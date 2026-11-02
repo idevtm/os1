@@ -204,3 +204,6 @@ BOOTINFO_STATIC_ASSERT(boot_info_module_count_offset, offsetof(BootInfo, module_
 
 // copy the bootloader-owned BootInfo graph into kernel-owned storage.
 [[nodiscard]] const BootInfo* own_boot_info(const BootInfo* source);
+// Return true when the space-separated boot command line contains `option` as
+// a whole word (e.g. "os1.noxhci").
+[[nodiscard]] bool boot_info_has_option(const BootInfo& info, const char* option);

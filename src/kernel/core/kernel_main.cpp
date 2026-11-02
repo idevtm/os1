@@ -81,7 +81,7 @@ struct KernelMainFailureReporter
         if(bootlog_active())
         {
             bootlog_mark(kBootLogFlagKernelMainReturned);
-            bootlog_reset_machine();
+            halt_forever();
         }
     }
 };
@@ -411,6 +411,10 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         bootlog_physical_start(), 16)();
     bind_initrd_boot_info(g_boot_info);
     debug("boot source: ")(boot_source_name(g_boot_info->source))();
+    if(nullptr != g_boot_info->command_line)
+    {
+        debug("command line: ")(g_boot_info->command_line)();
+    }
     if(g_boot_info->bootloader_name)
     {
         debug("bootloader: ")(g_boot_info->bootloader_name)();
@@ -656,7 +660,7 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
 
     // Driver probing stays after the IDT and local interrupt controllers are
     // online so later MSI/MSI-X work does not need another boot-order split.
-    if(!platform_probe_devices(kvm))
+    if(!platform_probe_devices(kvm, !boot_info_has_option(*g_boot_info, "os1.noxhci")))
     {
         return;
     }
@@ -705,7 +709,14 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         return;
     }
 
-    cpu_boot_others(g_kernel_root_cr3);
+    if(boot_info_has_option(*g_boot_info, "os1.nosmp"))
+    {
+        debug("smp: application processors left offline by boot option")();
+    }
+    else
+    {
+        cpu_boot_others(g_kernel_root_cr3);
+    }
 
     if(SchedulerTimerSource::Lapic == timer_source_scheduler())
     {

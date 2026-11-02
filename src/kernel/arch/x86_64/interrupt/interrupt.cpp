@@ -161,6 +161,12 @@ bool Interrupts::initialize()
     set_idt(0x13, (uint64_t)int_13h);
     set_idt(0x1D, (uint64_t)int_1Dh);
     set_idt(0x1E, (uint64_t)int_1Eh);
+    // NMI, double fault, and machine check run on each CPU's IST1 stack so a
+    // fault on a broken kernel stack still reaches a handler instead of
+    // escalating to a triple fault (an instant, silent reset).
+    IDT[0x02].ist = 1;
+    IDT[0x08].ist = 1;
+    IDT[0x12].ist = 1;
     for(int i = 0; i < 256; ++i)
     {
         irq_handler_function[i] = nullptr;

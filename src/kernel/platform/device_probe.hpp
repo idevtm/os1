@@ -5,4 +5,5 @@
 class VirtualMemory;
 
 // Probe supported devices from the normalized PCI table and publish facades.
-bool platform_probe_devices(VirtualMemory& kernel_vm);
+// `enable_xhci` = false leaves xHCI controllers unbound (boot option os1.noxhci).
+bool platform_probe_devices(VirtualMemory& kernel_vm, bool enable_xhci);

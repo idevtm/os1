@@ -33,13 +33,15 @@ and has the next boot's loader, while the BIOS still works, save it on the stick
 1. **Pre-loader** (`src/boot/efi/preloader.cpp`, `\EFI\BOOT\BOOTX64.EFI`),
    every boot, while boot services still work:
    - numbers the boot from the line count of `\os1logs\journal.txt`;
-   - checks the candidate windows `0x04000000`, `0x05000000`, `0x06000000`,
-     `0x07000000` (1 MiB each, `kBootLogUefiCandidates`) for a valid header and
-     saves the log as plain text in `\os1logs\boot-NNNN.txt`;
+   - checks the candidate windows `0x04A35000`, `0x05B47000`, `0x06C59000`,
+     `0x07D6B000` (1 MiB each, `kBootLogUefiCandidates`) for a valid header and
+     saves the log as plain text in `\os1logs\boot-NNNN.txt`. A header whose
+     magic lost one 32-bit half still counts;
    - reserves the first free candidate as `EfiReservedMemoryType` and writes a
      fresh header, which keeps Limine and the kernel allocator away from it;
-   - appends a journal line with the first header word of every candidate
-     (shows whether RAM survived the reset), the saved log, and the armed window;
+   - appends a journal line with the first header word of every candidate and
+     `[5a:count@offset]`, the number of `0x5A5A5A5A` fill dwords found in it
+     (shows what the firmware overwrote), the saved log, and the armed window;
    - after saving a log, waits for a key; then chain-loads
      `\EFI\OS1\LIMINE.EFI` with a device path on the same partition.
    It is built position-independent, linked with `--emit-relocs`, and wrapped
@@ -51,6 +53,28 @@ and has the next boot's loader, while the BIOS still works, save it on the stick
 3. **Kernel** — `bootlog_attach` accepts a candidate only inside a `Reserved`
    BootInfo region with a valid header, then behaves as on the BIOS path
    (failure resets, TCO watchdog, flags).
+
+### First G74SX result
+
+The first UEFI attempt saved nothing: on reset the firmware wrote `0x5A5A5A5A`
+over the first dword of every 16 MiB-aligned window (`w0=0x31474f4c5a5a5a5a`:
+the upper half of the magic survived), so every header was invalid and the
+pre-loader never paused. The windows now sit off those boundaries.
+
+### Fatal stops and bring-up variants
+
+- With the log active, `halt_forever` no longer resets at once: it prints a
+  `FATAL` banner on screen, waits for a polled i8042 key press, then resets so
+  the log is saved. The TCO watchdog resets within ~90 s if nobody presses a key.
+- NMI, double fault, and machine check run on a per-CPU IST1 stack, so a fault
+  on a broken kernel stack reaches the handler instead of triple-faulting.
+- The stick's Limine menu (`src/boot/limine/limine-usb.conf`, 10 s timeout)
+  offers `os1`, `os1 (no xHCI)` (`os1.noxhci`), and `os1 (no xHCI, one CPU)`
+  (`os1.noxhci os1.nosmp`). The kernel logs its command line.
+- The xHCI probe logs each step, enables memory decoding before touching
+  registers, and skips controllers whose registers read all ones or whose BAR is
+  implausible. 64-bit BARs whose upper half reads back 0 are sized from the low
+  half (previously a size near 2^64).
 
 ## BIOS flow
 

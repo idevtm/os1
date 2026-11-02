@@ -114,3 +114,36 @@ const BootInfo* own_boot_info(const BootInfo* source)
 
     return &g_owned_boot_info.info;
 }
+
+bool boot_info_has_option(const BootInfo& info, const char* option)
+{
+    if((nullptr == info.command_line) || (nullptr == option) || ('\0' == option[0]))
+    {
+        return false;
+    }
+
+    const char* cursor = info.command_line;
+    while('\0' != *cursor)
+    {
+        while(' ' == *cursor)
+        {
+            ++cursor;
+        }
+        size_t length = 0;
+        while(('\0' != cursor[length]) && (' ' != cursor[length]))
+        {
+            ++length;
+        }
+        size_t matched = 0;
+        while((matched < length) && (option[matched] == cursor[matched]))
+        {
+            ++matched;
+        }
+        if((0 != length) && (matched == length) && ('\0' == option[length]))
+        {
+            return true;
+        }
+        cursor += length;
+    }
+    return false;
+}

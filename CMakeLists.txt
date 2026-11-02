@@ -138,6 +138,8 @@ set(OS1_LIMINE_BOOTX64 "${OS1_LIMINE_DIR}/BOOTX64.EFI")
 set(OS1_LIMINE_UEFI_CD "${OS1_LIMINE_DIR}/limine-uefi-cd.bin")
 set(OS1_LIMINE_PROTOCOL_HEADER "${OS1_LIMINE_DIR}/limine.h")
 set(OS1_LIMINE_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine.conf")
+# The USB stick offers bring-up variants (boot options) in a Limine menu.
+set(OS1_LIMINE_USB_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine-usb.conf")
 
 foreach(OS1_VENDOR_FILE
     "${OS1_LIMINE_BOOTX64}"
@@ -533,7 +535,7 @@ add_custom_command(
     --raw-image "${OS1_RAW_IMAGE}"
     --preloader "${OS1_EFI_PRELOADER}"
     --limine-efi "${OS1_LIMINE_BOOTX64}"
-    --limine-conf "${OS1_LIMINE_CONFIG_SOURCE}"
+    --limine-conf "${OS1_LIMINE_USB_CONFIG_SOURCE}"
     --kernel-shim "${OS1_KERNEL_LIMINE_ELF}"
     --kernel "${OS1_KERNEL_ELF}"
     --initrd "${OS1_INITRD_CPIO}"
@@ -547,7 +549,7 @@ add_custom_command(
     "${OS1_EFI_PRELOADER}"
     os1_efi_preloader
     "${OS1_LIMINE_BOOTX64}"
-    "${OS1_LIMINE_CONFIG_SOURCE}"
+    "${OS1_LIMINE_USB_CONFIG_SOURCE}"
     "${OS1_KERNEL_LIMINE_ELF}"
     "${OS1_KERNEL_ELF}"
     "${OS1_INITRD_CPIO}"

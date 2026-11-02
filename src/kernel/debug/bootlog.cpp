@@ -175,11 +175,33 @@ void bootlog_mark(uint32_t flag)
     }
 }
 
+void bootlog_wait_for_keypress()
+{
+    constexpr uint8_t kOutputFull = 0x01;
+    constexpr uint8_t kAuxData = 0x20;
+    for(uint32_t i = 0; (i < 64u) && (0 != (inb(0x64) & kOutputFull)); ++i)
+    {
+        (void)inb(0x60);
+    }
+    for(;;)
+    {
+        const uint8_t status = inb(0x64);
+        if(0 != (status & kOutputFull))
+        {
+            const uint8_t scancode = inb(0x60);
+            // Ignore touchpad bytes, key releases, and extended-key prefixes.
+            if((0 == (status & kAuxData)) && (scancode < 0x80u) && (0xE0u != scancode))
+            {
+                return;
+            }
+        }
+        asm volatile("pause");
+    }
+}
+
 [[noreturn]] void bootlog_reset_machine()
 {
     asm volatile("cli");
-    // Leave the last screen readable briefly; the log already holds everything.
-    io_delay_microseconds(5000000);
 
     // Keyboard-controller reset pulse.
     for(uint32_t spins = 0; (spins < 100000u) && (0 != (inb(0x64) & 0x02)); ++spins)

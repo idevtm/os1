@@ -55,5 +55,7 @@ void bootlog_write(char c);
 void bootlog_replay_early(void (*sink)(char));
 // Record a progress flag in the RAM header.
 void bootlog_mark(uint32_t flag);
+// Wait for a key press on the i8042 keyboard by polling (interrupts may be off).
+void bootlog_wait_for_keypress();
 // Reset the machine while preserving RAM so the next boot can save the log.
 [[noreturn]] void bootlog_reset_machine();

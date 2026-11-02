@@ -112,3 +112,17 @@ TEST(BootInfoOwnership, PreservesNullOptionalStrings)
     EXPECT_EQ(nullptr, owned->memory_map);
     EXPECT_EQ(nullptr, owned->modules);
 }
+
+TEST(BootInfo, CommandLineOptionsMatchWholeWords)
+{
+    BootInfo info{};
+    info.command_line = "os1.noxhci  os1.nosmp";
+    EXPECT_TRUE(boot_info_has_option(info, "os1.noxhci"));
+    EXPECT_TRUE(boot_info_has_option(info, "os1.nosmp"));
+    EXPECT_FALSE(boot_info_has_option(info, "os1.no"));
+    EXPECT_FALSE(boot_info_has_option(info, "os1.noxhci2"));
+    EXPECT_FALSE(boot_info_has_option(info, ""));
+
+    info.command_line = nullptr;
+    EXPECT_FALSE(boot_info_has_option(info, "os1.noxhci"));
+}

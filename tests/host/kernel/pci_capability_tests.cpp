@@ -1,3 +1,4 @@
+#include "platform/pci.hpp"
 #include "platform/pci_capability.hpp"
 
 #include "support/physical_memory.hpp"
@@ -64,4 +65,19 @@ TEST(PciCapability, MissingCapabilityReturnsFalse)
 
     PciCapabilityLocation location{};
     EXPECT_FALSE(pci_find_capability(device, 0x11, location));
+}
+
+TEST(PciBarSizing, DecodesThirtyTwoBitAndSixtyFourBitMasks)
+{
+    EXPECT_EQ(0x2000u, pci_bar_size_from_sizing_mask(0xFFFFE000u, 0u, false));
+    EXPECT_EQ(0x2000u, pci_bar_size_from_sizing_mask(0xFFFFE004u, 0xFFFFFFFFu, true));
+    EXPECT_EQ(0x200000000ull, pci_bar_size_from_sizing_mask(0x0000000Cu, 0xFFFFFFFEu, true));
+    EXPECT_EQ(0u, pci_bar_size_from_sizing_mask(0u, 0u, true));
+}
+
+TEST(PciBarSizing, SixtyFourBitBarWithHardwiredUpperHalfUsesLowMaskOnly)
+{
+    // Some controllers report a 64-bit BAR but hardwire the upper address bits;
+    // treating the zero read-back as a mask produced a size near 2^64.
+    EXPECT_EQ(0x2000u, pci_bar_size_from_sizing_mask(0xFFFFE004u, 0u, true));
 }

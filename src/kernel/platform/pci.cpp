@@ -77,15 +77,14 @@ void size_pci_bars(PciDevice& device)
         }
 
         uint64_t base = original & ~0xFull;
-        uint64_t size_mask = sized_low & ~0xFull;
         PciBarType type = PciBarType::Mmio32;
         if(is_64_bit)
         {
             base |= static_cast<uint64_t>(original_high) << 32;
-            size_mask |= static_cast<uint64_t>(sized_high) << 32;
             type = PciBarType::Mmio64;
         }
-        if(0 == size_mask)
+        const uint64_t bar_size = pci_bar_size_from_sizing_mask(sized_low, sized_high, is_64_bit);
+        if(0 == bar_size)
         {
             if(is_64_bit)
             {
@@ -95,7 +94,7 @@ void size_pci_bars(PciDevice& device)
         }
 
         bar.base = base;
-        bar.size = ~size_mask + 1u;
+        bar.size = bar_size;
         bar.type = type;
         if(is_64_bit && (index < 5u))
         {

@@ -18,7 +18,8 @@ bool platform_discover(const BootInfo& boot_info, VirtualMemory& kernel_vm);
 
 // Probe supported devices from the discovered PCI table and publish driver
 // facades once the generic interrupt machinery is online.
-bool platform_probe_devices(VirtualMemory& kernel_vm);
+// `enable_xhci` = false leaves xHCI controllers unbound (boot option os1.noxhci).
+bool platform_probe_devices(VirtualMemory& kernel_vm, bool enable_xhci = true);
 
 // Route an ISA IRQ through the discovered IOAPIC override table onto one IDT
 // vector chosen by the caller.

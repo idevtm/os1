@@ -110,7 +110,7 @@ public:
     }
 
 private:
-    char data_[512] = {};
+    char data_[1024] = {};
     size_t length_ = 0;
 };
 
@@ -177,11 +177,40 @@ bool window_is_ram(uint64_t window)
     return address_is_ram(window) && address_is_ram(window + kBootLogUefiWindowBytes - 1);
 }
 
+// Accept a header whose magic lost one 32-bit half (firmware fill patterns hit
+// individual dwords) as long as the remaining fields are consistent; a log with
+// a few damaged bytes is far more useful than none.
 bool header_valid(const BootLogHeader* log)
 {
-    return (kBootLogMagic == log->magic) && (kBootLogVersion == log->version) &&
+    const bool magic_low = static_cast<uint32_t>(log->magic) == static_cast<uint32_t>(kBootLogMagic);
+    const bool magic_high = (log->magic >> 32) == (kBootLogMagic >> 32);
+    return (magic_low || magic_high) && (kBootLogVersion == log->version) &&
            (kBootLogHeaderBytes == log->header_bytes) &&
-           (log->capacity == (kBootLogUefiWindowBytes - kBootLogHeaderBytes));
+           (log->capacity == (kBootLogUefiWindowBytes - kBootLogHeaderBytes)) &&
+           (log->write_count < (1ull << 40));
+}
+
+// Count firmware fill-pattern dwords in a window to learn what survives a reset.
+void append_scrub_stats(Text& text, uint64_t window)
+{
+    constexpr uint32_t kFillPattern = 0x5A5A5A5A;
+    const auto* dwords = reinterpret_cast<const uint32_t*>(window);
+    uint64_t count = 0;
+    uint64_t first = ~0ull;
+    for(uint64_t i = 0; i < kBootLogUefiWindowBytes / 4; ++i)
+    {
+        if(kFillPattern == dwords[i])
+        {
+            first = (0 == count) ? i * 4 : first;
+            ++count;
+        }
+    }
+    text.add("[5a:").dec(count);
+    if(0 != count)
+    {
+        text.add("@").hex(first);
+    }
+    text.add("]");
 }
 
 void append_flag_names(Text& text, uint32_t flags)
@@ -392,6 +421,7 @@ extern "C" EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE* system
         }
         const auto* log = reinterpret_cast<const BootLogHeader*>(window);
         journal_line.add(" w").dec(i).add("=").hex(log->magic);
+        append_scrub_stats(journal_line, window);
         if((0 != harvested_window) || !header_valid(log))
         {
             continue;
