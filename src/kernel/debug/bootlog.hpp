@@ -43,6 +43,9 @@ bool bootlog_attach(const BootInfo& info);
 bool bootlog_active();
 // Append one byte. Safe to call from any CPU and from fault paths.
 void bootlog_write(char c);
+// Replay output buffered before attach (only when no RAM log was attached),
+// e.g. onto a screen that did not exist yet when the bytes were written.
+void bootlog_replay_unattached(void (*sink)(char));
 // Record a progress flag in the RAM header.
 void bootlog_mark(uint32_t flag);
 // Reset the machine while preserving RAM so the next boot can save the log.

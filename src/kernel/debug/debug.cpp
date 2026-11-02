@@ -154,7 +154,21 @@ void Debug::write_vga(const char c)
     update_vga_cursor();
 }
 
+void Debug::set_mirror(void (*sink)(char))
+{
+    mirror_ = sink;
+}
+
 void Debug::write(const char c)
+{
+    if(nullptr != mirror_)
+    {
+        mirror_(c);
+    }
+    write_unmirrored(c);
+}
+
+void Debug::write_unmirrored(const char c)
 {
     bootlog_write(c);
     write_vga(c);

@@ -9,3 +9,7 @@ void write_console_bytes(const char* data, size_t length);
 
 // write a nul-terminated line and append a newline on both console backends.
 void write_console_line(const char* text);
+
+// Debug mirror sink that draws one byte on the active terminal. Bytes are
+// dropped while the console is busy so debug output can never deadlock it.
+void console_mirror_debug_byte(char c);

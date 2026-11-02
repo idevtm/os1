@@ -1,7 +1,27 @@
 # Real-Hardware Boot Log Capture (BIOS USB stick)
 
 Status: diagnostic tooling on branch `g74sx-bootlog`, built for the first
-bring-up attempts on an ASUS G74SX (Sandy Bridge, HM65 PCH, legacy BIOS only).
+bring-up attempts on an ASUS G74SX (Sandy Bridge, HM65 PCH). The first stick
+attempt showed that this machine's firmware is UEFI-only (no CSM), so the RAM
+log capture below, which needs the legacy BIOS path, does not run there yet; the
+hybrid stick image boots it through Limine with the debug stream on screen.
+
+## Hybrid USB image
+
+`build/artifacts/os1-usb.img` (target `os1_usb_image`, built by
+`cmake/scripts/create_usb_image.py`) boots on both firmware types:
+
+| LBA | Content |
+| --- | --- |
+| 0 | MBR: BIOS boot code, entry 1 = active type `0xDA` legacy area, entry 2 = type `0xEF` ESP |
+| 1–2879 | BIOS raw image (loader, kernel, initrd, boot log area) |
+| 4096–69631 | FAT16 ESP: `EFI/BOOT/BOOTX64.EFI` (Limine), `limine.conf`, `kernel_limine.elf`, `kernel.elf`, `initrd.cpio` |
+
+The active partition entry also lives in `os1.raw` because some AMI BIOSes only
+offer a USB stick for legacy boot when it has one. On UEFI boots the kernel
+mirrors its debug stream to the framebuffer terminal (replaying output from
+before the terminal existed) until `/bin/init` starts, since laptops have no
+serial port.
 
 ## Why
 
@@ -67,8 +87,7 @@ Write the stick (macOS, replace `diskN`; this erases it):
 ```sh
 cmake --build build
 diskutil unmountDisk /dev/diskN
-sudo dd if=/dev/zero of=/dev/rdiskN bs=1m count=16
-sudo dd if=build/artifacts/os1.raw of=/dev/rdiskN bs=1m
+sudo dd if=build/artifacts/os1-usb.img of=/dev/rdiskN bs=1m
 sync
 ```
 
@@ -100,4 +119,5 @@ sudo python3 -I tools/bootlog_extract.py /dev/rdiskN --all --out-dir bootlogs/
   and reset ~3 minutes after reaching the shell (`run_bios` exits because of
   `-no-reboot`). Smoke tests finish long before that.
 - Each boot writes the journal sector into the raw image (also under QEMU).
-- The feature is BIOS-path only; the UEFI path ignores it.
+- Log capture is BIOS-path only; on UEFI-only machines only the on-screen
+  debug stream is available until a UEFI-side harvester exists.

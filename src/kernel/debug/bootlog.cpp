@@ -11,7 +11,7 @@ static_assert(sizeof(BootLogHeader) == kBootLogHeaderBytes);
 namespace
 {
 constexpr const char* kBootLogModuleName = "bootlog";
-constexpr size_t kEarlyBufferBytes = 2048;
+constexpr size_t kEarlyBufferBytes = 8192;
 
 uint64_t g_bootlog_physical = 0;
 uint32_t g_bootlog_capacity = 0;
@@ -99,6 +99,18 @@ void bootlog_write(char c)
     if(g_early_length < kEarlyBufferBytes)
     {
         g_early_buffer[g_early_length++] = c;
+    }
+}
+
+void bootlog_replay_unattached(void (*sink)(char))
+{
+    if(g_bootlog_attached || (nullptr == sink))
+    {
+        return;
+    }
+    for(size_t i = 0; i < g_early_length; ++i)
+    {
+        sink(g_early_buffer[i]);
     }
 }
 

@@ -270,7 +270,8 @@ The helper wrapper scripts remain available as thin CMake frontends:
 The BIOS raw image can capture its own boot log on the USB stick it boots from:
 the kernel mirrors debug output into RAM, failures and hangs reset the machine,
 and the next boot saves the previous log to a reserved disk area. Read it back
-with `tools/bootlog_extract.py`. See
+with `tools/bootlog_extract.py`. `build/artifacts/os1-usb.img` is a hybrid stick
+image that boots on legacy BIOS and UEFI-only machines. See
 [doc/2026-11-02-real-hardware-bootlog.md](doc/2026-11-02-real-hardware-bootlog.md).
 
 ## Documentation

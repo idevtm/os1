@@ -372,6 +372,9 @@ bool prepare_scheduler_timer()
     }
 
     bootlog_mark(kBootLogFlagUserInitStarted);
+    // The on-screen debug mirror is for bring-up; drawing every debug line on
+    // the framebuffer is slow enough to perturb user-space scheduling.
+    debug.set_mirror(nullptr);
     if(intel_tco_watchdog_armed())
     {
         intel_tco_watchdog_set_timeout(kPostInitWatchdogStageSeconds);
@@ -607,6 +610,13 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         active_terminal->move_cursor(0, 0);
     }
     active_terminal->write_line("[kernel64] hello");
+    if(BootSource::BiosLegacy != g_boot_info->source)
+    {
+        // UEFI laptops have no serial port: show the debug stream on screen,
+        // starting with what was logged before the terminal existed.
+        bootlog_replay_unattached(console_mirror_debug_byte);
+        debug.set_mirror(console_mirror_debug_byte);
+    }
 
     result = interrupts.initialize();
     if(!result)

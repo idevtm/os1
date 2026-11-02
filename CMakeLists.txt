@@ -519,6 +519,40 @@ add_custom_command(
 add_custom_target(os1_image ALL DEPENDS "${OS1_ISO_IMAGE}" os1_virtio_test_disk os1_bios_layout_check)
 add_custom_target(os1_bios_image ALL DEPENDS "${OS1_RAW_IMAGE}" os1_virtio_test_disk)
 
+# Hybrid USB stick image: the BIOS raw image (legacy boot + boot log area) plus
+# a FAT16 EFI System Partition with Limine, so one stick boots on legacy BIOS
+# and UEFI-only machines alike.
+set(OS1_USB_IMAGE "${OS1_ARTIFACT_DIR}/os1-usb.img")
+set(OS1_USB_ESP_START_LBA 4096)
+set(OS1_USB_ESP_SECTORS 65536)
+add_custom_command(
+  OUTPUT "${OS1_USB_IMAGE}"
+  COMMAND
+    "${OS1_PYTHON_EXECUTABLE}" -I "${PROJECT_SOURCE_DIR}/cmake/scripts/create_usb_image.py"
+    --raw-image "${OS1_RAW_IMAGE}"
+    --bootx64 "${OS1_LIMINE_BOOTX64}"
+    --limine-conf "${OS1_LIMINE_CONFIG_SOURCE}"
+    --kernel-shim "${OS1_KERNEL_LIMINE_ELF}"
+    --kernel "${OS1_KERNEL_ELF}"
+    --initrd "${OS1_INITRD_CPIO}"
+    --esp-start-lba "${OS1_USB_ESP_START_LBA}"
+    --esp-sectors "${OS1_USB_ESP_SECTORS}"
+    --clear-lba-start "${OS1_BOOTLOG_JOURNAL_LBA}"
+    --clear-lba-end "${OS1_RAW_IMAGE_SECTOR_COUNT}"
+    --output "${OS1_USB_IMAGE}"
+  DEPENDS
+    "${OS1_RAW_IMAGE}"
+    "${OS1_LIMINE_BOOTX64}"
+    "${OS1_LIMINE_CONFIG_SOURCE}"
+    "${OS1_KERNEL_LIMINE_ELF}"
+    "${OS1_KERNEL_ELF}"
+    "${OS1_INITRD_CPIO}"
+    "${OS1_LIMINE_SHIM_LAYOUT_CHECK_STAMP}"
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/create_usb_image.py"
+  VERBATIM
+)
+add_custom_target(os1_usb_image ALL DEPENDS "${OS1_USB_IMAGE}")
+
 function(os1_add_unavailable_target target_name reason)
   add_custom_target(
     "${target_name}"

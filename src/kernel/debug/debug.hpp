@@ -16,8 +16,14 @@ public:
 #endif
     // Enable or disable BIOS text-mode VGA mirroring for all debug output.
     void set_vga_mirror_enabled(bool enabled);
+    // Mirror all debug output through `sink`, e.g. to the framebuffer terminal
+    // on machines without a serial port. nullptr disables the mirror.
+    void set_mirror(void (*sink)(char));
     // write one byte to COM1 after waiting for the transmit FIFO.
     void write(const char c);
+    // write one byte everywhere except the mirror; console code that already
+    // draws the byte on the terminal uses this to avoid duplicates.
+    void write_unmirrored(const char c);
     // write a nul-terminated string to COM1.
     void write(const char* str);
     // write a string followed by a newline.
@@ -68,6 +74,7 @@ private:
     bool vga_mirror_enabled_ = false;
     bool vga_cursor_initialized_ = false;
     uint16_t vga_cursor_ = 0;
+    void (*mirror_)(char) = nullptr;
 };
 
 // Dump a memory range in hex plus printable ASCII to the serial logger.
