@@ -267,12 +267,56 @@ The helper wrapper scripts remain available as thin CMake frontends:
 
 ## Real-Hardware Boot Logs
 
-The BIOS raw image can capture its own boot log on the USB stick it boots from:
-the kernel mirrors debug output into RAM, failures and hangs reset the machine,
-and the next boot saves the previous log to a reserved disk area. Read it back
-with `tools/bootlog_extract.py`. `build/artifacts/os1-usb.img` is a hybrid stick
-image that boots on legacy BIOS and UEFI-only machines. See
+`build/artifacts/os1-usb.img` boots on legacy BIOS and UEFI-only machines.
+Normal builds do not capture logs or arm a diagnostic watchdog. To build a
+USB image for the **ASUS G74SX**, use the profile that preserves the verified
+round-6 layout. The fresh FAT rebuild used in round 7 was not offered by this
+laptop's firmware; round 8's kernel-only update booted successfully.
+
+```sh
+cmake --preset g74sx \
+  -DOS1_G74SX_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
+cmake --build --preset g74sx
+```
+
+The result is `build/g74sx/artifacts/os1-usb.img`. The updater verifies the
+template's SHA-256 and replaces only the kernel file contents, using a stripped
+ELF padded to its existing size. It preserves the original menu, initrd, EFI
+loaders, BIOS payload, filesystem metadata and file locations. Choose the
+original `os1` menu entry; kernel capture and the watchdog are off. Missing or
+unrecognized templates, mismatched ELF payloads and oversized kernels fail
+without falling back to a fresh image. The local template is intentionally not
+committed. Its hash and qualification history are in the
+[G74SX handoff](doc/2026-11-02-g74sx-bringup-debug-plan.md).
+
+For other targets, a generic diagnostic USB image can include the EFI log
+pre-loader and diagnostic menu. This rebuild is **not G74SX-qualified**:
+
+```sh
+cmake -S . -B build/usb-diagnostics -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/x86_64-elf.cmake \
+  -DOS1_USB_PROFILE=generic -DOS1_BOOT_DIAGNOSTICS=ON -DOS1_QEMU_DEBUGCON=OFF
+cmake --build build/usb-diagnostics --target os1_usb_image
+```
+
+The diagnostic USB menu defaults to ordinary `os1`. Choose `os1 (capture only,
+no watchdog)` for sustained operation with RAM logging, or `os1 (diagnostics,
+automatic log harvest)` for verbose bring-up and the deliberate post-init
+watchdog reset. The next warm boot saves the preceding captured log. The BIOS
+path enables full diagnostics when `OS1_BOOT_DIAGNOSTICS=ON`; extract its raw
+log slots with `tools/bootlog_extract.py`. See
 [doc/2026-11-02-real-hardware-bootlog.md](doc/2026-11-02-real-hardware-bootlog.md).
+
+The no-UART regression removes COM1, observes output through QEMU debugcon,
+and types a shell command through PS/2. CI enables this test channel; keep it
+off for hardware images. To run it locally:
+
+```sh
+cmake --preset default -DOS1_QEMU_DEBUGCON=ON
+cmake --build build --target smoke_no_uart
+```
+
+When enabled, `smoke_all` and `ctest` include the no-UART regression.
 
 ## Documentation
 

@@ -21,6 +21,20 @@ project(os1 LANGUAGES C CXX)
 option(OS1_KMEM_DEBUG "Enable kernel small-object allocator debug instrumentation" ON)
 option(OS1_BOOT_DIAGNOSTICS "Enable USB pre-loader and BIOS boot-log diagnostics" OFF)
 option(OS1_QEMU_DEBUGCON "Mirror kernel output to QEMU port 0xE9 for no-UART tests" OFF)
+set(OS1_USB_PROFILE "generic" CACHE STRING "USB image profile: generic or g74sx")
+set_property(CACHE OS1_USB_PROFILE PROPERTY STRINGS generic g74sx)
+set(OS1_G74SX_BASE_IMAGE "" CACHE FILEPATH "Verified round-6 G74SX stick capture for kernel-only updates")
+if(NOT OS1_USB_PROFILE STREQUAL "generic" AND NOT OS1_USB_PROFILE STREQUAL "g74sx")
+  message(FATAL_ERROR "Unknown OS1_USB_PROFILE: ${OS1_USB_PROFILE}")
+endif()
+if(OS1_USB_PROFILE STREQUAL "g74sx")
+  if(NOT OS1_G74SX_BASE_IMAGE OR NOT EXISTS "${OS1_G74SX_BASE_IMAGE}" OR IS_DIRECTORY "${OS1_G74SX_BASE_IMAGE}")
+    message(FATAL_ERROR "The g74sx profile requires OS1_G74SX_BASE_IMAGE pointing to the verified round-6 stick capture. Fresh FAT image rebuilding failed on this laptop; there is no generic fallback. See doc/2026-11-02-g74sx-bringup-debug-plan.md.")
+  endif()
+  if(OS1_QEMU_DEBUGCON OR OS1_BOOT_DIAGNOSTICS)
+    message(FATAL_ERROR "The g74sx profile requires OS1_QEMU_DEBUGCON=OFF and OS1_BOOT_DIAGNOSTICS=OFF. It preserves the template's loader/menu and updates only the normal kernel.")
+  endif()
+endif()
 set(OS1_BOOT_DIAGNOSTICS_ENABLED 0)
 if(OS1_BOOT_DIAGNOSTICS)
   set(OS1_BOOT_DIAGNOSTICS_ENABLED 1)
@@ -541,6 +555,27 @@ add_custom_target(os1_bios_image ALL DEPENDS "${OS1_RAW_IMAGE}" os1_virtio_test_
 set(OS1_USB_IMAGE "${OS1_ARTIFACT_DIR}/os1-usb.img")
 set(OS1_USB_ESP_START_LBA 4096)
 set(OS1_USB_ESP_SECTORS 65536)
+if(OS1_USB_PROFILE STREQUAL "g74sx")
+  # Round 7's fresh FAT rebuild was invisible to the G74SX firmware. Round 8
+  # booted with only the kernel file contents changed in the round-6 template.
+  # Never fall back to repacking if this fixed-layout update cannot be made.
+  add_custom_command(
+    OUTPUT "${OS1_USB_IMAGE}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}"
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I "${PROJECT_SOURCE_DIR}/cmake/scripts/update_g74sx_image.py"
+      --base-image "${OS1_G74SX_BASE_IMAGE}"
+      --kernel "${OS1_KERNEL_ELF}"
+      --stripped-kernel "${OS1_KERNEL_BIOS_ELF}"
+      --output "${OS1_USB_IMAGE}"
+    DEPENDS
+      "${OS1_G74SX_BASE_IMAGE}"
+      "${OS1_KERNEL_ELF}"
+      "${OS1_KERNEL_BIOS_ELF}"
+      "${OS1_BIOS_LAYOUT_CHECK_STAMP}"
+      "${PROJECT_SOURCE_DIR}/cmake/scripts/update_g74sx_image.py"
+    VERBATIM
+  )
+else()
 add_custom_command(
   OUTPUT "${OS1_USB_IMAGE}"
   COMMAND
@@ -569,6 +604,7 @@ add_custom_command(
     "${PROJECT_SOURCE_DIR}/cmake/scripts/create_usb_image.py"
   VERBATIM
 )
+endif()
 add_custom_target(os1_usb_image ALL DEPENDS "${OS1_USB_IMAGE}")
 
 function(os1_add_unavailable_target target_name reason)
@@ -752,6 +788,12 @@ os1_register_menu_target(
 )
 
 include(CTest)
+if(BUILD_TESTING)
+  add_test(NAME os1_g74sx_image_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
+      -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_update_g74sx_image.py
+  )
+endif()
 
 # The smoke runner terminates QEMU as soon as every expected marker has been
 # seen, so these values are safety ceilings for the slowest realistic CI host

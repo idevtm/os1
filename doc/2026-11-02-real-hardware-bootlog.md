@@ -1,25 +1,102 @@
 # Real-Hardware Boot Log Capture (USB stick)
 
-Status: diagnostic tooling on branch `g74sx-bootlog`, built for the first
-bring-up attempts on an ASUS G74SX (Sandy Bridge, HM65 PCH, UEFI-only firmware
-without CSM). Logs are captured on both the legacy BIOS and the UEFI path.
+Status: the user reports round 8 works on the physical ASUS G74SX (Sandy
+Bridge, HM65 PCH, UEFI-only firmware without CSM). Its image preserves the
+round-6 boot/filesystem layout and replaces only kernel file contents. The
+freshly repacked round-7 image was not offered by that laptop's firmware.
+The dedicated G74SX workflow below preserves the working layout; generic
+images are not G74SX-qualified. Permanent UART and platform fixes remain
+active in every build.
 
-## Hybrid USB image
+## G74SX image profile
+
+Use the pinned round-6 40 MiB capture, SHA-256
+`5a0643210bf7fdb2f5a95c741329dfd9d88f5c589e3473df1e124d28d17298ae`, as the
+explicit base:
+
+```sh
+cmake --preset g74sx -DOS1_G74SX_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
+cmake --build --preset g74sx
+```
+
+The output is `build/g74sx/artifacts/os1-usb.img`. The preset selects
+`OS1_USB_PROFILE=g74sx`, `OS1_QEMU_DEBUGCON=OFF`, and
+`OS1_BOOT_DIAGNOSTICS=OFF`. A missing or incorrect base fails; the profile
+never falls back to a fresh FAT16/hybrid build.
+
+`cmake/scripts/update_g74sx_image.py` replaces only the original
+`kernel.elf` file contents with the stripped new kernel padded to 650,952
+bytes. The FATs, directories, file locations, final-cluster slack, pre-loader,
+Limine, shim, menu, initrd, and entire BIOS area remain unchanged. If the
+stripped kernel no longer fits, or an update needs any of those other
+components changed, it needs a separate physically qualified image. Do not
+silently resize or reformat the template.
+
+Choose the preserved menu's original `os1` entry. It has neither
+`os1.bootlog` nor `os1.bootdiag`, so the new kernel leaves RAM capture,
+diagnostic mirroring/scancodes, and watchdog off regardless of the build's
+diagnostic setting. The preserved EFI pre-loader still runs, reserves its
+RAM window, and updates its journal before displaying the menu; that is not
+evidence of new kernel-log capture. This profile does not install newly built
+EFI binaries, shim, initrd, menus or BIOS code.
+
+Round 7 increased the unstripped kernel size by one FAT cluster, and the fresh
+builder relocated later EFI files and directories. Other payloads changed
+too. Its verified stick was absent from the ASUS boot menu; restoring round 6
+recovered boot, and the user reports the kernel-only round 8 works. The exact
+failure mechanism remains unproven. The round-7 fresh-repack path is excluded
+from routine G74SX use. See the
+[handoff](2026-11-02-g74sx-bringup-debug-plan.md) for the evidence and limits;
+no ten-minute duration or detailed round-8 shell-command results were supplied.
+
+## Selecting generic capture and diagnostics
+
+`OS1_USB_PROFILE=generic` is the default profile and creates a fresh hybrid
+filesystem. The following options apply to this generic path, not the pinned
+G74SX image. `OS1_BOOT_DIAGNOSTICS` defaults to `OFF`; ordinary generic images
+boot Limine directly without persistent capture or diagnostic watchdog. A separate build with
+`-DOS1_BOOT_DIAGNOSTICS=ON` enables the BIOS capture loader and packages the EFI
+pre-loader plus the diagnostic USB menu. The UEFI ISO remains an ordinary boot
+image. Keep the two build directories separate so the normal image is not
+mistaken for an image that writes logs to its boot media.
+
+On the diagnostic USB image, choose:
+
+| Menu entry | Behavior |
+| --- | --- |
+| `os1` | Ordinary sustained kernel boot; no RAM capture or diagnostic watchdog. |
+| `os1 (capture only, no watchdog)` | `os1.bootlog`: retain the debug stream in RAM, without screen/scancode diagnostics or an automatic reset. |
+| `os1 (diagnostics, automatic log harvest)` | `os1.bootdiag`: capture plus the screen mirror, first 32 scancodes, and watchdog reset to harvest the log. |
+| Diagnostic entries disabling xHCI or SMP | Same diagnostics, with `os1.noxhci` and optionally `os1.nosmp` to isolate bring-up failures. |
+
+The pre-loader itself is selected when the diagnostic image is built, before
+the menu is shown. It therefore still reserves a window and updates the journal
+when the ordinary `os1` entry is chosen on that image. The default build has no
+pre-loader and performs none of those writes. BIOS diagnostic builds publish
+`os1.bootdiag` directly because the BIOS loader has no interactive menu.
+
+Capture-only boots require a warm reset followed by another boot of the
+diagnostic image to harvest the log; a power-off may lose the RAM contents.
+Fatal stops show a banner and offer a key-triggered reset in either capture
+mode. Only `os1.bootdiag` arms the automatic watchdog.
+
+## Generic hybrid USB image
 
 `build/artifacts/os1-usb.img` (target `os1_usb_image`, built by
-`cmake/scripts/create_usb_image.py`) boots on both firmware types:
+`cmake/scripts/create_usb_image.py`) targets both BIOS and UEFI. This fresh
+packaging path is not qualified for the G74SX:
 
 | LBA | Content |
 | --- | --- |
 | 0 | MBR: BIOS boot code, entry 1 = active type `0xDA` legacy area, entry 2 = type `0xEF` ESP |
 | 1–2879 | BIOS raw image (loader, kernel, initrd, boot log area) |
-| 4096–69631 | FAT16 ESP: `EFI/BOOT/BOOTX64.EFI` (os1 pre-loader), `EFI/OS1/LIMINE.EFI`, `limine.conf`, `kernel_limine.elf`, `kernel.elf`, `initrd.cpio`, and `os1logs/` once logs exist |
+| 4096–69631 | FAT16 ESP: `EFI/BOOT/BOOTX64.EFI` (Limine normally, os1 pre-loader in diagnostic builds), `EFI/OS1/LIMINE.EFI` (diagnostic builds only), `limine.conf`, `kernel_limine.elf`, `kernel.elf`, `initrd.cpio`, and `os1logs/` once diagnostics save logs |
 
 The active partition entry also lives in `os1.raw` because some AMI BIOSes only
-offer a USB stick for legacy boot when it has one. On UEFI boots the kernel
-mirrors its debug stream to the framebuffer terminal (replaying output from
-before the terminal existed) until `/bin/init` starts, since laptops have no
-serial port.
+offer a USB stick for legacy boot when it has one. With `os1.bootdiag`, the
+kernel mirrors its debug stream to the framebuffer terminal (replaying output
+from before the terminal existed) until `/bin/init` starts, since laptops have
+no serial port. Normal and capture-only boots leave this mirror disabled.
 
 ## Why
 
@@ -31,7 +108,8 @@ and has the next boot's loader, while the BIOS still works, save it on the stick
 ## UEFI flow
 
 1. **Pre-loader** (`src/boot/efi/preloader.cpp`, `\EFI\BOOT\BOOTX64.EFI`),
-   every boot, while boot services still work:
+   every boot of a generic diagnostic image or the preserved G74SX template,
+   while boot services still work:
    - numbers the boot from the line count of `\os1logs\journal.txt`;
    - checks the candidate windows `0x04A35000`, `0x05B47000`, `0x06C59000`,
      `0x07D6B000` (1 MiB each, `kBootLogUefiCandidates`) for a valid header and
@@ -50,12 +128,15 @@ and has the next boot's loader, while the BIOS still works, save it on the stick
 2. **Limine shim** — keeps a copy of its serial output and hands it to the
    kernel as the `shimlog` boot module. (An earlier version read the window
    through Limine's HHDM, which does not map reserved memory, and triple-faulted.)
-3. **Kernel** — after its direct map exists, `attach_uefi_bootlog` maps each
+3. **Kernel** — when `os1.bootlog` or `os1.bootdiag` is selected and its direct
+   map exists, `attach_uefi_bootlog` maps each
    candidate itself, attaches to the first valid header, copies the shim log
    and the buffered early output in, reserves the window if the memory map
    called it usable, and logs the region type. It does not require a `Reserved`
-   region: on the G74SX the firmware/Limine did not report one. From there it
-   behaves as on the BIOS path (fatal stop, TCO watchdog, flags).
+   region, although the round-5 journal confirmed the G74SX firmware correctly
+   reported `EfiReservedMemoryType` (`type=0`). The old missing-reservation
+   theory was superseded by the cache-persistence finding. Completed log lines
+   and flag updates flush the ring/header to RAM; reset paths use `wbinvd`.
 
 ### First G74SX result
 
@@ -66,22 +147,28 @@ pre-loader never paused. The windows now sit off those boundaries.
 
 ### Fatal stops and bring-up variants
 
-- With the log active, `halt_forever` no longer resets at once: it prints a
-  `FATAL` banner on screen, waits for a polled i8042 key press, then resets so
-  the log is saved. The TCO watchdog resets within ~90 s if nobody presses a key.
+- With the log active, `halt_forever` prints a `FATAL` banner on screen, waits
+  for a polled i8042 key press, then resets so the log is saved. In diagnostic
+  mode the TCO watchdog also resets if nobody presses a key: approximately
+  90 s during bring-up or 180 s after init, measured from its last reload.
 - NMI, double fault, and machine check run on a per-CPU IST1 stack, so a fault
   on a broken kernel stack reaches the handler instead of triple-faulting.
-- The stick's Limine menu (`src/boot/limine/limine-usb.conf`, 10 s timeout)
-  offers `os1`, `os1 (no xHCI)` (`os1.noxhci`), and `os1 (no xHCI, one CPU)`
-  (`os1.noxhci os1.nosmp`). The kernel logs its command line.
+- The normal generic stick uses `src/boot/limine/limine-usb.conf`; generic diagnostic builds
+  use `src/boot/limine/limine-usb-diagnostic.conf` (10 s timeout, ordinary
+  `os1` default). The G74SX profile preserves the template's original config
+  bytes instead. The kernel logs its command line.
 - The xHCI probe logs each step, enables memory decoding before touching
   registers, and skips controllers whose registers read all ones or whose BAR is
   implausible. 64-bit BARs whose upper half reads back 0 are sized from the low
   half (previously a size near 2^64).
 
-## BIOS flow
+## Generic diagnostic BIOS flow
 
-1. **Loader (real mode, every boot)** — after E820, `bootlog_prepare16`:
+The G74SX profile retains its old BIOS area byte-for-byte and is qualified for
+the laptop's UEFI path only; it does not install a new BIOS kernel or loader.
+The following describes the separately built generic diagnostic BIOS image.
+
+1. **Loader (real mode, diagnostic builds only)** — after E820, `bootlog_prepare16`:
    - reads the journal sector, increments the boot counter;
    - checks the RAM window at `0x04000000` (must lie in a usable E820 entry);
    - if a valid `OS1BLOG1` header is present, copies header + log into the next
@@ -106,8 +193,9 @@ pre-loader never paused. The windows now sit off those boundaries.
      When `/bin/init` starts, the stage becomes 90 s, so even a successful boot
      resets after ~3 minutes and its log is saved.
 
-Reset order: 5 s pause, keyboard controller `0xFE`, `0xCF9` system reset,
-triple fault. Whether the firmware preserves RAM across these resets is exactly
+Reset order: keyboard controller `0xFE`, `0xCF9` system reset, then triple fault.
+The BIOS-loader fallback also pauses 5 s before the first reset attempt.
+Whether the firmware preserves RAM across these resets is exactly
 what the journal's "RAM seen at last boot" fields reveal.
 
 ## Layout
@@ -132,18 +220,26 @@ failed, 4 RAM window not usable.
 
 ## Operator procedure
 
-Write the stick (macOS, replace `diskN`; this erases it):
+For the G74SX, build with the dedicated preset above and select the original
+`os1` menu entry. Do not flash the failed round-7 candidate or substitute a
+fresh generic image. Preserve the current stick, identify the target device,
+verify the candidate checksum, and verify the written bytes before booting.
+
+For a separately qualified generic diagnostic target, write its image
+(macOS, replace `diskN`; this overwrites the stick's boot area):
 
 ```sh
-cmake --build build
+cmake --preset default -DOS1_USB_PROFILE=generic -DOS1_BOOT_DIAGNOSTICS=ON -DOS1_QEMU_DEBUGCON=OFF
+cmake --build build --target os1_usb_image
 diskutil unmountDisk /dev/diskN
 sudo dd if=build/artifacts/os1-usb.img of=/dev/rdiskN bs=1m
 sync
 ```
 
-On the laptop: boot the stick (UEFI entry in the firmware boot menu). If the
+On the generic diagnostic target: boot the UEFI stick entry. If the
 screen shows `previous boot log saved`, either press a key to try again or
-power off. Allow ~3 minutes for a hang to turn into a watchdog reset.
+power off. An automatic watchdog reset requires the full `os1.bootdiag`
+entry; capture-only and the preserved G74SX menu do not arm it.
 
 Read the logs back: UEFI logs are plain files in `os1logs/` on the stick's
 `OS1 EFI` volume. Legacy BIOS logs live in raw sectors:
@@ -161,14 +257,26 @@ sudo python3 -I tools/bootlog_extract.py /dev/rdiskN --all --out-dir bootlogs/
 - A failing PCI driver probe no longer aborts bring-up; the device is marked
   `Failed` and probing continues.
 - `Interrupts::initialize` keeps all 8259 lines masked.
-- The first 32 PS/2 scancodes are logged.
+- With `os1.bootdiag`, the first 32 PS/2 scancodes are logged.
 - `rdtsc()` returns the full 64-bit counter.
 
 ## Caveats
 
-- Interactive QEMU sessions of the BIOS image on q35 also arm the TCO watchdog
-  and reset ~3 minutes after reaching the shell (`run_bios` exits because of
-  `-no-reboot`). Smoke tests finish long before that.
-- Each boot writes the journal sector into the raw image (also under QEMU).
+- Concurrent writers can advance the persistent flush cursor before an earlier
+  reserved byte is stored. A hardware reset can therefore lose a late store
+  even after another CPU flushed a completed line. The current opt-in capture
+  is best-effort under SMP; QEMU does not model this cache-persistence race.
+  Normal G74SX boots leave capture off. Closing this remaining durability gap
+  requires a completion-safe flush policy and hardware validation.
+- A successful generic QEMU boot does not qualify a fresh image for the G74SX:
+  round 7 passed QEMU checks but was absent from the laptop's firmware menu.
+- The G74SX profile deliberately keeps the original boot chain and userspace.
+  It supports kernel-only updates within the original file size; bootloader,
+  shim, initrd, menu, BIOS, and filesystem changes need separate qualification.
+- Diagnostic BIOS builds on q35 also arm the TCO watchdog and reset ~3 minutes
+  after reaching the shell (`run_bios` exits because of `-no-reboot`). Ordinary
+  BIOS builds do not arm it. Smoke tests finish long before that.
+- Each diagnostic BIOS boot writes the journal sector into the raw image
+  (also under QEMU); ordinary BIOS boots do not.
 - The UEFI ISO used by the smoke tests has no pre-loader, so log capture and the
   TCO watchdog stay off there.

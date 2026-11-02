@@ -1,7 +1,14 @@
 # ASUS G74SX Bring-Up: Debugging Plan and Handoff
 
-Status: **boot successful in round 6** (shell, PS/2 keyboard, all 8 CPUs);
-remaining work is cleanup and merge, see "Next steps". Branch `g74sx-bootlog` (local). Owner: whoever picks up the
+Status: **the user reports round 8 works on the physical ASUS G74SX**.
+Round 7's freshly rebuilt filesystem was not offered by the firmware;
+restoring the exact round-6 stick recovered boot. Round 8 changed only the
+kernel file contents in that known-working image. Use the constrained `g74sx`
+USB profile below for this laptop. The exact round-7 failure mechanism remains
+unproven; do not reuse its repacking path for the G74SX. The round-8 report
+does not establish a ten-minute run or specific shell-command results.
+PR branch `codex/g74sx-bringup`; original investigation history is retained on
+`g74sx-bootlog`. Owner: whoever picks up the
 next stick round. Companion doc for the capture mechanism:
 [2026-11-02-real-hardware-bootlog.md](2026-11-02-real-hardware-bootlog.md).
 
@@ -43,21 +50,42 @@ round must be designed to return as much information as possible.
 
 ## Round-trip workflow (human in the loop)
 
-1. Build: `cmake --build build` → `build/artifacts/os1-usb.img` (hybrid MBR:
-   legacy area + FAT16 ESP with the os1 EFI pre-loader, Limine, kernel).
-2. Write the stick (erases it; needs sudo; checks the device is the Kingston
-   DataTraveler 3.0 on `disk13`): scratchpad `write-stick.sh`, equivalent to
-   `sudo dd if=build/artifacts/os1-usb.img of=/dev/rdisk13 bs=1m`.
-3. Human boots the laptop (UEFI boot menu entry for the stick), picks a Limine
-   menu entry, photographs any `FATAL` screen, presses a key, repeats as asked.
-4. Read back (needs sudo): scratchpad `read-stick.sh` copies the first 40 MB of
-   `/dev/rdisk13` to `stick.img`. Then without sudo:
+1. Build from the verified, pinned round-6 capture using the dedicated profile:
+
+   ```sh
+   cmake --preset g74sx -DOS1_G74SX_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
+   cmake --build --preset g74sx
+   ```
+
+   Output: `build/g74sx/artifacts/os1-usb.img`. The expected base is the
+   40 MiB capture with SHA-256
+   `5a0643210bf7fdb2f5a95c741329dfd9d88f5c589e3473df1e124d28d17298ae`.
+   `OS1_USB_PROFILE=g74sx` requires `OS1_G74SX_BASE_IMAGE`; a missing or wrong
+   base fails instead of falling back to a fresh filesystem.
+2. The profile replaces only `kernel.elf` contents with the stripped new
+   kernel, padded to the original 650,952-byte file size. All filesystem
+   metadata, cluster locations/slack, EFI binaries, shim, menu, initrd and
+   BIOS area stay unchanged. A kernel exceeding this capacity, or a change
+   requiring any of those other components, needs separate physical
+   qualification; do not resize or reformat implicitly.
+3. Preserve the current stick before writing, re-identify the Kingston
+   DataTraveler 3.0, and verify the candidate and written bytes. Disk numbers
+   can change. Use the current profile output, not an old round-7 or
+   scratchpad write script. The user boots the UEFI USB entry and selects the
+   original `os1` menu entry. The new kernel's capture and watchdog remain off
+   because the preserved menu has no `os1.bootlog` or `os1.bootdiag` option.
+4. Read back the identified device's first 40 MiB to a fresh capture when
+   collecting evidence. Then without sudo:
    `hdiutil attach -readonly -nomount stick.img`, `mount -t msdos -o rdonly
    /dev/diskNs2 <dir>`, read `os1logs/journal.txt` and `os1logs/boot-NNNN.txt`.
-   Detach afterwards.
+   Detach afterwards. The retained pre-loader may update its journal, but the
+   current G74SX menu does not enable new kernel-log capture.
 
-Agents cannot use sudo in this environment; ask the human to run the two
-scripts. Never write the stick without the human's go-ahead.
+The default `OS1_USB_PROFILE=generic` builds a new hybrid filesystem. Its
+ordinary and diagnostic variants are not G74SX-qualified. The failed round-7
+fresh-repack path is excluded from the G74SX workflow.
+
+Writing the stick requires administrator access and the human's go-ahead.
 
 ## Capture mechanism (summary)
 
@@ -65,8 +93,11 @@ scripts. Never write the stick without the human's go-ahead.
   the previous RAM log to `\os1logs\boot-NNNN.txt`, appends one journal line per
   boot, reserves a 1 MiB window (`kBootLogUefiCandidates`), pauses after a save,
   chain-loads `\EFI\OS1\LIMINE.EFI`.
-- Limine shim and kernel append to the window; fatal paths show a `FATAL`
-  banner, wait for a key (or the TCO watchdog, ~90 s), then reset.
+- With kernel capture enabled, the shim log is copied into the window and
+  the kernel appends to it; fatal paths show a `FATAL` banner and wait for a
+  key. Full diagnostics also arm the TCO watchdog. This describes the capture
+  mechanism used in earlier rounds and generic diagnostics; the current
+  G74SX profile preserves the old menu and leaves kernel capture disabled.
 - Journal line fields: `wN=<first qword of window N>[5a:<fill dwords>@<first
   offset>]`, `(boot#… bytes=… flags:…)` for a found log, `saved`/`SAVE-FAILED`,
   `armed=<window>`. Flags: kernel-attached, user-init-started, fatal-stop,
@@ -82,6 +113,46 @@ scripts. Never write the stick without the human's go-ahead.
 | 4 | `8463110` windows moved, FATAL stop, IST, menu | All three menu entries: kernel log scrolled, then reset (no FATAL banner). Journal: 4 boots, each saved log only the pre-loader's 54-byte banner. See round-4 findings. |
 | 5 | `2843375` late UEFI attach + shim log | Both `os1` and `os1 (no xHCI, one CPU)` hung (no instant reset) with `root alloc 0x…` as the last screen line, then reset after a while. Journal: firmware `type=0`; saved logs again only 54 bytes. Root cause found, see round-5 findings. |
 | 6 | `0e09566` UART detection + cache-safe log | **Success.** `os1` boots to the shell; keyboard works; the post-init watchdog reset saved a complete 42 KB log (`boot-0001.txt`, flags: kernel-attached, user-init-started, watchdog-armed). |
+| 7 | Uncommitted follow-up candidate, SHA-256 `32abefcc32b0aaf8423f7f8768dfdb3f09640b244158fcea1fdafe0b378a9976` | Missing from ASUS firmware boot menu on the same USB port. The write verified; the subsequent raw backup exactly matches the candidate. Restoring the exact round-6 capture reappeared as UEFI USB and booted. |
+| 8 | Kernel-only isolation, SHA-256 `59e37f1951bbb63281f5261e0fa57b4629f3a638c62e356ef9ea5814efadddde` | **The user reports it works on the physical laptop.** Round-6 stick bytes with only kernel.elf contents replaced by the round-7 loadable kernel. No duration or detailed command results were supplied. |
+
+## Round-7 firmware discovery regression
+
+- Failed-stick readback is preserved in
+  `local-evidence/g74sx/round7-restore-round6/before-write-20261102T215245Z/`.
+  Its entire 34 MiB written range exactly matches the round-7 candidate, and
+  the following 6 MiB is unchanged from round 6. This excludes a partial or
+  corrupt write as the explanation for this attempt.
+- Full MBR, FAT16 boot sector/BPB, EFI pre-loader, Limine and kernel shim are
+  byte-identical between rounds 6 and 7. Both filesystems pass read-only
+  `fsck_msdos` and independent FAT/directory/chain validation.
+- The new kernel grew from 650,952 to 651,472 bytes, requiring one extra
+  2,048-byte cluster. The builder consequently relocated initrd and every EFI
+  directory/file by one cluster. All pointers are consistent. Menu, kernel,
+  initrd archive timestamps, and BIOS payloads also changed. The exact cause
+  of the firmware-menu disappearance is still unknown; relocation is a
+  hypothesis, not a demonstrated ASUS firmware defect.
+- Round 8 preserves the complete round-6 filesystem metadata, file locations,
+  EFI loaders, menu, initrd, BIOS area and cluster slack. Only kernel.elf file
+  contents change: the stripped round-7 ELF is padded to the old file size.
+  Its entry, program headers and all PT_LOAD bytes match the full round-7
+  kernel exactly, and the UEFI shim ignores symbol tables and trailing data.
+  The unchanged menu selects normal mode, so capture and watchdog are off.
+  This tests the new kernel in the known-working disk layout; its success
+  does not establish which other round-7 difference caused enumeration to fail.
+- Independent round-8 review verified that every byte outside the original
+  kernel file is unchanged, including its 312-byte final-cluster slack. QEMU
+  booted this exact artifact with eight CPUs, all seven APs online, and PS/2
+  `echo mode-ok`; no kernel capture, watchdog or scancode diagnostics appeared.
+  The pristine image hash stayed unchanged. Evidence is under
+  `local-evidence/g74sx/round8-kernel-only/qemu-validation/`. The user then
+  reported round 8 works physically. Keep that report separate from the
+  detailed QEMU checks; QEMU success did not predict the round-7 ASUS result.
+- **Excluded G74SX path:** do not freshly repack the FAT16/hybrid image with
+  the growing unstripped kernel as round 7 did. Keep round 7 under
+  `local-evidence/g74sx/round7-candidate/` as failed evidence, not as an image
+  to flash again for routine use. The `g74sx` profile implements round 8's
+  one-file-content replacement and refuses to silently fall back to repacking.
 
 ## Round-4 findings
 
@@ -136,14 +207,15 @@ scripts. Never write the stick without the human's go-ahead.
     the upper 16 bits of an I/O BAR read back 0 here, and the sizing treats them
     as address bits. Same class of bug as the 64-bit memory BAR fix; no driver
     claims I/O BARs yet.
-  - **`devices` prints only its header** (QEMU lists PCI and ACPI devices). Most
-    likely the observe buffer is too small for 102 ACPI devices and the call
-    fails; to verify.
   - **Memory is clipped at 16 GiB**: `pages=4051062/4194304`, exactly the
     page-frame bitmap limit (`kPageFrameBitmapSizeBytes` 512 KiB); RAM remapped
     above 16 GiB is ignored.
 - Seen in QEMU too (existing behavior): `ps` shows the kernel threads of pid 1
   as `dying running`.
+- **Handoff correction:** the preserved round-6 log contains the xHCI device,
+  all 102 ACPI devices, and `devices complete`. The previous header-only and
+  undersized-observe-buffer claim was incorrect for this run. No `devices`
+  code change is needed.
 
 ## Remaining hypotheses (kept for reference; resolved by round 6)
 
@@ -151,22 +223,74 @@ scripts. Never write the stick without the human's go-ahead.
    (it is disabled on the BIOS path after an earlier hang on this machine).
    Check the `timer: LAPIC source … count=` line; ~100000 is expected for a
    100 MHz bus at 1 kHz.
-2. **xHCI probe** on the Renesas controller: compare `os1` with `os1 (no xHCI)`;
+2. **xHCI probe** on the Fresco Logic controller: compare `os1` with `os1 (no xHCI)`;
    every probe step is logged.
 3. **AP startup**: compare with `os1 (no xHCI, one CPU)`.
 4. **Keyboard**: PS/2 IRQ1 routing via IOAPIC; the first 32 scancodes are logged.
 
+## Follow-up implementation
+
+- Round-6 evidence is preserved under `local-evidence/g74sx/round6-0e09566/`
+  (ignored by Git): the 40 MiB stick capture, extracted ESP and journal/log,
+  matching binaries, source archive, original handoff documents, and SHA-256
+  manifest. Kernel, shim, initrd, and pre-loader bytes match the captured ESP.
+- I/O BAR sizing now handles hardwired-zero upper 16 bits. Regression tests
+  reproduce the G74SX masks and retain full-width and empty-mask cases.
+- `smoke_no_uart` removes COM1, observes output through test-only QEMU debugcon,
+  and types `echo no-uart` through PS/2. CI enables `OS1_QEMU_DEBUGCON=ON`;
+  ordinary hardware builds keep it off.
+- `OS1_BOOT_DIAGNOSTICS=OFF` is the normal build default. Diagnostic builds
+  of the generic profile opt into the EFI pre-loader and BIOS capture. Their USB menu has ordinary,
+  capture-only (`os1.bootlog`), and full diagnostic (`os1.bootdiag`) entries.
+  Only full diagnostics enable noisy mirroring/scancodes and the TCO watchdog.
+  See the companion capture document for the full mode contract.
+- The `g74sx` preset selects `OS1_USB_PROFILE=g74sx`, turns QEMU debugcon and
+  boot diagnostics off, and requires the verified round-6 base image. It
+  preserves the original pre-loader and menu rather than installing generic
+  diagnostic components. That menu leaves kernel capture and watchdog off
+  regardless of the build's diagnostic setting.
+- The 16 GiB bitmap ceiling remains unchanged; expanding it is separate
+  allocator work.
+
+Validation completed locally: all 158 host tests and all 11 existing UEFI/BIOS
+smokes passed. The no-UART test reached the shell and ran the PS/2 command;
+an isolated kernel with the old unbounded serial poll timed out without either
+marker, confirming regression sensitivity. UEFI ordinary/capture/diagnostic
+and BIOS normal/diagnostic boots all reached the shell and accepted PS/2 input
+with the expected capture/watchdog/scancode gates. Capture-only warm-reset
+harvest saved a 4,586-byte log containing the shell command and no watchdog
+flag. Evidence is in `local-evidence/g74sx/followup-validation/` and
+`local-evidence/g74sx/mode-validation/`. Independent diff review passed.
+The screen-mirror gate was checked in source, and watchdog programming by log
+markers; these checks do not prove a ten-minute physical run or watchdog expiry.
+
+PR verification adds 13 image-updater contract cases and confirms the `g74sx`
+preset reproduces the exact successful round-8 image from the same kernel
+inputs. Missing templates and incompatible profile options fail without an
+image. The final code passes all 158 host tests and all 12 QEMU smokes
+(including no-UART). A review fix also stops the early log replay buffer before
+IRQ/AP startup in every mode; its updated kernel passes eight-CPU capture-only
+and G74SX-profile QEMU checks. That final buffer fix postdates the user's
+physical round-8 report, so no additional physical result is claimed.
+
 ## Next steps
 
-1. Fix the round-6 anomalies above (I/O BAR sizing with a host test; `devices`
-   observe sizing; the 16 GiB bitmap limit is a design choice to revisit).
-2. Add a no-UART regression check (see follow-ups).
-3. Split the branch for `main`: permanent fixes first (UART detection, IST
+1. Use the dedicated `g74sx` profile for subsequent kernel updates and keep
+   the round-6 base immutable. Record each candidate's source and checksum.
+   Do not install a new shim, EFI loader, menu, initrd or BIOS payload through
+   this profile; qualify such changes separately on the laptop.
+2. If sustained-operation evidence is needed, use the original `os1` entry
+   and record a ten-minute responsive session plus `sys`, `cpu`, `pci`,
+   `devices`, `irqs`, `resources`, `kmem`, `smpcheck`, and `balancecheck`
+   results. Confirm eight CPUs and sensible AHCI I/O BAR sizes (8, 4, 8, 4,
+   32 bytes). These detailed physical checks have not been established by
+   the user's round-8 success report. Capture screen evidence because this
+   preserved menu does not enable kernel RAM logging.
+3. Prepare the reviewed PR for `main`: permanent fixes (UART detection, IST
    stacks, BAR sizing, xHCI decode enable, PIC masking, non-fatal probes,
-   ACPICA timing, `rdtsc`), then the bring-up tooling (EFI pre-loader, boot log,
-   hybrid USB image, TCO watchdog) behind a clear opt-in, and drop or gate the
-   diagnostics (on-screen debug mirror until init, scancode logging, post-init
-   watchdog reset). Needs human review: boot/handoff contract, interrupt paths.
+   ACPICA timing, `rdtsc`), the no-UART regression, opt-in generic diagnostics,
+   and the constrained G74SX image profile. Include the failed round-7 path,
+   successful round-8 report, and limits of the physical evidence in review.
 
 ## Plan used during rounds 1–6
 2. Map the faulting RIP to a symbol: `x86_64-elf-addr2line -f -C -e
@@ -193,16 +317,19 @@ scripts. Never write the stick without the human's go-ahead.
   mixing memory types for one physical page is undefined on x86.
 - Serial presence uses the 16550 scratch register (write `0xA5`/`0x5A`, read
   back) rather than "LSR != 0xFF", so a partially decoded port cannot pass.
+- G74SX images preserve the pinned round-6 boot/filesystem layout and replace
+  only stripped, padded kernel contents. Round 8 worked physically; round 7's
+  fresh repack did not. This is an evidence-based packaging constraint, not
+  proof of a particular firmware defect.
 
 ## Open follow-ups
 
-- Regression coverage for machines without a UART: the smoke runner depends on
-  serial markers, so a `-serial none` variant needs another channel (e.g.
-  QEMU `isa-debugcon` on port `0xE9`, or a screendump check).
+- The opt-in SMP boot log still has a flush-cursor/store-completion race that
+  may lose late bytes across hardware reset; see the capture document's
+  caveats. Its early replay buffer is now stopped before interrupts/AP startup
+  in every mode, avoiding concurrent writes into that bootstrap-only buffer.
 - The pre-loader and both reset paths rely on `wbinvd`; consider flushing the
   window header in the shim/pre-loader paths with `clflush` as well.
-- Merge plan for `main`: which pieces are permanent (EFI pre-loader, TSC clock,
-  IST, BAR sizing, PIC masking, non-fatal probes) versus bring-up only
-  (watchdog post-init reset, scancode logging, on-screen mirror).
+- Complete sustained physical validation and the staged merge review above.
 - xHCI BIOS→OS ownership handoff (USBLEGSUP) is still not implemented.
 - x2APIC mode is not detected; LAPIC is assumed to be in xAPIC MMIO mode.

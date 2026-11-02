@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Build the hybrid os1 USB stick image.
+"""Build a generic hybrid os1 USB stick image.
+
+Do not use this fresh-filesystem path for the ASUS G74SX: the round-7 rebuild
+was absent from its firmware menu. Use the g74sx CMake preset and pinned-image
+updater instead; see doc/2026-11-02-g74sx-bringup-debug-plan.md.
 
 Layout:
   LBA 0            MBR from the BIOS raw image (boot code + active legacy partition)
@@ -9,8 +13,9 @@ Layout:
                    and the kernel files
 
 Legacy BIOS machines boot the MBR code; UEFI machines boot
-\\EFI\\BOOT\\BOOTX64.EFI, the os1 boot-log pre-loader, which saves the
-previous boot's log under \\os1logs and chain-loads \\EFI\\OS1\\LIMINE.EFI. The FAT writer is deliberately
+\\EFI\\BOOT\\BOOTX64.EFI (Limine normally). With --preloader, the diagnostic
+pre-loader saves the previous boot's log under \\os1logs and chain-loads
+\\EFI\\OS1\\LIMINE.EFI. The FAT writer is deliberately
 small and deterministic (fixed timestamps, sequential clusters, long file names)
 so the build needs no mtools/dosfstools.
 """
