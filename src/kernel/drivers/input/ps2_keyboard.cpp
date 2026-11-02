@@ -5,6 +5,7 @@
 #include "arch/x86_64/cpu/io_port.hpp"
 #include "console/console_input.hpp"
 #include "console/terminal_switcher.hpp"
+#include "debug/bootlog.hpp"
 #include "debug/debug.hpp"
 
 namespace
@@ -97,7 +98,7 @@ void Keyboard::irq_handler(Keyboard* object)
 
     // read scan code
     uint8_t scancode = inb(KBDATAPORT);
-    if(g_logged_scancodes < kLoggedScancodeLimit)
+    if(bootlog_diagnostics_enabled() && (g_logged_scancodes < kLoggedScancodeLimit))
     {
         ++g_logged_scancodes;
         debug("ps2: scancode 0x")(scancode, 16, 2)();

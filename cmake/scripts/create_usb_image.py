@@ -182,7 +182,7 @@ class Fat16Builder:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw-image", required=True)
-    parser.add_argument("--preloader", required=True, help="os1 EFI pre-loader (becomes BOOTX64.EFI)")
+    parser.add_argument("--preloader", help="optional diagnostic EFI pre-loader (becomes BOOTX64.EFI)")
     parser.add_argument("--limine-efi", required=True, help="Limine BOOTX64.EFI (chain-loaded)")
     parser.add_argument("--limine-conf", required=True)
     parser.add_argument("--kernel-shim", required=True)
@@ -203,11 +203,14 @@ def main():
 
     limine_conf = read(args.limine_conf)
     efi_boot = Node("BOOT")
-    efi_boot.children += [Node("BOOTX64.EFI", read(args.preloader)), Node("limine.conf", limine_conf)]
-    efi_os1 = Node("OS1")
-    efi_os1.children += [Node("LIMINE.EFI", read(args.limine_efi)), Node("limine.conf", limine_conf)]
+    efi_boot.children += [Node("BOOTX64.EFI", read(args.preloader or args.limine_efi)),
+                          Node("limine.conf", limine_conf)]
     efi = Node("EFI")
-    efi.children += [efi_boot, efi_os1]
+    efi.children.append(efi_boot)
+    if args.preloader:
+        efi_os1 = Node("OS1")
+        efi_os1.children += [Node("LIMINE.EFI", read(args.limine_efi)), Node("limine.conf", limine_conf)]
+        efi.children.append(efi_os1)
     root = Node("")
     root.children += [
         efi,

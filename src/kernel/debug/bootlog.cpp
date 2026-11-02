@@ -17,10 +17,12 @@ uint64_t g_bootlog_physical = 0;
 uint64_t g_bootlog_region_bytes = 0;
 uint32_t g_bootlog_capacity = 0;
 bool g_bootlog_attached = false;
+bool g_capture_enabled = false;
+bool g_diagnostics_enabled = false;
 char g_early_buffer[kEarlyBufferBytes];
 size_t g_early_length = 0;
-// Keep buffering until the early output has been replayed on screen, even when
-// the RAM log attached first.
+// BSP-only buffer: stop collecting at terminal setup, before IRQs and APs can
+// log concurrently. The output may be replayed on screen or simply discarded.
 bool g_early_replayed = false;
 // Ring index up to which log bytes have been flushed from the CPU caches.
 uint64_t g_flushed_count = 0;
@@ -111,8 +113,33 @@ void io_delay_microseconds(uint64_t microseconds)
 }
 }  // namespace
 
+void bootlog_configure(const BootInfo& info)
+{
+    g_diagnostics_enabled = boot_info_has_option(info, "os1.bootdiag");
+    g_capture_enabled = g_diagnostics_enabled || boot_info_has_option(info, "os1.bootlog");
+    if(!g_capture_enabled)
+    {
+        g_early_replayed = true;
+        g_early_length = 0;
+    }
+}
+
+bool bootlog_capture_enabled()
+{
+    return g_capture_enabled;
+}
+
+bool bootlog_diagnostics_enabled()
+{
+    return g_diagnostics_enabled;
+}
+
 bool bootlog_attach(const BootInfo& info)
 {
+    if(!g_capture_enabled)
+    {
+        return false;
+    }
     if(g_bootlog_attached)
     {
         return true;
@@ -143,7 +170,8 @@ bool bootlog_attach(const BootInfo& info)
 
 bool bootlog_attach_window(uint64_t physical, uint64_t region_bytes, const char* preamble)
 {
-    if(g_bootlog_attached || (region_bytes <= kBootLogHeaderBytes) || !header_valid(physical, region_bytes))
+    if(!g_capture_enabled || g_bootlog_attached || (region_bytes <= kBootLogHeaderBytes) ||
+       !header_valid(physical, region_bytes))
     {
         return false;
     }
@@ -181,11 +209,15 @@ void bootlog_write(char c)
 
 void bootlog_replay_early(void (*sink)(char))
 {
-    if((nullptr == sink) || g_early_replayed)
+    if(g_early_replayed)
     {
         return;
     }
     g_early_replayed = true;
+    if(nullptr == sink)
+    {
+        return;
+    }
     for(size_t i = 0; i < g_early_length; ++i)
     {
         sink(g_early_buffer[i]);

@@ -19,7 +19,12 @@ endif()
 project(os1 LANGUAGES C CXX)
 
 option(OS1_KMEM_DEBUG "Enable kernel small-object allocator debug instrumentation" ON)
+option(OS1_BOOT_DIAGNOSTICS "Enable USB pre-loader and BIOS boot-log diagnostics" OFF)
 option(OS1_QEMU_DEBUGCON "Mirror kernel output to QEMU port 0xE9 for no-UART tests" OFF)
+set(OS1_BOOT_DIAGNOSTICS_ENABLED 0)
+if(OS1_BOOT_DIAGNOSTICS)
+  set(OS1_BOOT_DIAGNOSTICS_ENABLED 1)
+endif()
 
 if(NOT CMAKE_C_COMPILER MATCHES "(^|/)x86_64-elf-gcc$")
   message(FATAL_ERROR "os1 requires the x86_64-elf cross toolchain. Configure with -DCMAKE_TOOLCHAIN_FILE=${OS1_TOOLCHAIN_FILE} or use the provided CMake preset.")
@@ -141,6 +146,13 @@ set(OS1_LIMINE_PROTOCOL_HEADER "${OS1_LIMINE_DIR}/limine.h")
 set(OS1_LIMINE_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine.conf")
 # The USB stick offers bring-up variants (boot options) in a Limine menu.
 set(OS1_LIMINE_USB_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine-usb.conf")
+set(OS1_USB_PRELOADER_ARGS)
+set(OS1_USB_PRELOADER_DEPENDS)
+if(OS1_BOOT_DIAGNOSTICS)
+  set(OS1_LIMINE_USB_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine-usb-diagnostic.conf")
+  set(OS1_USB_PRELOADER_ARGS --preloader "${OS1_EFI_PRELOADER}")
+  set(OS1_USB_PRELOADER_DEPENDS "${OS1_EFI_PRELOADER}" os1_efi_preloader)
+endif()
 
 foreach(OS1_VENDOR_FILE
     "${OS1_LIMINE_BOOTX64}"
@@ -534,7 +546,7 @@ add_custom_command(
   COMMAND
     "${OS1_PYTHON_EXECUTABLE}" -I "${PROJECT_SOURCE_DIR}/cmake/scripts/create_usb_image.py"
     --raw-image "${OS1_RAW_IMAGE}"
-    --preloader "${OS1_EFI_PRELOADER}"
+    ${OS1_USB_PRELOADER_ARGS}
     --limine-efi "${OS1_LIMINE_BOOTX64}"
     --limine-conf "${OS1_LIMINE_USB_CONFIG_SOURCE}"
     --kernel-shim "${OS1_KERNEL_LIMINE_ELF}"
@@ -547,8 +559,7 @@ add_custom_command(
     --output "${OS1_USB_IMAGE}"
   DEPENDS
     "${OS1_RAW_IMAGE}"
-    "${OS1_EFI_PRELOADER}"
-    os1_efi_preloader
+    ${OS1_USB_PRELOADER_DEPENDS}
     "${OS1_LIMINE_BOOTX64}"
     "${OS1_LIMINE_USB_CONFIG_SOURCE}"
     "${OS1_KERNEL_LIMINE_ELF}"

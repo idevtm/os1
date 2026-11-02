@@ -255,8 +255,10 @@ loader_full_main16:
 
 	; Save the previous boot's RAM log to disk and arm a fresh one. This must
 	; run after E820 (it validates the RAM window) and while the BIOS is usable.
+%if BOOT_DIAGNOSTICS_ENABLED
 	call bootlog_prepare16
 	call save_text_cursor16
+%endif
 
 	; TODO: detect video modes
 
@@ -372,6 +374,9 @@ str_off					db "off", 0
 str_bootloader_name		db "bios-loader", 0
 str_initrd_name			db "initrd.cpio", 0
 str_bootlog_name		db "bootlog", 0
+%if BOOT_DIAGNOSTICS_ENABLED
+str_boot_diagnostics_command_line db "os1.bootdiag", 0
+%endif
 disk_load_phase			db 0
 
 %include "disk16_range.asm"
@@ -502,6 +507,10 @@ loader_main64:
 	mov [boot_info + boot_info_struct.magic], rax
 	mov rax, str_bootloader_name
 	mov [boot_info + boot_info_struct.bootloader_name], rax
+%if BOOT_DIAGNOSTICS_ENABLED
+	mov rax, str_boot_diagnostics_command_line
+	mov [boot_info + boot_info_struct.command_line], rax
+%endif
 	mov rsi, str_loader_stage_rsdp
 	call print64
 	call find_rsdp64

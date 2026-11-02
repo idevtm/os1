@@ -4,6 +4,7 @@
 #include "console/console.hpp"
 #include "debug/bootlog.hpp"
 #include "debug/debug.hpp"
+#include "drivers/watchdog/intel_tco.hpp"
 
 [[noreturn]] void halt_forever()
 {
@@ -16,7 +17,11 @@
         bootlog_mark(kBootLogFlagFatalStop);
         debug.set_mirror(console_mirror_debug_byte);
         debug("==== FATAL: os1 stopped. Photograph this screen, then press any key to")();
-        debug("==== reset and save the boot log (the watchdog resets within ~90 s).")();
+        debug("==== reset and save the boot log.")();
+        if(intel_tco_watchdog_armed())
+        {
+            debug("==== The diagnostic watchdog will also reset the machine if no key is pressed.")();
+        }
         bootlog_wait_for_keypress();
         debug("fatal: resetting to preserve boot log")();
         bootlog_reset_machine();

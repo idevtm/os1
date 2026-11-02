@@ -97,7 +97,9 @@ switch_to_long_mode:
     mov [es:di + 0x2008], eax
     ; Identity-map the RAM boot log window with one 2 MiB page so the loader
     ; and the early kernel can append to it before the kernel page tables exist.
+%if BOOT_DIAGNOSTICS_ENABLED
     mov dword [es:di + 0x2000 + ((BOOTLOG_PHYSICAL_ADDRESS >> 21) * 8)], BOOTLOG_PHYSICAL_ADDRESS | PAGE_PRESENT | PAGE_WRITE | (1 << 7)
+%endif
  
  
     push di                           ; Save DI for the time being.

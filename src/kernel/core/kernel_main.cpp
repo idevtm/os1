@@ -88,8 +88,9 @@ struct KernelMainFailureReporter
 
 // UEFI boots: the EFI pre-loader armed one of kBootLogUefiCandidates. Attach
 // through the kernel's own direct map once it exists. The memory type the
-// firmware and Limine report for the window is only logged: on the G74SX the
-// window was not reported as reserved, so requiring that lost every log.
+// firmware and Limine report for the window is logged. The G74SX firmware
+// reports reserved memory correctly; mapping it explicitly also avoids relying
+// on the loader's direct map covering reserved regions.
 void attach_uefi_bootlog(VirtualMemory& kvm)
 {
     const char* shim_log = nullptr;
@@ -437,7 +438,6 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     const bool bios_legacy_boot = (nullptr != info) && (info->magic == kBootInfoMagic) &&
                                   (info->version == kBootInfoVersion) &&
                                   (BootSource::BiosLegacy == info->source);
-    debug.set_vga_mirror_enabled(bios_legacy_boot);
     debug("[kernel64] hello!\n");
 
     g_boot_info = own_boot_info(info);
@@ -446,7 +446,9 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         debug("invalid boot info")();
         return;
     }
-    if(bios_legacy_boot)
+    bootlog_configure(*g_boot_info);
+    debug.set_vga_mirror_enabled(bios_legacy_boot && bootlog_diagnostics_enabled());
+    if(bios_legacy_boot && bootlog_capture_enabled())
     {
         debug(bootlog_attach(*g_boot_info) ? "bootlog: attached at 0x" : "bootlog: not available")(
             bootlog_physical_start(), 16)();
@@ -570,11 +572,12 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     g_cpu_boot->tss.rsp0 = 0;
     cpu_init();
 
-    if(!bios_legacy_boot)
+    if(!bios_legacy_boot && bootlog_capture_enabled())
     {
         attach_uefi_bootlog(kvm);
     }
-    if(bootlog_active() && intel_tco_watchdog_arm(kvm, kBootWatchdogStageSeconds))
+    if(bootlog_diagnostics_enabled() && bootlog_active() &&
+       intel_tco_watchdog_arm(kvm, kBootWatchdogStageSeconds))
     {
         bootlog_mark(kBootLogFlagWatchdogArmed);
     }
@@ -666,11 +669,15 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         active_terminal->move_cursor(0, 0);
     }
     active_terminal->write_line("[kernel64] hello");
-    if(BootSource::BiosLegacy != g_boot_info->source)
+    const bool mirror_boot_diagnostics =
+        (BootSource::BiosLegacy != g_boot_info->source) && bootlog_diagnostics_enabled();
+    // End BSP-only buffering in every mode before IRQ/AP startup, including
+    // capture-only boots and failed log attachments that have no screen replay.
+    bootlog_replay_early(mirror_boot_diagnostics ? console_mirror_debug_byte : nullptr);
+    if(mirror_boot_diagnostics)
     {
         // UEFI laptops have no serial port: show the debug stream on screen,
-        // starting with what was logged before the terminal existed.
-        bootlog_replay_early(console_mirror_debug_byte);
+        // continuing after the early output replay above.
         debug.set_mirror(console_mirror_debug_byte);
     }
 

@@ -37,6 +37,13 @@ enum BootLogFlag : uint32_t
     kBootLogFlagKernelMainReturned = 1u << 5,
 };
 
+// Explicit boot options: os1.bootlog captures only; os1.bootdiag also enables
+// the bring-up screen/scancode diagnostics and automatic watchdog harvest.
+// Call once after taking ownership of BootInfo, before attaching a RAM window.
+void bootlog_configure(const BootInfo& info);
+bool bootlog_capture_enabled();
+bool bootlog_diagnostics_enabled();
+
 // BIOS boots: locate and validate the loader's "bootlog" module. Output produced
 // before attaching is buffered in a small static area and copied into the log.
 // Runs while low memory is still identity-mapped. Returns false on UEFI boots.
@@ -53,8 +60,8 @@ uint64_t bootlog_region_bytes();
 bool bootlog_active();
 // Append one byte. Safe to call from any CPU and from fault paths.
 void bootlog_write(char c);
-// Replay the output buffered before attach, e.g. onto a screen that did not
-// exist yet when the bytes were written.
+// Stop early BSP-only buffering before IRQ/AP startup. A non-null sink replays
+// the buffered output (e.g. onto a newly created screen); nullptr discards it.
 void bootlog_replay_early(void (*sink)(char));
 // Record a progress flag in the RAM header.
 void bootlog_mark(uint32_t flag);
