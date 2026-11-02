@@ -50,6 +50,7 @@ bootlog_io_delay64:
 ; log: keyboard-controller pulse, then PCI reset control, then a triple fault.
 bootlog_reset64:
 	cli
+	wbinvd			; write back dirty cache lines; a reset would drop them
 	mov rcx, 5000000
 	call bootlog_io_delay64
 

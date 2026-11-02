@@ -22,6 +22,13 @@ size_t g_early_length = 0;
 // Keep buffering until the early output has been replayed on screen, even when
 // the RAM log attached first.
 bool g_early_replayed = false;
+// Ring index up to which log bytes have been flushed from the CPU caches.
+uint64_t g_flushed_count = 0;
+
+void clflush(const volatile void* address)
+{
+    asm volatile("clflush (%0)" : : "r"(address) : "memory");
+}
 
 // The header lives at a physical address; resolve it through the identity map
 // before the kernel page tables exist and through the direct map afterwards.
@@ -30,12 +37,44 @@ BootLogHeader* header()
     return kernel_physical_pointer<BootLogHeader>(g_bootlog_physical);
 }
 
+// A platform reset (watchdog, reset button) drops dirty cache lines. The header
+// is written on every byte and never leaves the cache on its own, so without
+// flushing the next boot sees the loader's original header and saves nothing.
+// Flush each finished line and the header to memory.
+void flush_written(uint64_t end)
+{
+    volatile char* ring = kernel_physical_pointer<volatile char>(g_bootlog_physical + kBootLogHeaderBytes);
+    uint64_t start = __atomic_exchange_n(&g_flushed_count, end, __ATOMIC_RELAXED);
+    if(end < start)
+    {
+        start = end;
+    }
+    if((end - start) > g_bootlog_capacity)
+    {
+        start = end - g_bootlog_capacity;
+    }
+    for(uint64_t index = start; index < end; index += 64)
+    {
+        clflush(&ring[index % g_bootlog_capacity]);
+    }
+    if(start < end)
+    {
+        clflush(&ring[(end - 1) % g_bootlog_capacity]);
+    }
+    clflush(header());
+    asm volatile("mfence" : : : "memory");
+}
+
 void append_attached(char c)
 {
     BootLogHeader* log = header();
     const uint64_t index = __atomic_fetch_add(&log->write_count, 1, __ATOMIC_RELAXED);
     kernel_physical_pointer<volatile char>(g_bootlog_physical + kBootLogHeaderBytes)
         [index % g_bootlog_capacity] = c;
+    if('\n' == c)
+    {
+        flush_written(index + 1);
+    }
 }
 
 bool header_valid(uint64_t physical, uint64_t region_bytes)
@@ -158,6 +197,7 @@ void bootlog_mark(uint32_t flag)
     if(g_bootlog_attached)
     {
         __atomic_fetch_or(&header()->flags, flag, __ATOMIC_RELAXED);
+        flush_written(__atomic_load_n(&header()->write_count, __ATOMIC_RELAXED));
     }
 }
 
@@ -188,6 +228,8 @@ void bootlog_wait_for_keypress()
 [[noreturn]] void bootlog_reset_machine()
 {
     asm volatile("cli");
+    // Write every dirty cache line back to memory before the reset drops them.
+    asm volatile("wbinvd" : : : "memory");
 
     // Keyboard-controller reset pulse.
     for(uint32_t spins = 0; (spins < 100000u) && (0 != (inb(0x64) & 0x02)); ++spins)

@@ -19,6 +19,12 @@ public:
     // Mirror all debug output through `sink`, e.g. to the framebuffer terminal
     // on machines without a serial port. nullptr disables the mirror.
     void set_mirror(void (*sink)(char));
+    // Return true when a UART answered at COM1. Laptops usually have none: the
+    // port then reads 0xFF, which looks like "data ready" forever.
+    [[nodiscard]] bool serial_available() const
+    {
+        return kSerialStateReady == serial_state_;
+    }
     // write one byte to COM1 after waiting for the transmit FIFO.
     void write(const char c);
     // write one byte everywhere except the mirror; console code that already

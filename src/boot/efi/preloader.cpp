@@ -507,6 +507,10 @@ extern "C" EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE* system
     }
     journal_line.add("\n");
 
+    // Push the fresh header out of the CPU caches; a reset before it is evicted
+    // would otherwise leave the previous contents in DRAM.
+    asm volatile("wbinvd" : : : "memory");
+
     if(files_ready)
     {
         journal->set_position(journal, ~0ull);

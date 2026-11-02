@@ -15,11 +15,17 @@ round must be designed to return as much information as possible.
 - ASUS G74SX: Intel Sandy Bridge (4C/8T), HM65 PCH, NVIDIA GTX 560M, 2011 AMI
   Aptio firmware.
 - **UEFI-only boot, no CSM.** The legacy BIOS raw image is never offered.
-- No serial port. Internal keyboard is PS/2 (i8042 via EC).
+- **No serial port**: I/O ports `0x3F8`–`0x3FF` read `0xFF`, so the COM1 line
+  status register looks like "data ready" forever.
+- Internal keyboard is PS/2 (i8042 via EC).
 - USB 3.0 ports on a Renesas/NEC xHCI controller (bound by the os1 xHCI driver).
-- On reset the firmware writes `0x5A5A5A5A` at least at 16 MiB-aligned
-  addresses (observed in the first dword of four windows); upper dwords there
-  survived. Full extent of the fill is unknown — the journal now measures it.
+- On reset the firmware writes single `0x5A5A5A5A` dwords at 256 KiB-aligned
+  physical addresses (4 per 1 MiB window; first seen as damaged headers at
+  16 MiB-aligned windows in round 3). Everything else in the windows survived.
+- The firmware reports the pre-loader's `EfiReservedMemoryType` allocation
+  correctly (`type=0` in the round-5 journal).
+- The CPU caches are not written back on a platform reset (watchdog or reset
+  button): log data still in cache is lost (see round-5 findings).
 - An older, unapplied investigation stash exists: `git stash list` →
   `stash@{0}: On real-device: ASUS G74SX investigation` (PIC masking, AP startup
   skipped on BIOS, xHCI handoff skipped, 64-bit BAR sizing fix, user DS/ES
@@ -64,51 +70,67 @@ scripts. Never write the stick without the human's go-ahead.
 | 2 | `19e644c` hybrid, no UEFI capture | Boots via UEFI, reset loop (~10–15 s per cycle incl. POST); last visible line "about interrupts" per the human. |
 | 3 | `5f95037` UEFI capture | Loop continued; journal: 3 boots, all `no previous log`; window headers hit by `0x5A5A5A5A` (`w0=0x31474f4c5a5a5a5a`). |
 | 4 | `8463110` windows moved, FATAL stop, IST, menu | All three menu entries: kernel log scrolled, then reset (no FATAL banner). Journal: 4 boots, each saved log only the pre-loader's 54-byte banner. See round-4 findings. |
-| 5 | late UEFI attach + shim log | Pending. |
+| 5 | `2843375` late UEFI attach + shim log | Both `os1` and `os1 (no xHCI, one CPU)` hung (no instant reset) with `root alloc 0x…` as the last screen line, then reset after a while. Journal: firmware `type=0`; saved logs again only 54 bytes. Root cause found, see round-5 findings. |
+| 6 | UART detection + cache-safe log | Pending. |
 
 ## Round-4 findings
 
 - The window survives a reset: headers intact, only 4 fill dwords per 1 MiB
   window (`[5a:4@…]`), at 256 KiB-aligned physical addresses (e.g. `0x4A40000`,
   `0x5B80000`). The pause-after-save works.
-- Neither the Limine shim nor the kernel attached: both required the window to
-  be a `Reserved` region in Limine's memory map. On this firmware it was not,
-  although the pre-loader allocated it as `EfiReservedMemoryType`. With the log
-  inactive, the TCO watchdog was not armed and `halt_forever` would only halt,
-  so the observed resets are most likely triple faults (or a firmware-side
-  reset), in all three variants — xHCI and AP startup alone are not the cause.
-- Fix (round 5): the kernel attaches after its direct map exists, maps the
-  candidate itself, validates the header, logs the region type it saw, and
-  reserves the window if it was reported usable. The shim buffers its serial
-  output and hands it over as the `shimlog` boot module (copied first into the
-  log). The pre-loader journals the firmware's own type for the armed window
-  (`type=N`, 0 = reserved). In QEMU, an allocation reported as boot-services
-  data (Limine type 9) still attaches.
-- Remaining blind spot: a fault before the kernel's direct map exists (or before
-  the IDT) still resets without a saved log. Ask the human to film the screen.
+- Each saved log held only the pre-loader's 54-byte banner. At the time this was
+  read as "the window is not reported as reserved"; round 5 disproved that
+  (`type=0`). The round-5 cache explanation below fits rounds 4 and 5 better.
+- Changes made for round 5 regardless (still useful): the kernel attaches after
+  its direct map exists, maps the candidate itself, logs the region type, and
+  reserves the window if it was reported usable; the shim buffers its serial
+  output and hands it over as the `shimlog` boot module; the pre-loader journals
+  the firmware's type for the armed window.
 
-## Hypotheses for the reset loop (ranked)
+## Round-5 findings (root cause of the hang)
 
-1. **Fault after `Interrupts initialization successful`, in xHCI probe** — next
-   step in `kernel_main` is `platform_probe_devices`; the Renesas controller may
-   have memory decoding off (registers read all ones), a 64-bit BAR with
-   hardwired upper bits (old sizing produced ~2^64), or MSI/MSI-X programming
-   issues. Round 4 logs each probe step; the `os1 (no xHCI)` menu entry is the
-   A/B test.
-2. **Triple fault in an exception handler** (no IST before `8463110`), which
-   resets without a visible fault message. Now NMI/#DF/#MC use IST1.
-3. **AP startup** (INIT/SIPI, trampoline at 0x1000) — the old stash skipped APs
-   on BIOS. A/B test: `os1 (no xHCI, one CPU)`.
-4. **Spurious/unexpected interrupt right after `sti`** (firmware-left MSI on a
-   device, LAPIC error/spurious vectors). Visible as an exception or unknown
-   vector in the log.
-5. **HPET/LAPIC timer calibration** on the UEFI path (HPET is disabled only on
-   the BIOS path).
+- **Hang:** `console_input_poll_serial()` runs on every scheduler tick on the
+  BSP and drained COM1 with `while(LSR & DATA_READY)`. With no UART the port
+  reads `0xFF`, so the loop never ended, with interrupts off and the console
+  lock held. The first tick fires a few milliseconds after the timer starts,
+  i.e. while the boot thread prints `root alloc` (that line was even cut off in
+  the QEMU reproduction). Independent of xHCI and SMP, matching both variants.
+  **Reproduced in QEMU with `-serial none`** (q35 + OVMF + the USB image).
+- **Empty logs:** the kernel did attach and arm the TCO watchdog (the machine
+  reset itself after the hang, which nothing else in os1 could do). But every
+  byte written updates the header's write count, so that cache line never left
+  the CPU cache; the platform reset dropped it, and DRAM still held the
+  pre-loader's header (54 bytes, no flags). QEMU has no cache, so every QEMU
+  test passed.
+- **Fixes (round 6):** `Debug::init_serial` probes the UART scratch register and
+  marks serial unavailable when it does not answer; serial output and the tick
+  poll are skipped then, and the poll drains at most 16 bytes per tick. The boot
+  log `clflush`es each finished line plus the header (`mfence` after), every
+  flag update flushes, and every intentional reset path (kernel, BIOS loader,
+  EFI pre-loader after arming) runs `wbinvd` first.
+- **Verified in QEMU without a serial port:** boots to the shell, PS/2 keyboard
+  input works (`echo hi`), and after a reset the saved log holds the whole boot
+  including the shell session.
+- Rounds 2–4 reset loops are not fully explained. Candidates: triple faults
+  removed by the round-4 IST and xHCI changes, or watchdog resets after this
+  same hang once a log was attached. Confirm with round-6 logs.
+
+## Remaining hypotheses (if round 6 still fails)
+
+1. **Timer source** on the UEFI path: HPET is used for LAPIC calibration there
+   (it is disabled on the BIOS path after an earlier hang on this machine).
+   Check the `timer: LAPIC source … count=` line; ~100000 is expected for a
+   100 MHz bus at 1 kHz.
+2. **xHCI probe** on the Renesas controller: compare `os1` with `os1 (no xHCI)`;
+   every probe step is logged.
+3. **AP startup**: compare with `os1 (no xHCI, one CPU)`.
+4. **Keyboard**: PS/2 IRQ1 routing via IOAPIC; the first 32 scancodes are logged.
 
 ## Plan
 
-1. Read round-5 logs: which menu entries ran, last lines before reset/FATAL,
-   exception name and registers, `type=` and `memmap type` of the window.
+1. Round 6: write the stick, boot `os1`; if the shell appears, type a few keys
+   and wait ~3 minutes for the post-init watchdog reset so the log is saved.
+   If anything fails, boot `os1 (no xHCI, one CPU)` next. Read back the stick.
 2. Map the faulting RIP to a symbol: `x86_64-elf-addr2line -f -C -e
    build/artifacts/kernel.elf <rip>` (the build must match the stick's commit;
    rebuild from that commit if needed). For shim addresses use
@@ -128,9 +150,19 @@ scripts. Never write the stick without the human's go-ahead.
   reset destroyed the only on-screen evidence.
 - Boot options (`os1.noxhci`, `os1.nosmp`) live in a USB-only Limine config so
   the smoke-test ISO keeps a zero-timeout single entry.
+- The boot log is flushed per line (`clflush`) instead of being mapped
+  uncached: the kernel direct map already maps the window write-back, and
+  mixing memory types for one physical page is undefined on x86.
+- Serial presence uses the 16550 scratch register (write `0xA5`/`0x5A`, read
+  back) rather than "LSR != 0xFF", so a partially decoded port cannot pass.
 
 ## Open follow-ups
 
+- Regression coverage for machines without a UART: the smoke runner depends on
+  serial markers, so a `-serial none` variant needs another channel (e.g.
+  QEMU `isa-debugcon` on port `0xE9`, or a screendump check).
+- The pre-loader and both reset paths rely on `wbinvd`; consider flushing the
+  window header in the shim/pre-loader paths with `clflush` as well.
 - Merge plan for `main`: which pieces are permanent (EFI pre-loader, TSC clock,
   IST, BAR sizing, PIC masking, non-fatal probes) versus bring-up only
   (watchdog post-init reset, scancode logging, on-screen mirror).

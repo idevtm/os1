@@ -29,6 +29,16 @@ void Debug::set_vga_mirror_enabled(bool enabled)
 
 void Debug::init_serial()
 {
+    // Probe the scratch register first: without a UART the port floats to 0xFF.
+    outb(PORT + 7, 0xA5);
+    const bool scratch_a5 = (0xA5 == inb(PORT + 7));
+    outb(PORT + 7, 0x5A);
+    if(!scratch_a5 || (0x5A != inb(PORT + 7)))
+    {
+        serial_state_ = kSerialStateUnavailable;
+        return;
+    }
+
     outb(PORT + 1, 0x00);  // Disable all interrupts
     outb(PORT + 3, 0x80);  // Enable DLAB (set baud rate divisor)
     outb(PORT + 0, 0x01);  // Set divisor to 1 (lo byte) 115200 baud
