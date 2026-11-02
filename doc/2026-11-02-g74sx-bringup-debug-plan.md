@@ -1,6 +1,7 @@
 # ASUS G74SX Bring-Up: Debugging Plan and Handoff
 
-Status: active, branch `g74sx-bootlog` (local). Owner: whoever picks up the
+Status: **boot successful in round 6** (shell, PS/2 keyboard, all 8 CPUs);
+remaining work is cleanup and merge, see "Next steps". Branch `g74sx-bootlog` (local). Owner: whoever picks up the
 next stick round. Companion doc for the capture mechanism:
 [2026-11-02-real-hardware-bootlog.md](2026-11-02-real-hardware-bootlog.md).
 
@@ -18,7 +19,16 @@ round must be designed to return as much information as possible.
 - **No serial port**: I/O ports `0x3F8`–`0x3FF` read `0xFF`, so the COM1 line
   status register looks like "data ready" forever.
 - Internal keyboard is PS/2 (i8042 via EC).
-- USB 3.0 ports on a Renesas/NEC xHCI controller (bound by the os1 xHCI driver).
+- USB 3.0 ports on a **Fresco Logic FL1000** xHCI controller (`1b73:1000`, PCI
+  04:00.0, BAR0 `0xf4c00000`+64 KiB, 2 ports, 32 slots, no scratchpads); binds
+  and starts fine with MSI. (Earlier notes guessed Renesas/NEC.)
+- Round-6 measurements: TSC 2195 MHz; LAPIC timer count 99773 for 1 kHz
+  (100 MHz bus); HPET at `0xfed00000`, 8 timers, period 69841279 fs
+  (14.318 MHz); MADT: 8 CPUs (APIC IDs 0–7, BSP 0), 1 IOAPIC (id 2), 2 ISOs;
+  ACPICA: 102 devices, 63 PCI routes; 18 PCI functions (GTX 560M `10de:1251`,
+  Atheros Wi-Fi `168c:002b`, Realtek NIC `10ec:8168`, HM65 AHCI `8086:1c03`).
+- Firmware leaves the TCO watchdog halted with NO_REBOOT set (GCS `0xc21`);
+  os1 clears NO_REBOOT (`0xc01`) and arms it successfully.
 - On reset the firmware writes single `0x5A5A5A5A` dwords at 256 KiB-aligned
   physical addresses (4 per 1 MiB window; first seen as damaged headers at
   16 MiB-aligned windows in round 3). Everything else in the windows survived.
@@ -71,7 +81,7 @@ scripts. Never write the stick without the human's go-ahead.
 | 3 | `5f95037` UEFI capture | Loop continued; journal: 3 boots, all `no previous log`; window headers hit by `0x5A5A5A5A` (`w0=0x31474f4c5a5a5a5a`). |
 | 4 | `8463110` windows moved, FATAL stop, IST, menu | All three menu entries: kernel log scrolled, then reset (no FATAL banner). Journal: 4 boots, each saved log only the pre-loader's 54-byte banner. See round-4 findings. |
 | 5 | `2843375` late UEFI attach + shim log | Both `os1` and `os1 (no xHCI, one CPU)` hung (no instant reset) with `root alloc 0x…` as the last screen line, then reset after a while. Journal: firmware `type=0`; saved logs again only 54 bytes. Root cause found, see round-5 findings. |
-| 6 | UART detection + cache-safe log | Pending. |
+| 6 | `0e09566` UART detection + cache-safe log | **Success.** `os1` boots to the shell; keyboard works; the post-init watchdog reset saved a complete 42 KB log (`boot-0001.txt`, flags: kernel-attached, user-init-started, watchdog-armed). |
 
 ## Round-4 findings
 
@@ -115,7 +125,27 @@ scripts. Never write the stick without the human's go-ahead.
   removed by the round-4 IST and xHCI changes, or watchdog resets after this
   same hang once a log was attached. Confirm with round-6 logs.
 
-## Remaining hypotheses (if round 6 still fails)
+## Round-6 findings
+
+- Full bring-up with no faults: ACPICA init, HPET, LAPIC timer, xHCI probe, all
+  7 APs started, `/bin/sh` reached. The human ran `help`, `pid`, `sys`, `ps`,
+  `cpu`, `pci`, `initrd`, `devices`, `irqs`, `resources`, `kmem`, `events`,
+  `exec`; scancodes and command output are in the log.
+- Anomalies seen only on this machine (not blocking):
+  - **I/O BAR sizes** print as `+0xffff00NN` (e.g. AHCI `bar0:io@0xe070+0xffff0008`):
+    the upper 16 bits of an I/O BAR read back 0 here, and the sizing treats them
+    as address bits. Same class of bug as the 64-bit memory BAR fix; no driver
+    claims I/O BARs yet.
+  - **`devices` prints only its header** (QEMU lists PCI and ACPI devices). Most
+    likely the observe buffer is too small for 102 ACPI devices and the call
+    fails; to verify.
+  - **Memory is clipped at 16 GiB**: `pages=4051062/4194304`, exactly the
+    page-frame bitmap limit (`kPageFrameBitmapSizeBytes` 512 KiB); RAM remapped
+    above 16 GiB is ignored.
+- Seen in QEMU too (existing behavior): `ps` shows the kernel threads of pid 1
+  as `dying running`.
+
+## Remaining hypotheses (kept for reference; resolved by round 6)
 
 1. **Timer source** on the UEFI path: HPET is used for LAPIC calibration there
    (it is disabled on the BIOS path after an earlier hang on this machine).
@@ -126,11 +156,19 @@ scripts. Never write the stick without the human's go-ahead.
 3. **AP startup**: compare with `os1 (no xHCI, one CPU)`.
 4. **Keyboard**: PS/2 IRQ1 routing via IOAPIC; the first 32 scancodes are logged.
 
-## Plan
+## Next steps
 
-1. Round 6: write the stick, boot `os1`; if the shell appears, type a few keys
-   and wait ~3 minutes for the post-init watchdog reset so the log is saved.
-   If anything fails, boot `os1 (no xHCI, one CPU)` next. Read back the stick.
+1. Fix the round-6 anomalies above (I/O BAR sizing with a host test; `devices`
+   observe sizing; the 16 GiB bitmap limit is a design choice to revisit).
+2. Add a no-UART regression check (see follow-ups).
+3. Split the branch for `main`: permanent fixes first (UART detection, IST
+   stacks, BAR sizing, xHCI decode enable, PIC masking, non-fatal probes,
+   ACPICA timing, `rdtsc`), then the bring-up tooling (EFI pre-loader, boot log,
+   hybrid USB image, TCO watchdog) behind a clear opt-in, and drop or gate the
+   diagnostics (on-screen debug mirror until init, scancode logging, post-init
+   watchdog reset). Needs human review: boot/handoff contract, interrupt paths.
+
+## Plan used during rounds 1–6
 2. Map the faulting RIP to a symbol: `x86_64-elf-addr2line -f -C -e
    build/artifacts/kernel.elf <rip>` (the build must match the stick's commit;
    rebuild from that commit if needed). For shim addresses use
