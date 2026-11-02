@@ -111,6 +111,7 @@ set(OS1_CPU_START_BIN "${OS1_ARTIFACT_DIR}/cpu_start.bin")
 set(OS1_KERNEL_ELF "${OS1_ARTIFACT_DIR}/kernel.elf")
 set(OS1_KERNEL_BIOS_ELF "${OS1_ARTIFACT_DIR}/kernel_bios.elf")
 set(OS1_KERNEL_LIMINE_ELF "${OS1_ARTIFACT_DIR}/kernel_limine.elf")
+set(OS1_EFI_PRELOADER "${OS1_ARTIFACT_DIR}/OS1BOOTX64.EFI")
 set(OS1_INITRD_CPIO "${OS1_ARTIFACT_DIR}/initrd.cpio")
 set(OS1_RAW_IMAGE "${OS1_ARTIFACT_DIR}/os1.raw")
 set(OS1_ISO_IMAGE "${OS1_ARTIFACT_DIR}/os1.iso")
@@ -530,7 +531,8 @@ add_custom_command(
   COMMAND
     "${OS1_PYTHON_EXECUTABLE}" -I "${PROJECT_SOURCE_DIR}/cmake/scripts/create_usb_image.py"
     --raw-image "${OS1_RAW_IMAGE}"
-    --bootx64 "${OS1_LIMINE_BOOTX64}"
+    --preloader "${OS1_EFI_PRELOADER}"
+    --limine-efi "${OS1_LIMINE_BOOTX64}"
     --limine-conf "${OS1_LIMINE_CONFIG_SOURCE}"
     --kernel-shim "${OS1_KERNEL_LIMINE_ELF}"
     --kernel "${OS1_KERNEL_ELF}"
@@ -542,6 +544,8 @@ add_custom_command(
     --output "${OS1_USB_IMAGE}"
   DEPENDS
     "${OS1_RAW_IMAGE}"
+    "${OS1_EFI_PRELOADER}"
+    os1_efi_preloader
     "${OS1_LIMINE_BOOTX64}"
     "${OS1_LIMINE_CONFIG_SOURCE}"
     "${OS1_KERNEL_LIMINE_ELF}"

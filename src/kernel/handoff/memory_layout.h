@@ -70,6 +70,13 @@ constexpr uint64_t kBootLogPhysicalAddress = 0x04000000;
 constexpr uint64_t kBootLogMagic = 0x31474F4C4231534Full;  // "OS1BLOG1"
 constexpr uint32_t kBootLogVersion = 1;
 constexpr uint32_t kBootLogHeaderBytes = 64;
+// UEFI path: the os1 EFI pre-loader reserves the first free window from this
+// list as EfiReservedMemoryType before chain-loading Limine, and saves the
+// previous boot's log from whichever window holds one. The Limine shim
+// identity-maps up to kBootLogUefiCandidatesEnd so the kernel can attach early.
+constexpr uint64_t kBootLogUefiWindowBytes = 0x100000;
+constexpr uint64_t kBootLogUefiCandidates[] = {0x04000000, 0x05000000, 0x06000000, 0x07000000};
+constexpr uint64_t kBootLogUefiCandidatesEnd = 0x07000000 + kBootLogUefiWindowBytes;
 
 
 constexpr uint64_t kKernelPml4Index = (kKernelVirtualOffset >> 39) & 0x1FFull;

@@ -5,10 +5,12 @@ Layout:
   LBA 0            MBR from the BIOS raw image (boot code + active legacy partition)
                    plus entry 2: the EFI System Partition (type 0xEF)
   LBA 1..N-1       rest of the BIOS raw image (loader, kernel, initrd, boot log area)
-  LBA ESP_START..  FAT16 EFI System Partition with Limine and the kernel files
+  LBA ESP_START..  FAT16 EFI System Partition with the os1 pre-loader, Limine,
+                   and the kernel files
 
 Legacy BIOS machines boot the MBR code; UEFI machines boot
-\\EFI\\BOOT\\BOOTX64.EFI (Limine) from the ESP. The FAT writer is deliberately
+\\EFI\\BOOT\\BOOTX64.EFI, the os1 boot-log pre-loader, which saves the
+previous boot's log under \\os1logs and chain-loads \\EFI\\OS1\\LIMINE.EFI. The FAT writer is deliberately
 small and deterministic (fixed timestamps, sequential clusters, long file names)
 so the build needs no mtools/dosfstools.
 """
@@ -180,7 +182,8 @@ class Fat16Builder:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw-image", required=True)
-    parser.add_argument("--bootx64", required=True)
+    parser.add_argument("--preloader", required=True, help="os1 EFI pre-loader (becomes BOOTX64.EFI)")
+    parser.add_argument("--limine-efi", required=True, help="Limine BOOTX64.EFI (chain-loaded)")
     parser.add_argument("--limine-conf", required=True)
     parser.add_argument("--kernel-shim", required=True)
     parser.add_argument("--kernel", required=True)
@@ -200,9 +203,11 @@ def main():
 
     limine_conf = read(args.limine_conf)
     efi_boot = Node("BOOT")
-    efi_boot.children += [Node("BOOTX64.EFI", read(args.bootx64)), Node("limine.conf", limine_conf)]
+    efi_boot.children += [Node("BOOTX64.EFI", read(args.preloader)), Node("limine.conf", limine_conf)]
+    efi_os1 = Node("OS1")
+    efi_os1.children += [Node("LIMINE.EFI", read(args.limine_efi)), Node("limine.conf", limine_conf)]
     efi = Node("EFI")
-    efi.children.append(efi_boot)
+    efi.children += [efi_boot, efi_os1]
     root = Node("")
     root.children += [
         efi,

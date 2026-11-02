@@ -78,7 +78,11 @@ struct KernelMainFailureReporter
     ~KernelMainFailureReporter()
     {
         debug("kernel_main: bring-up failed, returning to the boot loader")();
-        bootlog_mark(kBootLogFlagKernelMainReturned);
+        if(bootlog_active())
+        {
+            bootlog_mark(kBootLogFlagKernelMainReturned);
+            bootlog_reset_machine();
+        }
     }
 };
 
@@ -403,10 +407,8 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         debug("invalid boot info")();
         return;
     }
-    if(bios_legacy_boot)
-    {
-        debug(bootlog_attach(*g_boot_info) ? "bootlog: attached" : "bootlog: not available")();
-    }
+    debug(bootlog_attach(*g_boot_info) ? "bootlog: attached at 0x" : "bootlog: not available")(
+        bootlog_physical_start(), 16)();
     bind_initrd_boot_info(g_boot_info);
     debug("boot source: ")(boot_source_name(g_boot_info->source))();
     if(g_boot_info->bootloader_name)
@@ -501,6 +503,10 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         return;
     }
     if(!map_direct_range(kvm, g_boot_info->rsdp_physical, 64))
+    {
+        return;
+    }
+    if(!map_direct_range(kvm, bootlog_physical_start(), bootlog_region_bytes()))
     {
         return;
     }
@@ -614,7 +620,7 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     {
         // UEFI laptops have no serial port: show the debug stream on screen,
         // starting with what was logged before the terminal existed.
-        bootlog_replay_unattached(console_mirror_debug_byte);
+        bootlog_replay_early(console_mirror_debug_byte);
         debug.set_mirror(console_mirror_debug_byte);
     }
 

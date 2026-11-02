@@ -130,6 +130,7 @@ set(KERNEL_UTIL_SOURCES
 )
 
 set(KERNEL_LIMINE_SOURCES
+  "${PROJECT_SOURCE_DIR}/src/boot/limine/bootlog.cpp"
   "${PROJECT_SOURCE_DIR}/src/boot/limine/elf_loader.cpp"
   "${PROJECT_SOURCE_DIR}/src/boot/limine/entry.cpp"
   "${PROJECT_SOURCE_DIR}/src/boot/limine/handoff_builder.cpp"
@@ -370,6 +371,67 @@ add_custom_command(
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
   VERBATIM
 )
+
+# os1 EFI pre-loader (\EFI\BOOT\BOOTX64.EFI on the USB stick): saves the
+# previous boot's RAM log to the stick, then chain-loads Limine. The ELF is
+# position-independent and wrapped into PE32+ by elf_to_pe.py.
+set(OS1_EFI_PRELOADER_LINKER_SCRIPT "${PROJECT_SOURCE_DIR}/src/boot/efi/preloader.ld")
+set(OS1_EFI_PRELOADER_ELF "${OS1_ARTIFACT_DIR}/os1-preloader.elf")
+add_library(os1_efi_preloader_objects OBJECT "${PROJECT_SOURCE_DIR}/src/boot/efi/preloader.cpp")
+target_include_directories(os1_efi_preloader_objects PRIVATE
+  "${PROJECT_SOURCE_DIR}/src/common"
+  "${OS1_GENERATED_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${KERNEL_ARCH_DIR}"
+  "${PROJECT_SOURCE_DIR}/src/libc"
+  "${PROJECT_SOURCE_DIR}/src/uapi"
+)
+set_target_properties(os1_efi_preloader_objects PROPERTIES CXX_STANDARD 20 CXX_EXTENSIONS ON)
+target_compile_options(
+  os1_efi_preloader_objects
+  PRIVATE
+    -ffreestanding
+    -fpie
+    -fvisibility=hidden
+    -mno-red-zone
+    -march=x86-64
+    -mgeneral-regs-only
+    -fno-stack-protector
+    -O2
+    -Wall
+    -Wextra
+    -fno-asynchronous-unwind-tables
+    -fno-unwind-tables
+    -fno-exceptions
+    -fno-rtti
+)
+add_custom_command(
+  OUTPUT "${OS1_EFI_PRELOADER_ELF}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}"
+  COMMAND
+    "${CMAKE_LINKER}"
+    -T "${OS1_EFI_PRELOADER_LINKER_SCRIPT}"
+    -static
+    --emit-relocs
+    -z max-page-size=0x1000
+    $<TARGET_OBJECTS:os1_efi_preloader_objects>
+    -o "${OS1_EFI_PRELOADER_ELF}"
+  DEPENDS
+    os1_efi_preloader_objects
+    $<TARGET_OBJECTS:os1_efi_preloader_objects>
+    "${OS1_EFI_PRELOADER_LINKER_SCRIPT}"
+  COMMAND_EXPAND_LISTS
+  VERBATIM
+)
+add_custom_command(
+  OUTPUT "${OS1_EFI_PRELOADER}"
+  COMMAND
+    "${OS1_PYTHON_EXECUTABLE}" -I "${PROJECT_SOURCE_DIR}/cmake/scripts/elf_to_pe.py"
+    "${OS1_EFI_PRELOADER_ELF}" "${OS1_EFI_PRELOADER}"
+  DEPENDS "${OS1_EFI_PRELOADER_ELF}" "${PROJECT_SOURCE_DIR}/cmake/scripts/elf_to_pe.py"
+  VERBATIM
+)
+add_custom_target(os1_efi_preloader ALL DEPENDS "${OS1_EFI_PRELOADER}")
 
 add_custom_target(kernel_elf DEPENDS "${OS1_KERNEL_ELF}")
 add_custom_target(kernel_limine_elf DEPENDS "${OS1_KERNEL_LIMINE_ELF}")

@@ -11,13 +11,17 @@ static_assert(sizeof(BootLogHeader) == kBootLogHeaderBytes);
 namespace
 {
 constexpr const char* kBootLogModuleName = "bootlog";
-constexpr size_t kEarlyBufferBytes = 8192;
+constexpr size_t kEarlyBufferBytes = 16384;
 
 uint64_t g_bootlog_physical = 0;
+uint64_t g_bootlog_region_bytes = 0;
 uint32_t g_bootlog_capacity = 0;
 bool g_bootlog_attached = false;
 char g_early_buffer[kEarlyBufferBytes];
 size_t g_early_length = 0;
+// Keep buffering until the early output has been replayed on screen, even when
+// the RAM log attached first.
+bool g_early_replayed = false;
 
 // The header lives at a physical address; resolve it through the identity map
 // before the kernel page tables exist and through the direct map afterwards.
@@ -32,6 +36,44 @@ void append_attached(char c)
     const uint64_t index = __atomic_fetch_add(&log->write_count, 1, __ATOMIC_RELAXED);
     kernel_physical_pointer<volatile char>(g_bootlog_physical + kBootLogHeaderBytes)
         [index % g_bootlog_capacity] = c;
+}
+
+bool header_valid(uint64_t physical, uint64_t region_bytes)
+{
+    const BootLogHeader* log = kernel_physical_pointer<const BootLogHeader>(physical);
+    return (kBootLogMagic == log->magic) && (kBootLogVersion == log->version) &&
+           (kBootLogHeaderBytes == log->header_bytes) &&
+           (log->capacity == (region_bytes - kBootLogHeaderBytes));
+}
+
+// The UEFI pre-loader allocates its window as EfiReservedMemoryType, which
+// reaches the kernel as a Reserved region. Requiring that keeps the kernel from
+// attaching to a stale header in memory it will later hand out.
+bool region_reserved(const BootInfo& info, uint64_t start, uint64_t length)
+{
+    for(uint32_t i = 0; i < info.memory_map_count; ++i)
+    {
+        const BootMemoryRegion& region = info.memory_map[i];
+        if((BootMemoryType::Reserved == region.type) && (region.physical_start <= start) &&
+           ((region.physical_start + region.length) >= (start + length)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void finish_attach(uint64_t physical, uint64_t region_bytes)
+{
+    g_bootlog_physical = physical;
+    g_bootlog_region_bytes = region_bytes;
+    g_bootlog_capacity = static_cast<uint32_t>(region_bytes - kBootLogHeaderBytes);
+    g_bootlog_attached = true;
+    for(size_t j = 0; j < g_early_length; ++j)
+    {
+        append_attached(g_early_buffer[j]);
+    }
+    bootlog_mark(kBootLogFlagKernelAttached);
 }
 
 void io_delay_microseconds(uint64_t microseconds)
@@ -50,37 +92,48 @@ bool bootlog_attach(const BootInfo& info)
         return true;
     }
 
-    for(uint32_t i = 0; i < info.module_count; ++i)
+    if(BootSource::BiosLegacy == info.source)
     {
-        const BootModuleInfo& module = info.modules[i];
-        if((nullptr == module.name) || !freestanding::strings_equal(module.name, kBootLogModuleName) ||
-           (module.physical_start != kBootLogPhysicalAddress) || (module.length <= kBootLogHeaderBytes))
+        for(uint32_t i = 0; i < info.module_count; ++i)
         {
-            continue;
+            const BootModuleInfo& module = info.modules[i];
+            if((nullptr == module.name) ||
+               !freestanding::strings_equal(module.name, kBootLogModuleName) ||
+               (module.physical_start != kBootLogPhysicalAddress) ||
+               (module.length <= kBootLogHeaderBytes))
+            {
+                continue;
+            }
+            if(!header_valid(module.physical_start, module.length))
+            {
+                return false;
+            }
+            finish_attach(module.physical_start, module.length);
+            return true;
         }
-
-        g_bootlog_physical = module.physical_start;
-        const BootLogHeader* log = header();
-        if((kBootLogMagic != log->magic) || (kBootLogVersion != log->version) ||
-           (kBootLogHeaderBytes != log->header_bytes) ||
-           (log->capacity != (module.length - kBootLogHeaderBytes)))
-        {
-            g_bootlog_physical = 0;
-            return false;
-        }
-
-        g_bootlog_capacity = log->capacity;
-        g_bootlog_attached = true;
-        for(size_t j = 0; j < g_early_length; ++j)
-        {
-            append_attached(g_early_buffer[j]);
-        }
-        g_early_length = 0;
-        bootlog_mark(kBootLogFlagKernelAttached);
-        return true;
+        return false;
     }
 
+    for(const uint64_t candidate : kBootLogUefiCandidates)
+    {
+        if(region_reserved(info, candidate, kBootLogUefiWindowBytes) &&
+           header_valid(candidate, kBootLogUefiWindowBytes))
+        {
+            finish_attach(candidate, kBootLogUefiWindowBytes);
+            return true;
+        }
+    }
     return false;
+}
+
+uint64_t bootlog_physical_start()
+{
+    return g_bootlog_attached ? g_bootlog_physical : 0;
+}
+
+uint64_t bootlog_region_bytes()
+{
+    return g_bootlog_attached ? g_bootlog_region_bytes : 0;
 }
 
 bool bootlog_active()
@@ -93,21 +146,21 @@ void bootlog_write(char c)
     if(g_bootlog_attached)
     {
         append_attached(c);
-        return;
     }
 
-    if(g_early_length < kEarlyBufferBytes)
+    if(!g_early_replayed && (g_early_length < kEarlyBufferBytes))
     {
         g_early_buffer[g_early_length++] = c;
     }
 }
 
-void bootlog_replay_unattached(void (*sink)(char))
+void bootlog_replay_early(void (*sink)(char))
 {
-    if(g_bootlog_attached || (nullptr == sink))
+    if((nullptr == sink) || g_early_replayed)
     {
         return;
     }
+    g_early_replayed = true;
     for(size_t i = 0; i < g_early_length; ++i)
     {
         sink(g_early_buffer[i]);

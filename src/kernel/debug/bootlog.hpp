@@ -1,8 +1,9 @@
-// Persistent RAM boot log for BIOS bring-up on real hardware. The BIOS loader
-// arms a RAM window and publishes it as the "bootlog" boot module; the kernel
-// mirrors all debug output into it. After a failure the machine is reset
-// without clearing RAM, and the next loader run saves the log onto the boot
-// disk. See doc/2026-11-02-real-hardware-bootlog.md.
+// Persistent RAM boot log for bring-up on real hardware. A loader arms a RAM
+// window: the BIOS loader publishes it as the "bootlog" boot module, the UEFI
+// pre-loader reserves one of kBootLogUefiCandidates. The kernel mirrors all
+// debug output into it. After a failure the machine is reset without clearing
+// RAM, and the next loader run saves the log onto the boot stick.
+// See doc/2026-11-02-real-hardware-bootlog.md.
 #pragma once
 
 #include <stddef.h>
@@ -36,16 +37,22 @@ enum BootLogFlag : uint32_t
     kBootLogFlagKernelMainReturned = 1u << 5,
 };
 
-// Locate and validate the loader-armed "bootlog" module. Output produced before
-// this call is buffered in a small static area and replayed on success.
+// Locate and validate the loader-armed window: the "bootlog" module on BIOS
+// boots, or a reserved UEFI candidate window. Output produced before this call
+// is buffered in a small static area and copied into the log on success.
+// Physical memory must still be identity-mapped when this runs.
 bool bootlog_attach(const BootInfo& info);
+// Physical extent of the attached window (0 when not attached), so the kernel
+// can keep it in its own page tables.
+uint64_t bootlog_physical_start();
+uint64_t bootlog_region_bytes();
 // Return true once the kernel is mirroring debug output into the RAM log.
 bool bootlog_active();
 // Append one byte. Safe to call from any CPU and from fault paths.
 void bootlog_write(char c);
-// Replay output buffered before attach (only when no RAM log was attached),
-// e.g. onto a screen that did not exist yet when the bytes were written.
-void bootlog_replay_unattached(void (*sink)(char));
+// Replay the output buffered before attach, e.g. onto a screen that did not
+// exist yet when the bytes were written.
+void bootlog_replay_early(void (*sink)(char));
 // Record a progress flag in the RAM header.
 void bootlog_mark(uint32_t flag);
 // Reset the machine while preserving RAM so the next boot can save the log.
