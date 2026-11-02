@@ -19,7 +19,7 @@ void init_serial()
 
 void write_serial_char(char value)
 {
-    bootlog_write_char(value);
+    shim_log_write_char(value);
     constexpr uint16_t kSerialPort = 0x3F8;
     while(0 == (inb(kSerialPort + 5) & 0x20))
     {

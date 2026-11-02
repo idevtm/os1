@@ -86,6 +86,45 @@ struct KernelMainFailureReporter
     }
 };
 
+// UEFI boots: the EFI pre-loader armed one of kBootLogUefiCandidates. Attach
+// through the kernel's own direct map once it exists. The memory type the
+// firmware and Limine report for the window is only logged: on the G74SX the
+// window was not reported as reserved, so requiring that lost every log.
+void attach_uefi_bootlog(VirtualMemory& kvm)
+{
+    const char* shim_log = nullptr;
+    if(const BootModuleInfo* module = boot_info_find_module(*g_boot_info, "shimlog"))
+    {
+        shim_log = kernel_physical_pointer<const char>(module->physical_start);
+    }
+
+    for(const uint64_t candidate : kBootLogUefiCandidates)
+    {
+        const BootMemoryRegion* region =
+            boot_memory_region_containing(*g_boot_info, candidate, kBootLogUefiWindowBytes);
+        const uint32_t type = (nullptr != region) ? static_cast<uint32_t>(region->type) : 0u;
+        if((nullptr == region) || (BootMemoryType::Mmio == region->type) ||
+           (BootMemoryType::Framebuffer == region->type) ||
+           !map_direct_range(kvm, candidate, kBootLogUefiWindowBytes))
+        {
+            debug("bootlog: candidate 0x")(candidate, 16)(" memmap type ")(type)(" skipped")();
+            continue;
+        }
+        if(!bootlog_attach_window(candidate, kBootLogUefiWindowBytes, shim_log))
+        {
+            debug("bootlog: candidate 0x")(candidate, 16)(" memmap type ")(type)(" has no valid header")();
+            continue;
+        }
+        if(boot_memory_region_is_usable(*region))
+        {
+            reserve_tracked_physical_range(page_frames, candidate, kBootLogUefiWindowBytes);
+        }
+        debug("bootlog: attached at 0x")(candidate, 16)(" memmap type ")(type)();
+        return;
+    }
+    debug("bootlog: no armed window found")();
+}
+
 [[noreturn]] void finish_kernel_thread(int exit_status)
 {
     mark_current_thread_dying(exit_status);
@@ -407,8 +446,11 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         debug("invalid boot info")();
         return;
     }
-    debug(bootlog_attach(*g_boot_info) ? "bootlog: attached at 0x" : "bootlog: not available")(
-        bootlog_physical_start(), 16)();
+    if(bios_legacy_boot)
+    {
+        debug(bootlog_attach(*g_boot_info) ? "bootlog: attached at 0x" : "bootlog: not available")(
+            bootlog_physical_start(), 16)();
+    }
     bind_initrd_boot_info(g_boot_info);
     debug("boot source: ")(boot_source_name(g_boot_info->source))();
     if(nullptr != g_boot_info->command_line)
@@ -528,6 +570,10 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     g_cpu_boot->tss.rsp0 = 0;
     cpu_init();
 
+    if(!bios_legacy_boot)
+    {
+        attach_uefi_bootlog(kvm);
+    }
     if(bootlog_active() && intel_tco_watchdog_arm(kvm, kBootWatchdogStageSeconds))
     {
         bootlog_mark(kBootLogFlagWatchdogArmed);

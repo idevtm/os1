@@ -172,6 +172,21 @@ bool address_is_ram(uint64_t address)
     return false;
 }
 
+// Firmware memory type covering `address`, or ~0u when no descriptor covers it.
+uint32_t memory_type_at(uint64_t address)
+{
+    for(uint64_t offset = 0; offset + g_descriptor_size <= g_memory_map_size; offset += g_descriptor_size)
+    {
+        const auto* descriptor = reinterpret_cast<const EFI_MEMORY_DESCRIPTOR*>(g_memory_map + offset);
+        const uint64_t end = descriptor->physical_start + descriptor->number_of_pages * 0x1000;
+        if((address >= descriptor->physical_start) && (address < end))
+        {
+            return descriptor->type;
+        }
+    }
+    return ~0u;
+}
+
 bool window_is_ram(uint64_t window)
 {
     return address_is_ram(window) && address_is_ram(window + kBootLogUefiWindowBytes - 1);
@@ -476,6 +491,11 @@ extern "C" EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE* system
     if(nullptr != armed)
     {
         journal_line.add(" armed=").hex(reinterpret_cast<uint64_t>(armed));
+        // Record how the firmware now reports the window (0 = EfiReservedMemoryType).
+        if(load_memory_map())
+        {
+            journal_line.add(" type=").dec(memory_type_at(reinterpret_cast<uint64_t>(armed)));
+        }
         Text banner;
         banner.add("[os1-bootlog] boot #").dec(boot_number).add(" armed window ").hex(reinterpret_cast<uint64_t>(armed));
         banner.add("\n");

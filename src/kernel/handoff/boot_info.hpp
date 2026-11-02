@@ -204,6 +204,12 @@ BOOTINFO_STATIC_ASSERT(boot_info_module_count_offset, offsetof(BootInfo, module_
 
 // copy the bootloader-owned BootInfo graph into kernel-owned storage.
 [[nodiscard]] const BootInfo* own_boot_info(const BootInfo* source);
+// Return the boot module with this exact name, or nullptr.
+[[nodiscard]] const BootModuleInfo* boot_info_find_module(const BootInfo& info, const char* name);
+// Return the memory-map region that fully contains [start, start + length), or nullptr.
+[[nodiscard]] const BootMemoryRegion* boot_memory_region_containing(const BootInfo& info,
+                                                                   uint64_t start,
+                                                                   uint64_t length);
 // Return true when the space-separated boot command line contains `option` as
 // a whole word (e.g. "os1.noxhci").
 [[nodiscard]] bool boot_info_has_option(const BootInfo& info, const char* option);

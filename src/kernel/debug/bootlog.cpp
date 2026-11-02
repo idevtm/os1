@@ -46,29 +46,16 @@ bool header_valid(uint64_t physical, uint64_t region_bytes)
            (log->capacity == (region_bytes - kBootLogHeaderBytes));
 }
 
-// The UEFI pre-loader allocates its window as EfiReservedMemoryType, which
-// reaches the kernel as a Reserved region. Requiring that keeps the kernel from
-// attaching to a stale header in memory it will later hand out.
-bool region_reserved(const BootInfo& info, uint64_t start, uint64_t length)
-{
-    for(uint32_t i = 0; i < info.memory_map_count; ++i)
-    {
-        const BootMemoryRegion& region = info.memory_map[i];
-        if((BootMemoryType::Reserved == region.type) && (region.physical_start <= start) &&
-           ((region.physical_start + region.length) >= (start + length)))
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-void finish_attach(uint64_t physical, uint64_t region_bytes)
+void finish_attach(uint64_t physical, uint64_t region_bytes, const char* preamble)
 {
     g_bootlog_physical = physical;
     g_bootlog_region_bytes = region_bytes;
     g_bootlog_capacity = static_cast<uint32_t>(region_bytes - kBootLogHeaderBytes);
     g_bootlog_attached = true;
+    for(const char* cursor = preamble; (nullptr != cursor) && ('\0' != *cursor); ++cursor)
+    {
+        append_attached(*cursor);
+    }
     for(size_t j = 0; j < g_early_length; ++j)
     {
         append_attached(g_early_buffer[j]);
@@ -108,22 +95,21 @@ bool bootlog_attach(const BootInfo& info)
             {
                 return false;
             }
-            finish_attach(module.physical_start, module.length);
-            return true;
-        }
-        return false;
-    }
-
-    for(const uint64_t candidate : kBootLogUefiCandidates)
-    {
-        if(region_reserved(info, candidate, kBootLogUefiWindowBytes) &&
-           header_valid(candidate, kBootLogUefiWindowBytes))
-        {
-            finish_attach(candidate, kBootLogUefiWindowBytes);
+            finish_attach(module.physical_start, module.length, nullptr);
             return true;
         }
     }
     return false;
+}
+
+bool bootlog_attach_window(uint64_t physical, uint64_t region_bytes, const char* preamble)
+{
+    if(g_bootlog_attached || (region_bytes <= kBootLogHeaderBytes) || !header_valid(physical, region_bytes))
+    {
+        return false;
+    }
+    finish_attach(physical, region_bytes, preamble);
+    return true;
 }
 
 uint64_t bootlog_physical_start()

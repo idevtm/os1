@@ -37,11 +37,14 @@ enum BootLogFlag : uint32_t
     kBootLogFlagKernelMainReturned = 1u << 5,
 };
 
-// Locate and validate the loader-armed window: the "bootlog" module on BIOS
-// boots, or a reserved UEFI candidate window. Output produced before this call
-// is buffered in a small static area and copied into the log on success.
-// Physical memory must still be identity-mapped when this runs.
+// BIOS boots: locate and validate the loader's "bootlog" module. Output produced
+// before attaching is buffered in a small static area and copied into the log.
+// Runs while low memory is still identity-mapped. Returns false on UEFI boots.
 bool bootlog_attach(const BootInfo& info);
+// Attach to an already-mapped window (UEFI boots, after the kernel direct map
+// exists) if its header is valid. `preamble` (may be null) is NUL-terminated
+// text, e.g. the Limine shim's log, copied in ahead of the buffered output.
+bool bootlog_attach_window(uint64_t physical, uint64_t region_bytes, const char* preamble);
 // Physical extent of the attached window (0 when not attached), so the kernel
 // can keep it in its own page tables.
 uint64_t bootlog_physical_start();

@@ -204,9 +204,6 @@ extern "C" [[noreturn]] void limine_start_main()
         halt_forever();
     }
     limine_shim::set_hhdm_offset(hhdm->offset);
-    const bool bootlog_attached = limine_shim::attach_bootlog(g_memmap_request.response);
-    limine_shim::write_serial_ln(bootlog_attached ? "[limine-shim] bootlog window attached"
-                                                  : "[limine-shim] no bootlog window");
 
     const limine_file* kernel_file = find_module(kKernelModuleName);
     const limine_file* initrd_file = find_module(kInitrdModuleName);
@@ -268,12 +265,7 @@ extern "C" [[noreturn]] void limine_start_main()
         align_up(reinterpret_cast<uint64_t>(cpu_boot) + limine_shim::kPageSize,
                  limine_shim::kPageSize);
     const uint64_t bitmap_end = kPageFrameBitmapBaseAddress + kPageFrameBitmapSizeBytes;
-    uint64_t low_handoff_end = (cpu_boot_end > bitmap_end) ? cpu_boot_end : bitmap_end;
-    // The kernel attaches to the boot log window before it owns page tables.
-    if(bootlog_attached && (low_handoff_end < kBootLogUefiCandidatesEnd))
-    {
-        low_handoff_end = kBootLogUefiCandidatesEnd;
-    }
+    const uint64_t low_handoff_end = (cpu_boot_end > bitmap_end) ? cpu_boot_end : bitmap_end;
     if(!limine_shim::ensure_bootstrap_low_window(low_handoff_end))
     {
         limine_shim::write_serial_ln("[limine-shim] low identity map failed");

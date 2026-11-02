@@ -1,15 +1,14 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
-
-#include "limine.h"
 
 namespace limine_shim
 {
-// Find the RAM boot log window armed by the os1 EFI pre-loader (a reserved
-// kBootLogUefiCandidates entry with a valid header). Requires the HHDM; maps
-// the low identity window up to kBootLogUefiCandidatesEnd when a window exists.
-bool attach_bootlog(const limine_memmap_response* memory_map);
-// Append one byte to the attached window; no-op when none was found.
-void bootlog_write_char(char value);
+// The shim keeps a copy of its serial output and hands it to the kernel as the
+// "shimlog" boot module; the kernel copies it into the real-hardware boot log
+// once that log is attached, so shim progress is visible without a serial port.
+void shim_log_write_char(char value);
+// Physical address and capacity of the (NUL-terminated) shim log buffer.
+bool shim_log_physical(uint64_t& physical_address, uint64_t& capacity);
 }  // namespace limine_shim

@@ -41,18 +41,21 @@ and has the next boot's loader, while the BIOS still works, save it on the stick
      fresh header, which keeps Limine and the kernel allocator away from it;
    - appends a journal line with the first header word of every candidate and
      `[5a:count@offset]`, the number of `0x5A5A5A5A` fill dwords found in it
-     (shows what the firmware overwrote), the saved log, and the armed window;
+     (shows what the firmware overwrote), the saved log, the armed window, and
+     `type=N`, the firmware's memory type for it after allocation;
    - after saving a log, waits for a key; then chain-loads
      `\EFI\OS1\LIMINE.EFI` with a device path on the same partition.
    It is built position-independent, linked with `--emit-relocs`, and wrapped
    into PE32+ by `cmake/scripts/elf_to_pe.py` (the cross binutils lack PE).
-2. **Limine shim** — finds the reserved window in Limine's memory map, appends
-   its serial messages to it, and identity-maps up to the last candidate. The
-   identity map is required: Limine's HHDM does not map reserved memory, and
-   reading the window through it triple-faulted.
-3. **Kernel** — `bootlog_attach` accepts a candidate only inside a `Reserved`
-   BootInfo region with a valid header, then behaves as on the BIOS path
-   (failure resets, TCO watchdog, flags).
+2. **Limine shim** — keeps a copy of its serial output and hands it to the
+   kernel as the `shimlog` boot module. (An earlier version read the window
+   through Limine's HHDM, which does not map reserved memory, and triple-faulted.)
+3. **Kernel** — after its direct map exists, `attach_uefi_bootlog` maps each
+   candidate itself, attaches to the first valid header, copies the shim log
+   and the buffered early output in, reserves the window if the memory map
+   called it usable, and logs the region type. It does not require a `Reserved`
+   region: on the G74SX the firmware/Limine did not report one. From there it
+   behaves as on the BIOS path (fatal stop, TCO watchdog, flags).
 
 ### First G74SX result
 
