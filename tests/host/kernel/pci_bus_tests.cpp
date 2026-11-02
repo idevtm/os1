@@ -183,7 +183,7 @@ TEST(PciBus, OnlyProbesMatchingDriver)
     platform_reset_state();
 }
 
-TEST(PciBus, MatchingProbeFailureFailsBusProbe)
+TEST(PciBus, MatchingProbeFailureDoesNotStopLaterDevices)
 {
     os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
     (void)arena;
@@ -192,26 +192,45 @@ TEST(PciBus, MatchingProbeFailureFailsBusProbe)
     VirtualMemory kernel_vm(frames);
     reset_state();
 
-    g_platform.device_count = 1;
+    g_platform.device_count = 2;
     g_platform.devices[0].vendor_id = 0x1AF4;
     g_platform.devices[0].device_id = 0x1042;
+    g_platform.devices[1].vendor_id = 0x8086;
+    g_platform.devices[1].device_id = 0x100e;
 
-    const PciMatch match{
+    const PciMatch failing_match{
         .vendor_id = 0x1AF4,
         .device_id = 0x1042,
         .match_flags = static_cast<uint8_t>(kPciMatchVendorId | kPciMatchDeviceId),
     };
-    const PciDriver driver{
+    const PciMatch second_match{
+        .vendor_id = 0x8086,
+        .device_id = 0x100e,
+        .match_flags = static_cast<uint8_t>(kPciMatchVendorId | kPciMatchDeviceId),
+    };
+    const PciDriver failing_driver{
         .name = "virtio-blk",
-        .matches = &match,
+        .matches = &failing_match,
         .match_count = 1,
         .probe = failing_probe,
     };
+    const PciDriver second_driver{
+        .name = "second-driver",
+        .matches = &second_match,
+        .match_count = 1,
+        .probe = second_probe,
+    };
 
-    ASSERT_TRUE(driver_registry_add_pci_driver(driver));
-    EXPECT_FALSE(pci_bus_probe_all(kernel_vm, frames));
+    ASSERT_TRUE(driver_registry_add_pci_driver(failing_driver));
+    ASSERT_TRUE(driver_registry_add_pci_driver(second_driver));
+    EXPECT_TRUE(pci_bus_probe_all(kernel_vm, frames));
     EXPECT_EQ(1u, g_probe_harness.failing_probe_calls);
     EXPECT_EQ(nullptr, device_binding_find(DeviceId{DeviceBus::Pci, 0}));
+    EXPECT_EQ(1u, g_probe_harness.second_probe_calls);
+    EXPECT_EQ(1u, g_probe_harness.last_probe_id.index);
+    const DeviceBinding* binding = device_binding_find(DeviceId{DeviceBus::Pci, 1});
+    ASSERT_NE(nullptr, binding);
+    EXPECT_EQ(DeviceState::Bound, binding->state);
 
     platform_reset_state();
 }

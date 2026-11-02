@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "arch/x86_64/cpu/io_port.hpp"
+#include "debug/bootlog.hpp"
 #include "handoff/memory_layout.h"
 #include "util/memory.h"
 
@@ -155,6 +156,7 @@ void Debug::write_vga(const char c)
 
 void Debug::write(const char c)
 {
+    bootlog_write(c);
     write_vga(c);
     if(!wait_until_ready())
     {

@@ -20,6 +20,7 @@ extern "C"
 
 #if !defined(OS1_HOST_TEST)
 #include "arch/x86_64/cpu/io_port.hpp"
+#include "drivers/timer/tsc_clock.hpp"
 #endif
 
 namespace
@@ -366,12 +367,24 @@ void AcpiOsWaitEventsComplete(void)
 {
 }
 
-void AcpiOsSleep(UINT64)
+// Real firmware relies on these waits: ACPICA gives the ACPI-mode switch 3 s of
+// AcpiOsStall polling, and AML Sleep/Stall pace EC and SMBus handshakes.
+void AcpiOsSleep(UINT64 milliseconds)
 {
+#if defined(OS1_HOST_TEST)
+    (void)milliseconds;
+#else
+    tsc_clock_delay_us(milliseconds * 1000u);
+#endif
 }
 
-void AcpiOsStall(UINT32)
+void AcpiOsStall(UINT32 microseconds)
 {
+#if defined(OS1_HOST_TEST)
+    (void)microseconds;
+#else
+    tsc_clock_delay_us(microseconds);
+#endif
 }
 
 ACPI_STATUS AcpiOsReadPort(ACPI_IO_ADDRESS address, UINT32* value, UINT32 width)
@@ -516,9 +529,15 @@ BOOLEAN AcpiOsWritable(void* pointer, ACPI_SIZE)
     return (nullptr != pointer) ? TRUE : FALSE;
 }
 
+// ACPICA aborts AML While loops after 30 s measured with this timer; a frozen
+// timer turns a firmware loop waiting on unresponsive hardware into a hang.
 UINT64 AcpiOsGetTimer(void)
 {
+#if defined(OS1_HOST_TEST)
     return 0;
+#else
+    return tsc_clock_now_100ns();
+#endif
 }
 
 ACPI_STATUS AcpiOsSignal(UINT32, void*)

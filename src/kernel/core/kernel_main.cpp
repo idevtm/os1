@@ -20,11 +20,13 @@
 #include "core/kernel_state.hpp"
 #include "core/panic.hpp"
 #include "core/timer_source.hpp"
+#include "debug/bootlog.hpp"
 #include "debug/debug.hpp"
 #include "debug/event_ring.hpp"
 #include "drivers/block/virtio_blk.hpp"
 #include "drivers/display/text_display.hpp"
 #include "drivers/timer/pit.hpp"
+#include "drivers/watchdog/intel_tco.hpp"
 #include "fs/initrd.hpp"
 #include "handoff/boot_info.hpp"
 #include "handoff/memory_layout.h"
@@ -63,6 +65,22 @@ constexpr uint8_t kPitSchedulerVector = static_cast<uint8_t>(T_IRQ0 + IRQ_TIMER)
 constexpr DeviceId kPitTimerOwner{DeviceBus::Platform, 0};
 constexpr DeviceId kKeyboardOwner{DeviceBus::Platform, 1};
 constexpr DeviceId kLapicTimerOwner{DeviceBus::Platform, 2};
+// Real-hardware bring-up watchdog: the platform resets after two stages without
+// a kick. After /bin/init starts, a longer stage leaves time at the shell and
+// still ends in a reset so a successful boot's log gets saved too.
+constexpr uint32_t kBootWatchdogStageSeconds = 45;
+constexpr uint32_t kPostInitWatchdogStageSeconds = 90;
+
+// Every early return from kernel_main means bring-up failed; the BIOS loader
+// then resets the machine when the boot log is active.
+struct KernelMainFailureReporter
+{
+    ~KernelMainFailureReporter()
+    {
+        debug("kernel_main: bring-up failed, returning to the boot loader")();
+        bootlog_mark(kBootLogFlagKernelMainReturned);
+    }
+};
 
 [[noreturn]] void finish_kernel_thread(int exit_status)
 {
@@ -353,6 +371,13 @@ bool prepare_scheduler_timer()
         finish_boot_sequence_thread(1);
     }
 
+    bootlog_mark(kBootLogFlagUserInitStarted);
+    if(intel_tco_watchdog_armed())
+    {
+        intel_tco_watchdog_set_timeout(kPostInitWatchdogStageSeconds);
+        debug("tco: user space reached; machine resets in ~")(2u * kPostInitWatchdogStageSeconds)(
+            " s to save this boot log")();
+    }
     write_console_line("starting first user process");
     mark_thread_ready(init_thread);
     finish_boot_sequence_thread(0);
@@ -361,6 +386,7 @@ bool prepare_scheduler_timer()
 
 extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
 {
+    KernelMainFailureReporter failure_reporter;
     bool result = false;
     const bool bios_legacy_boot = (nullptr != info) && (info->magic == kBootInfoMagic) &&
                                   (info->version == kBootInfoVersion) &&
@@ -373,6 +399,10 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     {
         debug("invalid boot info")();
         return;
+    }
+    if(bios_legacy_boot)
+    {
+        debug(bootlog_attach(*g_boot_info) ? "bootlog: attached" : "bootlog: not available")();
     }
     bind_initrd_boot_info(g_boot_info);
     debug("boot source: ")(boot_source_name(g_boot_info->source))();
@@ -485,10 +515,16 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     g_cpu_boot->tss.rsp0 = 0;
     cpu_init();
 
+    if(bootlog_active() && intel_tco_watchdog_arm(kvm, kBootWatchdogStageSeconds))
+    {
+        bootlog_mark(kBootLogFlagWatchdogArmed);
+    }
+
     if(!platform_discover(*g_boot_info, kvm))
     {
         return;
     }
+    intel_tco_watchdog_kick();
     debug("muliprocessor: ")(ismp ? "yes" : "no")();
     debug("ncpu: ")(ncpu)();
 
@@ -608,6 +644,7 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     {
         return;
     }
+    intel_tco_watchdog_kick();
 
     keyboard.initialize();
     keyboard.set_active_terminal(active_terminal);
@@ -669,6 +706,7 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     }
 
     kernel_event::record(OS1_KERNEL_EVENT_SMOKE_MARKER, 0, OS1_KERNEL_EVENT_SMOKE_MAGIC, 0, 0, 0);
+    intel_tco_watchdog_kick();
     set_current_thread(boot_sequence_thread);
     enter_first_thread(boot_sequence_thread, boot_sequence_thread->kernel_stack_top);
     halt_forever();

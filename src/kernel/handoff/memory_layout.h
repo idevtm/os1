@@ -62,6 +62,15 @@ constexpr uint64_t kPageFrameBitmapQwordLimit = kPageFrameBitmapSizeBytes / size
 // Early low-memory scratch remains reserved until boot no longer depends on it.
 constexpr uint64_t kEarlyReservedPhysicalEnd = 0x20000;
 
+// Persistent RAM boot log for BIOS bring-up on real hardware. The BIOS loader
+// saves the previous boot's log from this window onto the boot disk, re-arms the
+// header, and publishes the window to the kernel as the "bootlog" boot module.
+// Keep these values synchronized with memory_layout.inc.
+constexpr uint64_t kBootLogPhysicalAddress = 0x04000000;
+constexpr uint64_t kBootLogMagic = 0x31474F4C4231534Full;  // "OS1BLOG1"
+constexpr uint32_t kBootLogVersion = 1;
+constexpr uint32_t kBootLogHeaderBytes = 64;
+
 
 constexpr uint64_t kKernelPml4Index = (kKernelVirtualOffset >> 39) & 0x1FFull;
 constexpr uint64_t kDirectMapPml4Index = (kDirectMapBase >> 39) & 0x1FFull;

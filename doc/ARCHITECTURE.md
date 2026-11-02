@@ -476,10 +476,12 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-832`: `kernel.elf`
-- LBA `833-960`: `initrd.cpio`
+- LBA `65-1088`: `kernel.elf`
+- LBA `1089-1216`: `initrd.cpio`
+- LBA `1280`: real-hardware boot log journal
+- LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](2026-11-02-real-hardware-bootlog.md))
 
-The slot sizes come from `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [../CMakeLists.txt](../CMakeLists.txt). The kernel BIOS slot now matches the reserved low-physical kernel window published through the shared memory-layout contract. The build runs an ELF-aware boot-envelope assertion before writing `os1.raw` and fails if `kernel.elf` no longer fits its disk slot, low-memory staging buffer, or reserved execution window; `initrd.cpio` is still checked against its configured slot. To expand BIOS storage space, increase the corresponding sector-count or reserved-window value in [../CMakeLists.txt](../CMakeLists.txt) and rebuild; the generated BIOS image layout updates automatically while `os1.raw` stays padded to 1 MiB.
+The slot sizes come from `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [../CMakeLists.txt](../CMakeLists.txt). The kernel BIOS slot now matches the reserved low-physical kernel window published through the shared memory-layout contract. The build runs an ELF-aware boot-envelope assertion before writing `os1.raw` and fails if `kernel.elf` no longer fits its disk slot, low-memory staging buffer, or reserved execution window; `initrd.cpio` is still checked against its configured slot. To expand BIOS storage space, increase the corresponding sector-count or reserved-window value in [../CMakeLists.txt](../CMakeLists.txt) and rebuild; the generated BIOS image layout updates automatically while `os1.raw` stays padded to 2880 sectors so the boot log area is zeroed in the image.
 
 ## The Shared Kernel Contract: `BootInfo`
 

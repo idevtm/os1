@@ -123,8 +123,10 @@ bool Interrupts::initialize()
     outb(0xA1, 0x02);
     outb(0x21, 0x01);
     outb(0xA1, 0x01);
-    outb(0x21, 0x0);
-    outb(0xA1, 0x0);
+    // Keep every 8259 line masked: external IRQs are routed through the IOAPIC,
+    // and an unmasked PIC can deliver the same lines on its own vectors.
+    outb(0x21, 0xFF);
+    outb(0xA1, 0xFF);
 
     for(uint16_t vector = T_IRQ0; vector <= 0xFFu; ++vector)
     {
