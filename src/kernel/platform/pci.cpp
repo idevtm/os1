@@ -50,13 +50,13 @@ void size_pci_bars(PciDevice& device)
             pci_config_write32(device, offset, 0xFFFFFFFFu);
             const uint32_t sized = pci_config_read32(device, offset);
             pci_config_write32(device, offset, original);
-            const uint32_t mask = sized & ~0x3u;
-            if(0 == mask)
+            const uint64_t bar_size = pci_io_bar_size_from_sizing_mask(sized);
+            if(0 == bar_size)
             {
                 continue;
             }
             bar.base = original & ~0x3u;
-            bar.size = (~static_cast<uint64_t>(mask) + 1u) & 0xFFFFFFFFull;
+            bar.size = bar_size;
             bar.type = PciBarType::Io;
             continue;
         }

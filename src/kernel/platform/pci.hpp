@@ -9,6 +9,22 @@
 
 class VirtualMemory;
 
+// Decode an I/O BAR size from the value read back after writing all ones.
+// Some devices hardwire address bits 31:16 to zero; size those in 16-bit space.
+[[nodiscard]] inline uint64_t pci_io_bar_size_from_sizing_mask(uint32_t sized)
+{
+    uint32_t size_mask = sized & ~0x3u;
+    if(0u == size_mask)
+    {
+        return 0u;
+    }
+    if(0u == (size_mask & 0xFFFF0000u))
+    {
+        size_mask |= 0xFFFF0000u;
+    }
+    return (~static_cast<uint64_t>(size_mask) + 1u) & 0xFFFFFFFFull;
+}
+
 // Decode a memory BAR size from the values read back after writing all ones.
 // A 64-bit BAR whose upper half reads back 0 hardwires its upper address bits
 // (it can only live below 4 GiB); its size comes from the low half alone.

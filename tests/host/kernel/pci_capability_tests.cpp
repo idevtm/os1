@@ -81,3 +81,25 @@ TEST(PciBarSizing, SixtyFourBitBarWithHardwiredUpperHalfUsesLowMaskOnly)
     // treating the zero read-back as a mask produced a size near 2^64.
     EXPECT_EQ(0x2000u, pci_bar_size_from_sizing_mask(0xFFFFE004u, 0u, true));
 }
+
+TEST(PciBarSizing, IoBarWithHardwiredUpperHalfUsesSixteenBitMask)
+{
+    // The G74SX's AHCI and SMBus I/O BARs hardwire address bits 31:16 to zero.
+    EXPECT_EQ(0x8u, pci_io_bar_size_from_sizing_mask(0x0000FFF9u));
+    EXPECT_EQ(0x4u, pci_io_bar_size_from_sizing_mask(0x0000FFFDu));
+    EXPECT_EQ(0x20u, pci_io_bar_size_from_sizing_mask(0x0000FFE1u));
+}
+
+TEST(PciBarSizing, IoBarPreservesFullWidthMasks)
+{
+    EXPECT_EQ(0x8u, pci_io_bar_size_from_sizing_mask(0xFFFFFFF9u));
+    EXPECT_EQ(0x80u, pci_io_bar_size_from_sizing_mask(0xFFFFFF81u));
+    EXPECT_EQ(0x100u, pci_io_bar_size_from_sizing_mask(0xFFFFFF01u));
+    EXPECT_EQ(0x10000u, pci_io_bar_size_from_sizing_mask(0xFFFF0001u));
+}
+
+TEST(PciBarSizing, IoBarWithoutAddressBitsHasNoSize)
+{
+    EXPECT_EQ(0u, pci_io_bar_size_from_sizing_mask(0u));
+    EXPECT_EQ(0u, pci_io_bar_size_from_sizing_mask(1u));
+}
