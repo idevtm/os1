@@ -19,6 +19,7 @@ endif()
 project(os1 LANGUAGES C CXX)
 
 option(OS1_KMEM_DEBUG "Enable kernel small-object allocator debug instrumentation" ON)
+option(OS1_QEMU_DEBUGCON "Mirror kernel output to QEMU port 0xE9 for no-UART tests" OFF)
 
 if(NOT CMAKE_C_COMPILER MATCHES "(^|/)x86_64-elf-gcc$")
   message(FATAL_ERROR "os1 requires the x86_64-elf cross toolchain. Configure with -DCMAKE_TOOLCHAIN_FILE=${OS1_TOOLCHAIN_FILE} or use the provided CMake preset.")
@@ -1489,6 +1490,45 @@ os1_register_menu_target(
   "Run the BIOS exec smoke."
 )
 
+if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE AND OS1_QEMU_DEBUGCON)
+  # COM1 is absent; output uses debugcon and input uses the actual PS/2 path.
+  set(OS1_NO_UART_INPUT_EVENTS
+    "shell prompt ready::sendkey e 1\\nsendkey c 1\\nsendkey h 1\\nsendkey o 1\\nsendkey spc 1\\nsendkey n 1\\nsendkey o 1\\nsendkey minus 1\\nsendkey u 1\\nsendkey a 1\\nsendkey r 1\\nsendkey t 1\\nsendkey ret 1"
+  )
+  add_test(
+    NAME os1_smoke_no_uart
+    COMMAND "${CMAKE_COMMAND}"
+      "-DQEMU_EXECUTABLE=${OS1_QEMU_EXECUTABLE}"
+      "-DISO_IMAGE=${OS1_ISO_IMAGE}"
+      "-DOVMF_CODE=${OS1_OVMF_CODE}"
+      "-DOVMF_VARS_TEMPLATE=${OS1_OVMF_VARS_TEMPLATE}"
+      "-DLOG_FILE=${OS1_ARTIFACT_DIR}/smoke-no-uart.log"
+      "-DSMOKE_TIMEOUT_SECONDS=${OS1_UEFI_SMOKE_TIMEOUT_SECONDS}"
+      "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
+      "-DEXPECTED_MARKERS=shell prompt ready;echo: no-uart"
+      "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
+      "-DMONITOR_SOCKET=${OS1_ARTIFACT_DIR}/smoke-no-uart.sock"
+      "-DMONITOR_SEND_EVENTS=${OS1_NO_UART_INPUT_EVENTS}"
+      "-DNO_UART=ON"
+      "-DVIRTIO_TEST_DISK=${OS1_VIRTIO_TEST_DISK}"
+      "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"
+      "-DSMOKE_RUNNER=${OS1_SMOKE_RUNNER}"
+      -P "${PROJECT_SOURCE_DIR}/cmake/scripts/run_smoke_test.cmake"
+  )
+  list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_no_uart)
+  add_custom_target(smoke_no_uart
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke_no_uart$"
+    DEPENDS os1_image "${OS1_VIRTIO_TEST_DISK}"
+    USES_TERMINAL VERBATIM
+  )
+else()
+  os1_add_unavailable_target(smoke_no_uart "smoke_no_uart requires OS1_QEMU_DEBUGCON=ON, BUILD_TESTING, QEMU and OVMF")
+endif()
+os1_register_menu_target(smoke_no_uart
+  "UEFI boot and PS/2 input without a UART"
+  "Remove COM1 and verify a shell command through debugcon and PS/2."
+)
+
 if(OS1_QEMU_SMOKE_TESTS)
   set_tests_properties(
     ${OS1_QEMU_SMOKE_TESTS}
@@ -1501,7 +1541,7 @@ endif()
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(
     smoke_all
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke(_observe|_balance|_spawn|_exec|_xhci)?(_bios)?$"
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke(_observe|_balance|_spawn|_exec|_xhci|_no_uart)?(_bios)?$"
     DEPENDS os1_image os1_bios_image "${OS1_VIRTIO_TEST_DISK}"
     USES_TERMINAL
     VERBATIM

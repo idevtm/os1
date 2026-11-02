@@ -234,6 +234,9 @@ target_compile_options(
 if(OS1_KMEM_DEBUG)
   target_compile_definitions(kernel_core_objects PRIVATE OS1_KMEM_DEBUG=1)
 endif()
+if(OS1_QEMU_DEBUGCON)
+  target_compile_definitions(kernel_core_objects PRIVATE OS1_QEMU_DEBUGCON=1)
+endif()
 
 add_library(kernel_limine_frontend OBJECT ${KERNEL_LIMINE_SOURCES})
 target_include_directories(kernel_limine_frontend PRIVATE

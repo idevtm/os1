@@ -74,7 +74,7 @@ jobs:
       # Firmware discovery itself lives in CMakeLists.txt (single source of
       # truth); this workflow must never re-implement the candidate list.
       - name: Configure
-        run: cmake --preset default -DOS1_REQUIRE_UEFI_SMOKE=ON -DOS1_KMEM_DEBUG=ON
+        run: cmake --preset default -DOS1_REQUIRE_UEFI_SMOKE=ON -DOS1_KMEM_DEBUG=ON -DOS1_QEMU_DEBUGCON=ON
 
       - name: Build
         run: |

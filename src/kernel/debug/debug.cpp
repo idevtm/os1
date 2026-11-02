@@ -180,6 +180,10 @@ void Debug::write(const char c)
 
 void Debug::write_unmirrored(const char c)
 {
+#if defined(OS1_QEMU_DEBUGCON) && OS1_QEMU_DEBUGCON
+    // Test-only observation channel: the no-UART smoke removes COM1 entirely.
+    outb(0xE9, static_cast<uint8_t>(c));
+#endif
     bootlog_write(c);
     write_vga(c);
     if(!wait_until_ready())
