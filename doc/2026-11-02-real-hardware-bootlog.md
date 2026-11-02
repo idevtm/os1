@@ -4,27 +4,52 @@ Status: the user reports round 8 works on the physical ASUS G74SX (Sandy
 Bridge, HM65 PCH, UEFI-only firmware without CSM). Its image preserves the
 round-6 boot/filesystem layout and replaces only kernel file contents. The
 freshly repacked round-7 image was not offered by that laptop's firmware.
-The dedicated G74SX workflow below preserves the working layout; generic
+The kernel-update operation below preserves the working layout; fresh
 images are not G74SX-qualified. Permanent UART and platform fixes remain
 active in every build.
 
-## G74SX image profile
+## Kernel-only USB image update
 
 Use the pinned round-6 40 MiB capture, SHA-256
 `5a0643210bf7fdb2f5a95c741329dfd9d88f5c589e3473df1e124d28d17298ae`, as the
 explicit base:
 
 ```sh
-cmake --preset g74sx -DOS1_G74SX_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
-cmake --build --preset g74sx
+cmake --preset usb-kernel-update -DOS1_USB_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
+cmake --build --preset usb-kernel-update
 ```
 
-The output is `build/g74sx/artifacts/os1-usb.img`. The preset selects
-`OS1_USB_PROFILE=g74sx`, `OS1_QEMU_DEBUGCON=OFF`, and
-`OS1_BOOT_DIAGNOSTICS=OFF`. A missing or incorrect base fails; the profile
-never falls back to a fresh FAT16/hybrid build.
+The optional preset selects the `os1_usb_kernel_update` target with
+`OS1_QEMU_DEBUGCON=OFF` and `OS1_BOOT_DIAGNOSTICS=OFF`. The output is
+`build/usb-kernel-update/artifacts/os1-usb-kernel-update.img`.
+The target also works without a preset:
 
-`cmake/scripts/update_g74sx_image.py` replaces only the original
+```sh
+cmake -S . -B build/usb-kernel-update -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/x86_64-elf.cmake \
+  -DOS1_USB_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img \
+  -DOS1_QEMU_DEBUGCON=OFF -DOS1_BOOT_DIAGNOSTICS=OFF
+cmake --build build/usb-kernel-update --target os1_usb_kernel_update
+```
+
+A missing base or incompatible build option makes this target fail without
+preventing other targets from building. An incorrect base is rejected by its
+size and SHA-256. There is no fresh-image fallback. The separate
+`os1_usb_image` target always builds `os1-usb.img` from current sources;
+`os1_usb_kernel_update` is explicit and is not part of the default build.
+
+The former `g74sx` preset and `OS1_USB_PROFILE` were removed. For an existing
+build directory, clear the obsolete cache variables when reconfiguring:
+
+```sh
+cmake -S . -B <build-dir> -UOS1_USB_PROFILE -UOS1_G74SX_BASE_IMAGE \
+  -DOS1_USB_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
+```
+
+Then explicitly build `os1_usb_kernel_update` and use its new output filename.
+Old profile caches fail configuration rather than silently changing recipes.
+
+`cmake/scripts/update_usb_kernel.py` replaces only the original
 `kernel.elf` file contents with the stripped new kernel padded to 650,952
 bytes. The FATs, directories, file locations, final-cluster slack, pre-loader,
 Limine, shim, menu, initrd, and entire BIOS area remain unchanged. If the
@@ -37,7 +62,7 @@ Choose the preserved menu's original `os1` entry. It has neither
 diagnostic mirroring/scancodes, and watchdog off regardless of the build's
 diagnostic setting. The preserved EFI pre-loader still runs, reserves its
 RAM window, and updates its journal before displaying the menu; that is not
-evidence of new kernel-log capture. This profile does not install newly built
+evidence of new kernel-log capture. This target does not install newly built
 EFI binaries, shim, initrd, menus or BIOS code.
 
 Round 7 increased the unstripped kernel size by one FAT cluster, and the fresh
@@ -51,9 +76,9 @@ no ten-minute duration or detailed round-8 shell-command results were supplied.
 
 ## Selecting generic capture and diagnostics
 
-`OS1_USB_PROFILE=generic` is the default profile and creates a fresh hybrid
-filesystem. The following options apply to this generic path, not the pinned
-G74SX image. `OS1_BOOT_DIAGNOSTICS` defaults to `OFF`; ordinary generic images
+`os1_usb_image` creates a fresh hybrid filesystem. The following options
+apply to that packaging path; the kernel-update target retains the base image's
+boot components. `OS1_BOOT_DIAGNOSTICS` defaults to `OFF`; ordinary generic images
 boot Limine directly without persistent capture or diagnostic watchdog. A separate build with
 `-DOS1_BOOT_DIAGNOSTICS=ON` enables the BIOS capture loader and packages the EFI
 pre-loader plus the diagnostic USB menu. The UEFI ISO remains an ordinary boot
@@ -155,7 +180,7 @@ pre-loader never paused. The windows now sit off those boundaries.
   on a broken kernel stack reaches the handler instead of triple-faulting.
 - The normal generic stick uses `src/boot/limine/limine-usb.conf`; generic diagnostic builds
   use `src/boot/limine/limine-usb-diagnostic.conf` (10 s timeout, ordinary
-  `os1` default). The G74SX profile preserves the template's original config
+  `os1` default). The kernel-update target preserves the template's original config
   bytes instead. The kernel logs its command line.
 - The xHCI probe logs each step, enables memory decoding before touching
   registers, and skips controllers whose registers read all ones or whose BAR is
@@ -164,7 +189,7 @@ pre-loader never paused. The windows now sit off those boundaries.
 
 ## Generic diagnostic BIOS flow
 
-The G74SX profile retains its old BIOS area byte-for-byte and is qualified for
+The kernel-update target retains its old BIOS area byte-for-byte and is qualified for
 the laptop's UEFI path only; it does not install a new BIOS kernel or loader.
 The following describes the separately built generic diagnostic BIOS image.
 
@@ -220,7 +245,7 @@ failed, 4 RAM window not usable.
 
 ## Operator procedure
 
-For the G74SX, build with the dedicated preset above and select the original
+For the G74SX, build with the kernel-update target above and select the original
 `os1` menu entry. Do not flash the failed round-7 candidate or substitute a
 fresh generic image. Preserve the current stick, identify the target device,
 verify the candidate checksum, and verify the written bytes before booting.
@@ -229,7 +254,7 @@ For a separately qualified generic diagnostic target, write its image
 (macOS, replace `diskN`; this overwrites the stick's boot area):
 
 ```sh
-cmake --preset default -DOS1_USB_PROFILE=generic -DOS1_BOOT_DIAGNOSTICS=ON -DOS1_QEMU_DEBUGCON=OFF
+cmake --preset default -DOS1_BOOT_DIAGNOSTICS=ON -DOS1_QEMU_DEBUGCON=OFF
 cmake --build build --target os1_usb_image
 diskutil unmountDisk /dev/diskN
 sudo dd if=build/artifacts/os1-usb.img of=/dev/rdiskN bs=1m
@@ -270,7 +295,7 @@ sudo python3 -I tools/bootlog_extract.py /dev/rdiskN --all --out-dir bootlogs/
   requires a completion-safe flush policy and hardware validation.
 - A successful generic QEMU boot does not qualify a fresh image for the G74SX:
   round 7 passed QEMU checks but was absent from the laptop's firmware menu.
-- The G74SX profile deliberately keeps the original boot chain and userspace.
+- The kernel-update target deliberately keeps the original boot chain and userspace.
   It supports kernel-only updates within the original file size; bootloader,
   shim, initrd, menu, BIOS, and filesystem changes need separate qualification.
 - Diagnostic BIOS builds on q35 also arm the TCO watchdog and reset ~3 minutes

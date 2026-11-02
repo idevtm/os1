@@ -19,13 +19,12 @@
       }
     },
     {
-      "name": "g74sx",
-      "displayName": "ASUS G74SX preserved USB layout",
-      "description": "Update only the kernel in the verified round-6 image; requires OS1_G74SX_BASE_IMAGE.",
+      "name": "usb-kernel-update",
+      "displayName": "Kernel-only USB image update",
+      "description": "Update only the kernel in the verified round-6 image; requires OS1_USB_BASE_IMAGE.",
       "inherits": "default",
-      "binaryDir": "${sourceDir}/build/g74sx",
+      "binaryDir": "${sourceDir}/build/usb-kernel-update",
       "cacheVariables": {
-        "OS1_USB_PROFILE": "g74sx",
         "OS1_BOOT_DIAGNOSTICS": false,
         "OS1_QEMU_DEBUGCON": false
       }
@@ -81,11 +80,11 @@
       ]
     },
     {
-      "name": "g74sx",
-      "displayName": "Build G74SX kernel-only USB update",
-      "configurePreset": "g74sx",
+      "name": "usb-kernel-update",
+      "displayName": "Build kernel-only USB image update",
+      "configurePreset": "usb-kernel-update",
       "targets": [
-        "os1_usb_image"
+        "os1_usb_kernel_update"
       ]
     }
   ]

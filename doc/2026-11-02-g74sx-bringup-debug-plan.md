@@ -3,9 +3,9 @@
 Status: **the user reports round 8 works on the physical ASUS G74SX**.
 Round 7's freshly rebuilt filesystem was not offered by the firmware;
 restoring the exact round-6 stick recovered boot. Round 8 changed only the
-kernel file contents in that known-working image. Use the constrained `g74sx`
-USB profile below for this laptop. The exact round-7 failure mechanism remains
-unproven; do not reuse its repacking path for the G74SX. The round-8 report
+kernel file contents in that known-working image. Use the constrained
+`os1_usb_kernel_update` target below for this laptop. The exact round-7 failure
+mechanism remains unproven; do not reuse its repacking path for the G74SX. The round-8 report
 does not establish a ten-minute run or specific shell-command results.
 PR branch `codex/g74sx-bringup`; original investigation history is retained on
 `g74sx-bootlog`. Owner: whoever picks up the
@@ -50,19 +50,20 @@ round must be designed to return as much information as possible.
 
 ## Round-trip workflow (human in the loop)
 
-1. Build from the verified, pinned round-6 capture using the dedicated profile:
+1. Build from the verified, pinned round-6 capture using the optional kernel-update preset:
 
    ```sh
-   cmake --preset g74sx -DOS1_G74SX_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
-   cmake --build --preset g74sx
+   cmake --preset usb-kernel-update -DOS1_USB_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
+   cmake --build --preset usb-kernel-update
    ```
 
-   Output: `build/g74sx/artifacts/os1-usb.img`. The expected base is the
+   Output: `build/usb-kernel-update/artifacts/os1-usb-kernel-update.img`. The expected base is the
    40 MiB capture with SHA-256
    `5a0643210bf7fdb2f5a95c741329dfd9d88f5c589e3473df1e124d28d17298ae`.
-   `OS1_USB_PROFILE=g74sx` requires `OS1_G74SX_BASE_IMAGE`; a missing or wrong
-   base fails instead of falling back to a fresh filesystem.
-2. The profile replaces only `kernel.elf` contents with the stripped new
+   `os1_usb_kernel_update` requires `OS1_USB_BASE_IMAGE`; a missing or wrong
+   base fails instead of falling back to a fresh filesystem. The preset is a
+   shortcut for `cmake --build build/usb-kernel-update --target os1_usb_kernel_update`.
+2. The target replaces only `kernel.elf` contents with the stripped new
    kernel, padded to the original 650,952-byte file size. All filesystem
    metadata, cluster locations/slack, EFI binaries, shim, menu, initrd and
    BIOS area stay unchanged. A kernel exceeding this capacity, or a change
@@ -70,7 +71,7 @@ round must be designed to return as much information as possible.
    qualification; do not resize or reformat implicitly.
 3. Preserve the current stick before writing, re-identify the Kingston
    DataTraveler 3.0, and verify the candidate and written bytes. Disk numbers
-   can change. Use the current profile output, not an old round-7 or
+   can change. Use the current kernel-update output, not an old round-7 or
    scratchpad write script. The user boots the UEFI USB entry and selects the
    original `os1` menu entry. The new kernel's capture and watchdog remain off
    because the preserved menu has no `os1.bootlog` or `os1.bootdiag` option.
@@ -81,7 +82,7 @@ round must be designed to return as much information as possible.
    Detach afterwards. The retained pre-loader may update its journal, but the
    current G74SX menu does not enable new kernel-log capture.
 
-The default `OS1_USB_PROFILE=generic` builds a new hybrid filesystem. Its
+The separate `os1_usb_image` target builds a new hybrid filesystem. Its
 ordinary and diagnostic variants are not G74SX-qualified. The failed round-7
 fresh-repack path is excluded from the G74SX workflow.
 
@@ -97,7 +98,7 @@ Writing the stick requires administrator access and the human's go-ahead.
   the kernel appends to it; fatal paths show a `FATAL` banner and wait for a
   key. Full diagnostics also arm the TCO watchdog. This describes the capture
   mechanism used in earlier rounds and generic diagnostics; the current
-  G74SX profile preserves the old menu and leaves kernel capture disabled.
+  kernel-update target preserves the old menu and leaves kernel capture disabled.
 - Journal line fields: `wN=<first qword of window N>[5a:<fill dwords>@<first
   offset>]`, `(boot#… bytes=… flags:…)` for a found log, `saved`/`SAVE-FAILED`,
   `armed=<window>`. Flags: kernel-attached, user-init-started, fatal-stop,
@@ -151,7 +152,7 @@ Writing the stick requires administrator access and the human's go-ahead.
 - **Excluded G74SX path:** do not freshly repack the FAT16/hybrid image with
   the growing unstripped kernel as round 7 did. Keep round 7 under
   `local-evidence/g74sx/round7-candidate/` as failed evidence, not as an image
-  to flash again for routine use. The `g74sx` profile implements round 8's
+  to flash again for routine use. The `os1_usb_kernel_update` target implements round 8's
   one-file-content replacement and refuses to silently fall back to repacking.
 
 ## Round-4 findings
@@ -240,12 +241,13 @@ Writing the stick requires administrator access and the human's go-ahead.
   and types `echo no-uart` through PS/2. CI enables `OS1_QEMU_DEBUGCON=ON`;
   ordinary hardware builds keep it off.
 - `OS1_BOOT_DIAGNOSTICS=OFF` is the normal build default. Diagnostic builds
-  of the generic profile opt into the EFI pre-loader and BIOS capture. Their USB menu has ordinary,
+  for fresh images opt into the EFI pre-loader and BIOS capture. Their USB menu has ordinary,
   capture-only (`os1.bootlog`), and full diagnostic (`os1.bootdiag`) entries.
   Only full diagnostics enable noisy mirroring/scancodes and the TCO watchdog.
   See the companion capture document for the full mode contract.
-- The `g74sx` preset selects `OS1_USB_PROFILE=g74sx`, turns QEMU debugcon and
-  boot diagnostics off, and requires the verified round-6 base image. It
+- The optional `usb-kernel-update` preset selects `os1_usb_kernel_update`,
+  turns QEMU debugcon and boot diagnostics off, and requires the verified
+  round-6 base image via `OS1_USB_BASE_IMAGE`. The target
   preserves the original pre-loader and menu rather than installing generic
   diagnostic components. That menu leaves kernel capture and watchdog off
   regardless of the build's diagnostic setting.
@@ -264,21 +266,21 @@ flag. Evidence is in `local-evidence/g74sx/followup-validation/` and
 The screen-mirror gate was checked in source, and watchdog programming by log
 markers; these checks do not prove a ten-minute physical run or watchdog expiry.
 
-PR verification adds 13 image-updater contract cases and confirms the `g74sx`
-preset reproduces the exact successful round-8 image from the same kernel
-inputs. Missing templates and incompatible profile options fail without an
+Initial PR verification added 13 image-updater contract cases and confirmed
+the former `g74sx` preset reproduced the exact successful round-8 image from the same kernel
+inputs. Missing templates and incompatible build options fail without an
 image. The final code passes all 158 host tests and all 12 QEMU smokes
 (including no-UART). A review fix also stops the early log replay buffer before
 IRQ/AP startup in every mode; its updated kernel passes eight-CPU capture-only
-and G74SX-profile QEMU checks. That final buffer fix postdates the user's
+and kernel-update QEMU checks. That final buffer fix postdates the user's
 physical round-8 report, so no additional physical result is claimed.
 
 ## Next steps
 
-1. Use the dedicated `g74sx` profile for subsequent kernel updates and keep
+1. Use the dedicated `os1_usb_kernel_update` target for subsequent kernel updates and keep
    the round-6 base immutable. Record each candidate's source and checksum.
    Do not install a new shim, EFI loader, menu, initrd or BIOS payload through
-   this profile; qualify such changes separately on the laptop.
+   this target; qualify such changes separately on the laptop.
 2. If sustained-operation evidence is needed, use the original `os1` entry
    and record a ten-minute responsive session plus `sys`, `cpu`, `pci`,
    `devices`, `irqs`, `resources`, `kmem`, `smpcheck`, and `balancecheck`
@@ -289,7 +291,7 @@ physical round-8 report, so no additional physical result is claimed.
 3. Prepare the reviewed PR for `main`: permanent fixes (UART detection, IST
    stacks, BAR sizing, xHCI decode enable, PIC masking, non-fatal probes,
    ACPICA timing, `rdtsc`), the no-UART regression, opt-in generic diagnostics,
-   and the constrained G74SX image profile. Include the failed round-7 path,
+   and the constrained kernel-update target. Include the failed round-7 path,
    successful round-8 report, and limits of the physical evidence in review.
 
 ## Plan used during rounds 1–6
@@ -333,3 +335,36 @@ physical round-8 report, so no additional physical result is claimed.
 - Complete sustained physical validation and the staged merge review above.
 - xHCI BIOS→OS ownership handoff (USBLEGSUP) is still not implemented.
 - x2APIC mode is not detected; LAPIC is assumed to be in xAPIC MMIO mode.
+
+## Model-neutral packaging operation (2026-11-03)
+
+The public operation is now `os1_usb_kernel_update`, taking
+`OS1_USB_BASE_IMAGE` and producing `os1-usb-kernel-update.img`. The optional
+`usb-kernel-update` preset selects that target. It is independent of fresh
+`os1_usb_image` creation and is not included in the default build. The updater
+and contract test are named `update_usb_kernel.py` and
+`test_update_usb_kernel.py`. The same pinned base, slot capacity and ELF checks
+remain; this does not add support for arbitrary templates or qualify new
+machines. See the capture document for old-cache migration instructions.
+
+This names the operation rather than assuming a model-specific defect. UEFI
+specifies file-path discovery and permits FAT16 removable media; it does not
+require preserving EFI file locations. Round 8 established a workaround, not
+that the one-cluster relocation caused round 7's failure. Other payloads also
+changed. OVMF boots both variants, and this exact failure has not been shown on
+another firmware implementation. Keep the machine model in the evidence record.
+
+References: [UEFI media formats](https://uefi.org/specs/UEFI/2.10/13_Protocols_Media_Access.html),
+[UEFI boot-file convention](https://uefi.org/sites/default/files/resources/UEFI_Spec_Final_2.11.pdf).
+To isolate the cause, vary EFI allocation and other changed payloads separately,
+then compare the same images across physical and virtual firmware. Do not
+replace the working update path with a newly generated layout before validation.
+
+Validation of the target refactor: all 13 updater contract cases pass through
+CTest. The preset and explicit target produce SHA-256
+`3be357ed8b1af9cec461d64b701f2fe17b3f5a007f897fc83f56a99466f847a7`, identical
+to the previously validated final profile image, with every byte outside the
+kernel file unchanged. Missing-base and incompatible-option targets fail;
+obsolete cache settings fail configuration with migration instructions. The
+fresh-image target still builds independently, and the default build excludes
+the kernel-update target. No new physical boot is claimed.

@@ -7,8 +7,8 @@ import tempfile
 import unittest
 
 
-SCRIPT = Path(__file__).resolve().parents[2] / "cmake/scripts/update_g74sx_image.py"
-SPEC = importlib.util.spec_from_file_location("update_g74sx_image", SCRIPT)
+SCRIPT = Path(__file__).resolve().parents[2] / "cmake/scripts/update_usb_kernel.py"
+SPEC = importlib.util.spec_from_file_location("update_usb_kernel", SCRIPT)
 updater = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(updater)
 

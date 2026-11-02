@@ -267,19 +267,27 @@ The helper wrapper scripts remain available as thin CMake frontends:
 
 ## Real-Hardware Boot Logs
 
-`build/artifacts/os1-usb.img` boots on legacy BIOS and UEFI-only machines.
+`build/artifacts/os1-usb.img` is a fresh image targeting legacy BIOS and UEFI.
 Normal builds do not capture logs or arm a diagnostic watchdog. To build a
-USB image for the **ASUS G74SX**, use the profile that preserves the verified
-round-6 layout. The fresh FAT rebuild used in round 7 was not offered by this
-laptop's firmware; round 8's kernel-only update booted successfully.
+USB image while preserving a verified base, use `os1_usb_kernel_update`.
+This operation was tested on the **ASUS G74SX** using the round-6 layout. The
+fresh FAT rebuild used in round 7 was not offered by this laptop's firmware;
+round 8's kernel-only update booted successfully.
 
 ```sh
-cmake --preset g74sx \
-  -DOS1_G74SX_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
-cmake --build --preset g74sx
+cmake --preset usb-kernel-update \
+  -DOS1_USB_BASE_IMAGE=/absolute/path/to/verified-round6-stick.img
+cmake --build --preset usb-kernel-update
 ```
 
-The result is `build/g74sx/artifacts/os1-usb.img`. The updater verifies the
+The preset is an optional shortcut for the explicit target:
+
+```sh
+cmake --build build/usb-kernel-update --target os1_usb_kernel_update
+```
+
+The result is `build/usb-kernel-update/artifacts/os1-usb-kernel-update.img`,
+separate from the fresh `os1_usb_image` output. The updater verifies the
 template's SHA-256 and replaces only the kernel file contents, using a stripped
 ELF padded to its existing size. It preserves the original menu, initrd, EFI
 loaders, BIOS payload, filesystem metadata and file locations. Choose the
@@ -289,13 +297,13 @@ without falling back to a fresh image. The local template is intentionally not
 committed. Its hash and qualification history are in the
 [G74SX handoff](doc/2026-11-02-g74sx-bringup-debug-plan.md).
 
-For other targets, a generic diagnostic USB image can include the EFI log
+Fresh-image creation can include the EFI log
 pre-loader and diagnostic menu. This rebuild is **not G74SX-qualified**:
 
 ```sh
 cmake -S . -B build/usb-diagnostics -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/x86_64-elf.cmake \
-  -DOS1_USB_PROFILE=generic -DOS1_BOOT_DIAGNOSTICS=ON -DOS1_QEMU_DEBUGCON=OFF
+  -DOS1_BOOT_DIAGNOSTICS=ON -DOS1_QEMU_DEBUGCON=OFF
 cmake --build build/usb-diagnostics --target os1_usb_image
 ```
 

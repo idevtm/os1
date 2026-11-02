@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Update only kernel.elf bytes in the ASUS G74SX's verified round-6 capture.
+"""Update only kernel.elf bytes in a pinned, verified USB base image.
 
-Round 8 booted this exact layout with the stripped replacement zero-padded to
+The ASUS G74SX round-8 test booted this base with the replacement zero-padded to
 the original file length. Keep all FAT metadata, other files, and cluster slack
 unchanged; this is deliberately not a general image builder.
 """
@@ -125,7 +125,7 @@ def main():
     try:
         report = update_image(args.base_image, args.kernel, args.stripped_kernel, args.output)
     except (OSError, ValueError) as error:
-        parser.exit(1, f"update_g74sx_image: error: {error}\n")
+        parser.exit(1, f"update_usb_kernel: error: {error}\n")
     print(json.dumps(report, indent=2))
 
 
