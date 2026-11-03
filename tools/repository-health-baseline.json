@@ -1,0 +1,45 @@
+{
+  "architecture_exceptions": 1,
+  "footprint": {
+    "acpica_archive": {
+      "bss": 1663,
+      "data": 1571,
+      "file_size": 512534,
+      "path": "build/src/kernel/libos1_acpica.a",
+      "text": 137940,
+      "total": 141174
+    },
+    "kernel_elf": {
+      "bss": 102400,
+      "data": 40960,
+      "file_size": 619712,
+      "path": "build/artifacts/kernel.elf",
+      "text": 360448,
+      "total": 503808
+    }
+  },
+  "large_file_line_threshold": 500,
+  "large_files": {
+    "src/boot/bios/kernel16.asm": 675,
+    "src/kernel/core/kernel_main.cpp": 675,
+    "src/kernel/drivers/block/virtio_blk.cpp": 756,
+    "src/kernel/drivers/net/virtio_net.cpp": 592,
+    "src/kernel/drivers/usb/xhci.cpp": 1485,
+    "src/kernel/drivers/usb/xhci_controller.cpp": 526,
+    "src/kernel/mm/kmem.cpp": 1725,
+    "src/kernel/platform/acpica_integration.cpp": 1875,
+    "src/kernel/platform/acpica_osl.cpp": 577,
+    "src/kernel/proc/thread.cpp": 772,
+    "src/kernel/syscall/observe.cpp": 1029,
+    "src/user/programs/sh.cpp": 1104,
+    "tests/host/kernel/acpi_aml_tests.cpp": 941,
+    "tests/host/kernel/acpi_hpet_tests.cpp": 558
+  },
+  "legacy_unowned_todos": 4,
+  "schema_version": 1,
+  "test_inventory": {
+    "host": 158,
+    "qemu": 12
+  },
+  "unreferenced_translation_units": []
+}

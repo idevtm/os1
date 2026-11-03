@@ -209,6 +209,31 @@ markers for both boot paths. CI drives the shell through serial input rather
 than relying on display-only interaction, so local smoke transcripts closely
 match the automated coverage.
 
+## Repository Verification
+
+Run the non-mutating fast contract before handing off ordinary code or tooling
+changes:
+
+```sh
+tools/verify.sh fast
+```
+
+This validates the repository tooling, C/C++ formatting ratchet, documentation
+index/live contracts, source-boundary rules, dependency pins/artifacts,
+repository hygiene, and host unit tests.
+
+Run the full contract for boot, memory-management, interrupt, SMP, syscall/UAPI,
+driver, security, or cross-build changes:
+
+```sh
+tools/verify.sh full
+```
+
+The full mode adds the freestanding cross build and all registered UEFI and BIOS
+QEMU smokes. Override `OS1_BUILD_DIR` or `OS1_HOST_BUILD_DIR` to isolate outputs
+when multiple worktrees or agents validate concurrently. The default output
+directories are ignored; keep overrides outside tracked source and documentation.
+
 ## Local CI With `act`
 
 The main CI job is still:
@@ -328,9 +353,16 @@ When enabled, `smoke_all` and `ctest` include the no-UART regression.
 
 ## Documentation
 
+- [Documentation Map](doc/README.md) — complete index separating live contracts, plans, reviews, drafts, and historical context
+- [Agent Map](AGENTS.md) — concise repository operating contract and verification entry points
 - [Goals](GOALS.md) — project direction and design principles
 - [References](doc/REFERENCES.md) — central index of external standards, vendor manuals, protocol RFCs, and public specifications used by the project
 - [Architecture](doc/ARCHITECTURE.md) — current-state source of truth for boot, memory, console, process, and test architecture; includes a system diagram and end-to-end workflow
+- [Quality](doc/QUALITY.md) — subsystem coverage linked to host/QEMU evidence, artifact interpretation, and explicit gaps
+- [Technical Debt](doc/TECH_DEBT.md) — live owners, prerequisites, and next actions for repeated architectural findings
+- [Dependencies](doc/DEPENDENCIES.md) — exact ACPICA, Limine, and GoogleTest pins plus upgrade and validation procedures
+- [Staged Agent Autonomy](doc/AUTONOMY.md) — evidence requirements, human-review boundaries, and the completed Level 2 pilot
+- [Smoke Failure Triage](doc/playbooks/smoke-failure-triage.md) — structured QEMU failure classification and ownership workflow
 - [OS API Drafts](doc/os-api-draft/README.md) — design exploration for the descriptor/object model, VFS shape, and user ABI growth; not the live kernel contract
 - [Latest Review](doc/latest-review.md) — current code-grounded project review (recommended entry point for readers)
 - [Driver, Device, And Platform Implementation Plan 2026-04-29](doc/2026-04-29-driver-device-platform-implementation-plan.md) — live plan-and-status document for the driver/device/platform substrate; tracks the 2026-04-30 implementation pass that landed the static PCI driver registry, IRQ vector allocator, MSI-X/MSI/INTx fallback, DMA buffers, shared virtio transport, BlockDevice v2, HPET/LAPIC timer migration, `virtio-net`, xHCI + HID boot keyboard, and the minimal AML interpreter

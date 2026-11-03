@@ -1,0 +1,8 @@
+# Reviewed unowned TODOs at ffe258c.
+# Format: repository path|exact stripped source line
+# New TODO/FIXME entries must use TODO(TD-001):, TODO(#123):, or a concrete
+# TODO(reason: local rationale): form. Remove entries when the legacy line goes.
+src/boot/bios/kernel16.asm|; TODO: detect video modes
+src/kernel/console/terminal.cpp|asm volatile("hlt");  // TODO: multi CPU sync
+src/kernel/mm/page_frame.cpp|// TODO: correct check fit into memory
+src/kernel/mm/page_frame.cpp|// TODO: mark last first free qword to speed up next search

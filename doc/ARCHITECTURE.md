@@ -1,6 +1,6 @@
 # os1 Architecture
 
-> generated-by: GitHub Copilot; updated-by: Codex (GPT-5) - last-reviewed: 2026-05-05 - git-state: working tree
+> generated-by: GitHub Copilot; updated-by: Codex - last-reviewed: 2026-08-19 - git-state: `harness1` working tree
 
 This document is the current-state source of truth for `os1`. It describes what is implemented in the repository today. For build, run, and smoke workflows, see [README](../README.md). For the longer-term direction, see [GOALS](../GOALS.md). For the external specifications, firmware manuals, ABI references, and protocol standards that inform the project, see [REFERENCES](REFERENCES.md). For the shell/operator milestone that produced the current user-facing environment, see [Milestone 5 Design: Interactive Shell And Observability](2026-04-23-milestone-5-interactive-shell-and-observability.md). For a full code-grounded review of the project, see [Latest Review](latest-review.md). The review documents under `doc/` are historical context, not the live system contract.
 
@@ -184,6 +184,39 @@ Current kernel folders:
 | [../src/kernel/linker/](../src/kernel/linker) | Kernel linker scripts and link-layout variants. | `kernel_core.ld`, `kernel_limine.ld` |
 
 The split is intentionally monolithic at link time. These folders express ownership and readability, not a module ABI or loadable-driver boundary.
+
+## Mechanically Enforced Source Boundaries
+
+[`tools/check_architecture.py`](../tools/check_architecture.py) turns the
+highest-confidence ownership rules into a repository check:
+
+- `src/common/` cannot depend on kernel or boot implementation headers;
+- `src/user/` cannot include kernel or boot implementation headers;
+- the shared kernel cannot depend on BIOS- or Limine-specific frontend code;
+- boot frontends may use only `arch`, `handoff`, and `util` from the kernel,
+  plus `src/common/`, frontend-local files, UAPI, and vendored boot interfaces.
+
+The checker scans quoted/angle C and C++ includes plus NASM `%include`
+directives. Reviewed legacy exceptions live in
+[`tools/architecture-baseline.txt`](../tools/architecture-baseline.txt). The
+baseline is a ratchet: a new dependency and a stale exception both fail with a
+corrective message. The one exception imported from `main` at `85ebb10` is the
+UEFI log-recovery preloader's include of `debug/bootlog.hpp`: it consumes the
+shared `BootLogHeader` and `BootLogFlag` wire format, not kernel debug functions.
+Move those definitions into `handoff/` in a dedicated boot-contract change;
+other debug-header dependencies remain forbidden.
+
+These rules deliberately cover only boundaries that are already unambiguous.
+Additional subsystem directions should become blocking only after the current
+include graph and legitimate interfaces are documented here.
+
+Phase C adds two more objective repository boundaries to `tools/verify.sh fast`:
+the exact ACPICA/GoogleTest gitlinks and Limine artifact set are checked against
+`tools/dependency-lock.json`, while tracked build outputs and new unowned task
+markers are rejected by a ratcheted hygiene check. The debt ledger's required
+ownership/evidence fields are enforced by the documentation checker. Advisory
+file-size, source-reference, test-inventory, and footprint deltas remain outside
+the architecture contract until their signal quality is proven.
 
 ## System Diagram
 
@@ -1109,6 +1142,13 @@ The dedicated observe, balance, spawn, exec, and xHCI smokes then exercise the o
 - in-place `exec` replacement without the old shell prompt returning
 - xHCI controller bring-up, root-port enumeration, HID boot keyboard configuration, and USB key reports feeding the same console-input path used by PS/2
 
+Each smoke writes a complete serial `.log` and an atomic `.json` sidecar under
+the selected build's artifact directory. The summary carries the CTest name,
+UEFI/BIOS path, elapsed/timeout values, expected/seen/missing/forbidden markers,
+the exact log path, QEMU version, normalized command arguments, and a stable
+result reason. A `running` result is interruption evidence, never success. See
+[QUALITY.md](QUALITY.md) for the coverage and interpretation contract.
+
 ### CI
 
 GitHub Actions runs on `ubuntu-24.04` and does all of the following on every push and pull request:
@@ -1120,9 +1160,17 @@ GitHub Actions runs on `ubuntu-24.04` and does all of the following on every pus
 - configure the project
 - build the default modern artifact
 - explicitly build the BIOS compatibility artifact
-- run the full eleven-test shell smoke matrix (including the UEFI-only xHCI smoke) through `ctest`
+- run all 12 QEMU smokes (including xHCI and no-UART input) plus the two script contract tests through `ctest`
+- upload serial logs, JSON summaries, and CTest's failure log when verification fails
+- on the weekly schedule or manual dispatch, always generate and upload the advisory Markdown/JSON repository-health report
 
-The same single CI job name is kept for local `act` compatibility.
+CI invokes [`tools/verify.sh full`](../tools/verify.sh), so local and CI checks
+select the same invariants and tests. The same single job name is kept for local
+`act` compatibility; artifact upload is skipped under `act`.
+
+The scheduled report reuses this job and full verifier. Its findings do not fail
+the job or create external issues/PRs; a true verification failure remains red,
+and report generation still runs so the failure is represented in the artifact.
 
 ## Current Constraints And Next Step
 

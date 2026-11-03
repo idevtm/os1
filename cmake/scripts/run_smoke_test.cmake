@@ -6,6 +6,19 @@ if(NOT DEFINED LOG_FILE)
   message(FATAL_ERROR "LOG_FILE must be set")
 endif()
 
+if(NOT DEFINED SMOKE_TEST_NAME)
+  message(FATAL_ERROR "SMOKE_TEST_NAME must be set")
+endif()
+
+if(NOT DEFINED SMOKE_BOOT_PATH OR NOT SMOKE_BOOT_PATH MATCHES "^(uefi|bios)$")
+  message(FATAL_ERROR "SMOKE_BOOT_PATH must be 'uefi' or 'bios'")
+endif()
+
+get_filename_component(log_dir "${LOG_FILE}" DIRECTORY)
+get_filename_component(log_name "${LOG_FILE}" NAME_WE)
+file(MAKE_DIRECTORY "${log_dir}")
+set(SUMMARY_FILE "${log_dir}/${log_name}.json")
+
 if(NOT DEFINED SMOKE_TIMEOUT_SECONDS)
   set(SMOKE_TIMEOUT_SECONDS 8)
 endif()
@@ -74,9 +87,6 @@ if(DEFINED ISO_IMAGE)
     message(FATAL_ERROR "OVMF_VARS_TEMPLATE must be set for ISO-based smoke tests")
   endif()
 
-  get_filename_component(log_dir "${LOG_FILE}" DIRECTORY)
-  get_filename_component(log_name "${LOG_FILE}" NAME_WE)
-  file(MAKE_DIRECTORY "${log_dir}")
   set(ovmf_vars_copy "${log_dir}/${log_name}-ovmf-vars.fd")
   file(COPY_FILE "${OVMF_VARS_TEMPLATE}" "${ovmf_vars_copy}" ONLY_IF_DIFFERENT)
 
@@ -128,6 +138,12 @@ set(runner_command
   "${SMOKE_RUNNER}"
   --log
   "${LOG_FILE}"
+  --summary
+  "${SUMMARY_FILE}"
+  --test-name
+  "${SMOKE_TEST_NAME}"
+  --boot-path
+  "${SMOKE_BOOT_PATH}"
   --timeout
   "${SMOKE_TIMEOUT_SECONDS}"
   --settle-after-markers
@@ -172,7 +188,7 @@ endif()
 
 if(NOT runner_result EQUAL 0)
   message(FATAL_ERROR
-    "Smoke runner failed (exit=${runner_result}). See ${LOG_FILE} for the captured serial log.\n"
+    "Smoke runner failed (exit=${runner_result}). See ${LOG_FILE} and ${SUMMARY_FILE}.\n"
     "${runner_stderr}"
   )
 endif()

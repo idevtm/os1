@@ -5,6 +5,9 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,6 +20,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: recursive
 
       - name: Install host tools
@@ -33,19 +37,12 @@ jobs:
             command -v cpio
             command -v xorriso
             command -v qemu-system-x86_64
+            command -v python3
+            command -v clang-format
           else
             sudo apt-get update
-            sudo apt-get install -y nasm cpio xorriso ovmf qemu-system-x86 cmake ninja-build
+            sudo apt-get install -y nasm cpio xorriso ovmf qemu-system-x86 cmake ninja-build python3 clang-format
           fi
-
-      - name: Configure host unit tests
-        run: cmake -S tests/host -B build-host-tests -G Ninja -DCMAKE_BUILD_TYPE=Debug
-
-      - name: Build host unit tests
-        run: cmake --build build-host-tests
-
-      - name: Run host unit tests
-        run: ctest --test-dir build-host-tests --output-on-failure --no-tests=error
 
       - name: Enable Homebrew
         if: ${{ !env.ACT }}
@@ -67,19 +64,42 @@ jobs:
             brew install x86_64-elf-gcc
           fi
 
-      # OS1_REQUIRE_UEFI_SMOKE=ON turns a missing OVMF firmware into a
-      # configure-time hard error. OS1_KMEM_DEBUG=ON keeps the freestanding
-      # CI build aligned with host tests so redzones, poison checks, and leak
-      # diagnostics stay exercised even if the root CMake default changes.
-      # Firmware discovery itself lives in CMakeLists.txt (single source of
-      # truth); this workflow must never re-implement the candidate list.
-      - name: Configure
-        run: cmake --preset default -DOS1_REQUIRE_UEFI_SMOKE=ON -DOS1_KMEM_DEBUG=ON -DOS1_QEMU_DEBUGCON=ON
+      # tools/verify.sh is the shared local/CI contract. Its full mode makes
+      # missing UEFI coverage a configure-time error and keeps allocator debug
+      # instrumentation enabled in both host and freestanding builds.
+      - name: Run full repository verification
+        id: verification
+        run: tools/verify.sh full
 
-      - name: Build
+      - name: Upload smoke failure evidence
+        if: ${{ failure() && !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: os1-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/artifacts/*.log
+            build/artifacts/*.json
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Generate scheduled repository-health report
+        if: ${{ always() && !env.ACT && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        env:
+          OS1_VERIFICATION_STATUS: ${{ steps.verification.outcome }}
         run: |
-          cmake --build --preset default
-          cmake --build build --target os1_bios_image
+          python3 tools/repository_health.py \
+            --verification-status "$OS1_VERIFICATION_STATUS" \
+            --markdown-output build/artifacts/repository-health.md \
+            --json-output build/artifacts/repository-health.json
 
-      - name: Smoke test
-        run: ctest --test-dir build --output-on-failure
+      - name: Upload scheduled repository-health report
+        if: ${{ always() && !env.ACT && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: os1-repository-health-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/artifacts/repository-health.md
+            build/artifacts/repository-health.json
+          if-no-files-found: error
+          retention-days: 14

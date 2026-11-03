@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "submodules": [
+    {
+      "commit": "232ff3f8ae1a4da11c709f61d9154482cfe8e6df",
+      "name": "ACPICA",
+      "path": "third_party/acpica"
+    },
+    {
+      "commit": "52eb8108c5bdec04579160ae17225d66034bd723",
+      "name": "GoogleTest",
+      "path": "third_party/googletest"
+    }
+  ],
+  "vendored": [
+    {
+      "base_path": "third_party/limine/v11.4.0",
+      "files": [
+        {
+          "path": "BOOTX64.EFI",
+          "sha256": "d9f86e107067eb683c9498844c72c69e51869ffa01f0297a8f11f49e0c3ceb71",
+          "size": 319488
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "f174b8ff78f6f8982a1fc992668f8486eb8cf598f6938923c22e9bb50f8338a8",
+          "size": 1297
+        },
+        {
+          "path": "LICENSE.protocol",
+          "sha256": "e2b1c35814afb22acbddf7ff567d2b05a467e503628ffea62752bc1f3fa2595c",
+          "size": 659
+        },
+        {
+          "path": "limine-uefi-cd.bin",
+          "sha256": "88407b143f4bbbd74b253be7f8df41a684d4bf9276f80ebc5ad6fcb60b58cb36",
+          "size": 2949120
+        },
+        {
+          "path": "limine.h",
+          "sha256": "bf0f2aff9395fe158c7268498dff8841d700c5544ee987a2b80294adae4deeec",
+          "size": 16718
+        }
+      ],
+      "name": "Limine",
+      "version": "v11.4.0"
+    }
+  ]
+}

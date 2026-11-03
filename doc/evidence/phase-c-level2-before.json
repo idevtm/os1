@@ -1,0 +1,51 @@
+{
+  "artifacts": {
+    "serial_log": "/private/tmp/os1-phase-c-pilot-before.log",
+    "summary": "/private/tmp/os1-phase-c-pilot-before.json"
+  },
+  "boot_path": "bios",
+  "markers": {
+    "expected": [
+      "phase-c: impossible marker"
+    ],
+    "forbidden": [
+      "#GP general protection",
+      "#UD invalid opcode"
+    ],
+    "missing": [
+      "phase-c: impossible marker"
+    ],
+    "rejected": [],
+    "seen": []
+  },
+  "qemu": {
+    "executable": "qemu-system-x86_64",
+    "normalized_arguments": [
+      "-machine",
+      "q35",
+      "-smp",
+      "4",
+      "-serial",
+      "stdio",
+      "-display",
+      "none",
+      "-no-reboot",
+      "-no-shutdown",
+      "-drive",
+      "format=raw,file=build/artifacts/os1.raw"
+    ],
+    "version": "QEMU emulator version 11.1.0"
+  },
+  "result": {
+    "message": "matched 0/1 required markers before timeout",
+    "reason": "timeout",
+    "status": "failed"
+  },
+  "schema_version": 1,
+  "test_name": "phase_c_pilot_before",
+  "timing": {
+    "elapsed_seconds": 2.032,
+    "settle_after_markers_seconds": 0.0,
+    "timeout_seconds": 2.0
+  }
+}
