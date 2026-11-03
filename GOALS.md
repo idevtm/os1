@@ -161,18 +161,18 @@ Near-term development should optimize for:
 - clean serial-debug workflow
 - predictable virtual hardware targets
 
-Real-hardware bring-up matters, but not before the architecture is coherent enough to justify it.
+QEMU remains the reproducible development baseline. Physical-machine bring-up now contributes concrete requirements too: the November work added UART-optional boot, bounded firmware waits, and device-probe failure isolation. The [2026-11-03 review](doc/2026-11-03-review.md) distinguishes that implementation from hardware qualification still needed.
 
 ### Real hardware enablement
 
-Real-hardware support is a goal once the emulator-first architecture is stable enough to carry it.
+The G74SX bring-up has produced a reported successful boot and a preserved-layout USB update path. The immediate goal is to qualify the exact current kernel on that image, recording input, command, CPU, and sustained-runtime results. Boot-chain, initrd, and diagnostic recovery changes need separate qualification.
 
-Near-term real-hardware priorities:
+Broader real-hardware goals remain:
 
-- USB through xHCI
+- extend the existing xHCI/HID keyboard path to more controllers and USB classes
 - GPT partition handling
 - NVMe or AHCI as the first non-virtio storage path
-- MSI/MSI-X enablement
+- qualify MSI/MSI-X routing on additional physical devices
 - robust ACPI table handling
 - tolerance for real-firmware variation and partial firmware quality
 - explicit hardware-quirk isolation instead of spreading quirks through generic paths
@@ -259,7 +259,7 @@ Later modularization is acceptable where it clearly improves structure, but earl
 
 ### Kernel and userland separation
 
-The project has already crossed the first protected-userland threshold: it boots through a minimal `/bin/init` that immediately `exec`s `/bin/sh`, can load statically linked user ELF programs from an initrd, services a small but real syscall ABI, and can kill or reap a faulting child process without panicking the kernel. The remaining goal is to deepen that foundation into a more complete operating system model.
+The project has already crossed the first protected-userland threshold: it boots through a minimal `/bin/init` that immediately `exec`s `/bin/sh`, can load statically linked user ELF programs from an initrd, services a small but real syscall ABI, and has demonstrated killing and reaping a faulting child without panicking the kernel. The [current review](doc/2026-11-03-review.md) also identifies a child-publication race and retains an unresolved intermittent BIOS child-launch fault. Closing those correctness gaps precedes expanding the process model.
 
 Required eventual capabilities:
 
@@ -288,6 +288,8 @@ Core native-interface goals:
 
 Where practical, POSIX compatibility should be implemented as a compatibility layer or mapping over these native primitives rather than treated as the only system model the kernel may expose.
 
+These are design goals, not implemented contracts. The [API drafts](doc/os-api-draft/README.md) and [unified architecture review](doc/os-api-draft/2026-05-10-unified-os-api-architecture-review.md) propose a single fd-shaped descriptor table with native object entries and rights; that proposal still needs an explicit decision. The first implementation should establish only the resource lifetime and access rules needed for console descriptors and a read-only initrd VFS. Reflection, properties, and event interfaces remain later design work.
+
 ### Process and scheduling model
 
 The system should support:
@@ -310,7 +312,7 @@ SMP should come early enough to shape:
 
 The implementation may still progress through simpler intermediate steps, but the architecture should not assume that single-core is the long-term model.
 
-That first SMP baseline now exists on `x86_64`: APs run per-CPU idle threads, take LAPIC timer ticks, use per-CPU run queues, accept remote wakeups via reschedule IPIs, and participate in load-balanced user-thread scheduling. Follow-on SMP work is now about device-IRQ steering, lock-order enforcement, and policy refinement rather than first bring-up.
+That first SMP baseline now exists on `x86_64`: APs run per-CPU idle threads, take LAPIC timer ticks, use per-CPU run queues, accept remote wakeups via reschedule IPIs, and participate in load-balanced user-thread scheduling. The next priority is process publication and teardown correctness, including address-space reclamation and allocation-failure handling. Device-IRQ steering, lock-order enforcement, and policy refinement remain follow-ups.
 
 ### Security model
 
@@ -325,6 +327,8 @@ Goals:
 - least-privilege design where practical
 - secure enough architecture to justify SSH and remote administration
 
+Ordinary observation should be passive now, before a full multiuser model exists. The current ACPI observation path can change device power state; separate that into explicitly authorized diagnostics with driver quiescence and failure recovery. Broader object-control APIs need defined rights and access policy before exposure.
+
 Non-goal:
 
 - enterprise-grade hardening in early stages
@@ -335,10 +339,12 @@ The system should support persistent storage with a simple, understandable files
 
 Suggested progression:
 
-- initrd or in-memory filesystem early
-- simple native filesystem or readable existing simple filesystem later
-- block-device abstraction
+- expose the existing initrd through a minimal read-only VFS after defining descriptors
+- add a read-only block-backed filesystem using the existing request/completion block abstraction
+- define flush, ordering, error, and crash behavior before writable filesystem persistence
 - partition awareness later if justified
+
+Bounded block reads and writes are implemented. `virtio-blk` still rejects flush requests, so successful write completion is not yet a durability contract.
 
 ### Driver model
 
@@ -385,6 +391,10 @@ Suggested goals:
 - debug build modes
 - subsystem-specific test harnesses where practical
 - milestone demo scripts
+- failure-injection and lifecycle regressions that cover rollback and cross-CPU publication
+- smoke success only after the complete observation interval, retaining failures even when retries pass
+
+Integrate the reviewed unified verification harness after reconciling its document index and metadata. It is not part of the source snapshot reviewed on 2026-11-03.
 
 ### Performance stance
 
@@ -425,9 +435,15 @@ The project is not trying to:
 
 ## Recommended sequencing
 
-The existing review is directionally correct on the importance of protected userland: this project explicitly prioritizes **running isolated user programs** over early broad real-hardware support. However, the architecture should be shaped early by **SMP readiness** and eventual accelerator / heterogeneous-compute support, even when some capabilities are initially stubbed or emulator-first.
+The [2026-11-03 review](doc/2026-11-03-review.md) sets the immediate sequence:
 
-In other words:
+1. Close process-publication and failure-path defects, investigate the intermittent BIOS fault, and make ordinary observation passive with constrained power diagnostics.
+2. Correct smoke success handling, integrate the reviewed verification harness, and qualify the exact kernel on the preserved G74SX image.
+3. Approve a minimal descriptor contract and implement console entries 0/1/2, with rights, duplication, close, inheritance, and teardown behavior covered.
+4. Add bounded argv/envp handoff and a read-only initrd VFS, then route executable loading through it.
+5. Establish the persistence or networking prerequisites before choosing the next vertical slice; add credentials and access policy before multiuser or network-exposed operations.
+
+Descriptor design can proceed while the reliability bugs are isolated. Runtime expansion should wait for the relevant lifetime and failure contracts. The longer-term priorities remain:
 
 - protected userland outranks early real-hardware breadth
 - SMP should influence kernel structure early, not be bolted on late
@@ -455,8 +471,9 @@ The in-repo milestone designs (M1–M5) refine the coarser A–G map below into 
 - PCIe support expanding from enumeration into BAR/resource ownership, driver binding, bus mastering, MSI/MSI-X, and DMA-safe building blocks (implemented)
 - USB host-controller discovery through PCI, with xHCI as the first USB transport and HID keyboard as the first USB class target ([2026-04-30 pass](doc/2026-04-29-driver-device-platform-implementation-plan.md) — implemented; HID mouse recognized but not yet routed; USB hub class and mass storage remain follow-on work)
 - HPET-calibrated LAPIC periodic timer with PIT fallback (implemented)
+- UART-optional boot, bounded serial polling, PIT-calibrated TSC firmware waits, and PCI probe failure isolation (implemented in the November runtime baseline; exact-kernel physical qualification remains pending)
 - early APIC / SMP-oriented platform groundwork plus the first operational SMP runtime (per-CPU `cpu` pages, TSS, ACPI-derived AP bring-up, per-CPU idle threads, per-CPU LAPIC timer ticks, reschedule IPIs, per-CPU run queues, load-balanced user-thread placement, `WaitQueue` / `Completion`-based blocking, `Spinlock`/`IrqGuard` synchronization vocabulary, and an `OS1_BSP_ONLY` annotation system are implemented; per-CPU device IRQ steering remains follow-on work)
-- early accelerator / GPU device discovery path where feasible
+- follow-on: early accelerator / GPU device discovery path where feasible
 
 ### Milestone C: Protected userland and operator shell baseline *(implemented across [M2 design](doc/2026-04-22-milestone-2-process-model-and-isolation.md) and [M5 design](doc/2026-04-23-milestone-5-interactive-shell-and-observability.md))*
 
@@ -469,24 +486,26 @@ The in-repo milestone designs (M1–M5) refine the coarser A–G map below into 
 
 Later follow-ups expected in this area: filesystem-backed loading, richer file-descriptor / handle semantics, arguments/environment passing, and process credentials.
 
-### Milestone D: Persistence and local security *(next; block-layer half done, filesystem and multiuser halves remain)*
+### Milestone D: Persistence and local security *(next feature milestone; block read/write baseline implemented, VFS, durability, and multiuser work remain)*
 
-The block-layer half of Milestone D is now done as part of the 2026-04-30 [driver/device/platform pass](doc/2026-04-29-driver-device-platform-implementation-plan.md): `BlockDevice` is request-shaped with completion, error, and write support; `virtio-blk` runs through MSI-X with INTx fallback. The two remaining halves are no longer "block layer plus filesystem plus multiuser" — they are filesystem and multiuser:
+The 2026-04-30 [driver/device/platform pass](doc/2026-04-29-driver-device-platform-implementation-plan.md) established request-shaped `BlockDevice` I/O with completion, error, and write support; `virtio-blk` runs through MSI-X with INTx fallback. That is a useful baseline, but flush support and a durable-write contract remain open. After the correctness work above, the feature progression is:
 
-1. a first read-only filesystem (FAT32 or a bespoke simple FS) on top of `BlockDevice`, plus a minimal VFS and filesystem-backed `exec`;
-2. a small multiuser/permissions foundation (uid/gid, file ownership, user table, credential checks) so Milestone F can meaningfully run SSH.
+1. minimal console descriptors, bounded argv/envp, and a read-only initrd VFS with executable loading through the same namespace;
+2. a first read-only block-backed filesystem (FAT32 or a bespoke simple FS), then explicit durability and failure semantics before writable storage;
+3. a small multiuser/permissions foundation (uid/gid, file ownership, user table, credential checks) before multiuser access or Milestone F's remote administration.
 
 Implementation notes grounded in current source:
 
-- bounded multi-sector reads and writes are now in code at [src/kernel/drivers/block/virtio_blk.cpp](src/kernel/drivers/block/virtio_blk.cpp) and exercised by both the boot-time and threaded smokes; the cap is `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request). Per-page user-buffer scatter-gather is the next storage extension and should land together with user-DMA pinning
+- bounded multi-sector reads and writes are now in code at [src/kernel/drivers/block/virtio_blk.cpp](src/kernel/drivers/block/virtio_blk.cpp) and exercised by both the boot-time and threaded smokes; the cap is `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request). Future per-page user-buffer scatter-gather requires a user-DMA pinning and ownership contract
 - the kernel small-object allocator at [src/kernel/mm/kmem.cpp](src/kernel/mm/kmem.cpp) is implemented and now has real kernel consumers (process/thread registries, ARP cache, device-binding records, PCI BAR claim records, DMA allocation records, and IRQ route records). The next allocator-related step is to use the same lifetime model for VFS inode/dentry state, descriptor tables, packet buffers, and other resource records as those subsystems land, not to prove first-use viability again
-- decide the native object/handle vs POSIX-FD stance before adding a per-process descriptor table; this affects VFS shape, sockets shape, device-handle shape, and POSIX-shim direction simultaneously (see drafts under [doc/os-api-draft/](doc/os-api-draft/): [native_object_kernel_contract.md](doc/os-api-draft/native_object_kernel_contract.md), [object_oriented_vfs_spec.md](doc/os-api-draft/object_oriented_vfs_spec.md), [elf_interface_spec.md](doc/os-api-draft/elf_interface_spec.md), [os1-shell-language-first-draft.md](doc/os-api-draft/os1-shell-language-first-draft.md))
-- add argv/envp handoff in the initrd-backed loader under [src/kernel/proc/user_program.cpp](src/kernel/proc/user_program.cpp) so a real `init` can evolve apart from `/bin/sh` and so filesystem-backed `exec` can pass arguments meaningfully
+- decide the minimal descriptor ABI before adding the table: rights, invalid/reused identifiers, per-open state, duplication, inheritance, close, and teardown. The [unified API review](doc/os-api-draft/2026-05-10-unified-os-api-architecture-review.md) recommends one fd-shaped table, but remains a proposal rather than an accepted contract
+- add bounded argv/envp handoff in the initrd-backed loader under [src/kernel/proc/user_program.cpp](src/kernel/proc/user_program.cpp), with explicit size limits and failure handling, so a real `init` can evolve apart from `/bin/sh` and filesystem-backed `exec` can pass arguments meaningfully
 - treat USB mass storage as a later storage target, after the USB hub class and the first non-virtio storage path are stable
 
-### Milestone E: Networking foundation *(driver in; protocol stack not started)*
+### Milestone E: Networking foundation *(driver and ARP probe implemented; IP/UDP/TCP and sockets remain)*
 
 - NIC support — `virtio-net` is implemented through the shared virtio transport with MSI-X-driven RX/TX completion and an ARP probe smoke; see [src/kernel/drivers/net/virtio_net.cpp](src/kernel/drivers/net/virtio_net.cpp)
+- define packet ownership, receive buffering, cancellation, and monotonic deadlines before expanding the protocol stack; firmware timing helpers do not yet provide a public clock/deadline contract
 - IP networking
 - TCP basics
 - DHCP and DNS resolver
@@ -521,8 +540,10 @@ Some earlier open questions have since been resolved in source or in the milesto
 
 The following are not fully decided yet and should be revisited explicitly:
 
+- the minimal descriptor/rights/lifetime ABI, and which later native property, event, and interface proposals to adopt
 - first filesystem choice
-- follow-on plan from the current SMP baseline to AP-targeted device IRQ steering, lock-order assertions, and later scheduler-policy refinement
+- process and address-space reclamation guarantees, followed by AP-targeted device IRQ steering, lock-order assertions, and scheduler-policy refinement
+- public clock/deadline and cancellation contracts for blocking I/O and networking
 - later GPU / accelerator target model after discovery-only phase: compute queues, minimal kernel offload primitives, or richer user-facing submission model
 - whether the terminal compositor stays intentionally minimal or grows into a broader desktop shell
 
@@ -530,7 +551,7 @@ The following are not fully decided yet and should be revisited explicitly:
 
 These are strong candidates to adopt explicitly:
 
-- **serial-first debugging:** always preserve a reliable non-graphical debug path
+- **serial-first debugging:** preserve a reliable non-graphical debug path while keeping boot and console progress independent of UART presence
 - **QEMU-first developer workflow:** every major milestone should be reproducible in emulation
 - **deterministic milestone demos:** each milestone should have a short demonstration script
 - **architecture isolation:** keep `arch/x86_64` concerns separate from generic kernel code

@@ -1,34 +1,62 @@
 # SMP Synchronization Contract - 2026-04-29
 
-Generated-by: Codex / GPT-5, 2026-04-29.
+Created: 2026-04-29. Updated against source: 2026-11-03 (`63e328d`).
 
 ## Current State
 
-APs are brought online but remain parked in an interrupt-disabled idle loop. The BSP still owns live kernel execution, scheduling, process lifecycle, console input, platform discovery, PCI/device lists, and physical page allocation.
+APs run per-CPU idle threads and user threads, install the shared IDT, take
+local LAPIC timer ticks, and consume reschedule and TLB-shootdown IPIs. Per-CPU
+run queues and load balancing are implemented. Process/thread registries,
+physical allocation, console queues, and blocking paths have shared-state
+synchronization; they are no longer collectively BSP-only.
 
-This document records the synchronization contract that applies until APs run real scheduler code.
+This is the live synchronization contract carried forward from the original
+pre-SMP plan. It records existing mechanisms and required ownership rules,
+not a proof that every path satisfies them. The
+[2026-11-03 review](2026-11-03-review.md) identifies the outstanding child-thread
+publication defect and the limits of the current reclamation evidence.
 
-## New Kernel Contract
+## Kernel Primitives
 
-The synchronization declarations live in `src/kernel/sync/smp.hpp`:
+The synchronization declarations live in [smp.hpp](../src/kernel/sync/smp.hpp):
 
-- `Spinlock`: a simple non-recursive atomic spinlock for future shared kernel state.
-- `IrqGuard`: an RAII interrupt guard that disables external interrupts and restores them only if they were previously enabled.
-- `OS1_BSP_ONLY`: annotation for globals that are intentionally bootstrap-CPU-owned for now.
-- `KASSERT_ON_BSP()`: runtime assertion for mutation paths that are only valid on the BSP.
+- `Spinlock`: a named, non-recursive atomic lock with acquire/release semantics.
+- `IrqGuard`: disables local external interrupts and restores the prior enabled
+  state on destruction; it does not exclude another CPU.
+- `IrqSpinGuard`: acquires the IRQ guard before the lock and releases the lock
+  before restoring interrupts.
+- `OS1_BSP_ONLY` and `OS1_LOCKED_BY(name)`: documentation annotations, both
+  expanding to `[[maybe_unused]]`. They enforce neither affinity nor lock order.
+- `KASSERT_ON_BSP()`: a runtime BSP assertion in freestanding debug builds. It
+  is disabled in host tests and builds defining `NDEBUG`.
 
-Current BSP-only state has been tagged in source:
+`WaitQueue` and `Completion` in
+[wait_queue.hpp](../src/kernel/sync/wait_queue.hpp) support block-I/O, child-exit,
+and console-read blocking. Wake helpers detach waiters under the queue lock,
+then release it before making threads runnable.
 
-- `processTable` and PID allocation in `src/kernel/proc/process.*`
-- `threadTable`, TID allocation, idle-thread publication, and runnable links in `src/kernel/proc/thread.*`
-- `terminal[]` and `active_terminal` in `src/kernel/core/kernel_state.*`
-- console input queues in `src/kernel/console/console_input.cpp`
-- PCI/platform discovery state in `src/kernel/platform/state.*`
-- `page_frames` in `src/kernel/core/kernel_state.*` and allocator mutation paths in `src/kernel/mm/page_frame.cpp`
+## Current Ownership
+
+| State | Existing protection or ownership |
+| --- | --- |
+| Physical page allocation/free | `g_page_frames_lock`; allocator initialization remains BSP-owned. |
+| Process registry and PID allocation | `g_process_table_lock` in `proc/process.cpp`. |
+| Thread registry and TID allocation | `g_thread_registry_lock` in `proc/thread.cpp`. |
+| Runnable links and queue length | The owning CPU's `runq.lock`; balancing acquires a pair in ascending CPU-ID order. |
+| Console input queues | `g_console_input_lock`; hardware polling/input production remains BSP-owned. |
+| Console API writes | `g_console_output_lock` protects `write_console_bytes`/`write_console_line` and the debug mirror. Input echo and terminal switching do not take that lock; terminal selection retains BSP ownership. |
+| Platform discovery | BSP initialization of `g_platform`; device IRQ affinity remains BSP-first. Registry locks do not make device lifecycle or ACPICA calls generally concurrent-safe. |
+
+Some registry and allocator globals still carry `OS1_BSP_ONLY` alongside real
+internal locks. Read the mutation path rather than treating that marker as a
+complete ownership description. CPU-local scheduler state, startup publication,
+and shared object lifetime need their own rules in addition to these locks.
 
 ## Locking Order
 
-When APs stop being parked, lock acquisition must follow this order. Do not introduce a new lock outside this order without updating this document first.
+Lock acquisition must follow this order. This remains a design rule; there is
+no static or runtime lock-tier checker. Do not introduce a new lock outside this
+order without updating this document first.
 
 1. CPU-local interrupt state: acquire `IrqGuard` before taking any lock that can also be touched from an interrupt path.
 2. Physical memory allocator: `page_frames` lock.
@@ -48,16 +76,36 @@ Rules:
 - Never sleep or block while holding a spinlock.
 - Never acquire a lower-numbered lock while holding a higher-numbered lock.
 - Interrupt handlers may only take locks that are IRQ-safe and must do so under `IrqGuard`.
-- Locks protect data ownership; they do not replace lifetime rules. Process, thread, page-table, and device lifetimes still need explicit ownership transitions.
+- When taking two run-queue locks, acquire them in ascending CPU-ID order and
+  release them in reverse order.
+- Detach waiters and release the wait-queue lock before taking an earlier-tier
+  scheduler/run-queue lock to wake them.
+- Locks protect data ownership; they do not replace lifetime rules. Process,
+  thread, page-table, and device lifetimes still need explicit ownership transitions.
 
-## Migration Path
+## Publication And Reclamation Follow-Ups
 
-Before APs enter the normal scheduler:
+The original migration to scheduled AP execution landed in May; it is recorded
+in the [phased SMP plan](2026-05-05-phased-smp-enablement.md) and
+[May review](2026-05-05-review-2.md). The remaining work is correctness under
+that live runtime:
 
-1. Replace every `OS1_BSP_ONLY` global with either a lock, CPU-local ownership, immutable publication, or single-writer handoff rule.
-2. Convert `KASSERT_ON_BSP()` assertions into lock assertions or remove them only after the relevant state is protected.
-3. Add lock-order assertions if nested locks become common.
-4. Add host tests for pure lock-order helpers if such helpers are introduced.
-5. Add QEMU SMP smoke coverage that proves APs can run user threads without corrupting process/thread/page-frame state.
+1. Complete a child's entry frame and ownership state before enqueueing it or
+   sending a reschedule IPI. `load_user_program` currently rewrites the frame
+   after ready-thread creation; see
+   [R1](2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication).
+2. Define address-space reclamation and invalidation completion before adding
+   shared address spaces, COW, or public mapping operations. The existing
+   broadcast TLB IPI has no address-space/range acknowledgement protocol;
+   having callers does not establish when frames are safe to reuse.
+3. Establish actual ACPICA serialization before concurrent AML or SCI/GPE
+   expansion. The OSL currently has dummy locks and nonblocking semaphores.
+4. Keep allocation and device operations outside incompatible locks; add
+   lock-order assertions and focused cross-CPU tests as enforcement evolves.
+5. Retain SMP balance/spawn/exec coverage and add a deterministic publication
+   regression. Passing QEMU runs alone do not close the unresolved BIOS
+   child-launch failure or prove every lifetime rule.
 
-Until that work is done, `KASSERT_ON_BSP()` failures are correctness bugs, not diagnostic noise.
+`KASSERT_ON_BSP()` failures in enabled builds remain correctness bugs, not
+diagnostic noise. Remove an ownership assertion only after the replacement
+contract is explicit and exercised.

@@ -2,9 +2,23 @@
 
 `os1` is a self-documented teaching and engineering operating system project: a small, technically serious `x86_64` OS built for clarity, runnable vertical slices, and modern OS concepts rather than feature sprawl. The project stays terminal-first, QEMU-first, and documentation-heavy on purpose, with the current implementation status and a full system diagram in [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md), the longer-term direction in [GOALS.md](GOALS.md), the curated external standards and specification index in [doc/REFERENCES.md](doc/REFERENCES.md), a code-grounded project review in [doc/latest-review.md](doc/latest-review.md), the completed shell/operator milestone captured in [doc/2026-04-23-milestone-5-interactive-shell-and-observability.md](doc/2026-04-23-milestone-5-interactive-shell-and-observability.md), and the 2026 source-tree refactor summary in [doc/2026-04-26-source-tree-refactor.md](doc/2026-04-26-source-tree-refactor.md).
 
+For computer architecture and OS terminology, see the categorized
+[Glossary](doc/GLOSSARY.md), including TLB, IST, FADT, PCI, and the other terms
+used throughout the project documents.
+
 Today `os1` uses a shared-kernel, dual-entry boot architecture. The default path is a Limine-based UEFI ISO that enters a thin higher-half shim, normalizes bootloader state into `BootInfo`, then transfers control to the shared higher-half kernel core. The legacy BIOS raw image is still built and tested as a compatibility path, loading the same kernel physically before entering it at its higher-half virtual address. The kernel itself is freestanding `C++20`, runs protected user programs loaded from an initrd `cpio` archive, starts a small `/bin/init` that `exec`s `/bin/sh`, exposes `write`/`read`/`observe`/`spawn`/`waitpid`/`exec` through the x86_64 `SYSCALL`/`SYSRET` path, and can present the terminal either through VGA text mode or a minimal framebuffer text renderer. Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives. The 2026-05-10 ACPICA integration replaced the hand-rolled AML interpreter path with upstream ACPICA for ACPI table discovery, namespace load, device enumeration, `_PRT` routing, resource parsing, and `_PS0`/`_PS3` power transitions; `/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose that surface from userland.
 
 In the source tree, the two boot frontends are explicit peers under `src/boot/`: the legacy raw-image BIOS path lives in `src/boot/bios/`, and the modern UEFI shim lives in `src/boot/limine/`. The kernel tree is now split by ownership rather than by bring-up history: `src/kernel/core/` owns orchestration and trap flow, `handoff/` owns the boot contract, `mm/` owns physical/virtual memory, `proc/`, `sched/`, and `sync/` split process/thread lifecycle, scheduling policy, and blocking primitives, `console/` owns terminal streams, `drivers/` owns hardware drivers, `platform/` owns machine discovery, and `storage/`, `vfs/`, and `security/` mark the intended growth seams. The detailed source-structure contract now lives in [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md).
+
+The November boot changes add operation without COM1, bounded serial waits,
+PIT-calibrated TSC firmware delays, per-CPU exception stacks, PCI probe failure
+isolation, and a kernel-only update path for the preserved G74SX USB layout.
+The [2026-11-03 review](doc/2026-11-03-review.md) records the validation and its
+limits, including an unresolved intermittent BIOS child-launch fault and
+source-confirmed lifecycle and allocation defects. ACPI observation currently
+attempts device power transitions; `/bin/acpiprobe` is not a passive inventory
+command. Descriptors, argv/envp, VFS, credentials, and a general network stack
+remain future work; the Native API documents are proposals.
 
 ## Prerequisites
 
@@ -18,6 +32,7 @@ Required build tools:
 - `nasm`
 - `cpio`
 - `xorriso`
+- `python3` for image helpers and smoke/script tests
 
 Optional helper tools:
 
@@ -33,7 +48,8 @@ brew install x86_64-elf-gcc nasm cpio xorriso qemu
 
 Homebrew `qemu` ships usable OVMF firmware files and the CMake build will auto-detect them. On Linux, install your distro's `ovmf` or `edk2-ovmf` package.
 
-This repository uses GoogleTest as a git submodule for host unit tests. Existing clones should initialize submodules once:
+This repository vendors ACPICA for the kernel and host tests, and GoogleTest
+for host unit tests, as git submodules. Initialize both in a new or existing clone:
 
 ```sh
 git submodule update --init --recursive
@@ -70,7 +86,7 @@ This repo ships CMake presets for the supported workflows. In VS Code with the C
 - use the `run_serial` target for a serial-first UEFI shell session in the terminal
 - use the `run_bios` preset or target for the legacy BIOS path
 - use the `run_bios_serial` target for a serial-first BIOS shell session in the terminal
-- use the `smoke`, `smoke_observe`, `smoke_balance`, `smoke_spawn`, `smoke_exec`, `smoke_xhci`, `smoke_bios`, `smoke_observe_bios`, `smoke_balance_bios`, `smoke_spawn_bios`, `smoke_exec_bios`, or `smoke_all` targets for tests
+- use the `smoke`, `smoke_observe`, `smoke_balance`, `smoke_spawn`, `smoke_exec`, `smoke_xhci`, `smoke_no_uart`, `smoke_bios`, `smoke_observe_bios`, `smoke_balance_bios`, `smoke_spawn_bios`, `smoke_exec_bios`, or `smoke_all` targets for tests (`smoke_no_uart` requires `OS1_QEMU_DEBUGCON=ON`)
 
 If the extension still has stale cache or generator state from an older setup, run `CMake: Delete Cache and Reconfigure` once.
 
@@ -81,7 +97,8 @@ The host unit tests are a separate CMake project under `tests/host/` and use the
 Configure, build, and run them with:
 
 ```sh
-cmake -S tests/host -B build-host-tests -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake -S tests/host -B build-host-tests -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug -DOS1_KMEM_DEBUG=ON
 cmake --build build-host-tests
 ctest --test-dir build-host-tests --output-on-failure --no-tests=error
 ```
@@ -160,6 +177,16 @@ Modern UEFI xHCI + USB-keyboard smoke (UEFI only; BIOS does not boot Limine UEFI
 cmake --build build --target smoke_xhci
 ```
 
+Modern UEFI no-UART smoke, using debugcon output and PS/2 input:
+
+```sh
+cmake --preset default -DOS1_QEMU_DEBUGCON=ON
+cmake --build build --target smoke_no_uart
+```
+
+Keep `OS1_QEMU_DEBUGCON=OFF` for physical hardware images. This test removes
+COM1 and verifies a shell command in QEMU; it does not qualify a physical console.
+
 Legacy BIOS shell baseline smoke:
 
 ```sh
@@ -190,24 +217,32 @@ Legacy BIOS exec smoke:
 cmake --build build --target smoke_exec_bios
 ```
 
-Run the full smoke matrix:
+Run the QEMU smoke matrix:
 
 ```sh
 cmake --build build --target smoke_all
 ```
 
-Or run the registered CTest suite directly:
+Or run the full registered CTest suite, including script contracts:
 
 ```sh
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure --no-tests=error
 ```
 
-After a normal `cmake --build build`, the registered CTest suite is
-self-contained for both UEFI and BIOS smokes. The smoke tests capture serial
-logs and assert stable boot, shell, observability, SMP balance, child-launch, and exec
-markers for both boot paths. CI drives the shell through serial input rather
-than relying on display-only interaction, so local smoke transcripts closely
-match the automated coverage.
+With `BUILD_TESTING=ON`, QEMU, and OVMF available, CTest registers eleven QEMU
+smokes and two Python script contracts (HMP acknowledgement and USB kernel
+updates). `OS1_QEMU_DEBUGCON=ON` adds the no-UART smoke, giving the CI
+configuration 12 QEMU smokes and 14 CTest cases. `smoke_all` runs only the QEMU
+smokes. Missing QEMU/OVMF reduces registration; CI sets
+`OS1_REQUIRE_UEFI_SMOKE=ON` to reject a missing UEFI smoke environment.
+
+After `cmake --build build`, the registered smokes have their required images.
+They check boot, shell, observability (including ACPI route/power output), SMP
+balance, child-launch, and exec markers through serial logs, with debugcon used
+for no-UART. Monitor-driven tests also exercise keyboard input. The runner's
+early-EOF settle-window defect and the unresolved BIOS fault are documented in
+the [current review](doc/2026-11-03-review.md); a green run is not evidence that
+those issues have been fixed.
 
 ## Local CI With `act`
 
@@ -241,7 +276,7 @@ The build writes outputs under `build/artifacts/`:
 - `kernel.elf` — shared higher-half kernel core used by the BIOS path and loaded as a module by the Limine path
 - `kernel_limine.elf` — higher-half Limine frontend that normalizes boot state, loads the shared kernel by physical `PT_LOAD` ranges, and enters it through temporary transition mappings
 - `cpu_start.bin` — AP trampoline blob used for debugging / disassembly
-- `initrd.cpio` — `cpio newc` initrd archive containing `/bin/init`, `/bin/sh`, `/bin/yield`, `/bin/balanceworker`, `/bin/busyyield`, `/bin/balancecheck`, `/bin/smpcheck`, `/bin/fault`, `/bin/copycheck`, and `/bin/ascii`
+- `initrd.cpio` — `cpio newc` initrd archive containing `/bin/init`, `/bin/sh`, `/bin/yield`, `/bin/balanceworker`, `/bin/busyyield`, `/bin/balancecheck`, `/bin/smpcheck`, `/bin/fault`, `/bin/copycheck`, `/bin/ascii`, and `/bin/acpiprobe`
 - `virtio-test-disk.raw` — generated raw disk image used to validate the `virtio-blk` path during boot and smoke tests
 - `user/*.elf` — statically linked user-space ELF inputs used to build the initrd
 - `os1.iso` — default UEFI-only Limine ISO
@@ -254,6 +289,7 @@ The build writes outputs under `build/artifacts/`:
 - `smoke-spawn.log` / `smoke-spawn-bios.log` — captured child-launch smoke serial logs
 - `smoke-exec.log` / `smoke-exec-bios.log` — captured exec smoke serial logs
 - `smoke-xhci.log` — captured xHCI + USB-keyboard smoke serial log (UEFI only)
+- `smoke-no-uart.log` — captured no-UART debugcon log (when enabled)
 
 For BIOS compatibility, `os1.raw` reserves fixed slots for `kernel16.bin`, `kernel.elf`, and `initrd.cpio`. Those slot sizes are defined by `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [CMakeLists.txt](CMakeLists.txt). The kernel BIOS slot now matches the reserved low-physical kernel window, and the build fails before writing `os1.raw` if `kernel.elf` no longer fits its disk slot, its low-memory staging buffer, or its reserved execution window. `initrd.cpio` is still checked against its configured slot. To expand BIOS storage space, raise the corresponding sector-count or reserved-window value and rebuild; the generated BIOS layout follows those values automatically while the raw image stays padded to 1 MiB.
 
@@ -273,6 +309,8 @@ USB image while preserving a verified base, use `os1_usb_kernel_update`.
 This operation was tested on the **ASUS G74SX** using the round-6 layout. The
 fresh FAT rebuild used in round 7 was not offered by this laptop's firmware;
 round 8's kernel-only update booted successfully.
+That report predates the final early-buffer fix; the exact current kernel still
+needs recorded hardware command, input, and sustained-runtime validation.
 
 ```sh
 cmake --preset usb-kernel-update \
@@ -315,22 +353,15 @@ path enables full diagnostics when `OS1_BOOT_DIAGNOSTICS=ON`; extract its raw
 log slots with `tools/bootlog_extract.py`. See
 [doc/2026-11-02-real-hardware-bootlog.md](doc/2026-11-02-real-hardware-bootlog.md).
 
-The no-UART regression removes COM1, observes output through QEMU debugcon,
-and types a shell command through PS/2. CI enables this test channel; keep it
-off for hardware images. To run it locally:
-
-```sh
-cmake --preset default -DOS1_QEMU_DEBUGCON=ON
-cmake --build build --target smoke_no_uart
-```
-
-When enabled, `smoke_all` and `ctest` include the no-UART regression.
+See [Smoke Tests](#smoke-tests) for the QEMU no-UART regression. Its test channel
+is enabled in CI and must stay off for hardware images.
 
 ## Documentation
 
 - [Goals](GOALS.md) — project direction and design principles
 - [References](doc/REFERENCES.md) — central index of external standards, vendor manuals, protocol RFCs, and public specifications used by the project
 - [Architecture](doc/ARCHITECTURE.md) — current-state source of truth for boot, memory, console, process, and test architecture; includes a system diagram and end-to-end workflow
+- [Glossary](doc/GLOSSARY.md) — computer architecture, firmware, OS, device, API, and development terms grouped by domain
 - [OS API Drafts](doc/os-api-draft/README.md) — design exploration for the descriptor/object model, VFS shape, and user ABI growth; not the live kernel contract
 - [Latest Review](doc/latest-review.md) — current code-grounded project review (recommended entry point for readers)
 - [Driver, Device, And Platform Implementation Plan 2026-04-29](doc/2026-04-29-driver-device-platform-implementation-plan.md) — implementation history for the driver/device/platform substrate; tracks the 2026-04-30 pass that landed the static PCI driver registry, IRQ vector allocator, MSI-X/MSI/INTx fallback, DMA buffers, shared virtio transport, BlockDevice v2, HPET/LAPIC timer migration, `virtio-net`, and xHCI + HID boot keyboard. ACPI has since moved to the ACPICA-backed implementation described in [2026-05-06 ACPICA Integration](doc/2026-05-06-acpica-integration.md) and reviewed in [2026-05-10 Review](doc/2026-05-10-review.md).

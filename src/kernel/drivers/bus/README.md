@@ -8,7 +8,8 @@ Live pieces:
 
 - `driver_registry.*`: fixed-size PCI driver registry.
 - `pci_bus.*`: walks enumerated PCI functions, probes registered drivers, and
-  exposes a remove hook.
+  exposes a remove hook. A failed matching probe marks that device failed and
+  continues enumeration without it.
 - `device.*`: publishes bound device records and lifecycle state.
 - `resource.*`: claims and releases PCI BAR ownership by `DeviceId`.
 
@@ -16,4 +17,6 @@ Current limits:
 
 - Matching is minimal and static. There is no dynamic module loading.
 - Hot-remove is a resource-release skeleton, not a hardware hotplug event path.
-- Observe output does not yet expose bindings or resource tables.
+- The `devices`, `resources`, and `irqs` observe views expose binding state,
+  BAR/DMA ownership, and interrupt routes. These snapshots do not constitute
+  hotplug, driver quiescence, or coordinated device-power policy.

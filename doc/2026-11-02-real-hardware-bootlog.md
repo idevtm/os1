@@ -8,6 +8,13 @@ The kernel-update operation below preserves the working layout; fresh
 images are not G74SX-qualified. Permanent UART and platform fixes remain
 active in every build.
 
+**2026-11-03 status update:** the bring-up changes are merged in `main` at
+`85ebb10` ([PR #26](https://github.com/idevtm/os1/pull/26)). The final early-buffer
+fix postdates the physical round-8 report; later QEMU checks do not qualify that
+kernel on the laptop. The [current project review](2026-11-03-review.md) records
+the source findings and validation limits. The experiment history below remains
+the evidence for the reported hardware result.
+
 ## Kernel-only USB image update
 
 Use the pinned round-6 40 MiB capture, SHA-256
@@ -273,12 +280,14 @@ Read the logs back: UEFI logs are plain files in `os1logs/` on the stick's
 sudo python3 -I tools/bootlog_extract.py /dev/rdiskN --all --out-dir bootlogs/
 ```
 
-## Other bring-up changes on this branch
+## Bring-up changes merged in main
 
 - ACPICA OSL: `AcpiOsStall`/`AcpiOsSleep` now delay and `AcpiOsGetTimer` runs,
   using a TSC clock calibrated on PIT channel 2
   (`src/kernel/drivers/timer/tsc_clock.cpp`). Before, the ACPI-mode switch had
   microseconds instead of 3 s, and AML `While` loops could never time out.
+  If calibration fails, the timer advances by queries and delays are approximate;
+  this is firmware-wait support, not a public clock/deadline contract.
 - A failing PCI driver probe no longer aborts bring-up; the device is marked
   `Failed` and probing continues.
 - `Interrupts::initialize` keeps all 8259 lines masked.

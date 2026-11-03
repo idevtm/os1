@@ -1,8 +1,32 @@
 # ACPICA Integration Spec - 2026-05-06
 
-Status: implemented design/specification. Source code is the authority for current behavior.
+Status: ACPICA backend implemented; some OSL requirements below remain outstanding.
+Source code is the authority for current behavior.
 
 Implementation note: this design landed before the [2026-05-10 review](2026-05-10-review.md). ACPI table discovery, ACPICA namespace load, device enumeration, `_PRT` route resolution, resource parsing, and `_PS0`/`_PS3` power transitions now flow through the ACPICA-backed platform facade. ACPICA is pinned under `third_party/acpica` at submodule SHA `232ff3f8` (release `20260408`), with OS glue in `src/kernel/platform/acpica_*` and no in-place edits to the third-party source.
+
+## Implementation Boundary — 2026-11-03
+
+The integration phases and validation plan below record the original design;
+their requirements must not all be read as completed behavior. The current
+[OSL](../src/kernel/platform/acpica_osl.cpp) still uses dummy locks,
+nonblocking semaphore counts, a constant thread ID, and unsupported asynchronous
+execution and interrupt-handler installation. Scheduler-aware sleep, real
+serialization, and SCI/GPE handling remain follow-up work.
+
+Freestanding `AcpiOsSleep`, `AcpiOsStall`, and `AcpiOsGetTimer` now use the
+[PIT-calibrated TSC helper](../src/kernel/drivers/timer/tsc_clock.cpp).
+Sleep is still a busy wait, not a scheduler sleep. Calibration fallback gives
+approximate progress, not a public monotonic deadline contract. Host-test waits
+remain no-ops and therefore do not validate real firmware timing.
+
+Both observability smokes launch `/bin/acpiprobe` and assert route/power output;
+the power marker permits an unavailable result. `OS1_OBSERVE_ACPI` currently
+attempts D3/D0 transitions on active devices without driver quiescence or a
+credential/diagnostic-mode gate. Separating passive observation from explicit
+power diagnostics is an immediate correctness follow-up. See
+[the current review](2026-11-03-review.md) for that finding, the independent
+unresolved BIOS child-launch fault, and the limits of physical-hardware evidence.
 
 ## Source Inputs Reviewed
 

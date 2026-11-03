@@ -1,8 +1,10 @@
 # os1 Architecture
 
-> generated-by: GitHub Copilot; updated-by: Codex (GPT-5) - last-reviewed: 2026-05-10 - git-state: working tree
+> generated-by: GitHub Copilot; updated-by: Codex - last-reviewed: 2026-11-03 - source revision: 63e328d
 
 This document is the current-state source of truth for `os1`. It describes what is implemented in the repository today. For build, run, and smoke workflows, see [README](../README.md). For the longer-term direction, see [GOALS](../GOALS.md). For the external specifications, firmware manuals, ABI references, and protocol standards that inform the project, see [REFERENCES](REFERENCES.md). For the shell/operator milestone that produced the current user-facing environment, see [Milestone 5 Design: Interactive Shell And Observability](2026-04-23-milestone-5-interactive-shell-and-observability.md). For a full code-grounded review of the project, see [Latest Review](latest-review.md). The review documents under `doc/` are historical context, not the live system contract.
+
+The [2026-11-03 review](2026-11-03-review.md) records current correctness findings and validation limits. The affected boundaries are noted below; those findings remain open and the native API drafts remain proposals.
 
 `os1` currently has:
 
@@ -29,12 +31,12 @@ This document is the current-state source of truth for `os1`. It describes what 
 - a source tree split by major responsibility: `arch/x86_64`, `core`, `handoff`, `mm`, `proc`, `sched`, `syscall`, `console`, `drivers`, `platform`, `storage`, `fs`, `vfs`, `security`, `debug`, `util`, and `linker`
 - protected ring-3 user programs loaded from an initrd
 - a terminal-first operator environment that boots directly into a ring-3 shell
-- structured read-only observability snapshots and kernel event records exposed through a shared UAPI
+- structured observability snapshots and kernel event records exposed through a shared UAPI; the ACPI probe also performs power transitions
 - initrd-backed `spawn` / `waitpid` / `exec` process control for user commands
 - a terminal model that can render either through VGA text mode or a framebuffer text backend
 - serial-driven smoke coverage and interactive serial run targets for both the UEFI and BIOS paths, including dedicated SMP observe / balance smokes
 
-Milestone status:
+Milestone implementation status (not a claim that all correctness or hardware-validation work is complete):
 
 - [Milestone 1: Boot Contract And Kernel Stabilization](2026-04-22-milestone-1-boot-contract-and-kernel-stabilization.md): implemented
 - [Milestone 2: Process Model And Isolation](2026-04-22-milestone-2-process-model-and-isolation.md): implemented
@@ -44,20 +46,12 @@ Milestone status:
 
 ## Glossary
 
-| Term | Meaning in `os1` |
-| --- | --- |
-| BIOS | Legacy PC firmware interface used by the compatibility boot path. |
-| UEFI | Modern firmware interface used by the default boot path. |
-| Limine | The bootloader / protocol used for the modern default path. |
-| OVMF | The UEFI firmware image used by QEMU for the default `run` and `smoke` targets. |
-| HHDM | Higher-Half Direct Map. Limine provides a virtual mapping of physical memory so the shim can access physical ranges before the kernel installs its own page tables. |
-| `BootInfo` | The normalized bootloader-to-kernel contract. Every boot frontend must convert its native state into this structure before entering `kernel_main`. |
-| Framebuffer | A physical memory region whose bytes directly represent display pixels. |
-| `cpio newc` | The archive format used for the initrd. It contains the first user-space programs. |
-| `ET_EXEC` | The ELF executable type used by the current statically linked user programs. |
-| PML4 / PML3 / PML2 / PML1 | The four levels of x86_64 page tables. |
-| `RSP0` | The kernel stack pointer stored in the Task State Segment. The CPU loads it automatically when an interrupt or syscall enters the kernel from ring 3. |
-| `TrapFrame` | The saved register/state layout shared by exceptions, IRQs, syscalls, and scheduler return paths. |
+The [project glossary](GLOSSARY.md) defines the terms used here and throughout
+the reviews and design documents. It is organized by domain: CPU execution and
+exceptions; memory and synchronization; boot, ACPI, and devices; process and API
+contracts; storage and networking; and build and validation tools. Acronyms such
+as TLB, IST, FADT, and PCI are expanded there, alongside project names such as
+`BootInfo` and `TrapFrame`.
 
 ## Reference Platform Tree
 
@@ -95,7 +89,7 @@ Milestone status:
   │   │   │   ├── 00:00.0 host-bridge
   │   │   │   ├── 00:02.0 gpu
   │   │   │   ├── 00:14.0 xhci
-  │   │   │   │   ├── root-hub 
+  │   │   │   │   ├── root-hub
   │   │   │   │   │   ├── port1
   │   │   │   │   │   ├── port2
   │   │   │   │   │   ├── port3
@@ -105,7 +99,7 @@ Milestone status:
   │   │   │   │   │   │   │   │   │   ├── hid-keyboard
   │   │   │   │   │   │   │   │   │   └── ...
   │   │   │   │   │   │   │   │   └── ...
-  │   │   │   │   │   │   │   └── ...  
+  │   │   │   │   │   │   │   └── ...
   │   │   │   │   │   │   └── ...
   │   │   │   │   │   └── ...
   │   │   │   │   └── ...
@@ -153,7 +147,7 @@ This section is the live source-structure contract for the kernel. Dated refacto
 
 Top-level kernel source rules:
 
-- The `src/kernel/` top level currently keeps two loose ownership files: [../src/kernel/CMakeLists.txt](../src/kernel/CMakeLists.txt) for build grouping.
+- The `src/kernel/` top level keeps [../src/kernel/CMakeLists.txt](../src/kernel/CMakeLists.txt) for build grouping.
 - C++ sources are grouped in CMake by ownership: architecture, handoff, memory, console, drivers, filesystem, core, platform, process, scheduler, syscall, debug, and utilities.
 - Cross-frontend freestanding helpers that do not belong to one boot path or one kernel subsystem live under `src/common/`.
 - NASM include paths explicitly include architecture layout files, handoff layout files, and process thread-layout files so assembly does not rely on old flat-tree placement.
@@ -442,7 +436,7 @@ The shell runs a line-buffered REPL:
  (return to user via iretq with new frame)
 ```
 
-The `exec` smoke enforces that control never returns to the *old* shell: the rejected-marker list includes `shell exec returned` and an `echo after-exec` probe. This is how the tests turn "no return" into a mechanical guarantee.
+The `exec` smoke checks for unwanted return to the *old* shell: the rejected-marker list includes `shell exec returned` and an `echo after-exec` probe. This provides bounded transcript evidence. The current runner can accept early process exit before its advertised settle period completes; see [review R4](2026-11-03-review.md#r4--p2-smoke-runner-reports-a-completed-settle-period-after-early-exit).
 
 ## Build Outputs And Boot Artifacts
 
@@ -683,30 +677,9 @@ It is no longer the default workflow.
 
 `kernel_main()` in [../src/kernel/core/kernel_main.cpp](../src/kernel/core/kernel_main.cpp) is the shared kernel entry for both paths. It is now high-level boot orchestration only: trap routing lives in `core/trap_dispatch.cpp`, IRQ flow in `core/irq_dispatch.cpp`, fault policy in `core/fault.cpp`, syscall dispatch in `syscall/dispatch.cpp`, scheduler handoff in `sched/scheduler.cpp`, platform sequencing in `platform/init.cpp`, and device-specific behavior under `drivers/`.
 
-The high-level sequence is:
+The sequence is detailed in [Phase 3](#phase-3--kernel-bring-up-kernel_main). After copying `BootInfo`, the kernel initializes physical allocation, builds its higher-half and direct-map mappings with narrow bootstrap identity exceptions, and switches `CR3`. Platform discovery, interrupt setup, and driver probing precede process registries and per-CPU idle threads. Scheduler timer preparation and AP startup follow those thread allocations; the boot-sequence thread then loads the first user process. `os1.nosmp` can leave APs offline.
 
-1. serial hello
-2. `own_boot_info()`
-3. boot CPU initialization
-4. physical page-frame allocator initialization
-5. reserve boot modules and framebuffer ranges
-6. build kernel-owned identity-mapped page tables
-7. map boot-critical non-usable ranges such as initrd, framebuffer, and the initial RSDP page
-8. switch to the kernel's `CR3`
-9. run `platform_discover()` to parse ACPI, normalize topology, and enumerate PCIe
-10. initialize PIC, IOAPIC, LAPIC
-11. start APs when available
-12. allocate terminals
-13. select display backend
-14. initialize interrupts
-15. run `platform_probe_devices()` to bind drivers and run device smoke checks
-16. initialize keyboard and console input
-17. initialize scheduler tables
-18. create kernel idle thread
-19. load user programs from initrd
-20. start multitasking
-
-The important architectural point is that the boot frontends stop mattering almost immediately after `own_boot_info()`. After that point, the system is running on kernel-owned page tables and kernel-owned copies of boot metadata.
+`own_boot_info()` removes dependence on frontend-owned metadata; the later `kvm.activate()` transition installs kernel-owned page tables. After those handoffs, both boot paths use the same runtime subsystems.
 
 ## Console And Display Architecture
 
@@ -760,7 +733,9 @@ The framebuffer backend is intentionally minimal:
 
 This is not a full graphics subsystem. It is a presentation adapter for the existing terminal model.
 
-The framebuffer renderer maintains a shadow buffer and skips unchanged rows and cells. Serial remains the authoritative debug channel.
+The framebuffer renderer maintains a shadow buffer and skips unchanged rows and cells. Serial carries debug output when COM1 is present.
+
+COM1 detection and bounded transmit polling allow boot without a UART. With boot diagnostics enabled on UEFI, early debug output is replayed to the display and subsequent output is mirrored there. Optional persistent boot capture and watchdog-assisted recovery are described in [Real-Hardware Boot Log](2026-11-02-real-hardware-bootlog.md); SMP persistence is best-effort and normal preserved-layout G74SX boots leave capture disabled.
 
 ## Memory Architecture
 
@@ -811,6 +786,8 @@ Supported operations include:
 - cloning the required supervisor mappings into a process address space
 - destroying the user slot during process teardown
 
+Mapping failure is not fully transactional: `allocate_and_map()` can leak a newly allocated data frame if a required page-table allocation fails before linking it. This failure path and the required rollback check remain open in [review R5](2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame).
+
 ## CPU, Interrupt, And Trap Architecture
 
 ### CPU State
@@ -834,7 +811,9 @@ The GDT now includes:
 - user code/data segments
 - 64-bit TSS descriptor
 
-The TSS is used for `RSP0`, not for hardware task switching. Every context switch updates `cpu_cur()->tss.rsp0` so the next ring-3 entry will return to the correct kernel stack.
+The TSS supplies `RSP0` and interrupt stack pointers; hardware task switching is not used. Every context switch updates `cpu_cur()->tss.rsp0` for the next ring-3 interrupt/trap entry that does not select an IST stack.
+
+CPU initialization also allocates a separate IST1 page for NMI, double fault, and machine check. The IDT selects IST1 for these exceptions, but allocation failure currently leaves `tss.ist1` unset without stopping initialization. This is an open failure-path defect, not guaranteed fault containment; see [review R3](2026-11-03-review.md#r3--p2-ist-allocation-failure-leaves-fatal-exceptions-without-their-stack).
 
 ### Unified `TrapFrame`
 
@@ -883,6 +862,8 @@ Current observe kinds include:
 - kernel small-object allocator snapshot
 - ACPICA route/power probe snapshot (`OS1_OBSERVE_ACPI`)
 
+`OS1_OBSERVE_ACPI` is not passive: it attempts D3 followed by D0 on an active power-capable device. The syscall has no credential/diagnostic-mode gate or driver-quiescence protocol, and a failed D0 does not establish recovery after D3. Separating snapshots from explicit power diagnostics remains open in [review R2](2026-11-03-review.md#r2--p1-acpi-observation-performs-ungated-power-transitions).
+
 The event ring currently stores 256 overwrite-on-full records with monotonic sequence numbers and direct `pid` / `tid` fields. Current event types cover traps, scheduler transitions, IRQs, block I/O, PCI binds, user-copy failures, smoke markers used by the observe smokes, the chosen scheduler timer source (PIT vs LAPIC), `kmem` corruption, NIC RX completions, AP-online / AP-tick events, reschedule / TLB-shootdown IPIs, kernel-thread ping markers, thread migration, and run-queue depth changes.
 
 `/bin/sh events` is a snapshot command. Continuous streaming and `Ctrl-C` cancellation are intentionally deferred until the console/process layer has nonblocking input, cancellation, or signal-like infrastructure.
@@ -905,6 +886,8 @@ Scheduling is intentionally simple in policy but no longer single-CPU in shape: 
 
 There is still no priority or nice model, no user-visible affinity control, and no AP-targeted device IRQ steering yet.
 
+The ordinary spawn path has a publication race: `load_user_program()` can enqueue a new user thread and send an AP reschedule IPI before it clears and rebuilds that thread's entry frame. The AP can already be consuming that state. Initialization-before-publication must be restored; [review R1](2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication) records the source evidence. Its relationship to the observed intermittent BIOS child-launch fault is unproven.
+
 ### User Address Spaces
 
 Each user process gets:
@@ -916,7 +899,7 @@ Each user process gets:
 
 The kernel validates user pointers through `mm/user_copy.cpp` before copying syscall payloads. That boundary rejects null, non-canonical, overflowing, and out-of-user-range addresses. It also requires user-accessible mappings for reads and user-writable mappings for kernel-to-user writes. The kernel does not rely on deliberate kernel faults as a normal syscall-copy mechanism.
 
-User-slot teardown in `mm/virtual_memory.cpp` now issues `ipi_send_tlb_shootdown()` so other CPUs reload stale user address-space state after mappings are removed. The current shootdown is still coarse-grained CR3 reload rather than per-CR3/per-page invalidation; that granularity remains a prerequisite for future `mmap`, COW, or paging work.
+Mapping changes and user-slot teardown in `mm/virtual_memory.cpp` issue `ipi_send_tlb_shootdown()`, which broadcasts CR3 reload requests. There is no remote completion acknowledgement or address-space/range retirement protocol, and teardown releases frames before sending the request. Existing one-thread user processes and BSP reaping limit exposure, but do not establish a general page-reuse contract. Completion and lifetime rules must be defined before shared address spaces, COW, or concurrent user mapping operations; finer invalidation granularity alone does not solve this boundary. See the [review's SMP and memory assessment](2026-11-03-review.md#smp-memory-and-lifetime).
 
 ### Initrd And ELF Loader
 
@@ -938,6 +921,8 @@ Current user programs:
 
 The kernel keeps its fixed `/bin/init` boot contract, but init is now a real first user process rather than an alias for the shell. It immediately calls `exec("/bin/sh")`, so later init responsibilities can grow without changing the kernel boot path. The kernel parses the initrd, finds those paths, and loads ELF64 `ET_EXEC` images with `PT_LOAD` segments only. It maps segment permissions from ELF flags and zero-fills `memsz - filesz` for `.bss`.
 
+The user stack is non-executable. ELF segment flags control writable/executable permissions, but the loader does not reject a segment requesting both: strict user-image W^X is not enforced.
+
 This userland is still intentionally a vertical slice, not a general Unix process-launch environment. The kernel can boot the shell, `spawn(path)` a child initrd program for foreground commands, `waitpid(pid)` for child completion, and `exec(path)` to replace the current image in place. There is still no filesystem-backed `exec`, no `fork`, and no arguments/environment yet.
 
 ### Process Fault Handling And Teardown
@@ -955,6 +940,8 @@ This deferred teardown is important. The kernel does not free the current thread
 ## Modern Platform Support
 
 Milestone 4 completed the move to ACPI-derived platform discovery and removed the legacy MP-table path. The 2026-05-10 ACPICA integration made upstream ACPICA the active ACPI implementation for table discovery, namespace load, device enumeration, resource parsing, `_PRT` resolution, and `_PS0`/`_PS3` power transitions. ACPICA is vendored under `third_party/acpica` at submodule SHA `232ff3f8` (release `20260408`); OS-specific policy and glue stay behind `src/kernel/platform/acpica_*` and the public platform facade.
+
+The freestanding OSL now implements firmware waits and timer queries using a PIT-channel-2-calibrated TSC helper. Its calibration-failure timer advances by query count, and it has no demonstrated cross-CPU monotonicity contract or public clock/deadline API. OSL locks remain dummy operations, semaphores do not block, the thread ID is constant, and asynchronous execution and interrupt-handler operations are unsupported. These boundaries constrain concurrent AML and SCI/GPE/power management; calls from multiple runnable processes require an explicit serialization model. See the [current review](2026-11-03-review.md#acpica-and-timing) and [ACPICA integration notes](2026-05-06-acpica-integration.md).
 
 The kernel now:
 
@@ -976,6 +963,7 @@ The kernel now:
 - allocates coherent DMA buffers with explicit owner, virtual address, physical
   address, direction, page count, and active state
 - binds drivers through a static PCI registry and publishes device binding state
+- marks a failed PCI probe as failed and continues probing other devices
 - probes a modern `virtio-blk` PCI device through the shared virtio transport,
   publishes a request-shaped `BlockDevice`, completes reads and writes through
   queue interrupts, and validates raw sector reads plus a scratch-sector write
@@ -991,12 +979,13 @@ The test ladder is now:
 
 1. Host GoogleTest unit tests for parser, ABI, memory-policy, and page-table logic.
 2. Build-time layout contract scripts for boot image and Limine shim invariants.
-3. QEMU UEFI and BIOS CTest smokes for boot, platform discovery, shell, observe, SMP balance, spawn, and exec behavior.
-4. Manual QEMU debug runs through the `run*` targets.
+3. Python script contracts for HMP monitor acknowledgements and kernel-only USB image updates.
+4. QEMU UEFI and BIOS CTest smokes for boot, platform discovery, shell, observe, SMP balance, spawn, exec, xHCI, and optional no-UART behavior.
+5. Manual QEMU debug runs through the `run*` targets and recorded physical-hardware experiments.
 
 The host unit tests live under `tests/host/` as a separate CMake project. They intentionally do not include the root `CMakeLists.txt`, because the root project is a freestanding `x86_64-elf` build and should continue to reject a hosted compiler.
 
-The current SMP synchronization contract is documented in [SMP Synchronization Contract - 2026-04-29](2026-04-29-smp-synchronization-contract.md). The live runtime now uses those locks for per-CPU run queues, wait queues, console input, process/thread registries, and the named public page-frame allocator lock. AP-targeted device IRQ steering remains the next alignment gap.
+The current SMP synchronization contract is documented in [SMP Synchronization Contract - 2026-04-29](2026-04-29-smp-synchronization-contract.md). The live runtime uses locks for per-CPU run queues, wait queues, console input, process/thread registries, and the named public page-frame allocator lock. Lock-tier annotations do not enforce lock order. Child publication, TLB lifetime completion, and concurrent AML boundaries need attention before broader resource concurrency; AP-targeted device IRQ steering remains later work.
 
 ### Local Targets
 
@@ -1014,6 +1003,7 @@ The main CMake targets are:
 - `smoke_spawn`
 - `smoke_exec`
 - `smoke_xhci`
+- `smoke_no_uart` (requires `OS1_QEMU_DEBUGCON=ON` and the QEMU/OVMF prerequisites)
 - `smoke_bios`
 - `smoke_observe_bios`
 - `smoke_balance_bios`
@@ -1027,7 +1017,7 @@ The default build produces both `os1.iso` and `os1.raw`, so a normal
 `cmake --build build` followed by `ctest --test-dir build --output-on-failure`
 has all boot artifacts needed by the registered tests. The aggregate
 `smoke_all` target remains the shortest target-driven way to rebuild artifacts
-and run the full smoke matrix.
+and run the registered QEMU smoke matrix. It does not select the two Python script contract tests; an unfiltered root `ctest` run includes those as well.
 
 ### Host Unit Tests
 
@@ -1081,19 +1071,21 @@ The host support layer under `tests/host/support/` provides serial-debug stubs, 
 
 ### Smoke Tests
 
-`CTest` now registers an eleven-test shell matrix:
+With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers eleven QEMU shell smokes:
 
 - `os1_smoke`
 - `os1_smoke_observe`
 - `os1_smoke_balance`
 - `os1_smoke_spawn`
 - `os1_smoke_exec`
-- `os1_smoke_xhci` (UEFI only; BIOS does not boot Limine UEFI)
+- `os1_smoke_xhci` (UEFI-only test configuration)
 - `os1_smoke_bios`
 - `os1_smoke_observe_bios`
 - `os1_smoke_balance_bios`
 - `os1_smoke_spawn_bios`
 - `os1_smoke_exec_bios`
+
+`OS1_QEMU_DEBUGCON=ON` additionally registers `os1_smoke_no_uart`, which removes COM1, captures output through QEMU debugcon, and enters a command through PS/2. `BUILD_TESTING=ON` also registers two Python script contracts, `os1_smoke_monitor_contract` and `os1_usb_kernel_update_contract`. Thus the CI configuration has 12 QEMU smokes plus two contracts (14 root CTest cases); the same complete-tool configuration without debugcon has 11 plus two (13). Missing emulator/firmware prerequisites can reduce registration, so counts must name their configuration. The separate host suite is not part of these totals.
 
 The baseline smoke tests cover the common boot and shell transcript on each frontend, including:
 
@@ -1111,29 +1103,34 @@ The dedicated observe, balance, spawn, exec, and xHCI smokes then exercise the o
 
 - structured `sys` / `ps` / `cpu` / `pci` / `initrd` / `events` / `devices` / `resources` / `irqs` output
 - the kernel event ring's smoke-marker, scheduler-timer-source, and device-binding records
+- ACPICA route/power probe output on both boot frontends; the power marker also accepts an unavailable result and does not prove successful power management
 - observable AP-online / AP-tick / migration behavior and user-visible run-queue deltas
 - child-process launch, user-fault containment, and prompt recovery
 - in-place `exec` replacement without the old shell prompt returning
 - xHCI controller bring-up, root-port enumeration, HID boot keyboard configuration, and USB key reports feeding the same console-input path used by PS/2
 
+The current runner can report success after all required markers if its subprocess exits before the configured clean settle interval completes. [Review R4](2026-11-03-review.md#r4--p2-smoke-runner-reports-a-completed-settle-period-after-early-exit) records a reproduction. Passing runs therefore do not prove the advertised interval, and passing retries do not close the separately observed BIOS launch fault. See the [review evidence](2026-11-03-review.md#validation-available-for-this-revision) for the retained results and their limits.
+
 ### CI
 
-GitHub Actions runs on `ubuntu-24.04` and does all of the following on every push and pull request:
+GitHub Actions runs on `ubuntu-24.04` for pushes to `main` and pull requests targeting `main`:
 
 - checkout submodules, including vendored GoogleTest
 - install host tools including `cpio`, `xorriso`, `ovmf`, `qemu-system-x86`
 - configure, build, and run the host GoogleTest suite
 - install the `x86_64-elf` cross toolchain through Homebrew
-- configure the project
+- configure with `OS1_REQUIRE_UEFI_SMOKE=ON`, `OS1_KMEM_DEBUG=ON`, and `OS1_QEMU_DEBUGCON=ON`
 - build the default modern artifact
 - explicitly build the BIOS compatibility artifact
-- run the full eleven-test shell smoke matrix (including the UEFI-only xHCI smoke) through `ctest`
+- run the 12 QEMU smokes and two script contracts through root `ctest`
 
 The same single CI job name is kept for local `act` compatibility.
 
+This branch runs build/test commands directly. The unified verification entrypoint, structured result artifacts, and maintenance checks proposed in the separate harness PR are not implemented here.
+
 ## Current Constraints And Next Step
 
-The current architecture is coherent, but intentionally incomplete.
+The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](2026-11-03-review.md#7-recommended-next-milestones) orders the immediate follow-ups: child publication, passive ACPI observation, IST allocation failure, mapping rollback, smoke-runner settling, and qualification of the exact current kernel on the preserved G74SX image. Passing QEMU tests alone do not qualify physical media or close the unresolved BIOS launch fault.
 
 Major constraints that remain:
 
@@ -1141,7 +1138,7 @@ Major constraints that remain:
 - the framebuffer path is a text presenter, not a graphics stack
 - userland is still initrd-backed and single-user rather than filesystem-backed and multiuser
 - there is no per-process file-descriptor or handle table; `spawn` and `exec` accept only a path, with no `argv`/`envp` and no errno discipline
-- block I/O is request-shaped, interrupt-completed, and supports bounded multi-sector requests up to `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request) through a single contiguous data descriptor; the synchronous wrappers chunk by `BlockDevice::max_sectors_per_request`; there is still no block scheduler, request merging, filesystem-facing buffer cache, or per-page user-buffer scatter-gather (which awaits user-DMA pinning)
+- block I/O is request-shaped, interrupt-completed, and supports bounded multi-sector requests up to `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request) through a single contiguous data descriptor; the synchronous wrappers chunk by `BlockDevice::max_sectors_per_request`; Flush is rejected, so successful write completion is not a durability contract; there is still no block scheduler, request merging, filesystem-facing buffer cache, or per-page user-buffer scatter-gather (which awaits user-DMA pinning)
 - PCI INTx fallback now resolves through ACPICA `_PRT` data when firmware
   provides it, with firmware-populated `interrupt_line` retained as the
   secondary fallback
@@ -1151,21 +1148,21 @@ Major constraints that remain:
 - hot-remove exists as a driver/resource lifecycle path, but there are no PCIe
   or ACPI hotplug event sources yet
 - APs come up through ACPI-derived bring-up, install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, and participate in per-CPU scheduling; device IRQ steering is still BSP-first
-- the `virtio-net` driver works but there is no IP/UDP/TCP/ICMP/ARP/DHCP/DNS layer above it
+- the `virtio-net` driver includes ARP parsing, a cache, and a QEMU-oriented probe, but no general IP/UDP/TCP/ICMP/DHCP/DNS or socket stack
 - xHCI brings up HID boot keyboards but does not yet handle USB hubs, mice past recognition, or USB mass storage
 - NVMe and AHCI are still follow-on work
 
-The next major work is therefore not another boot or shell bring-up refactor. With the 2026-04-30 driver/device/platform pass, the 2026-05-05 SMP enablement round, and the 2026-05-10 ACPICA integration all landed (`virtio-net`, HPET-calibrated LAPIC scheduling, MSI-X-driven block I/O, ACPICA-backed platform discovery, per-CPU run queues, `WaitQueue` / `Completion`, and balance smokes are all in code and exercised by tests), the active growth fronts are storage above the block driver, the network protocol stack above `virtio-net`, and a richer filesystem-backed userland on top of the current platform and operator shell base:
+The next feature decision is a minimum process-resource contract, followed by console descriptors, bounded argument/environment handoff, and a read-only initrd VFS. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
 
-- decide the native object/handle vs POSIX-FD stance before adding a per-process descriptor table; this gates VFS shape, sockets shape, device-handle shape, and the eventual POSIX shim direction (see drafts under [os-api-draft/](os-api-draft/): [native_object_kernel_contract.md](os-api-draft/native_object_kernel_contract.md), [object_oriented_vfs_spec.md](os-api-draft/object_oriented_vfs_spec.md), [elf_interface_spec.md](os-api-draft/elf_interface_spec.md), [os1-shell-language-first-draft.md](os-api-draft/os1-shell-language-first-draft.md))
+- define descriptor/handle identity, ownership, rights, close/dup behavior, errors, and spawn/exec inheritance before implementing a per-process resource table; the broader reflective object model remains a proposal (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md) and drafts under [os-api-draft/](os-api-draft/))
 - add `argv`/`envp` handoff in the initrd-backed loader so the shell can pass arguments and a real `init` can evolve apart from `/bin/sh`
 - use the existing small-object allocator for VFS inode/dentry state, descriptor tables, packet buffers, and other resource-lifetime records as those subsystems land
 - per-page user-buffer scatter-gather and DMA pinning, once the user-process side of the storage path needs them; bounded multi-sector requests already work today through a single contiguous data descriptor
-- a minimal VFS plus a first read-only filesystem (FAT32 or a bespoke simple FS) and filesystem-backed `exec`
+- an initrd-backed read-only VFS and VFS-backed `exec`, then additional filesystems once their block and persistence contracts are defined
 - a small multiuser/permissions foundation (uid/gid, file ownership, credentials field on `Process`) so Milestone F can meaningfully run SSH
-- the IPv4/UDP/TCP/ARP/ICMP protocol stack on top of `virtio-net`, followed by DHCP and DNS once persistent configuration storage exists
+- packet ownership, receive buffering, monotonic deadlines, and cancellation before expanding the existing ARP slice into IPv4/UDP/TCP/ICMP, DHCP, and DNS
 - USB hub class, mouse routing past recognition, and USB mass storage as the next USB tier
 - per-CPU device IRQ steering plus lock-order / policy follow-through on top of the operational SMP runtime (the synchronization vocabulary already exists in [src/kernel/sync/smp.hpp](../src/kernel/sync/smp.hpp))
 - ACPICA upgrade/footprint policy, OSL feature boundaries, and broader real-hardware ACPI coverage when new hardware requires it
 
-At this point the architecture is intentionally in a good place for that work: the boot path is modernized, the kernel entry contract is shared, ACPI/PCIe discovery is in place, MSI-X is the default device interrupt path, drivers bind through owned resources with a hot-remove skeleton, the kernel event ring carries cross-subsystem events, and both modern and legacy boot paths remain continuously testable on the same `q35` virtual platform.
+The shared boot contract, driver resource records, event ring, and dual-frontend QEMU coverage provide infrastructure for those steps. The review's source findings and physical-hardware evidence define what still needs to be established before claiming broader reliability or isolation.

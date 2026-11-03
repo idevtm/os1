@@ -7,10 +7,17 @@ kernel file contents in that known-working image. Use the constrained
 `os1_usb_kernel_update` target below for this laptop. The exact round-7 failure
 mechanism remains unproven; do not reuse its repacking path for the G74SX. The round-8 report
 does not establish a ten-minute run or specific shell-command results.
-PR branch `codex/g74sx-bringup`; original investigation history is retained on
-`g74sx-bootlog`. Owner: whoever picks up the
+The investigation used `g74sx-bootlog`; the `codex/g74sx-bringup` follow-up was
+merged as [PR #26](https://github.com/idevtm/os1/pull/26), commit `85ebb10` on
+`main`. Those names describe historical branches, not required local checkouts.
+Owner: whoever picks up the
 next stick round. Companion doc for the capture mechanism:
 [2026-11-02-real-hardware-bootlog.md](2026-11-02-real-hardware-bootlog.md).
+
+**2026-11-03 status update:** the [project review](2026-11-03-review.md) covers
+the merged runtime and its remaining source findings. The final early-buffer
+fix below postdates the physical round-8 report. No subsequent physical boot,
+ten-minute session, or detailed shell-command results are claimed here.
 
 ## Goal
 
@@ -239,7 +246,8 @@ Writing the stick requires administrator access and the human's go-ahead.
   reproduce the G74SX masks and retain full-width and empty-mask cases.
 - `smoke_no_uart` removes COM1, observes output through test-only QEMU debugcon,
   and types `echo no-uart` through PS/2. CI enables `OS1_QEMU_DEBUGCON=ON`;
-  ordinary hardware builds keep it off.
+  ordinary hardware builds keep it off. This is a UEFI/QEMU regression; it
+  does not establish no-UART BIOS or arbitrary physical-console coverage.
 - `OS1_BOOT_DIAGNOSTICS=OFF` is the normal build default. Diagnostic builds
   for fresh images opt into the EFI pre-loader and BIOS capture. Their USB menu has ordinary,
   capture-only (`os1.bootlog`), and full diagnostic (`os1.bootdiag`) entries.
@@ -288,11 +296,10 @@ physical round-8 report, so no additional physical result is claimed.
    32 bytes). These detailed physical checks have not been established by
    the user's round-8 success report. Capture screen evidence because this
    preserved menu does not enable kernel RAM logging.
-3. Prepare the reviewed PR for `main`: permanent fixes (UART detection, IST
-   stacks, BAR sizing, xHCI decode enable, PIC masking, non-fatal probes,
-   ACPICA timing, `rdtsc`), the no-UART regression, opt-in generic diagnostics,
-   and the constrained kernel-update target. Include the failed round-7 path,
-   successful round-8 report, and limits of the physical evidence in review.
+3. Address the [2026-11-03 review findings](2026-11-03-review.md#4-priority-findings)
+   before expanding the affected runtime capabilities. The bring-up PR is
+   already merged; preserve the failed round-7 evidence and the limits of
+   round-8 success when qualifying subsequent kernels or packaging changes.
 
 ## Plan used during rounds 1–6
 2. Map the faulting RIP to a symbol: `x86_64-elf-addr2line -f -C -e
@@ -332,7 +339,11 @@ physical round-8 report, so no additional physical result is claimed.
   in every mode, avoiding concurrent writes into that bootstrap-only buffer.
 - The pre-loader and both reset paths rely on `wbinvd`; consider flushing the
   window header in the shim/pre-loader paths with `clflush` as well.
-- Complete sustained physical validation and the staged merge review above.
+- Complete sustained physical validation with the bounded command set above.
+- `acpiprobe` is currently an active power diagnostic: its observation path
+  attempts D3 then D0 on live devices without a driver-quiescence or recovery
+  protocol. Keep this separate from passive hardware inspection; see
+  [review finding R2](2026-11-03-review.md#r2--p1-acpi-observation-performs-ungated-power-transitions).
 - xHCI BIOS→OS ownership handoff (USBLEGSUP) is still not implemented.
 - x2APIC mode is not detected; LAPIC is assumed to be in xAPIC MMIO mode.
 

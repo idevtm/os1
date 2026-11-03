@@ -4,6 +4,8 @@ This document consolidates the external standards, manuals, specifications, RFCs
 
 The list is curated rather than exhaustive. It favors primary sources first: official standards bodies, vendor manuals, protocol specifications, and normative registries. Where a foundational specification is membership-gated or historically difficult to obtain publicly, this guide points to the nearest official public landing page or the most authoritative open reference that is practical for project work.
 
+Implementation evidence as of 2026-11-03 is recorded in the [project review](2026-11-03-review.md), with [latest-review](latest-review.md) tracking the newest review. The [G74SX handoff](2026-11-02-g74sx-bringup-debug-plan.md) and [boot-log capture guide](2026-11-02-real-hardware-bootlog.md) distinguish physical boot reports from QEMU validation and later source changes. A specification listed here is a design reference, not evidence that its subsystem or full contract is implemented.
+
 ## Start Here
 
 If you are working on the codebase today, these are the highest-value references to open first:
@@ -35,8 +37,9 @@ If you are working on the codebase today, these are the highest-value references
 - [Unified Extensible Firmware Interface Specifications](https://uefi.org/specifications): Primary source for UEFI boot services, runtime services, memory descriptors, GPT, and the Graphics Output Protocol.
 - [UEFI Platform Initialization Specifications](https://uefi.org/specifications): Relevant when firmware-internal PEI and DXE assumptions matter for boot flow, handoff timing, or lower-level firmware bring-up.
 - [ACPI Specification 6.5](https://uefi.org/specs/ACPI/6.5/): Normative reference for MADT, MCFG, FADT, SRAT, SLIT, HPET, and RSDP/XSDT/RSDT handling.
+- [ACPICA upstream source](https://github.com/open-acpica/acpica): The interpreter integrated through the `third_party/acpica` submodule, pinned to `232ff3f8ae1a4da11c709f61d9154482cfe8e6df` in reviewed revision `63e328d`. Consult the [local OSL](../src/kernel/platform/acpica_osl.cpp) and [integration status](2026-05-06-acpica-integration.md) for the implemented OS services and remaining synchronization, interrupt, and asynchronous-execution limits.
 - [SMBIOS Reference Specification](https://www.dmtf.org/standards/smbios): The authoritative source for firmware-published system inventory and platform metadata.
-- [Limine Protocol](https://github.com/limine-bootloader/limine/blob/v8.x/PROTOCOL.md): The current bootloader protocol reference used by the default UEFI path.
+- [Limine Boot Protocol](https://github.com/Limine-Bootloader/limine-protocol/blob/trunk/PROTOCOL.md): The upstream protocol specification. The current [build selection](../CMakeLists.txt#L147) uses the vendored `v11.4.0` bootloader bundle; its [local protocol header](../third_party/limine/v11.4.0/limine.h) defines the exact declarations used by this checkout. Upstream documentation can advance independently of that bundle.
 - [Ralf Brown's Interrupt List](http://www.cs.cmu.edu/~ralf/files.html): A historical but still valuable public fallback for legacy BIOS interrupt behavior, especially when official firmware-era PDFs are unavailable.
 
 ## Memory Management, Interrupts, Timing, And SMP
