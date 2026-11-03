@@ -141,8 +141,16 @@ void console_input_on_keyboard_char(char ascii)
 void console_input_poll_serial()
 {
     KASSERT_ON_BSP();
+    // Runs from the timer tick with interrupts off. Without a UART the status
+    // port reads 0xFF ("data ready" forever), which hung the ASUS G74SX at its
+    // first tick; skip absent ports and bound the drain either way.
+    constexpr uint32_t kMaxBytesPerPoll = 16;
+    if(!debug.serial_available())
+    {
+        return;
+    }
     IrqSpinGuard guard(g_console_input_lock);
-    while((inb(kSerialLineStatusPort) & kSerialDataReady) != 0)
+    for(uint32_t i = 0; (i < kMaxBytesPerPoll) && ((inb(kSerialLineStatusPort) & kSerialDataReady) != 0); ++i)
     {
         handle_input_char((char)inb(kSerialPortBase));
     }

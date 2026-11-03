@@ -79,5 +79,25 @@ sectors_per_track	dw 0
 head_count			dw 0
 current_lba			dw 0
 
+; MBR partition table. Some BIOSes (AMI in particular) only offer a USB stick
+; as bootable when it carries an active partition, so describe the raw-image
+; area (loader, kernel, initrd, boot log) as one active non-filesystem
+; partition. The USB image builder adds the EFI System Partition as entry 2.
+%define CHS_CYLINDER(lba) ((lba) / (255 * 63))
+%define CHS_HEAD(lba) (((lba) / 63) % 255)
+%define CHS_SECTOR(lba) (((lba) % 63) + 1)
+%macro CHS_ADDRESS 1
+	db CHS_HEAD(%1)
+	db CHS_SECTOR(%1) | ((CHS_CYLINDER(%1) >> 2) & 0xC0)
+	db CHS_CYLINDER(%1) & 0xFF
+%endmacro
+
+times 0x1BE-($-$$) db 0x00
+	db 0x80
+	CHS_ADDRESS 1
+	db 0xDA
+	CHS_ADDRESS (RAW_IMAGE_SECTOR_COUNT - 1)
+	dd 1
+	dd RAW_IMAGE_SECTOR_COUNT - 1
 times 510-($-$$) db 0x00
 dw 0xAA55

@@ -42,6 +42,8 @@ constexpr size_t kXhciTransferRingBytes = kPageSize;
 constexpr size_t kXhciControlBufferBytes = 512u;
 constexpr size_t kXhciReportBufferBytes = 8u;
 constexpr uint32_t kXhciInitTimeoutSpins = 1000000u;
+constexpr uint64_t kXhciMaxBarBytes = 16ull * 1024 * 1024;
+constexpr uint16_t kPciCommandMemorySpace = 0x0002u;
 constexpr uint32_t kXhciPortTimeoutSpins = 1000000u;
 constexpr uint32_t kXhciTransferTimeoutSpins = 1000000u;
 
@@ -1364,16 +1366,27 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
     *controller = {};
     controller->owner = id;
     controller->pci_index = static_cast<uint16_t>(device_index);
+    debug("xhci: probe pci=")(device.bus, 16, 2)(":")(device.slot, 16, 2)(".")(device.function, 16, 1)(
+        " id=")(device.vendor_id, 16, 4)(":")(device.device_id, 16, 4)(" cmd=0x")(pci_read_command(device), 16, 4)();
 
     if(!claim_pci_bar(id, static_cast<uint16_t>(device_index), 0, controller->controller_bar))
     {
         debug("xhci: BAR0 claim failed")();
         return false;
     }
+    debug("xhci: BAR0 base=0x")(controller->controller_bar.base, 16)(" size=0x")(
+        controller->controller_bar.size, 16)();
     if((PciBarType::Mmio32 != controller->controller_bar.type) &&
        (PciBarType::Mmio64 != controller->controller_bar.type))
     {
         debug("xhci: BAR0 is not MMIO")();
+        release_controller(frames, *controller);
+        return false;
+    }
+    if((0 == controller->controller_bar.base) || (controller->controller_bar.size < 0x1000u) ||
+       (controller->controller_bar.size > kXhciMaxBarBytes))
+    {
+        debug("xhci: BAR0 implausible; skipping controller")();
         release_controller(frames, *controller);
         return false;
     }
@@ -1384,9 +1397,20 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         return false;
     }
 
+    // Firmware that never used this controller may leave memory decoding off;
+    // every register would then read as all ones.
+    pci_set_command_bits(device, kPciCommandMemorySpace);
     controller->controller.mmio_base =
         kernel_physical_pointer<volatile uint8_t>(controller->controller_bar.base);
     controller->controller.mmio_size = static_cast<size_t>(controller->controller_bar.size);
+    const uint32_t capability_word = *reinterpret_cast<volatile uint32_t*>(controller->controller.mmio_base);
+    debug("xhci: capability word=0x")(capability_word, 16, 8)();
+    if(0xFFFFFFFFu == capability_word)
+    {
+        debug("xhci: MMIO reads all ones; skipping controller")();
+        release_controller(frames, *controller);
+        return false;
+    }
     if(!xhci::parse_capability(controller->controller.mmio_base,
                                controller->controller.mmio_size,
                                controller->controller))
@@ -1405,6 +1429,9 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         return false;
     }
 
+    debug("xhci: capability ok ports=")(controller->controller.capability.max_ports)(" slots=")(
+        controller->controller.capability.max_slots)(" scratchpad=")(
+        controller->controller.capability.scratchpad_buffers)();
     controller->configured_slots = controller->controller.capability.max_slots;
     controller->scratchpad_count = controller->controller.capability.scratchpad_buffers;
     if(!allocate_controller_buffers(frames, *controller))
@@ -1414,12 +1441,14 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         return false;
     }
 
+    debug("xhci: buffers ok, binding interrupt")();
     if(!pci_enable_best_interrupt(kernel_vm, id, device, 0, xhci_irq, controller, controller->interrupt))
     {
         debug("xhci: interrupt bind failed")();
         release_controller(frames, *controller);
         return false;
     }
+    debug("xhci: interrupt bound vector=0x")(controller->interrupt.vector, 16, 2)(", resetting")();
 
     if(!xhci::controller_reset(controller->controller, kXhciInitTimeoutSpins))
     {

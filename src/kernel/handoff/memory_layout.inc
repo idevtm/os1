@@ -34,6 +34,14 @@
 
 %define EARLY_RESERVED_PHYSICAL_END 0x20000
 
+; Persistent RAM boot log for BIOS bring-up on real hardware. The BIOS loader
+; saves the previous boot's log from this window onto the boot disk, re-arms the
+; header, and publishes the window to the kernel as the "bootlog" boot module.
+%define BOOTLOG_PHYSICAL_ADDRESS 0x04000000
+%define BOOTLOG_MAGIC 0x31474F4C4231534F
+%define BOOTLOG_VERSION 1
+%define BOOTLOG_HEADER_BYTES 64
+
 %define KERNEL_PML4_INDEX ((KERNEL_VIRTUAL_OFFSET >> 39) & 0x1FF)
 %define DIRECT_MAP_PML4_INDEX ((DIRECT_MAP_BASE >> 39) & 0x1FF)
 

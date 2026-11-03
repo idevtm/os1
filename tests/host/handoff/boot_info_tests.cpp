@@ -112,3 +112,43 @@ TEST(BootInfoOwnership, PreservesNullOptionalStrings)
     EXPECT_EQ(nullptr, owned->memory_map);
     EXPECT_EQ(nullptr, owned->modules);
 }
+
+TEST(BootInfo, CommandLineOptionsMatchWholeWords)
+{
+    BootInfo info{};
+    info.command_line = "os1.noxhci  os1.nosmp";
+    EXPECT_TRUE(boot_info_has_option(info, "os1.noxhci"));
+    EXPECT_TRUE(boot_info_has_option(info, "os1.nosmp"));
+    EXPECT_FALSE(boot_info_has_option(info, "os1.no"));
+    EXPECT_FALSE(boot_info_has_option(info, "os1.noxhci2"));
+    EXPECT_FALSE(boot_info_has_option(info, ""));
+
+    info.command_line = nullptr;
+    EXPECT_FALSE(boot_info_has_option(info, "os1.noxhci"));
+}
+
+TEST(BootInfo, FindsModulesByExactName)
+{
+    std::array<BootModuleInfo, 2> modules{};
+    modules[0].name = "initrd.cpio";
+    modules[1].name = "shimlog";
+    BootInfo info{};
+    info.modules = modules.data();
+    info.module_count = 2;
+    EXPECT_EQ(&modules[1], boot_info_find_module(info, "shimlog"));
+    EXPECT_EQ(nullptr, boot_info_find_module(info, "shim"));
+    EXPECT_EQ(nullptr, boot_info_find_module(info, nullptr));
+}
+
+TEST(BootInfo, FindsRegionContainingWholeRange)
+{
+    std::array<BootMemoryRegion, 2> regions{};
+    regions[0] = {.physical_start = 0x100000, .length = 0x100000, .type = BootMemoryType::Usable};
+    regions[1] = {.physical_start = 0x4000000, .length = 0x200000, .type = BootMemoryType::Reserved};
+    BootInfo info{};
+    info.memory_map = regions.data();
+    info.memory_map_count = 2;
+    EXPECT_EQ(&regions[1], boot_memory_region_containing(info, 0x4100000, 0x100000));
+    EXPECT_EQ(nullptr, boot_memory_region_containing(info, 0x4180000, 0x100000));
+    EXPECT_EQ(nullptr, boot_memory_region_containing(info, 0x300000, 0x1000));
+}

@@ -19,6 +19,17 @@ endif()
 project(os1 LANGUAGES C CXX)
 
 option(OS1_KMEM_DEBUG "Enable kernel small-object allocator debug instrumentation" ON)
+option(OS1_BOOT_DIAGNOSTICS "Enable USB pre-loader and BIOS boot-log diagnostics" OFF)
+option(OS1_QEMU_DEBUGCON "Mirror kernel output to QEMU port 0xE9 for no-UART tests" OFF)
+set(OS1_USB_BASE_IMAGE "" CACHE FILEPATH "Verified base image for kernel-only USB updates")
+# Reject stale profile caches rather than silently switching their image recipe.
+if(DEFINED OS1_USB_PROFILE OR DEFINED OS1_G74SX_BASE_IMAGE)
+  message(FATAL_ERROR "USB profiles were replaced by the os1_usb_kernel_update target. Remove OS1_USB_PROFILE and OS1_G74SX_BASE_IMAGE from the cache (cmake -UOS1_USB_PROFILE -UOS1_G74SX_BASE_IMAGE ...), set OS1_USB_BASE_IMAGE, and build os1_usb_kernel_update. See doc/2026-11-02-real-hardware-bootlog.md.")
+endif()
+set(OS1_BOOT_DIAGNOSTICS_ENABLED 0)
+if(OS1_BOOT_DIAGNOSTICS)
+  set(OS1_BOOT_DIAGNOSTICS_ENABLED 1)
+endif()
 
 if(NOT CMAKE_C_COMPILER MATCHES "(^|/)x86_64-elf-gcc$")
   message(FATAL_ERROR "os1 requires the x86_64-elf cross toolchain. Configure with -DCMAKE_TOOLCHAIN_FILE=${OS1_TOOLCHAIN_FILE} or use the provided CMake preset.")
@@ -111,6 +122,7 @@ set(OS1_CPU_START_BIN "${OS1_ARTIFACT_DIR}/cpu_start.bin")
 set(OS1_KERNEL_ELF "${OS1_ARTIFACT_DIR}/kernel.elf")
 set(OS1_KERNEL_BIOS_ELF "${OS1_ARTIFACT_DIR}/kernel_bios.elf")
 set(OS1_KERNEL_LIMINE_ELF "${OS1_ARTIFACT_DIR}/kernel_limine.elf")
+set(OS1_EFI_PRELOADER "${OS1_ARTIFACT_DIR}/OS1BOOTX64.EFI")
 set(OS1_INITRD_CPIO "${OS1_ARTIFACT_DIR}/initrd.cpio")
 set(OS1_RAW_IMAGE "${OS1_ARTIFACT_DIR}/os1.raw")
 set(OS1_ISO_IMAGE "${OS1_ARTIFACT_DIR}/os1.iso")
@@ -137,6 +149,15 @@ set(OS1_LIMINE_BOOTX64 "${OS1_LIMINE_DIR}/BOOTX64.EFI")
 set(OS1_LIMINE_UEFI_CD "${OS1_LIMINE_DIR}/limine-uefi-cd.bin")
 set(OS1_LIMINE_PROTOCOL_HEADER "${OS1_LIMINE_DIR}/limine.h")
 set(OS1_LIMINE_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine.conf")
+# The USB stick offers bring-up variants (boot options) in a Limine menu.
+set(OS1_LIMINE_USB_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine-usb.conf")
+set(OS1_USB_PRELOADER_ARGS)
+set(OS1_USB_PRELOADER_DEPENDS)
+if(OS1_BOOT_DIAGNOSTICS)
+  set(OS1_LIMINE_USB_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine-usb-diagnostic.conf")
+  set(OS1_USB_PRELOADER_ARGS --preloader "${OS1_EFI_PRELOADER}")
+  set(OS1_USB_PRELOADER_DEPENDS "${OS1_EFI_PRELOADER}" os1_efi_preloader)
+endif()
 
 foreach(OS1_VENDOR_FILE
     "${OS1_LIMINE_BOOTX64}"
@@ -173,6 +194,22 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
 set(OS1_INITRD_IMAGE_SECTOR_COUNT 128)
+# Real-hardware boot log area on the BIOS raw image. The loader saves the
+# previous boot's RAM log here before booting again. Everything stays below LBA
+# 2880 so the area remains reachable even when firmware emulates a USB stick as
+# a 1.44 MB floppy. See doc/2026-11-02-real-hardware-bootlog.md.
+set(OS1_BOOTLOG_JOURNAL_LBA 1280)
+set(OS1_BOOTLOG_SLOT_BASE_LBA 1288)
+set(OS1_BOOTLOG_SLOT_SECTORS 392)
+set(OS1_BOOTLOG_SLOT_COUNT 4)
+set(OS1_RAW_IMAGE_SECTOR_COUNT 2880)
+math(EXPR OS1_INITRD_IMAGE_END_LBA "${OS1_INITRD_IMAGE_START_LBA} + ${OS1_INITRD_IMAGE_SECTOR_COUNT}")
+math(EXPR OS1_BOOTLOG_AREA_END_LBA "${OS1_BOOTLOG_SLOT_BASE_LBA} + ${OS1_BOOTLOG_SLOT_COUNT} * ${OS1_BOOTLOG_SLOT_SECTORS}")
+if(OS1_INITRD_IMAGE_END_LBA GREATER OS1_BOOTLOG_JOURNAL_LBA OR
+   NOT OS1_BOOTLOG_SLOT_BASE_LBA GREATER OS1_BOOTLOG_JOURNAL_LBA OR
+   OS1_BOOTLOG_AREA_END_LBA GREATER OS1_RAW_IMAGE_SECTOR_COUNT)
+  message(FATAL_ERROR "BIOS boot log area overlaps the initrd slot or exceeds the raw image")
+endif()
 math(EXPR OS1_KERNEL_IMAGE_MAX_BYTES "${OS1_KERNEL_IMAGE_SECTOR_COUNT} * 512")
 math(EXPR OS1_INITRD_IMAGE_MAX_BYTES "${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
 
@@ -427,7 +464,7 @@ add_custom_target(os1_limine_shim_layout_check DEPENDS "${OS1_LIMINE_SHIM_LAYOUT
 add_custom_command(
   OUTPUT "${OS1_RAW_IMAGE}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}"
-  COMMAND "${OS1_DD_EXECUTABLE}" if=/dev/zero "of=${OS1_RAW_IMAGE}" bs=1048576 count=1
+  COMMAND "${OS1_DD_EXECUTABLE}" if=/dev/zero "of=${OS1_RAW_IMAGE}" bs=512 "count=${OS1_RAW_IMAGE_SECTOR_COUNT}"
   COMMAND "${OS1_DD_EXECUTABLE}" "if=${OS1_BOOT_BIN}" "of=${OS1_RAW_IMAGE}" bs=512 count=1 conv=notrunc,sync
   COMMAND
     "${OS1_DD_EXECUTABLE}"
@@ -503,6 +540,42 @@ add_custom_command(
 add_custom_target(os1_image ALL DEPENDS "${OS1_ISO_IMAGE}" os1_virtio_test_disk os1_bios_layout_check)
 add_custom_target(os1_bios_image ALL DEPENDS "${OS1_RAW_IMAGE}" os1_virtio_test_disk)
 
+# Hybrid USB stick image: the BIOS raw image (legacy boot + boot log area) plus
+# a FAT16 EFI System Partition with Limine, so one stick boots on legacy BIOS
+# and UEFI-only machines alike.
+set(OS1_USB_IMAGE "${OS1_ARTIFACT_DIR}/os1-usb.img")
+set(OS1_USB_ESP_START_LBA 4096)
+set(OS1_USB_ESP_SECTORS 65536)
+add_custom_command(
+  OUTPUT "${OS1_USB_IMAGE}"
+  COMMAND
+    "${OS1_PYTHON_EXECUTABLE}" -I "${PROJECT_SOURCE_DIR}/cmake/scripts/create_usb_image.py"
+    --raw-image "${OS1_RAW_IMAGE}"
+    ${OS1_USB_PRELOADER_ARGS}
+    --limine-efi "${OS1_LIMINE_BOOTX64}"
+    --limine-conf "${OS1_LIMINE_USB_CONFIG_SOURCE}"
+    --kernel-shim "${OS1_KERNEL_LIMINE_ELF}"
+    --kernel "${OS1_KERNEL_ELF}"
+    --initrd "${OS1_INITRD_CPIO}"
+    --esp-start-lba "${OS1_USB_ESP_START_LBA}"
+    --esp-sectors "${OS1_USB_ESP_SECTORS}"
+    --clear-lba-start "${OS1_BOOTLOG_JOURNAL_LBA}"
+    --clear-lba-end "${OS1_RAW_IMAGE_SECTOR_COUNT}"
+    --output "${OS1_USB_IMAGE}"
+  DEPENDS
+    "${OS1_RAW_IMAGE}"
+    ${OS1_USB_PRELOADER_DEPENDS}
+    "${OS1_LIMINE_BOOTX64}"
+    "${OS1_LIMINE_USB_CONFIG_SOURCE}"
+    "${OS1_KERNEL_LIMINE_ELF}"
+    "${OS1_KERNEL_ELF}"
+    "${OS1_INITRD_CPIO}"
+    "${OS1_LIMINE_SHIM_LAYOUT_CHECK_STAMP}"
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/create_usb_image.py"
+  VERBATIM
+)
+add_custom_target(os1_usb_image ALL DEPENDS "${OS1_USB_IMAGE}")
+
 function(os1_add_unavailable_target target_name reason)
   add_custom_target(
     "${target_name}"
@@ -512,6 +585,37 @@ function(os1_add_unavailable_target target_name reason)
   )
   set_property(TARGET "${target_name}" PROPERTY OS1_TARGET_UNAVAILABLE_REASON "${reason}")
 endfunction()
+
+# This operation preserves a qualified image, independently of fresh packaging.
+# Only kernel file contents change; the updater pins the base hash and capacity.
+set(OS1_USB_KERNEL_UPDATE_IMAGE "${OS1_ARTIFACT_DIR}/os1-usb-kernel-update.img")
+if(NOT OS1_USB_BASE_IMAGE OR NOT EXISTS "${OS1_USB_BASE_IMAGE}" OR IS_DIRECTORY "${OS1_USB_BASE_IMAGE}")
+  os1_add_unavailable_target(os1_usb_kernel_update
+    "os1_usb_kernel_update requires OS1_USB_BASE_IMAGE pointing to the verified base image. No fresh-image fallback. See doc/2026-11-02-real-hardware-bootlog.md.")
+elseif(OS1_QEMU_DEBUGCON OR OS1_BOOT_DIAGNOSTICS)
+  os1_add_unavailable_target(os1_usb_kernel_update
+    "os1_usb_kernel_update requires OS1_QEMU_DEBUGCON=OFF and OS1_BOOT_DIAGNOSTICS=OFF to retain the qualified normal-kernel configuration.")
+else()
+  add_custom_command(
+    OUTPUT "${OS1_USB_KERNEL_UPDATE_IMAGE}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}"
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I "${PROJECT_SOURCE_DIR}/cmake/scripts/update_usb_kernel.py"
+      --base-image "${OS1_USB_BASE_IMAGE}"
+      --kernel "${OS1_KERNEL_ELF}"
+      --stripped-kernel "${OS1_KERNEL_BIOS_ELF}"
+      --output "${OS1_USB_KERNEL_UPDATE_IMAGE}"
+    DEPENDS
+      "${OS1_USB_BASE_IMAGE}"
+      "${OS1_KERNEL_ELF}"
+      "${OS1_KERNEL_BIOS_ELF}"
+      "${PROJECT_SOURCE_DIR}/cmake/scripts/update_usb_kernel.py"
+    VERBATIM
+  )
+  add_custom_target(os1_usb_kernel_update DEPENDS "${OS1_USB_KERNEL_UPDATE_IMAGE}")
+endif()
+os1_register_menu_target(os1_usb_kernel_update
+  "Update USB kernel in verified base image"
+  "Preserve all other bytes; requires OS1_USB_BASE_IMAGE. Produces os1-usb-kernel-update.img.")
 
 if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(
@@ -684,6 +788,16 @@ os1_register_menu_target(
 )
 
 include(CTest)
+if(BUILD_TESTING)
+  add_test(NAME os1_smoke_monitor_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
+      -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_smoke_monitor.py
+  )
+  add_test(NAME os1_usb_kernel_update_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
+      -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_update_usb_kernel.py
+  )
+endif()
 
 # The smoke runner terminates QEMU as soon as every expected marker has been
 # seen, so these values are safety ceilings for the slowest realistic CI host
@@ -1433,6 +1547,45 @@ os1_register_menu_target(
   "Run the BIOS exec smoke."
 )
 
+if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE AND OS1_QEMU_DEBUGCON)
+  # COM1 is absent; output uses debugcon and input uses the actual PS/2 path.
+  set(OS1_NO_UART_INPUT_EVENTS
+    "shell prompt ready::sendkey e 1\\nsendkey c 1\\nsendkey h 1\\nsendkey o 1\\nsendkey spc 1\\nsendkey n 1\\nsendkey o 1\\nsendkey minus 1\\nsendkey u 1\\nsendkey a 1\\nsendkey r 1\\nsendkey t 1\\nsendkey ret 1"
+  )
+  add_test(
+    NAME os1_smoke_no_uart
+    COMMAND "${CMAKE_COMMAND}"
+      "-DQEMU_EXECUTABLE=${OS1_QEMU_EXECUTABLE}"
+      "-DISO_IMAGE=${OS1_ISO_IMAGE}"
+      "-DOVMF_CODE=${OS1_OVMF_CODE}"
+      "-DOVMF_VARS_TEMPLATE=${OS1_OVMF_VARS_TEMPLATE}"
+      "-DLOG_FILE=${OS1_ARTIFACT_DIR}/smoke-no-uart.log"
+      "-DSMOKE_TIMEOUT_SECONDS=${OS1_UEFI_SMOKE_TIMEOUT_SECONDS}"
+      "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
+      "-DEXPECTED_MARKERS=shell prompt ready;echo: no-uart"
+      "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
+      "-DMONITOR_SOCKET=${OS1_ARTIFACT_DIR}/smoke-no-uart.sock"
+      "-DMONITOR_SEND_EVENTS=${OS1_NO_UART_INPUT_EVENTS}"
+      "-DNO_UART=ON"
+      "-DVIRTIO_TEST_DISK=${OS1_VIRTIO_TEST_DISK}"
+      "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"
+      "-DSMOKE_RUNNER=${OS1_SMOKE_RUNNER}"
+      -P "${PROJECT_SOURCE_DIR}/cmake/scripts/run_smoke_test.cmake"
+  )
+  list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_no_uart)
+  add_custom_target(smoke_no_uart
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke_no_uart$"
+    DEPENDS os1_image "${OS1_VIRTIO_TEST_DISK}"
+    USES_TERMINAL VERBATIM
+  )
+else()
+  os1_add_unavailable_target(smoke_no_uart "smoke_no_uart requires OS1_QEMU_DEBUGCON=ON, BUILD_TESTING, QEMU and OVMF")
+endif()
+os1_register_menu_target(smoke_no_uart
+  "UEFI boot and PS/2 input without a UART"
+  "Remove COM1 and verify a shell command through debugcon and PS/2."
+)
+
 if(OS1_QEMU_SMOKE_TESTS)
   set_tests_properties(
     ${OS1_QEMU_SMOKE_TESTS}
@@ -1445,7 +1598,7 @@ endif()
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(
     smoke_all
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke(_observe|_balance|_spawn|_exec|_xhci)?(_bios)?$"
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke(_observe|_balance|_spawn|_exec|_xhci|_no_uart)?(_bios)?$"
     DEPENDS os1_image os1_bios_image "${OS1_VIRTIO_TEST_DISK}"
     USES_TERMINAL
     VERBATIM

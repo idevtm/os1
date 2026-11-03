@@ -133,6 +133,8 @@ void cpu_set_kernel_stack(uint64_t stack_top)
     cpu_cur()->tss.rsp0 = stack_top;
 }
 
+extern PageFrameContainer page_frames;
+
 void cpu_init()
 {
     cpu* c = cpu_cur();
@@ -141,6 +143,14 @@ void cpu_init()
     if(0 == c->tss.rsp0)
     {
         c->tss.rsp0 = (uint64_t)c->kstackhi;
+    }
+    // Dedicated IST1 stack for NMI, double fault, and machine check. The BSP
+    // gets it on its second cpu_init, once the page allocator and direct map
+    // exist and before the IDT is loaded.
+    uint64_t ist_page = 0;
+    if((0 == c->tss.ist1) && g_kernel_direct_map_ready && page_frames.allocate(ist_page, 1))
+    {
+        c->tss.ist1 = reinterpret_cast<uint64_t>(kernel_physical_pointer<uint8_t>(ist_page)) + kPageSize;
     }
     set_tss_descriptor(c);
 
@@ -179,7 +189,6 @@ void cpu_load_idt()
     interrupts.load();
 }
 
-extern PageFrameContainer page_frames;
 cpu* cpu_alloc(void)
 {
     cpu* last_cpu = g_cpu_boot;

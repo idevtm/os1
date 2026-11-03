@@ -192,9 +192,10 @@ static inline void cpuid(uint32_t idx, cpuinfo* info)
 
 static inline uint64_t rdtsc(void)
 {
-    uint64_t tsc;
-    asm volatile("rdtsc" : "=A"(tsc));
-    return tsc;
+    uint32_t low;
+    uint32_t high;
+    asm volatile("rdtsc" : "=a"(low), "=d"(high));
+    return (static_cast<uint64_t>(high) << 32) | low;
 }
 
 static inline void wrmsr(uint32_t msr, uint64_t value)

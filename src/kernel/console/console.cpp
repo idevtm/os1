@@ -21,7 +21,7 @@ void write_console_bytes(const char* data, size_t length)
     IrqSpinGuard guard(g_console_output_lock);
     for(size_t i = 0; i < length; ++i)
     {
-        debug.write(data[i]);
+        debug.write_unmirrored(data[i]);
         if(active_terminal)
         {
             active_terminal->write(data[i]);
@@ -37,9 +37,27 @@ void write_console_line(const char* text)
     }
 
     IrqSpinGuard guard(g_console_output_lock);
-    debug.write_line(text);
+    for(const char* cursor = text; '\0' != *cursor; ++cursor)
+    {
+        debug.write_unmirrored(*cursor);
+    }
+    debug.write_unmirrored('\n');
     if(active_terminal)
     {
         active_terminal->write_line(text);
     }
+}
+
+void console_mirror_debug_byte(char c)
+{
+    IrqGuard irq;
+    if(!g_console_output_lock.try_lock())
+    {
+        return;
+    }
+    if(active_terminal)
+    {
+        active_terminal->write(c);
+    }
+    g_console_output_lock.unlock();
 }
