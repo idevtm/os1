@@ -1,5 +1,5 @@
 {
-  "architecture_exceptions": 0,
+  "architecture_exceptions": 1,
   "footprint": {
     "acpica_archive": {
       "bss": 1663,
@@ -38,8 +38,8 @@
   "legacy_unowned_todos": 4,
   "schema_version": 1,
   "test_inventory": {
-    "host": 150,
-    "qemu": 11
+    "host": 158,
+    "qemu": 12
   },
   "unreferenced_translation_units": []
 }

@@ -1,5 +1,8 @@
 # Reviewed architecture exceptions.
 # Format: rule|source path|include target
 #
-# The Phase A rules have no exceptions at d255142. Keep this file explicit so
-# any future temporary exception is reviewed, attributable, and ratcheted away.
+# 2026-11-03: imported from main at 85ebb10 (#26). The UEFI log-recovery
+# preloader uses only BootLogHeader and BootLogFlag wire-format definitions,
+# not kernel debug functions. Keep this exact include exception until the
+# shared log format moves into handoff/; other debug includes remain forbidden.
+boot-narrow-kernel-boundary|src/boot/efi/preloader.cpp|debug/bootlog.hpp

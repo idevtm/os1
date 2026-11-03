@@ -70,7 +70,7 @@ section .bss.boot_memory_map start=BOOT_MEMORY_REGION_BUFFER_ADDRESS
 boot_memory_map: times boot_memory_region_struct_size * BOOT_MEMORY_REGION_CAPACITY db 0
 
 section .bss.boot_modules start=BOOT_MODULE_INFO_BUFFER_ADDRESS
-boot_modules: times boot_module_info_struct_size db 0
+boot_modules: times boot_module_info_struct_size * 2 db 0
 
 memory_pages	equ		EARLY_LONG_MODE_PAGE_TABLES_ADDRESS
 kernel_image	equ 	KERNEL_IMAGE_LOAD_ADDRESS
@@ -232,16 +232,7 @@ loader_full_main16:
 	mov word [boot_info + boot_info_struct.text_console + boot_text_console_info_struct.columns], BOOT_TEXT_COLUMNS
 	mov word [boot_info + boot_info_struct.text_console + boot_text_console_info_struct.rows], BOOT_TEXT_ROWS
 
-	; save cursor position
-	mov ah, 03h
-	xor bh, bh
-	int 10h
-	xor ax, ax
-	mov al, dl
-	mov word [boot_info + boot_info_struct.text_console + boot_text_console_info_struct.cursor_x], ax
-	xor ax, ax
-	mov al, dh
-	mov word [boot_info + boot_info_struct.text_console + boot_text_console_info_struct.cursor_y], ax
+	call save_text_cursor16
 
 	; detect memory
 .l2:
@@ -262,6 +253,13 @@ loader_full_main16:
 	xor eax, eax
 	mov dword [boot_info + boot_info_struct.memory_map + 4], eax
 
+	; Save the previous boot's RAM log to disk and arm a fresh one. This must
+	; run after E820 (it validates the RAM window) and while the BIOS is usable.
+%if BOOT_DIAGNOSTICS_ENABLED
+	call bootlog_prepare16
+	call save_text_cursor16
+%endif
+
 	; TODO: detect video modes
 
 	; switch to long mode
@@ -272,6 +270,19 @@ no_long_mode:
 	mov si, str_no_long_mode
 	call print16
 	jmp $
+
+; Publish the BIOS cursor position for the long-mode console and kernel.
+save_text_cursor16:
+	mov ah, 03h
+	xor bh, bh
+	int 10h
+	xor ax, ax
+	mov al, dl
+	mov word [boot_info + boot_info_struct.text_console + boot_text_console_info_struct.cursor_x], ax
+	xor ax, ax
+	mov al, dh
+	mov word [boot_info + boot_info_struct.text_console + boot_text_console_info_struct.cursor_y], ax
+	ret
 
 print_loader_disk_debug:
 	cmp byte [disk_load_phase], 2
@@ -362,13 +373,19 @@ str_on					db "on", 0
 str_off					db "off", 0
 str_bootloader_name		db "bios-loader", 0
 str_initrd_name			db "initrd.cpio", 0
+str_bootlog_name		db "bootlog", 0
+%if BOOT_DIAGNOSTICS_ENABLED
+str_boot_diagnostics_command_line db "os1.bootdiag", 0
+%endif
 disk_load_phase			db 0
 
 %include "disk16_range.asm"
+%include "bootlog16.asm"
 %include "biosmemory.asm"
 %include "console16.asm"
 %include "long64.asm"
 %include "console64.asm"
+%include "bootlog64.asm"
 
 [bits 64]
 loader_main64:
@@ -490,6 +507,10 @@ loader_main64:
 	mov [boot_info + boot_info_struct.magic], rax
 	mov rax, str_bootloader_name
 	mov [boot_info + boot_info_struct.bootloader_name], rax
+%if BOOT_DIAGNOSTICS_ENABLED
+	mov rax, str_boot_diagnostics_command_line
+	mov [boot_info + boot_info_struct.command_line], rax
+%endif
 	mov rsi, str_loader_stage_rsdp
 	call print64
 	call find_rsdp64
@@ -507,6 +528,14 @@ loader_main64:
 	mov qword [boot_modules + boot_module_info_struct.length], INITRD_PAYLOAD_LENGTH_BYTES
 	mov rax, str_initrd_name
 	mov [boot_modules + boot_module_info_struct.name], rax
+	cmp byte [bootlog_enabled], 0
+	je .bootlog_module_done
+	mov dword [boot_info + boot_info_struct.module_count], 2
+	mov qword [boot_modules + boot_module_info_struct_size + boot_module_info_struct.physical_start], BOOTLOG_PHYSICAL_ADDRESS
+	mov qword [boot_modules + boot_module_info_struct_size + boot_module_info_struct.length], BOOTLOG_REGION_BYTES
+	mov rax, str_bootlog_name
+	mov [boot_modules + boot_module_info_struct_size + boot_module_info_struct.name], rax
+.bootlog_module_done:
 	mov rsi, str_loader_stage_kernel
 	call print64
     ; init program stack
@@ -522,6 +551,12 @@ loader_main64:
 	mov rax, [e_entry]
 	mov rdi, boot_info
 	call rax		; call kernel_main
+
+	; kernel_main only returns when bring-up failed. With the boot log armed,
+	; reset so the next loader run saves what the kernel logged.
+	cmp byte [bootlog_enabled], 0
+	je .l3
+	call bootlog_reset64
 .l3:		
 	hlt
         jmp .l3 ; stop here
@@ -672,4 +707,5 @@ validate_rsdp64:
 	ret
 
 ; Tail
-times 4096-($-$$) db 0xCC                ; Fill sectors
+; The loader text may grow up to the E820 buffer at BOOT_MEMORY_REGION_BUFFER_ADDRESS.
+times (BOOT_MEMORY_REGION_BUFFER_ADDRESS - LOADER16_LOAD_ADDRESS)-($-$$) db 0xCC                ; Fill sectors

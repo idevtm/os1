@@ -114,3 +114,62 @@ const BootInfo* own_boot_info(const BootInfo* source)
 
     return &g_owned_boot_info.info;
 }
+
+bool boot_info_has_option(const BootInfo& info, const char* option)
+{
+    if((nullptr == info.command_line) || (nullptr == option) || ('\0' == option[0]))
+    {
+        return false;
+    }
+
+    const char* cursor = info.command_line;
+    while('\0' != *cursor)
+    {
+        while(' ' == *cursor)
+        {
+            ++cursor;
+        }
+        size_t length = 0;
+        while(('\0' != cursor[length]) && (' ' != cursor[length]))
+        {
+            ++length;
+        }
+        size_t matched = 0;
+        while((matched < length) && (option[matched] == cursor[matched]))
+        {
+            ++matched;
+        }
+        if((0 != length) && (matched == length) && ('\0' == option[length]))
+        {
+            return true;
+        }
+        cursor += length;
+    }
+    return false;
+}
+
+const BootModuleInfo* boot_info_find_module(const BootInfo& info, const char* name)
+{
+    for(uint32_t i = 0; (nullptr != info.modules) && (i < info.module_count); ++i)
+    {
+        if((nullptr != info.modules[i].name) && (nullptr != name) &&
+           freestanding::strings_equal(info.modules[i].name, name))
+        {
+            return &info.modules[i];
+        }
+    }
+    return nullptr;
+}
+
+const BootMemoryRegion* boot_memory_region_containing(const BootInfo& info, uint64_t start, uint64_t length)
+{
+    for(uint32_t i = 0; (nullptr != info.memory_map) && (i < info.memory_map_count); ++i)
+    {
+        const BootMemoryRegion& region = info.memory_map[i];
+        if((region.physical_start <= start) && ((region.physical_start + region.length) >= (start + length)))
+        {
+            return &region;
+        }
+    }
+    return nullptr;
+}

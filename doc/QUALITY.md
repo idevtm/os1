@@ -35,12 +35,14 @@ The promoted dependency and hygiene checks are deliberately narrow:
 - [`check_docs.py`](../tools/check_docs.py) requires every live debt item to keep
   its status, owner, impact, evidence, prerequisite, and next action.
 
-The current inventory is 150 host tests and 11 QEMU smokes. Refresh counts from
-the configured build trees rather than editing code to preserve a number:
+The current inventory is 158 host tests, 12 QEMU smokes, and two script contract
+tests. Refresh counts from the configured build trees rather than editing code
+to preserve a number:
 
 ```sh
 ctest --test-dir build-host-tests -N
 ctest --test-dir build -N
+ctest --test-dir build -N -R "^os1_smoke" -E "_contract$"
 ```
 
 ## Coverage Matrix

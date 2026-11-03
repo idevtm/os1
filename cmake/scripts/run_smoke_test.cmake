@@ -49,13 +49,25 @@ set(qemu_command
   q35
   -smp
   4
-  -serial
-  stdio
   -display
   none
   -no-reboot
   -no-shutdown
 )
+
+if(NO_UART)
+  if(SERIAL_INPUT_EVENTS)
+    message(FATAL_ERROR "NO_UART smoke input must use the keyboard monitor, not serial")
+  endif()
+  # OS1_QEMU_DEBUGCON supplies output independently of the absent COM1 device.
+  list(APPEND qemu_command
+    -serial none
+    -debugcon stdio
+    -global isa-debugcon.iobase=0xe9
+  )
+else()
+  list(APPEND qemu_command -serial stdio)
+endif()
 
 if(DEFINED MONITOR_SOCKET)
   get_filename_component(monitor_dir "${MONITOR_SOCKET}" DIRECTORY)

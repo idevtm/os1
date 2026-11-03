@@ -20,11 +20,13 @@
 #include "core/kernel_state.hpp"
 #include "core/panic.hpp"
 #include "core/timer_source.hpp"
+#include "debug/bootlog.hpp"
 #include "debug/debug.hpp"
 #include "debug/event_ring.hpp"
 #include "drivers/block/virtio_blk.hpp"
 #include "drivers/display/text_display.hpp"
 #include "drivers/timer/pit.hpp"
+#include "drivers/watchdog/intel_tco.hpp"
 #include "fs/initrd.hpp"
 #include "handoff/boot_info.hpp"
 #include "handoff/memory_layout.h"
@@ -63,6 +65,66 @@ constexpr uint8_t kPitSchedulerVector = static_cast<uint8_t>(T_IRQ0 + IRQ_TIMER)
 constexpr DeviceId kPitTimerOwner{DeviceBus::Platform, 0};
 constexpr DeviceId kKeyboardOwner{DeviceBus::Platform, 1};
 constexpr DeviceId kLapicTimerOwner{DeviceBus::Platform, 2};
+// Real-hardware bring-up watchdog: the platform resets after two stages without
+// a kick. After /bin/init starts, a longer stage leaves time at the shell and
+// still ends in a reset so a successful boot's log gets saved too.
+constexpr uint32_t kBootWatchdogStageSeconds = 45;
+constexpr uint32_t kPostInitWatchdogStageSeconds = 90;
+
+// Every early return from kernel_main means bring-up failed; the BIOS loader
+// then resets the machine when the boot log is active.
+struct KernelMainFailureReporter
+{
+    ~KernelMainFailureReporter()
+    {
+        debug("kernel_main: bring-up failed, returning to the boot loader")();
+        if(bootlog_active())
+        {
+            bootlog_mark(kBootLogFlagKernelMainReturned);
+            halt_forever();
+        }
+    }
+};
+
+// UEFI boots: the EFI pre-loader armed one of kBootLogUefiCandidates. Attach
+// through the kernel's own direct map once it exists. The memory type the
+// firmware and Limine report for the window is logged. The G74SX firmware
+// reports reserved memory correctly; mapping it explicitly also avoids relying
+// on the loader's direct map covering reserved regions.
+void attach_uefi_bootlog(VirtualMemory& kvm)
+{
+    const char* shim_log = nullptr;
+    if(const BootModuleInfo* module = boot_info_find_module(*g_boot_info, "shimlog"))
+    {
+        shim_log = kernel_physical_pointer<const char>(module->physical_start);
+    }
+
+    for(const uint64_t candidate : kBootLogUefiCandidates)
+    {
+        const BootMemoryRegion* region =
+            boot_memory_region_containing(*g_boot_info, candidate, kBootLogUefiWindowBytes);
+        const uint32_t type = (nullptr != region) ? static_cast<uint32_t>(region->type) : 0u;
+        if((nullptr == region) || (BootMemoryType::Mmio == region->type) ||
+           (BootMemoryType::Framebuffer == region->type) ||
+           !map_direct_range(kvm, candidate, kBootLogUefiWindowBytes))
+        {
+            debug("bootlog: candidate 0x")(candidate, 16)(" memmap type ")(type)(" skipped")();
+            continue;
+        }
+        if(!bootlog_attach_window(candidate, kBootLogUefiWindowBytes, shim_log))
+        {
+            debug("bootlog: candidate 0x")(candidate, 16)(" memmap type ")(type)(" has no valid header")();
+            continue;
+        }
+        if(boot_memory_region_is_usable(*region))
+        {
+            reserve_tracked_physical_range(page_frames, candidate, kBootLogUefiWindowBytes);
+        }
+        debug("bootlog: attached at 0x")(candidate, 16)(" memmap type ")(type)();
+        return;
+    }
+    debug("bootlog: no armed window found")();
+}
 
 [[noreturn]] void finish_kernel_thread(int exit_status)
 {
@@ -353,6 +415,16 @@ bool prepare_scheduler_timer()
         finish_boot_sequence_thread(1);
     }
 
+    bootlog_mark(kBootLogFlagUserInitStarted);
+    // The on-screen debug mirror is for bring-up; drawing every debug line on
+    // the framebuffer is slow enough to perturb user-space scheduling.
+    debug.set_mirror(nullptr);
+    if(intel_tco_watchdog_armed())
+    {
+        intel_tco_watchdog_set_timeout(kPostInitWatchdogStageSeconds);
+        debug("tco: user space reached; machine resets in ~")(2u * kPostInitWatchdogStageSeconds)(
+            " s to save this boot log")();
+    }
     write_console_line("starting first user process");
     mark_thread_ready(init_thread);
     finish_boot_sequence_thread(0);
@@ -361,11 +433,11 @@ bool prepare_scheduler_timer()
 
 extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
 {
+    KernelMainFailureReporter failure_reporter;
     bool result = false;
     const bool bios_legacy_boot = (nullptr != info) && (info->magic == kBootInfoMagic) &&
                                   (info->version == kBootInfoVersion) &&
                                   (BootSource::BiosLegacy == info->source);
-    debug.set_vga_mirror_enabled(bios_legacy_boot);
     debug("[kernel64] hello!\n");
 
     g_boot_info = own_boot_info(info);
@@ -374,8 +446,19 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         debug("invalid boot info")();
         return;
     }
+    bootlog_configure(*g_boot_info);
+    debug.set_vga_mirror_enabled(bios_legacy_boot && bootlog_diagnostics_enabled());
+    if(bios_legacy_boot && bootlog_capture_enabled())
+    {
+        debug(bootlog_attach(*g_boot_info) ? "bootlog: attached at 0x" : "bootlog: not available")(
+            bootlog_physical_start(), 16)();
+    }
     bind_initrd_boot_info(g_boot_info);
     debug("boot source: ")(boot_source_name(g_boot_info->source))();
+    if(nullptr != g_boot_info->command_line)
+    {
+        debug("command line: ")(g_boot_info->command_line)();
+    }
     if(g_boot_info->bootloader_name)
     {
         debug("bootloader: ")(g_boot_info->bootloader_name)();
@@ -471,6 +554,10 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     {
         return;
     }
+    if(!map_direct_range(kvm, bootlog_physical_start(), bootlog_region_bytes()))
+    {
+        return;
+    }
     kvm.activate();
     g_kernel_root_cr3 = kvm.root();
     g_kernel_direct_map_ready = true;
@@ -485,10 +572,21 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     g_cpu_boot->tss.rsp0 = 0;
     cpu_init();
 
+    if(!bios_legacy_boot && bootlog_capture_enabled())
+    {
+        attach_uefi_bootlog(kvm);
+    }
+    if(bootlog_diagnostics_enabled() && bootlog_active() &&
+       intel_tco_watchdog_arm(kvm, kBootWatchdogStageSeconds))
+    {
+        bootlog_mark(kBootLogFlagWatchdogArmed);
+    }
+
     if(!platform_discover(*g_boot_info, kvm))
     {
         return;
     }
+    intel_tco_watchdog_kick();
     debug("muliprocessor: ")(ismp ? "yes" : "no")();
     debug("ncpu: ")(ncpu)();
 
@@ -571,6 +669,17 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         active_terminal->move_cursor(0, 0);
     }
     active_terminal->write_line("[kernel64] hello");
+    const bool mirror_boot_diagnostics =
+        (BootSource::BiosLegacy != g_boot_info->source) && bootlog_diagnostics_enabled();
+    // End BSP-only buffering in every mode before IRQ/AP startup, including
+    // capture-only boots and failed log attachments that have no screen replay.
+    bootlog_replay_early(mirror_boot_diagnostics ? console_mirror_debug_byte : nullptr);
+    if(mirror_boot_diagnostics)
+    {
+        // UEFI laptops have no serial port: show the debug stream on screen,
+        // continuing after the early output replay above.
+        debug.set_mirror(console_mirror_debug_byte);
+    }
 
     result = interrupts.initialize();
     if(!result)
@@ -604,10 +713,11 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
 
     // Driver probing stays after the IDT and local interrupt controllers are
     // online so later MSI/MSI-X work does not need another boot-order split.
-    if(!platform_probe_devices(kvm))
+    if(!platform_probe_devices(kvm, !boot_info_has_option(*g_boot_info, "os1.noxhci")))
     {
         return;
     }
+    intel_tco_watchdog_kick();
 
     keyboard.initialize();
     keyboard.set_active_terminal(active_terminal);
@@ -652,7 +762,14 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         return;
     }
 
-    cpu_boot_others(g_kernel_root_cr3);
+    if(boot_info_has_option(*g_boot_info, "os1.nosmp"))
+    {
+        debug("smp: application processors left offline by boot option")();
+    }
+    else
+    {
+        cpu_boot_others(g_kernel_root_cr3);
+    }
 
     if(SchedulerTimerSource::Lapic == timer_source_scheduler())
     {
@@ -669,6 +786,7 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     }
 
     kernel_event::record(OS1_KERNEL_EVENT_SMOKE_MARKER, 0, OS1_KERNEL_EVENT_SMOKE_MAGIC, 0, 0, 0);
+    intel_tco_watchdog_kick();
     set_current_thread(boot_sequence_thread);
     enter_first_thread(boot_sequence_thread, boot_sequence_thread->kernel_stack_top);
     halt_forever();

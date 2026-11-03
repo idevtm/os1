@@ -8,6 +8,7 @@ from tools.repository_health import (
     BaselineError,
     REPO_ROOT,
     collect_smokes,
+    collect_test_count,
     describe_large_file_deltas,
     load_health_baseline,
     main,
@@ -64,6 +65,19 @@ class RepositoryHealthTests(unittest.TestCase):
         self.assertEqual([], errors)
         self.assertEqual("failed", summaries[0]["status"])
         self.assertEqual("timeout", summaries[0]["reason"])
+
+    def test_qemu_inventory_excludes_script_contracts(self) -> None:
+        build = self.root / "build"
+        build.mkdir()
+        (build / "CTestTestfile.cmake").write_text(
+            'add_test(os1_smoke "${CMAKE_COMMAND}" -E true)\n'
+            'add_test(os1_smoke_no_uart "${CMAKE_COMMAND}" -E true)\n'
+            'add_test(os1_smoke_monitor_contract "${CMAKE_COMMAND}" -E true)\n'
+            'add_test(os1_usb_kernel_update_contract "${CMAKE_COMMAND}" -E true)\n',
+            encoding="utf-8",
+        )
+        self.assertEqual(4, collect_test_count(build)[0])
+        self.assertEqual(2, collect_test_count(build, qemu_only=True)[0])
 
     def test_describes_existing_large_file_growth(self) -> None:
         self.assertEqual(

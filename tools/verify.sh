@@ -129,7 +129,7 @@ ctest --test-dir "$OS1_HOST_BUILD_DIR" --output-on-failure --no-tests=error
 
 if [ "$MODE" = full ]; then
     stage "Configure freestanding build"
-    cmake --preset default -B "$OS1_BUILD_DIR" -DOS1_REQUIRE_UEFI_SMOKE=ON -DOS1_KMEM_DEBUG=ON
+    cmake --preset default -B "$OS1_BUILD_DIR" -DOS1_REQUIRE_UEFI_SMOKE=ON -DOS1_KMEM_DEBUG=ON -DOS1_QEMU_DEBUGCON=ON
 
     stage "Build UEFI and BIOS images"
     cmake --build "$OS1_BUILD_DIR" --target os1_image os1_bios_image

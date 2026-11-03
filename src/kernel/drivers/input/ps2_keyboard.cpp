@@ -5,6 +5,16 @@
 #include "arch/x86_64/cpu/io_port.hpp"
 #include "console/console_input.hpp"
 #include "console/terminal_switcher.hpp"
+#include "debug/bootlog.hpp"
+#include "debug/debug.hpp"
+
+namespace
+{
+// Bring-up diagnostics: log the first scancodes so a boot log shows whether
+// keyboard IRQs arrive at all on a new machine.
+constexpr uint32_t kLoggedScancodeLimit = 32;
+uint32_t g_logged_scancodes = 0;
+}  // namespace
 
 uint16_t plain_map[256] = {
     0xf200, 0xf01b, 0xf031, 0xf032, 0xf033, 0xf034, 0xf035, 0xf036,
@@ -88,6 +98,11 @@ void Keyboard::irq_handler(Keyboard* object)
 
     // read scan code
     uint8_t scancode = inb(KBDATAPORT);
+    if(bootlog_diagnostics_enabled() && (g_logged_scancodes < kLoggedScancodeLimit))
+    {
+        ++g_logged_scancodes;
+        debug("ps2: scancode 0x")(scancode, 16, 2)();
+    }
     uint8_t brk = scancode & 0x80;
     uint8_t key = scancode & 0x7f;
 

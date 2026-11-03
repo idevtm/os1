@@ -276,10 +276,13 @@ def collect_unreferenced_translation_units(repo_root: Path) -> list[str]:
     )
 
 
-def collect_test_count(build_dir: Path) -> tuple[int | None, str]:
+def collect_test_count(build_dir: Path, *, qemu_only: bool = False) -> tuple[int | None, str]:
     if not build_dir.is_dir():
         return None, f"missing build directory: {build_dir}"
-    code, output = _command(["ctest", "--test-dir", str(build_dir), "-N"], build_dir.parent)
+    arguments = ["ctest", "--test-dir", str(build_dir), "-N"]
+    if qemu_only:
+        arguments.extend(("-R", "^os1_smoke", "-E", "_contract$"))
+    code, output = _command(arguments, build_dir.parent)
     if code != 0:
         return None, output.strip()[-1024:]
     match = TOTAL_TESTS_RE.search(output)
@@ -464,7 +467,7 @@ def collect_report(
     assert isinstance(inventory_baseline, dict)
     test_inventory: dict[str, int | None] = {}
     for name, directory in (("host", host_build_dir), ("qemu", build_dir)):
-        count, evidence = collect_test_count(directory)
+        count, evidence = collect_test_count(directory, qemu_only=(name == "qemu"))
         test_inventory[name] = count
         expected = int(inventory_baseline[name])
         if count != expected:

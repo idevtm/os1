@@ -197,10 +197,14 @@ highest-confidence ownership rules into a repository check:
   plus `src/common/`, frontend-local files, UAPI, and vendored boot interfaces.
 
 The checker scans quoted/angle C and C++ includes plus NASM `%include`
-directives. Reviewed legacy exceptions, if ever required, live in
+directives. Reviewed legacy exceptions live in
 [`tools/architecture-baseline.txt`](../tools/architecture-baseline.txt). The
 baseline is a ratchet: a new dependency and a stale exception both fail with a
-corrective message. At the Phase A baseline there are no exceptions.
+corrective message. The one exception imported from `main` at `85ebb10` is the
+UEFI log-recovery preloader's include of `debug/bootlog.hpp`: it consumes the
+shared `BootLogHeader` and `BootLogFlag` wire format, not kernel debug functions.
+Move those definitions into `handoff/` in a dedicated boot-contract change;
+other debug-header dependencies remain forbidden.
 
 These rules deliberately cover only boundaries that are already unambiguous.
 Additional subsystem directions should become blocking only after the current
@@ -505,10 +509,12 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-832`: `kernel.elf`
-- LBA `833-960`: `initrd.cpio`
+- LBA `65-1088`: `kernel.elf`
+- LBA `1089-1216`: `initrd.cpio`
+- LBA `1280`: real-hardware boot log journal
+- LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](2026-11-02-real-hardware-bootlog.md))
 
-The slot sizes come from `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [../CMakeLists.txt](../CMakeLists.txt). The kernel BIOS slot now matches the reserved low-physical kernel window published through the shared memory-layout contract. The build runs an ELF-aware boot-envelope assertion before writing `os1.raw` and fails if `kernel.elf` no longer fits its disk slot, low-memory staging buffer, or reserved execution window; `initrd.cpio` is still checked against its configured slot. To expand BIOS storage space, increase the corresponding sector-count or reserved-window value in [../CMakeLists.txt](../CMakeLists.txt) and rebuild; the generated BIOS image layout updates automatically while `os1.raw` stays padded to 1 MiB.
+The slot sizes come from `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [../CMakeLists.txt](../CMakeLists.txt). The kernel BIOS slot now matches the reserved low-physical kernel window published through the shared memory-layout contract. The build runs an ELF-aware boot-envelope assertion before writing `os1.raw` and fails if `kernel.elf` no longer fits its disk slot, low-memory staging buffer, or reserved execution window; `initrd.cpio` is still checked against its configured slot. To expand BIOS storage space, increase the corresponding sector-count or reserved-window value in [../CMakeLists.txt](../CMakeLists.txt) and rebuild; the generated BIOS image layout updates automatically while `os1.raw` stays padded to 2880 sectors so the boot log area is zeroed in the image.
 
 ## The Shared Kernel Contract: `BootInfo`
 
@@ -1154,7 +1160,7 @@ GitHub Actions runs on `ubuntu-24.04` and does all of the following on every pus
 - configure the project
 - build the default modern artifact
 - explicitly build the BIOS compatibility artifact
-- run the full eleven-test shell smoke matrix (including the UEFI-only xHCI smoke) through `ctest`
+- run all 12 QEMU smokes (including xHCI and no-UART input) plus the two script contract tests through `ctest`
 - upload serial logs, JSON summaries, and CTest's failure log when verification fails
 - on the weekly schedule or manual dispatch, always generate and upload the advisory Markdown/JSON repository-health report
 

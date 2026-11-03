@@ -122,6 +122,12 @@ choice without review.
   retain the first failing serial/JSON pair, and reduce it to a host invariant or
   deterministic QEMU regression before changing kernel code.
 
+The 2026-11-03 [main integration review](exec-plans/completed/2026-11-03-main-integration.md)
+also observed a BIOS child-launch fault in `os1_smoke_observe_bios` while starting
+`acpiprobe`: `root alloc 0x284000` followed by `#GP general protection`.
+The retained structured result is `forbidden_marker_seen`. This is additional
+symptom evidence, not proof that both failures share one root cause.
+
 ## Ledger Maintenance
 
 Close an item only with links to the implementing decision, source, tests, and

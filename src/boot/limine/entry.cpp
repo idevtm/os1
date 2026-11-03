@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "arch/x86_64/cpu/cpu.hpp"
+#include "bootlog.hpp"
 #include "freestanding/string.hpp"
 #include "elf_loader.hpp"
 #include "handoff/boot_info.hpp"

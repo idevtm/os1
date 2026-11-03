@@ -1,8 +1,9 @@
 [bits 64]
 VIDEO_MEM equ 0xB8000
 VIDEO_ROW_STRIDE equ BOOT_TEXT_COLUMNS * 2
-; print64 console output
+; print64 console output (also appended to the RAM boot log when armed)
 print64:
+	call bootlog_append64
 	mov edi, VIDEO_MEM
 	; compose edi	
 	movzx eax, word [boot_info + boot_info_struct.text_console + boot_text_console_info_struct.cursor_y]

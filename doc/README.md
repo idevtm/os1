@@ -66,7 +66,18 @@ paths to avoid link churn. There are currently no active execution plans.
   reuse the authoritative CI environment and publish advisory findings only as
   artifacts.
 
+## Hardware Bring-up
+
+- [G74SX bring-up debug plan](2026-11-02-g74sx-bringup-debug-plan.md) —
+  investigation record and remaining real-hardware validation.
+- [Real-hardware boot log](2026-11-02-real-hardware-bootlog.md) —
+  persistent boot diagnostics and log-recovery workflow.
+
 ## Implemented Designs and Plans
+
+- [Main integration and verification review](exec-plans/completed/2026-11-03-main-integration.md) —
+  boot-regression preservation, baseline reconciliation, and unresolved BIOS
+  smoke evidence from the November integration.
 
 - [Phase C — Compounding Maintenance](exec-plans/completed/2026-08-19-phase-c-compounding-maintenance.md) —
   blocking drift checks, scheduled advisory health evidence, a smoke-triage
