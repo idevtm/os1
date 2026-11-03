@@ -116,3 +116,73 @@ disk_read_chs_range:
 .failed:
 	stc
 	ret
+
+; Transfer one sector between the drive and the bounce buffer with classic CHS.
+; AX = LBA address within the raw image
+; BL = BIOS function (0x02 read, 0x03 write)
+; DL = drive
+; Returns CF set on failure after the same retry/reset policy as the range read.
+chs_io_lba			dw 0
+chs_io_function		db 0
+chs_io_drive		db 0
+chs_io_retry_count	db 0
+
+disk_chs_bounce_sector:
+	push es
+	push ax
+	push bx
+	push cx
+	push dx
+	mov [chs_io_lba], ax
+	mov [chs_io_function], bl
+	mov [chs_io_drive], dl
+	mov byte [chs_io_retry_count], disk_read_chs_retry_limit
+
+.retry:
+	mov ax, [chs_io_lba]
+	xor dx, dx
+	div word [loader_sectors_per_track]
+	mov cl, dl
+	inc cl
+
+	xor dx, dx
+	div word [loader_head_count]
+	mov dh, dl
+	mov ch, al
+	and ah, 0x03
+	shl ah, 6
+	or cl, ah
+
+	mov ax, load_range_bounce_segment
+	mov es, ax
+	xor bx, bx
+	mov ah, [chs_io_function]
+	mov al, 1
+	mov dl, [chs_io_drive]
+	int 0x13
+	jnc .done
+
+	dec byte [chs_io_retry_count]
+	jz .failed
+	xor ah, ah
+	mov dl, [chs_io_drive]
+	int 0x13
+	jmp .retry
+
+.failed:
+	pop dx
+	pop cx
+	pop bx
+	pop ax
+	pop es
+	stc
+	ret
+
+.done:
+	pop dx
+	pop cx
+	pop bx
+	pop ax
+	pop es
+	clc
+	ret

@@ -72,6 +72,22 @@ def parse_event_spec(parser, spec, flag_name):
     return marker, bytes(text, "utf-8").decode("unicode_escape")
 
 
+def read_monitor_prompt(sock, timeout=5.0):
+    # HMP echoes input a character at a time. A recv() can contain only that
+    # echo; the next prompt is the acknowledgement that the command finished.
+    deadline = time.monotonic() + timeout
+    response = b""
+    while not response.endswith(b"(qemu) "):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("timed out waiting for QEMU monitor prompt")
+        sock.settimeout(remaining)
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("QEMU monitor closed before its prompt")
+        response = (response + chunk)[-4096:]
+
+
 def send_monitor_text(socket_path, text):
     commands = [line for line in text.splitlines() if line]
     if not commands:
@@ -82,25 +98,26 @@ def send_monitor_text(socket_path, text):
         last_error = None
         payload = command if command.endswith("\n") else (command + "\n")
         while time.monotonic() < deadline:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-                    sock.connect(socket_path)
-                    sock.settimeout(0.5)
-                    try:
-                        sock.recv(4096)
-                    except socket.timeout:
-                        pass
-                    sock.sendall(payload.encode("utf-8"))
-                    try:
-                        sock.recv(4096)
-                    except socket.timeout:
-                        pass
-                    break
+                sock.connect(socket_path)
+                break
             except OSError as exc:
+                sock.close()
                 last_error = exc
                 time.sleep(0.05)
         else:
-            raise RuntimeError(f"failed to send monitor text to '{socket_path}': {last_error}")
+            raise RuntimeError(f"failed to connect to monitor '{socket_path}': {last_error}")
+
+        # Retry connection establishment only. Once sent, a command must not
+        # be replayed if the acknowledgement is lost (e.g. duplicate keys).
+        try:
+            with sock:
+                read_monitor_prompt(sock)
+                sock.sendall(payload.encode("utf-8"))
+                read_monitor_prompt(sock)
+        except OSError as exc:
+            raise RuntimeError(f"monitor command {command!r} failed: {exc}") from exc
 
         time.sleep(0.05)
 

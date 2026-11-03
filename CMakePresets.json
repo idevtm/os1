@@ -17,6 +17,17 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/x86_64-elf.cmake"
       }
+    },
+    {
+      "name": "usb-kernel-update",
+      "displayName": "Kernel-only USB image update",
+      "description": "Update only the kernel in the verified round-6 image; requires OS1_USB_BASE_IMAGE.",
+      "inherits": "default",
+      "binaryDir": "${sourceDir}/build/usb-kernel-update",
+      "cacheVariables": {
+        "OS1_BOOT_DIAGNOSTICS": false,
+        "OS1_QEMU_DEBUGCON": false
+      }
     }
   ],
   "buildPresets": [
@@ -66,6 +77,14 @@
       "configurePreset": "default",
       "targets": [
         "smoke_all"
+      ]
+    },
+    {
+      "name": "usb-kernel-update",
+      "displayName": "Build kernel-only USB image update",
+      "configurePreset": "usb-kernel-update",
+      "targets": [
+        "os1_usb_kernel_update"
       ]
     }
   ]

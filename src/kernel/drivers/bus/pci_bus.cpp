@@ -1,6 +1,7 @@
 // PCI bus probing through the fixed driver registry.
 #include "drivers/bus/pci_bus.hpp"
 
+#include "debug/debug.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "freestanding/string.hpp"
@@ -28,8 +29,13 @@ bool pci_bus_probe_all(VirtualMemory& kernel_vm, PageFrameContainer& frames)
                 break;
             }
 
+            // One misbehaving device must not stop bring-up: real machines carry
+            // controllers that emulator-tested drivers have never seen.
+            debug("pci: ")(driver->name)(" probe failed for ")(devices[device_index].bus, 16, 2)(":")(
+                devices[device_index].slot, 16, 2)(".")(devices[device_index].function, 16, 1)(
+                "; continuing without it")();
             (void)device_binding_set_state(id, DeviceState::Failed);
-            return false;
+            break;
         }
     }
     return true;

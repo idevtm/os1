@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 
+#include "bootlog.hpp"
 #include "freestanding/string.hpp"
 #include "handoff/memory_layout.h"
 #include "paging.hpp"
@@ -231,6 +232,19 @@ typedef char low_handoff_storage_fits_reserved_budget
 
     boot_info.modules = modules;
     boot_info.module_count = 1;
+
+    uint64_t log_physical = 0;
+    uint64_t log_capacity = 0;
+    if(shim_log_physical(log_physical, log_capacity))
+    {
+        modules[1].physical_start = log_physical;
+        modules[1].length = log_capacity;
+        modules[1].name = copy_boot_string(arena, kBootInfoMaxModuleNameBytes, "shimlog");
+        if(nullptr != modules[1].name)
+        {
+            boot_info.module_count = 2;
+        }
+    }
     return true;
 }
 

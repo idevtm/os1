@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "arch/x86_64/cpu/io_port.hpp"
+#include "debug/bootlog.hpp"
 #include "handoff/memory_layout.h"
 #include "util/memory.h"
 
@@ -28,6 +29,16 @@ void Debug::set_vga_mirror_enabled(bool enabled)
 
 void Debug::init_serial()
 {
+    // Probe the scratch register first: without a UART the port floats to 0xFF.
+    outb(PORT + 7, 0xA5);
+    const bool scratch_a5 = (0xA5 == inb(PORT + 7));
+    outb(PORT + 7, 0x5A);
+    if(!scratch_a5 || (0x5A != inb(PORT + 7)))
+    {
+        serial_state_ = kSerialStateUnavailable;
+        return;
+    }
+
     outb(PORT + 1, 0x00);  // Disable all interrupts
     outb(PORT + 3, 0x80);  // Enable DLAB (set baud rate divisor)
     outb(PORT + 0, 0x01);  // Set divisor to 1 (lo byte) 115200 baud
@@ -153,8 +164,27 @@ void Debug::write_vga(const char c)
     update_vga_cursor();
 }
 
+void Debug::set_mirror(void (*sink)(char))
+{
+    mirror_ = sink;
+}
+
 void Debug::write(const char c)
 {
+    if(nullptr != mirror_)
+    {
+        mirror_(c);
+    }
+    write_unmirrored(c);
+}
+
+void Debug::write_unmirrored(const char c)
+{
+#if defined(OS1_QEMU_DEBUGCON) && OS1_QEMU_DEBUGCON
+    // Test-only observation channel: the no-UART smoke removes COM1 entirely.
+    outb(0xE9, static_cast<uint8_t>(c));
+#endif
+    bootlog_write(c);
     write_vga(c);
     if(!wait_until_ready())
     {

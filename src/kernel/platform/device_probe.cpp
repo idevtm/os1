@@ -14,13 +14,17 @@
 
 extern PageFrameContainer page_frames;
 
-bool platform_probe_devices(VirtualMemory& kernel_vm)
+bool platform_probe_devices(VirtualMemory& kernel_vm, bool enable_xhci)
 {
     platform_reset_driver_state();
     driver_registry_reset();
+    if(!enable_xhci)
+    {
+        debug("xhci: disabled by boot option")();
+    }
     if(!driver_registry_add_pci_driver(virtio_blk_pci_driver()) ||
        !driver_registry_add_pci_driver(virtio_net_pci_driver()) ||
-         !driver_registry_add_pci_driver(xhci_pci_driver()) ||
+       (enable_xhci && !driver_registry_add_pci_driver(xhci_pci_driver())) ||
        !pci_bus_probe_all(kernel_vm, page_frames))
     {
         return false;

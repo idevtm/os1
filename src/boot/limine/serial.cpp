@@ -1,6 +1,7 @@
 #include "serial.hpp"
 
 #include "arch/x86_64/cpu/io_port.hpp"
+#include "bootlog.hpp"
 
 namespace limine_shim
 {
@@ -18,6 +19,7 @@ void init_serial()
 
 void write_serial_char(char value)
 {
+    shim_log_write_char(value);
     constexpr uint16_t kSerialPort = 0x3F8;
     while(0 == (inb(kSerialPort + 5) & 0x20))
     {
