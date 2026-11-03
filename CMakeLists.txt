@@ -789,6 +789,10 @@ os1_register_menu_target(
 
 include(CTest)
 if(BUILD_TESTING)
+  add_test(NAME os1_smoke_monitor_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
+      -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_smoke_monitor.py
+  )
   add_test(NAME os1_usb_kernel_update_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
       -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_update_usb_kernel.py
