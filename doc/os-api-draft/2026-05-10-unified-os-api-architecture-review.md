@@ -1,6 +1,7 @@
 # Unified OS API Architecture Review — 2026-05-10
 
-**Refreshed: 2026-11-04. Status: review and implementation proposal, not an ABI approval.**
+**Refreshed: 2026-11-04. Status: review with approved first-slice semantic
+decisions; no implemented or frozen binary ABI.**
 
 The original filename and review date are retained for existing links. This
 refresh supersedes the May recommendations below; the original text remains in
@@ -35,11 +36,11 @@ prerequisites of basic I/O. That would enlarge the first milestone without
 resolving the hardest ownership and failure questions.
 
 **The selected sequence is descriptors, console, and read-only initrd VFS first;
-hosted services next.** The revised kernel contract is the canonical semantic
-proposal. It resolves several design choices on paper, while keeping concrete
-UAPI layouts and implementation evidence as explicit gates. The project is
-ready to converge on that bounded first contract; it is not ready to implement
-the entire catalog or claim service/security completeness.
+hosted services next.** The revised kernel contract owns the approved first-slice
+semantic decisions and the later proposals. Concrete UAPI layouts and
+implementation evidence remain explicit gates. The next step is to encode and
+implement the bounded first contract, with the runtime prerequisites below;
+the entire catalog and service/security completeness remain later work.
 
 ## Current implementation and evidence limits
 
@@ -407,8 +408,17 @@ land before that path's new ownership is relied on.
 
 ## Decisions still required before coding each boundary
 
-The **semantic recommendation is now concrete**, while these implementation
-contracts remain open and must appear in the relevant implementation review:
+The six first-slice decision groups were approved on 2026-11-04: descriptor
+ABI, ownership/synchronization, blocking/teardown, process startup, initial
+interfaces, and namespace/I/O behavior. The
+[canonical approval record](native_object_kernel_contract.md#approved-decisions--2026-11-04)
+defines that scope. These no longer await a choice of architectural direction.
+
+The remaining first-slice work is concrete UAPI/startup encoding, limits, lock
+placement/order, reference-counter mechanics, implementation, and acceptance
+tests. Approval does not close existing runtime defects or establish tested
+conformance. Later service, shared-activation, and event boundaries below still
+need their own implementation contracts:
 
 1. **First UAPI:** numeric operation/error/right assignments; record sizes,
    alignment, reserved fields; descriptor and transfer limits; exact duplicate

@@ -18,7 +18,8 @@ limits, including an unresolved intermittent BIOS child-launch fault and
 source-confirmed lifecycle and allocation defects. ACPI observation currently
 attempts device power transitions; `/bin/acpiprobe` is not a passive inventory
 command. Descriptors, argv/envp, VFS, credentials, and a general network stack
-remain future work; the Native API documents are proposals.
+remain future work; the Native API documents record approved first-slice
+semantics and later proposals, with binary ABI details still to specify.
 
 ## Prerequisites
 

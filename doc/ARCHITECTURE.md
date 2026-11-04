@@ -4,7 +4,7 @@
 
 This document is the current-state source of truth for `os1`. It describes what is implemented in the repository today. For build, run, and smoke workflows, see [README](../README.md). For the longer-term direction, see [GOALS](../GOALS.md). For the external specifications, firmware manuals, ABI references, and protocol standards that inform the project, see [REFERENCES](REFERENCES.md). For the shell/operator milestone that produced the current user-facing environment, see [Milestone 5 Design: Interactive Shell And Observability](2026-04-23-milestone-5-interactive-shell-and-observability.md). For a full code-grounded review of the project, see [Latest Review](latest-review.md). The review documents under `doc/` are historical context, not the live system contract.
 
-The [2026-11-03 review](2026-11-03-review.md) records current correctness findings and validation limits. The affected boundaries are noted below; those findings remain open and the native API drafts remain proposals.
+The [2026-11-03 review](2026-11-03-review.md) records current correctness findings and validation limits. The affected boundaries are noted below; those findings remain open. The native API documents now record [approved first-slice semantic decisions](os-api-draft/native_object_kernel_contract.md#approved-decisions--2026-11-04); binary ABI encoding, implementation, and later service/reflection contracts remain work ahead.
 
 `os1` currently has:
 
@@ -1152,9 +1152,9 @@ Major constraints that remain:
 - xHCI brings up HID boot keyboards but does not yet handle USB hubs, mice past recognition, or USB mass storage
 - NVMe and AHCI are still follow-on work
 
-The next feature decision is a minimum process-resource contract, followed by console descriptors, bounded argument/environment handoff, and a read-only initrd VFS. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
+The next feature milestone is to encode and implement the approved minimum process-resource semantics, followed by console descriptors, bounded argument/environment handoff, and a read-only initrd VFS. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
 
-- define descriptor/handle identity, ownership, rights, close/dup behavior, errors, and spawn/exec inheritance before implementing a per-process resource table; the broader reflective object model remains a proposal (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md) and drafts under [os-api-draft/](os-api-draft/))
+- implement the approved descriptor/handle identity, ownership, rights, close/dup, waiting, error, and spawn/exec semantics after specifying their concrete UAPI encoding and synchronization details; the broader reflective object model remains a proposal (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md) and drafts under [os-api-draft/](os-api-draft/))
 - add `argv`/`envp` handoff in the initrd-backed loader so the shell can pass arguments and a real `init` can evolve apart from `/bin/sh`
 - use the existing small-object allocator for VFS inode/dentry state, descriptor tables, packet buffers, and other resource-lifetime records as those subsystems land
 - per-page user-buffer scatter-gather and DMA pinning, once the user-process side of the storage path needs them; bounded multi-sector requests already work today through a single contiguous data descriptor

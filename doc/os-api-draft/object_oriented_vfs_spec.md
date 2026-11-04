@@ -2,10 +2,13 @@
 
 ## Status and authority
 
-Proposed contract, revised 2026-11-04. This document specifies the namespace and
+First-slice namespace/I/O semantics approved on 2026-11-04; binary layouts and
+extension profiles remain unfrozen. This document specifies the namespace and
 file profile of the [native object kernel contract](native_object_kernel_contract.md).
-Requirements below describe the proposed interface; they do not claim that a VFS,
-handle table, credentials, or these operations are implemented. The
+The [approval record](native_object_kernel_contract.md#approved-decisions--2026-11-04)
+defines the accepted scope. Requirements below describe the intended interface;
+they do not claim that a VFS, handle table, credentials, or these operations are
+implemented. The
 [draft index](README.md) separates the proposal from current source behavior.
 
 The native contract owns descriptor representation, rights, argument/result

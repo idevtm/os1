@@ -1,6 +1,7 @@
 # Native Object Kernel Contract
 
-Status: revised semantic proposal, 2026-11-04. **Not an implemented or frozen ABI.**
+Status: first-slice semantic decisions approved, 2026-11-04; later service and
+reflection contracts remain proposals. **Not an implemented or frozen binary ABI.**
 
 The agreed implementation order is descriptors, console, and a read-only initrd
 VFS first; hosted services follow. This document owns the shared semantics.
@@ -15,6 +16,27 @@ claim about today's kernel. Operation names and symbolic errors are semantic
 names; syscall numbers, layouts, numeric rights, and error values must be pinned
 in reviewed UAPI headers with the first implementation.
 
+## Approved decisions — 2026-11-04
+
+The following six decision groups are approved for the console/initrd milestone.
+Their numbers identify the approval groups, not the sections of this document.
+
+| Decision | Approved direction |
+| --- | --- |
+| 1. Descriptor ABI | Process-local nonnegative 32-bit indices with reuse; per-entry rights/flags; attenuation; duplicates share open instances; close releases one entry while accepted work retains references; distinct errors and progress results. |
+| 2. Ownership and synchronization | Entries own open-instance references; open instances own objects; accepted operations retain references. Use atomic reference counting and an acyclic ownership graph initially. Validate rights and retain under table synchronization; invoke operations and destroy objects outside table/scheduler locks. |
+| 3. Blocking and teardown | A blocked request retains its object, registration, and valid buffer/address-space borrow. Readiness and registration prevent lost wakeups; completion and teardown prevent access to freed state. Exit stops admission, detaches/cancels waits, and quiesces outstanding accesses before freeing memory. Single-source blocking first; wait-many later. |
+| 4. Process startup | Explicit child descriptor maps and granted root/cwd/standard-stream entries; one bounded versioned argument/environment/bootstrap record; complete child initialization before publication; transactional exec and close-on-exec; one user thread per process initially. |
+| 5. Initial interfaces | Descriptor lifecycle/flags/atomic replacement, byte I/O, seekable input, directory open/enumerate, and bounded basic information. Fixed records and common authorization/dispatch; each object implements only supported interfaces. Internal C++ inheritance/function tables are not the userspace ABI. |
+| 6. Namespace and I/O | Explicit directory capabilities, separate lookup/enumeration rights, immutable initrd, bounded byte paths, no links or parent traversal initially; independent opens have independent cursors, duplicates share them; cursor advancement follows successful delivery including partial progress. |
+
+Numeric assignments, record layouts, finite limits, startup encoding, exact
+lock placement/order, and reference-counter mechanics remain implementation
+specification work. The approved semantics must be preserved while resolving
+those details. Approval neither implements these facilities nor approves every
+later hosted-service, reflection, or event proposal. Acceptance tests remain
+required before claiming runtime conformance.
+
 ## 1. Scope and design decisions
 
 Keep one process resource table and a small set of native interfaces. Files and
@@ -22,7 +44,7 @@ consoles are objects with supported operations and granted rights; future
 processes or services need not pretend to be byte streams. POSIX functions can
 project suitable objects through the same descriptor numbers.
 
-| Decision proposed on 2026-11-04 | Reason and consequence |
+| First-slice direction approved on 2026-11-04 | Reason and consequence |
 | --- | --- |
 | One fd-shaped descriptor table | One close, duplication, inheritance, and teardown path; stale integers remain possible after slot reuse. |
 | Separate descriptor, open instance, and object | Duplicates share stream position while keeping independent rights and descriptor flags. |
@@ -69,8 +91,16 @@ flowchart LR
 A second `open` creates a fresh open instance. Duplication and an explicit child
 grant retain the existing open instance. Kernel references held by an in-flight
 operation are additional owners; they are not exposed descriptor entries.
-Reference counting is an implementation option, not a complete service lifetime
-or cycle-collection policy.
+Use atomic reference counting for this first slice. Entry references, accepted
+operation references, and open-instance-to-object references form an explicitly
+acyclic ownership graph. Back-links used by registries or wait queues must not
+create uncollectable owning cycles; their non-owning links need synchronized
+removal before the referenced storage is freed. A reference can be retained only
+from a live owner or under the protection that prevents removal; incrementing a
+counter through a stale pointer is not safe acquisition. Final release destroys
+outside table and scheduler locks. Exact counter ordering and new lock placement
+must be reviewed against the existing SMP synchronization contract. Reference
+counting alone does not define later service supervision or cycle collection.
 
 ## 3. Descriptor lifecycle
 
@@ -105,6 +135,29 @@ removes entries, and releases references through an ordered cleanup path.
 Address-space teardown waits until any operation that uses that address space
 has stopped using it. The first slice must reject unsupported concurrent
 user-thread creation rather than assume this remains safe when threads arrive.
+
+### Single-source blocking and cross-CPU completion
+
+An accepted blocking operation retains its open instance and owns a stable wait
+registration, completion state, and buffer/address-space borrow until it stops
+using them. Descriptor close/reuse never changes the retained target. The request
+must not sleep while holding the descriptor-table lock.
+
+Readiness checking and registration must share synchronization with the producer,
+or recheck under that synchronization before sleeping, so a readiness change
+between check and sleep cannot be lost. A notification prompts observation of
+authoritative state; it is not permission to access storage after teardown.
+Completion and cancellation coordinate one terminal request transition and one
+cleanup path. Removing a waiter from a queue is insufficient if a wakeup path
+already holds it: teardown must wait for, or otherwise safely retain storage
+through, those outstanding accesses before reclaiming request/thread memory.
+
+Process exit closes admission, detaches or cancels waits, and quiesces outstanding
+object, thread, and user-memory accesses before reclaiming their owners. Wait
+registration and wakeup paths must preserve the scheduler's cross-CPU locking
+rules. The implementation must document lock order and the handoff between queue,
+request, and scheduler ownership. General multi-source registration and public
+wait-many are deferred; the first slice uses single-source blocking operations.
 
 ### Duplication and flags
 

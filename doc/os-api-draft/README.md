@@ -1,7 +1,8 @@
 # OS API Drafts
 
-Revised 2026-11-04. These documents are a coordinated design proposal,
-**not implemented contracts or a frozen ABI**. The selected first implementation
+Revised 2026-11-04. These documents contain approved first-slice semantic
+decisions and later design proposals, **not implemented contracts or a frozen
+binary ABI**. The selected first implementation
 is descriptors, console, and a read-only initrd VFS; hosted services follow.
 
 ## Read order and ownership
@@ -19,7 +20,6 @@ is descriptors, console, and a read-only initrd VFS; hosted services follow.
 5. [Shell language profile](os1-shell-language-first-draft.md) explores a runtime
    over those contracts, with local values, explicit remote work, and queued
    event dispatch. It does not define another kernel ownership model.
-
 6. [C++ bindings and object construction](cpp-bindings-and-object-creation.md)
    gives short examples, dynamic discovery, binary-to-binding tooling, and
    construction hooks that can return new or existing objects.
@@ -43,7 +43,10 @@ specific rules. Preserve that distinction when changing a draft. The
 - Class-controlled construction with optional typed arguments: the ordinary
   caller has no fresh/shared policy switch; the implementation selects the object.
 
-These are recommendations for the implementation contract. Numeric UAPI
+The six [first-slice decision groups](native_object_kernel_contract.md#approved-decisions--2026-11-04)
+were approved on 2026-11-04: descriptor ABI, ownership/synchronization, blocking
+and teardown, process startup, initial interfaces, and namespace/I/O behavior.
+Later service and reflection work remains proposed. Numeric UAPI
 assignments, layouts, resource budgets, and the startup record still need a
 concrete review with the first implementation. The
 [acceptance matrix](2026-05-10-unified-os-api-architecture-review.md#implementation-sequence-and-acceptance)
