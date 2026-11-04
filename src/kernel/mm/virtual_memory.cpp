@@ -416,7 +416,8 @@ bool VirtualMemory::destroy_user_slot(uint64_t slot)
     }
 
     uint64_t* pml4 = kernel_physical_pointer<uint64_t>(root_);
-    destroy_table(pml4[slot], 4, true);
+    // A PML4 entry points to a level-three table, not another PML4.
+    destroy_table(pml4[slot], 3, true);
     maybe_shootdown_user_slot(root_, slot);
     return true;
 }
@@ -454,7 +455,7 @@ bool VirtualMemory::free()
         {
             if(pml4[i])
             {
-                destroy_table(pml4[i], 4, true);
+                destroy_table(pml4[i], 3, true);
             }
         }
         frames_.free(root_);
