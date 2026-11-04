@@ -1,461 +1,295 @@
-# ELF-Based Structured Interface Metadata Specification
-
-## 1. Overview
-
-This document defines a mechanism for embedding **structured interface metadata** inside an ELF file. The goal is to expose a well-defined, introspectable interface consisting of:
-
-- **Properties** (read-only / read-write data)
-- **Methods** (callable functions)
-- **Events** (subscription-based notifications)
-
-This design separates:
-
-ELF symbols → where code/data lives  
-Interface metadata → what those symbols mean
-
----
-
-## 2. Core Concept
-
-An ELF file contains:
-
-1. **Standard ELF structures**
-   - `.text`, `.data`, `.bss`
-   - `.symtab`, `.dynsym`
-
-2. **Custom interface metadata section**
-   - `.os.interface` (recommended)
-
-The metadata describes how to interpret symbols as a structured interface.
-
----
-
-## 3. ELF Section Definition
-
-### 3.1 Section Name
-
-Recommended:
-
-.os.interface
-
-Alternative (versioned):
-
-.os.iface.v1
-
----
-
-### 3.2 Section Contents
-
-The section contains a serialized schema describing:
-
-- Interface identity
-- Version
-- Properties
-- Methods
-- Events
-- Types
-- Permissions
-
----
-
-## 4. Metadata Schema (Conceptual)
-
-Example (YAML for clarity):
-
-```yaml
-interface: "com.example.counter"
-version: 1
-
-properties:
-  - name: "value"
-    type: "u64"
-    access: "rw"
-    symbol: "counter_value"
-
-  - name: "max"
-    type: "u64"
-    access: "ro"
-    symbol: "counter_max"
-
-methods:
-  - name: "increment"
-    symbol: "counter_increment"
-    args:
-      - { name: "amount", type: "u64" }
-    returns:
-      type: "u64"
-
-  - name: "reset"
-    symbol: "counter_reset"
-    args: []
-    returns:
-      type: "void"
-
-events:
-  - name: "changed"
-    payload:
-      - { name: "new_value", type: "u64" }
-    add_symbol: "counter_changed_add"
-    remove_symbol: "counter_changed_remove"
-    list_symbol: "counter_changed_list"
-```
-
----
-
-## 5. Symbol Resolution Model
-
-### 5.1 Address Calculation
-
-runtime_address = module_load_base + symbol.st_value
-
-Cases:
-
-| Type              | Address Formula                    |
-|------------------|-----------------------------------|
-| Non-PIE          | symbol.st_value                   |
-| PIE / shared obj | base + symbol.st_value            |
-
----
-
-### 5.2 Required ELF Data
-
-- `.symtab` or `.dynsym`
-- Symbol names referenced by metadata
-
----
-
-## 6. Properties
-
-### 6.1 Definition
-
-```yaml
-name: "value"
-type: "u64"
-access: "rw"
-symbol: "counter_value"
-```
-
----
-
-### 6.2 Property Models
-
-#### A. Direct Memory Property
-
-symbol: "counter_value"
-
-Access:
-
-read/write memory directly
-
-**Pros**
-- Fast
-- Simple
-
-**Cons**
-- Unsafe
-- No validation
-- Concurrency issues
-
----
-
-#### B. Accessor Property (Recommended)
-
-```yaml
-get_symbol: "counter_get_value"
-set_symbol: "counter_set_value"
-```
-
-Access:
-
-invoke functions instead of raw memory access
-
-**Pros**
-- Safe
-- Validated
-- Encapsulated
-
-**Cons**
-- Slight overhead
-
----
-
-### 6.3 Property Fields
-
-name  
-type  
-access (ro | rw)  
-symbol OR (get_symbol / set_symbol)  
-size  
-alignment  
-permissions (optional)
-
----
-
-## 7. Methods
-
-### 7.1 Definition
-
-```yaml
-- name: "increment"
-  symbol: "counter_increment"
-  calling_convention: "sysv_amd64"
-  args:
-    - { name: "amount", type: "u64" }
-  returns:
-    type: "u64"
-```
-
----
-
-### 7.2 Required Metadata
-
-name  
-symbol  
-argument list  
-return type  
-calling convention  
-permissions  
-blocking behavior (optional)  
-error model (optional)
-
----
-
-### 7.3 ABI Considerations
-
-Avoid relying indefinitely on raw C ABI.
-
-Long-term:
-
-→ define stable OS-level ABI  
-→ define portable type system
-
----
-
-## 8. Events
-
-### 8.1 Concept
-
-Events are modeled as structured subscription systems.
-
----
-
-### 8.2 Definition
-
-```yaml
-- name: "changed"
-  payload:
-    - { name: "new_value", type: "u64" }
-  add_symbol: "counter_changed_add"
-  remove_symbol: "counter_changed_remove"
-  list_symbol: "counter_changed_list"
-```
-
----
-
-### 8.3 Event Operations
-
-add(callback) → returns subscription handle  
-remove(handle)  
-list() → returns current subscriptions  
-emit(...) → internal
-
----
-
-### 8.4 Runtime Model
-
-obj.events.changed.add(fn)  
-obj.events.changed.remove(handle)  
-obj.events.changed.list()
-
----
-
-## 9. Encoding Options
-
-### 9.1 Option A: JSON / YAML (Recommended Initially)
-
-.os.interface = UTF-8 JSON/YAML
-
-**Pros**
-- Easy to debug
-- Easy to generate
-- Flexible
-
-**Cons**
-- Larger size
-- Runtime parsing cost
-
----
-
-### 9.2 Option B: Binary Schema
-
-Example:
-
-```c
-struct OsIfaceHeader {
-    uint32_t magic;   // "OSIF"
-    uint16_t version;
-    uint16_t flags;
-    uint32_t counts[];
-};
-```
-
-**Pros**
-- Fast
-- Compact
-
-**Cons**
-- Harder to evolve
-
----
-
-### 9.3 Option C: ELF Notes
-
-.note.os.interface
-
-**Pros**
-- Standard ELF mechanism
-
-**Cons**
-- Less flexible
-- Slightly harder tooling
-
----
-
-## 10. Embedding Metadata (C Example)
-
-```c
-__attribute__((section(".os.interface"), used))
-static const char os_interface_metadata[] =
-"{"
-"  \"interface\": \"com.example.counter\","
-"  \"version\": 1,"
-"  \"properties\": ["
-"    {\"name\":\"value\", \"type\":\"u64\", \"access\":\"rw\", \"symbol\":\"counter_value\"}"
-"  ],"
-"  \"methods\": ["
-"    {\"name\":\"increment\", \"symbol\":\"counter_increment\", \"args\":[\"u64\"], \"returns\":\"u64\"}"
-"  ]"
-"}";
-```
-
----
-
-## 11. Inspection Tools
-
-```bash
-readelf -S app
-readelf -x .os.interface app
-objdump -s -j .os.interface app
-```
-
----
-
-## 12. Runtime Resolution Flow
-
-1. Load ELF  
-2. Locate .os.interface section  
-3. Parse metadata  
-4. Resolve symbols  
-5. Compute runtime addresses  
-6. Build structured object  
-
----
-
-## 13. Runtime API Model (OS Object)
-
-obj = os.load("/bin/counter")
-
-obj.properties.value.read()  
-obj.properties.value.write(42)
-
-obj.methods.increment(5)
-
-sub = obj.events.changed.add(callback)  
-obj.events.changed.remove(sub)
-
----
-
-## 14. Security & Capability Model
-
-NO unrestricted memory access
-
-Instead:
-
-- Require capabilities / handles  
-- Enforce permissions at interface level  
-
----
-
-## 15. Design Constraints & Risks
-
-### 15.1 Stripped Symbols
-
-Mitigation:
-
-→ require export of interface symbols  
-→ or embed symbol indices  
-
----
-
-### 15.2 ASLR
-
-Mitigation:
-
-→ always resolve base at runtime  
-
----
-
-### 15.3 Relocations
-
-Mitigation:
-
-→ resolve after relocation  
-
----
-
-### 15.4 Local Variables
-
-Mitigation:
-
-→ restrict interface to globals/static  
-
----
-
-## 16. Design Principle
-
-Must describe semantics, not just structure:
-
-type  
-permissions  
-ownership  
-lifetime  
-thread-safety  
-blocking behavior  
-error model  
-versioning  
-
----
-
-## 17. Summary
-
-ELF = transport + symbol resolution  
-.os.interface = structured interface definition  
-
-Symbols give addresses  
-Metadata gives meaning  
-
----
-
-## 18. Next Steps
-
-1. Minimal JSON schema (v1)  
-2. Type system  
-3. Calling convention spec  
-4. Capability model  
-
-Then implement:
-
-→ ELF parser  
-→ metadata parser  
-→ runtime binder  
-→ shell integration  
+# ELF Interface Metadata and Hosted-Service Profile
+
+Status: revised later-stage proposal, 2026-11-04. **Not implemented or a frozen
+file format, wire ABI, or runtime API.**
+
+The [native contract](native_object_kernel_contract.md) owns descriptor,
+authority, process, and hosted-service semantics. Descriptors, console I/O,
+bounded process startup, and the read-only initrd VFS come first. This profile
+explains how a later service can describe its interfaces without making a
+reflective loader or universal kernel type system prerequisites for that work.
+The [shell profile](os1-shell-language-first-draft.md) shows possible bindings.
+
+## 1. Scope and current baseline
+
+An ELF image may contain optional interface descriptions for offline inspection,
+generated bindings, and shell help. A hosted service exposes a protocol through
+an endpoint. These are related artifacts, but inspecting the image, launching a
+process, and acquiring a usable service endpoint are separate operations.
+
+Today's [ELF validator](../../src/kernel/proc/user_elf.cpp) accepts x86-64
+`ET_EXEC` images. The [loader](../../src/kernel/proc/user_program.cpp) constructs
+images from loadable segments, and [crt0](../../src/user/lib/crt0.cpp) calls
+`main(void)`. That establishes neither a service protocol nor a reflective
+runtime. Bounded argv/envp, startup grants, and publication rules must first be
+implemented under the [process contract](native_object_kernel_contract.md#7-process-creation-and-image-replacement).
+Do not change the startup stack independently of crt0 and the reviewed startup
+record ABI.
+
+| Operation | Meaning |
+| --- | --- |
+| Inspect image | Read bounded descriptions from an already-open image; run no image code. |
+| Spawn program | Create an ordinary process with explicitly selected startup grants. It need not publish an interface. |
+| Start service | Start a provider under an explicit Supervisor; return a usable endpoint only after READY and compatibility checks. |
+| Connect service | Obtain an endpoint through an authorized publisher for an already-ready provider. |
+| Load local library | A future in-process loader/FFI feature with its own ABI and trust rules; outside this profile. |
+
+An image can implement ordinary program and service modes, but the selected mode
+and bootstrap record must be explicit. A pathname alone does not select a
+constructor or imply that every program implements a hosted-object protocol.
+
+## 2. Responsibilities and trust boundaries
+
+| Component | Responsibility |
+| --- | --- |
+| Kernel | Validate executable loading and startup grants; later enforce bounded channel envelopes, endpoint rights, and capability transfer. |
+| Protocol definitions and build tools | Define fixed request/reply records, stable interface and operation IDs, and generate userspace codecs and dispatch stubs. |
+| Provider runtime | Initialize in its own process, validate method payloads, authorize operations, and dispatch compiled handlers. |
+| Client runtime | Encode calls, correlate replies, expose local wrappers, and preserve transport and application error distinctions. |
+| Image inspector / shell | Present bounded metadata without executing constructors, getters, or methods. |
+| Supervisor / publisher | Own explicit provider-lifetime policy and authorized service publication. |
+
+The first service should use compiled dispatch and fixed records. Optional
+metadata can describe that exercised protocol later. The kernel does not parse
+JSON/YAML schemas, build a class registry, interpret arbitrary user objects, or
+call a user function discovered in an ELF symbol table.
+
+Metadata is untrusted descriptive input. Claimed interfaces, required rights,
+and a claimed program name cannot grant authority or prove provider identity.
+A service validates each invocation under its own granted authority and the
+client's authorized endpoint. If one endpoint permits methods with different
+privileges, the trusted provider must enforce those distinctions or publish
+separate restricted endpoints; a method label in metadata is insufficient.
+
+## 3. Metadata artifact and validation
+
+`.os.interface` is the proposed section name for an optional description stored
+in the image. It identifies an artifact convention, not a mapped address or a
+kernel syscall ABI. JSON may be useful as build-tool input or inspection output;
+no JSON/YAML runtime parser is required in the kernel or initial service host.
+
+Before adopting an on-disk encoding, specify its magic, format version, byte
+order, fixed-width fields, total length, alignment, table counts, string bounds,
+and extension rules. All offsets are relative to the metadata blob. Unknown
+required features fail; optional extensions are skipped only when their lengths
+and interpretation are defined. Reject duplicate identities, arithmetic
+overflow, overlapping forbidden ranges, invalid references, and excessive
+nesting or counts before allocation. Do not cast file bytes to native C++
+structures or store machine pointers in the description.
+
+The conceptual content is deliberately small:
+
+| Record | Required meaning |
+| --- | --- |
+| Artifact header | Format version, validated total size, and bounded table locations. |
+| Interface | Stable protocol identity, compatibility major, supported optional members, and a display name. |
+| Class / construction hook | Class identity, bounded optional argument schema/defaults, result interfaces, and documented identity/sharing effects. Allocation/reuse is decided by class code, not a caller policy flag. |
+| Method | Stable operation ID, input/output record identities, application result codes, and explicit side-effect/authorization semantics. |
+| Property | Getter operation and, if supported, a distinct setter operation; no direct remote memory offset. |
+| Event | Subscription protocol, payload record, ordering/loss policy, and overflow/resnapshot behavior. |
+| Record type | Fixed scalar fields and bounded arrays/strings with an explicit wire representation. |
+
+Names help people; numeric protocol identities route messages. A package version,
+a metadata-format version, an interface compatibility major, and an operation ID
+have different meanings. IDs must not be reused for incompatible payloads or
+behavior. Adding a member is compatible only when peers can reject or discover
+its absence safely. Changing a required record layout requires an explicitly
+versioned operation or interface; a C++ type name is not a compatibility rule.
+
+Bind inspection and launch to the **same opened executable object**. A cache
+must identify the exact immutable artifact or validated content, not just a
+pathname or modification timestamp. Future mutable files need an image snapshot
+or equivalent guarantee. Otherwise inspection of version A followed by path
+replacement with version B could select an incompatible decoder. READY still
+confirms the live provider's supported protocol; metadata alone is insufficient.
+
+### Canonical extraction and language bindings
+
+A bounded extractor can read `.os.interface` from a class binary without running
+it, validate the description, and emit a canonical language-neutral interface
+representation. It preserves class/interface/member IDs, versions, construction
+arguments/defaults, record bounds, errors, and ownership semantics. Canonical
+serialization/normalization is a tooling contract still to specify, not a
+requirement for a kernel schema registry. Metadata-free machine code is not
+assumed to reveal a recoverable public interface.
+
+Language generators consume that representation. A C++ generator emits headers
+and source for proxy construction, codecs, invocation, and error translation.
+The **target compiler and linker**, not the generator or kernel, build an
+optional client `.so`. Compiling bindings directly into the application or a
+static library is the initial recommendation. A common runtime can later be
+shared; a `.so` per interface is not mandatory. Client dynamic linking requires
+an explicit target loader/ABI profile absent from today's static executable
+support. Loading a provider implementation in-process is separate work.
+
+Live discovery can return the same semantic schema through an authorized,
+bounded endpoint query. Known generated bindings check supported interfaces;
+a later reflective runtime can construct messages from an unfamiliar schema.
+Both still validate live compatibility and permissions. Schema/generator/target
+provenance supports reproducible builds; compatible added members must not be
+rejected merely because the complete artifact hash changed.
+
+The [C++ workflow and examples](cpp-bindings-and-object-creation.md) show directory
+listing, typed and reflective calls, extraction, generation, compilation, and
+class-controlled construction. All tool and SDK names there are illustrative.
+
+## 4. ELF placement, retention, and symbols
+
+ELF sections organize file content; program headers describe loading. An
+arbitrary `.os.interface` section is not automatically present in the process
+image. The chosen build profile must say whether inspection reads file bytes or
+metadata resides in a read-only `PT_LOAD` segment. An ELF note is another possible
+container, not an instruction to execute its contents. See the
+[ELF program-loading specification](https://gabi.xinuos.com/elf/07-pheader.html).
+
+The initial service profile needs neither runtime symbol lookup nor a dynamic
+linker: compile and link provider handlers into a dispatch table, and use
+protocol IDs over IPC. ELF `st_value` is context-dependent; a universal
+`base + st_value` rule is wrong for cases such as absolute and thread-local
+symbols. A symbol-table index also depends on its table and is not a stable
+wire identity. See the [ELF symbol-table specification](https://gabi.xinuos.com/elf/05-symtab.html).
+No client can invoke a pointer into another process as a local function call.
+
+Compiler emission, linker retention, and packaging retention are separate
+steps. An emitted metadata object still needs a linker rule such as
+`KEEP(*(.os.interface))` when section garbage collection is enabled, plus a
+strip/package policy that preserves the chosen artifact. GNU ld documents
+[`KEEP`](https://sourceware.org/binutils/docs/ld/Input-Section-Keep.html) for
+this purpose. The current [user linker script](../../src/user/linker.ld) has no
+explicit interface-metadata placement contract. Adding a compiler `used`
+attribute alone would not establish one.
+
+A future local-library loader must separately define supported ELF types,
+relocations, symbol visibility, dependencies, TLS, calling conventions, and
+unload safety. ASLR or adding symbol indices cannot substitute for that work.
+This profile does not require `ET_DYN` support or expose direct-memory properties.
+
+## 5. Startup and service lifetime
+
+The [hosted-service contract](native_object_kernel_contract.md#8-later-hosted-service-contract)
+is authoritative. A proposed startup sequence is:
+
+1. Pin an executable with the required authority, validate the startup request,
+   and select explicit child grants and supervision policy.
+2. Prepare an unpublished process, bootstrap endpoint, image, startup record,
+   and final thread state. Publish the process to the scheduler only after its
+   normal process-creation invariants hold.
+3. Run provider initialization. The service remains unavailable for ordinary
+   connections while initialization is pending.
+4. Receive an authenticated READY record through the endpoint assigned to that
+   provider. Verify the expected protocol and provider generation before making
+   the service connectable or returning a usable client proxy.
+5. On constructor failure, timeout, malformed READY, or provider exit, fail
+   startup and invoke the Supervisor's cleanup policy. Release unpublished
+   endpoints and wait registrations; terminate/reap a still-starting owned
+   provider as that policy specifies.
+
+An error after provider code has run does not guarantee rollback of external
+side effects. Bootstrap grants should therefore be minimal, and provider
+initialization should avoid irreversible work before READY where practical.
+Startup deadlines need the explicit monotonic clock contract; a timeout only
+stops waiting until supervision confirms what happened to the provider.
+
+An endpoint, Process reference, Operation, and Supervisor have distinct
+lifetimes. Closing the last client endpoint releases a connection; it does not
+implicitly kill the service. Holding a Process reference does not keep its
+threads alive. A restart produces a new provider generation and new endpoints;
+an old endpoint remains closed rather than silently redirecting later calls.
+Shared services require explicit client-session cleanup, independently of the
+provider's lifetime. These rules also apply when the launching parent exits.
+
+### Construction arguments and existing objects
+
+Provider startup and class construction are different stages. Once a provider's
+class endpoint is ready, a construction request invokes the class hook with
+optional typed arguments. That code decides whether to initialize a new object
+or return an existing one. Ordinary clients have no fresh/shared/singleton mode
+or policy override. An object is returned only after its initialization and
+interface checks are complete; readiness of the process alone is insufficient.
+
+Use a generated C++ static factory returning a result/proxy for this protocol.
+An existing instance's ordinary C++ initializer is not run again just because a
+new client requests construction. Process environment is selected when the
+provider starts; it is not a per-object argument store. An explicitly declared
+adapter may translate environment strings into typed construction arguments,
+but capabilities travel through grants/attachments independently.
+
+A class returning a shared object must define its scope, argument behavior on
+reuse, and per-client authority. A manager can activate and supervise the class
+provider on demand; its registry coordinates readiness and lifetime without
+choosing the instance on behalf of the class implementation. The
+[canonical class contract](native_object_kernel_contract.md#classes-and-class-controlled-construction)
+is authoritative. Shared activation needs later registry/attachment/supervision
+contracts; it is not implied by the first private service's READY message.
+
+## 6. Invocation and fixed records
+
+A useful first protocol is a small counter service:
+
+| Illustrative member | Fixed-record meaning |
+| --- | --- |
+| `read` | Empty request; reply contains a signed 64-bit value. |
+| `add` | Request contains a signed 64-bit delta; reply contains the new value, or an explicit overflow result. Validate and update atomically within the provider. |
+| `reset` | Optional separately authorized operation; never inferred from permission to read. |
+
+The names and exact IDs/layouts above are examples. The reviewed wire profile
+must pin each field's encoding and bounds before implementation. The initial
+prototype can use one outstanding call per connection, a small fixed message
+limit, and no application-level capability transfer. A second real protocol
+should test the abstractions before introducing a general schema interpreter.
+
+The later envelope carries protocol/interface/operation identity, request
+identity, provider/connection generation, payload length, and a separate
+attached-capability list. Payload bytes never turn a numeric fd into authority.
+The kernel validates the envelope and transfers; generated userspace codecs
+validate method records. Capability-transfer ownership, destination reservation,
+and cleanup on every rejected, unread, or discarded message must be specified
+before enabling attachments. [Fuchsia channel messages](https://fuchsia.dev/reference/syscalls/channel_write)
+provide a concrete precedent for separating bytes from transferred handles;
+its ownership and size rules are not adopted implicitly here.
+
+A getter returns a snapshot or an explicitly described reference. A setter is
+an operation with defined validation and atomicity. Remote `counter.value += 1`
+cannot silently become a getter followed by a setter; use the atomic `add`
+method. Mutable request records in the client's memory are ordinary local
+values and do not imply shared-memory properties in the provider.
+
+## 7. Completion, errors, and events
+
+Transport/admission failure, provider-declared failure, confirmed cancellation,
+and unknown outcome must remain distinguishable. Stable numeric statuses and
+bounded diagnostics are sufficient; transporting arbitrary exception classes
+is unnecessary. Allocation failure must still be reportable without allocating
+a diagnostic object. Unknown status values remain failures.
+
+If a provider applies `add` and dies before its reply arrives, the caller may
+not know whether the counter changed. Do not automatically replay that call.
+At-most-once dispatch within a connection does not provide exactly-once effects
+across crashes. Explicit idempotency or durable deduplication is a later,
+operation-specific contract. Caller timeout, cancellation request, confirmed
+cancellation, and provider termination are distinct outcomes.
+
+Asynchronous calls produce an Operation with persistent terminal state.
+Notifications can prompt a query but cannot be the only record of completion.
+Events enqueue bounded records; callbacks execute only on explicit runtime
+event-loop or await turns. A synchronous call does not pump arbitrary nested
+callbacks. Bulk output uses bounded pull responses or a backpressured stream,
+not an unbounded sequence of callbacks. Every event stream must define ordering,
+loss/overflow reporting, subscription identity, and teardown.
+
+## 8. Implementation and acceptance gates
+
+| Gate | Evidence required before moving on |
+| --- | --- |
+| Descriptor/VFS foundation | The native contract's console, immutable namespace, bounded launch, authority, and teardown acceptance tests pass. |
+| First hosted service | Fixed counter protocol; explicit Supervisor; READY/failure/deadline tests; provider death before and after an effect; no automatic replay; bounded queues and request correlation. |
+| Second protocol and codecs | Independent client/provider encoders, malformed payloads, unknown operations/versions, old/new compatibility pairs, and resource exhaustion fail predictably. |
+| Capability attachments | Atomic destination reservation; rights attenuation; specified move/retain behavior; cleanup after timeout, peer death, shutdown with unread messages, and decode rejection. |
+| Class construction and shared activation | Class code selects allocation/reuse; no caller policy override; validated arguments; concurrent initialization, configuration conflicts, denied clients, cycles, timeout, and crash/restart tests; client close cannot stop a shared provider. |
+| Optional image metadata | Offline inspection runs no code; malformed offsets/counts are rejected; inspection/launch use the same artifact; the complete compile/link/strip/package pipeline retains and identifies metadata correctly. |
+| Events and shell binding | Explicit dispatch turns, bounded overflow recovery, durable Operation completion, subscription teardown, and no cross-process or nested synchronous callback invocation. |
+
+Metadata format, numeric protocol IDs, exact wire layouts, and full supervision
+policy remain implementation decisions requiring review. Those decisions should
+be driven by the first working services, not by preserving the older universal
+reflection and raw-symbol invocation sketches.

@@ -1,57 +1,66 @@
 # OS API Drafts
 
-These documents are design exploration, not implemented kernel contracts.
+Revised 2026-11-04. These documents are a coordinated design proposal,
+**not implemented contracts or a frozen ABI**. The selected first implementation
+is descriptors, console, and a read-only initrd VFS; hosted services follow.
 
-The source tree remains the authority for current behavior. As of the
-[2026-11-03 project review](../2026-11-03-review.md) at `63e328d`,
-the implemented syscall surface is the small ABI in
-[`src/uapi/os1/syscall_numbers.h`](../../src/uapi/os1/syscall_numbers.h):
-console `read`/`write`, process control for initrd-backed programs, and
-`observe`.
+## Read order and ownership
 
-The kernel does not yet implement:
+1. [Native Object Kernel Contract](native_object_kernel_contract.md) owns shared
+   semantics: descriptor/open-instance/object identity, rights, lifetime,
+   namespace authority, process publication, and the later service boundary.
+2. [Unified OS API Architecture Review](2026-05-10-unified-os-api-architecture-review.md)
+   is the May 10 review **refreshed on November 4**. It records concrete cracks,
+   changed recommendations, remaining gates, opportunities, and acceptance tests.
+3. [VFS profile](object_oriented_vfs_spec.md) defines the first immutable initrd
+   namespace and distinguishes it from the illustrative future resource catalog.
+4. [ELF and hosted-interface profile](elf_interface_spec.md) separates executable
+   loading, optional metadata inspection, and later service invocation.
+5. [Shell language profile](os1-shell-language-first-draft.md) explores a runtime
+   over those contracts, with local values, explicit remote work, and queued
+   event dispatch. It does not define another kernel ownership model.
 
-- a native object table
-- a per-process descriptor or handle table
-- a VFS object model
-- sockets
-- PTYs
-- argv/envp process startup
-- filesystem-backed `exec`
-- credentials or permission checks
+6. [C++ bindings and object construction](cpp-bindings-and-object-creation.md)
+   gives short examples, dynamic discovery, binary-to-binding tooling, and
+   construction hooks that can return new or existing objects.
 
-## Read Order
+The kernel contract takes precedence for shared semantics; profiles own their
+specific rules. Preserve that distinction when changing a draft. The
+[glossary](../GLOSSARY.md) explains terminology across the project.
 
-1. [Unified OS API Architecture Review](2026-05-10-unified-os-api-architecture-review.md)
-   for conflicts between the drafts, proposed resolutions, and open decisions.
-   Its preferred architecture is a canonicalization proposal, not an accepted ABI.
-2. [`native_object_kernel_contract.md`](native_object_kernel_contract.md) for the
-   broad native-object direction being explored.
-3. [`object_oriented_vfs_spec.md`](object_oriented_vfs_spec.md) for one possible
-   filesystem/object namespace shape.
-4. [`elf_interface_spec.md`](elf_interface_spec.md) for intended user-program ABI
-   growth beyond the current static `ET_EXEC` loader.
-5. [`os1-shell-language-first-draft.md`](os1-shell-language-first-draft.md) for
-   shell-language ideas that depend on the lower-level process, descriptor, and
-   filesystem decisions.
+## What the proposal now selects
 
-## Current Decision Needed
+- One process-local fd-shaped table, with descriptor rights/flags separate from
+  shared open-instance state and resource identity.
+- Fixed console/VFS interfaces first. Reflection, generic typed invocation,
+  events, and a kernel schema registry are not bootstrap requirements.
+- Explicit child grants and capability-relative lookup. Enumeration reveals
+  names; opening a child grants rights through a checked derivation rule.
+- Prepare-then-publish spawn and prepare-then-commit exec. No privileged path
+  shortcut when loading an already-authorized executable.
+- Later services with READY handshakes, separate supervision, persistent
+  completion state, and honest timeout/crash outcomes.
+- Class-controlled construction with optional typed arguments: the ordinary
+  caller has no fresh/shared policy switch; the implementation selects the object.
 
-The next implementation decision is intentionally narrower than these drafts:
-define the minimal per-process descriptor contract for console entries 0/1/2
-and read-only initrd files, with room for later devices, PTYs, and sockets.
+These are recommendations for the implementation contract. Numeric UAPI
+assignments, layouts, resource budgets, and the startup record still need a
+concrete review with the first implementation. The
+[acceptance matrix](2026-05-10-unified-os-api-architecture-review.md#implementation-sequence-and-acceptance)
+separates first-slice requirements from later service/event gates.
 
-The unified review recommends a single table with fd-shaped integer indices
-and native object entries carrying rights. Before implementation, decide
-identifier validation and reuse, per-open state, duplication, inheritance across
-`spawn`/`exec`, close, error behavior, and teardown. The internal object model can
-remain native without requiring the full reflection, property, or event system
-for this first slice.
+## Current source boundary
 
-The immediate runtime priorities are the process correctness, passive observation,
-failure handling, verification, and hardware qualification work recorded in the
-[project review](../2026-11-03-review.md). Descriptor design can proceed alongside
-that work. Once the relevant lifetime and failure contracts are sound, implement
-console descriptors, bounded argv/envp handoff, and a read-only initrd VFS with
-`exec` using the same namespace. Credentials and access policy must precede
-multiuser or network-exposed resource operations.
+At reviewed revision `b182aa1`, the implemented syscall surface remains the
+small ABI in [syscall_numbers.h](../../src/uapi/os1/syscall_numbers.h): console
+`read`/`write`, process control for initrd-backed programs, and `observe`.
+There is no descriptor table, VFS namespace, argv/envp startup, hosted RPC,
+socket/PTY API, or credential policy. The current program loader accesses the
+initrd directly. API draft changes do not change those facts.
+
+The [2026-11-03 project review](../2026-11-03-review.md) remains the latest
+whole-project source review. Its child-publication, passive-observation,
+allocation/failure, verification, and hardware follow-ups remain runtime work.
+Fix the affected ownership paths before relying on them for the descriptor/VFS
+milestone; credentials and access policy must precede multiuser or
+network-exposed resource operations.

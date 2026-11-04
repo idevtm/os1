@@ -1,531 +1,516 @@
 # Native Object Kernel Contract
 
-## Status
-
-Draft for iteration.
-
-This document defines the kernel-level contract for `os1` native objects. It sits between:
-
-- the long-term project goals in `GOALS.md`
-- object/interface metadata embedded in loadable images
-- the user-facing native shell language and runtime
-- the eventual POSIX compatibility layer
-
-The purpose of this document is to define the **kernel substrate**, not the shell syntax.
-
-## 1. Purpose
-
-`os1` aims to expose a native operating-system interface that is not conceptually limited by POSIX, while still allowing POSIX compatibility where useful.
-
-The native interface is built around:
-
-- kernel-managed objects
-- rights-bearing handles
-- uniform access to heterogeneous interfaces
-- structured properties, methods, and events
-- synchronous and asynchronous interaction
-- structured failure and exception transport
-- explicit lifetime and ownership rules
-
-This document defines the kernel contract that makes those features possible.
-
-## 2. Scope
-
-This document defines:
-
-- object and handle semantics
-- rights and permission model at the handle level
-- interface discovery model
-- property, method, and event operations
-- synchronous and asynchronous interaction model
-- failure and exception transport across kernel and process boundaries
-- lifetime and ownership rules
-- hosted vs in-process object-loading models
-- namespace and lookup implications
-- relationship to POSIX compatibility
-
-This document does **not** define:
-
-- shell language syntax
-- parser/compiler implementation
-- binary encoding details of interface metadata
-- full VFS design
-- full socket API design
-- full security policy beyond the kernel object contract
-
-## 3. Design principles
-
-The native object contract should be:
-
-- uniform at the syscall boundary
-- honest about process and protection boundaries
-- expressive enough for methods, properties, and events
-- compatible with both kernel-native and user-hosted objects
-- evolvable without locking the kernel into a fragile ABI too early
-- suitable as the substrate for a later POSIX compatibility layer
-
-The contract should avoid:
-
-- baking shell-language syntax into the kernel ABI
-- assuming every property is safe to memory-map directly
-- using raw cross-process callback pointers as the event ABI
-- coupling the kernel contract too tightly to ELF-specific details
-- forcing every object to behave as a POSIX file descriptor internally
-
-## 4. Terms and model
-
-### 4.1 Object image
-
-An object image is a loadable unit that may include native-interface metadata.
-
-Examples:
-
-- ELF image with `.os.interface` metadata
-- future object/package formats
-
-An object image is not yet a live object.
-
-### 4.2 Object instance
-
-An object instance is a runtime realization of an object image or kernel-native object provider.
-
-An object instance may expose:
-
-- properties
-- methods
-- events
-- type and version metadata
-
-### 4.3 Object kinds
-
-The kernel contract should initially recognize at least the following conceptual object kinds:
-
-- `KernelObject`
-- `HostedObject`
-- `InProcessObject`
-- `ProcessObject`
-- `ThreadObject`
-- `ProgramImageObject`
-- `DeviceObject`
-- `ObserveObject`
-- `JobObject`
-- `SubscriptionObject`
-- `NamespaceObject`
-
-These are conceptual categories. The exact kernel type hierarchy may differ.
-
-### 4.4 Handle
-
-A handle is a process-owned reference to an object instance.
-
-A handle is:
-
-- reference counted
-- rights-bearing
-- scoped to process lifetime unless explicitly transferred
-- the unit through which callers access properties, methods, events, and metadata
-
-The kernel ABI should be defined in terms of handles, not raw pointers.
-
-## 5. Object loading models
-
-### 5.1 Hosted object load
-
-A hosted object load creates or accesses an object instance backed by a protected process or equivalent protected execution context.
-
-Properties:
-
-- constructor / initialization runs at load time
-- object state persists across method calls
-- access happens through handle-mediated calls
-- properties, methods, and events may cross protection boundaries
-- default lifetime is tied to the owning process unless transferred or published through a service mechanism
-
-This is the primary model for native service-like objects.
-
-### 5.2 In-process object load
-
-An in-process object load creates an object instance inside the caller process.
-
-Properties:
-
-- not inherently accessible from other processes
-- lower overhead
-- weaker isolation
-- suitable for library-like or script-runtime-local objects
-
-This model must remain distinct from hosted objects in semantics, even if language syntax hides some differences.
-
-### 5.3 Kernel-native objects
-
-The kernel may expose object instances that do not originate from user-provided images.
-
-Examples:
-
-- operating system object
-- process objects
-- device objects
-- observability objects
-- namespace objects
-
-The `os` object used by native shell examples should be understood as a kernel-native object instance exposed through the same general object model.
-
-## 6. Interface metadata and discovery
-
-When an object image is loaded or otherwise accessed through the kernel, its interface metadata may be parsed and exposed to the caller according to permissions.
-
-This should enable callers to:
-
-- enumerate interface items
-- inspect property definitions
-- inspect method signatures
-- inspect event definitions and payload schemas
-- discover required rights for interface members
-- discover version and compatibility metadata
-- inspect structured exception/failure schemas where available
-
-The kernel contract must support heterogeneous interfaces, but access to them must happen through uniform kernel operations.
-
-The kernel contract must not assume ELF forever, even if ELF is the first metadata transport.
-
-## 7. Rights model
-
-Handles carry rights.
-
-Initial conceptual rights should include:
-
-- `inspect`
-- `read_property`
-- `write_property`
-- `call`
-- `subscribe`
-- `observe`
-- `control`
-- `duplicate`
-- `transfer`
-
-Possible later refinements:
-
-- per-method rights
-- per-property rights
-- delegation-limited duplicate/transfer rights
-- rights attenuation on transfer
-
-Rights are attached to handles, not to object identity alone.
-
-## 8. Uniform kernel operations
-
-The kernel should expose a small uniform object-ABI surface rather than one bespoke syscall per object family.
-
-Initial conceptual operations:
-
-- `object_query_interface`
-- `object_get_property`
-- `object_set_property`
-- `object_call`
-- `object_subscribe`
-- `object_unsubscribe`
-- `object_wait` or `object_poll`
-- `handle_duplicate`
-- `handle_close`
-
-Possible later operations:
-
-- `object_list_children`
-- `object_open_child`
-- `object_resolve_path`
-- `object_transfer`
-- `object_publish`
-
-The syscall ABI details may differ, but the semantic surface should remain small and uniform.
-
-## 9. Property model
-
-### 9.1 Baseline rule
-
-Properties are accessed through uniform operations, not ad hoc object-specific syscalls.
-
-Conceptual baseline:
-
-- get property by object handle + property ID
-- set property by object handle + property ID
-
-The first contract should use caller-provided buffers rather than specializing around register returns.
-
-### 9.2 Property kinds
-
-Properties may be:
-
-- read-only
-- writable
-- array/collection-like
-- computed
-- accessor-backed
-- cached or uncached remote views
-
-### 9.3 Direct mapping
-
-Direct memory mapping of properties may exist later as an optimization for a restricted subset of simple property classes.
-
-It must **not** be the baseline ABI.
-
-Reasons:
-
-- permission checks are harder
-- atomicity is harder
-- remote/process-backed semantics become inconsistent
-- computed/accessor-backed properties do not fit naturally
-
-### 9.4 Missing design questions
-
-Still to define:
-
-- property value encoding
-- large-value transport
-- atomicity guarantees
-- array/append/remove semantics
-- caching semantics for remote properties
-- change-notification coupling between properties and events
-
-## 10. Method model
-
-### 10.1 Baseline rule
-
-Methods are invoked through a uniform call operation.
-
-The first contract should pass arguments and returns through structured caller-provided buffers.
-
-### 10.2 Method metadata
-
-Methods should describe:
-
-- method ID
-- argument schema
-- return schema
-- required rights
-- blocking behavior
-- whether async invocation is supported
-- exception/failure schema where available
-
-### 10.3 Sync vs async
-
-The kernel contract should distinguish synchronous and asynchronous invocation explicitly.
-
-Synchronous calls:
-
-- run to completion before returning
-- may raise structured failures/exceptions
-
-Asynchronous calls:
-
-- return a `JobObject` or equivalent handle
-- complete through polling/waiting and/or events
-
-The exact first async surface is still open.
-
-## 11. Event model
-
-### 11.1 Baseline rule
-
-Events are part of the object interface model.
-
-Objects may expose structured events with typed payloads.
-
-### 11.2 Subscription model
-
-The kernel ABI should not treat raw caller function pointers as the cross-process subscription primitive.
-
-Instead, the baseline model should use:
-
-- object handle
-- event ID
-- delivery target (queue/port/session or equivalent)
-- returned subscription handle
-
-This keeps the kernel ABI uniform across:
-
-- kernel-native objects
-- hosted objects
-- future service objects
-
-Language runtimes may map queue-based delivery into callback syntax.
-
-### 11.3 Event operations
-
-Initial conceptual event operations:
-
-- subscribe to event
-- unsubscribe via subscription handle
-- wait/poll for delivered events
-- inspect event schema and metadata
-
-### 11.4 Event delivery questions still open
-
-- event queue model
-- ordering guarantees
-- overflow/backpressure behavior
-- filtering model
-- sync dispatch vs queued dispatch
-- reentrancy rules
-- permission checks for subscriptions
-
-## 12. Failure and exception transport
-
-### 12.1 Baseline rule
-
-The native object model must support structured failure transport through the same general kernel interface used for objects.
-
-### 12.2 Distinguish these failure classes
-
-The contract should distinguish:
-
-- transport / ABI failure
-- handle/rights failure
-- object method/property failure
-- async completion failure
-- subscription/delivery failure
-
-### 12.3 Hosted exceptions
-
-For hosted objects, exceptions do not literally travel across process stacks.
-
-Instead:
-
-- callee failure is captured and serialized
-- kernel/runtime transports it through the uniform interface
-- caller runtime reconstructs or re-raises it in caller context
-
-### 12.4 Exception object shape
-
-The structured failure model should eventually include at least:
-
-- type/category
-- message
-- source object/program
-- optional code/status
-- optional nested cause
-- optional structured details payload
-
-## 13. Lifetime and ownership
-
-### 13.1 Handle lifetime
-
-Handles are reference counted.
-
-Default rules:
-
-- creating or duplicating a handle increases a reference count
-- closing a handle decreases it
-- final release destroys the reference
-- if the object is owned solely through those references, it may be destroyed
-
-### 13.2 Hosted child rule
-
-Hosted child objects created by a process should, by default, die when the owning process dies unless ownership has been explicitly transferred or the object has been explicitly published as a shared service.
-
-### 13.3 Multiple references
-
-Multiple references to the same object are allowed.
-
-### 13.4 Subscription lifetime
-
-Subscription objects participate in the same general lifetime model.
-
-Still to define:
-
-- whether subscriptions hold strong or weak references to emitters/targets
-- cycle handling strategy
-- cleanup semantics when either emitter or subscriber dies
-
-## 14. Namespace and lookup implications
-
-The native object contract should support multiple lookup styles without forcing them into one flat namespace.
-
-Likely categories:
-
-- path-based lookup
-- service lookup
-- device/platform-tree lookup
-- child-object traversal
-
-Potential conceptual operations:
-
-- `open(path)`
-- `load(image_path)`
-- `connect(service_name)`
-- `resolve(parent_handle, child_name_or_id)`
-
-Exact namespace model remains open and should align with VFS and device-tree design.
-
-## 15. Kernel-native OS object
-
-A process should be able to request, receive, and decode the interface of the kernel / OS itself.
-
-The `os` object used in examples is the operating-system object.
-
-The kernel/OS object should be accessible through the same general object contract as other objects, subject to permissions.
-
-This implies the OS object can expose:
-
-- properties
-- methods
-- events
-- interface discovery
-- observability and control surfaces
-
-The shell/runtime may provide `os` as a built-in binding to this kernel-native object.
-
-## 16. POSIX compatibility implications
-
-`os1` aims to preserve POSIX compatibility where useful, but the kernel-native contract should not be forced into a pure file-descriptor mindset internally.
-
-The likely direction is:
-
-- native object/handle model internally
-- POSIX compatibility layered over it where practical
-- FD table as a compatibility veneer over native handles or a closely related primitive
-
-This document does not freeze the POSIX mapping, but the kernel contract should be designed so that mapping remains feasible.
-
-## 17. First implementation slice
-
-The first implementation should stay narrow.
-
-Recommended first slice:
-
-- handle table
-- rights bits
-- interface query
-- property get
-- property set
-- synchronous method call
-- event subscription via queue-style delivery
-- handle duplicate / close
-
-Recommended deferrals:
-
-- direct property mapping
-- shared service publication
-- async jobs beyond what is already needed for process lifecycle
-- transfer semantics beyond basic design placeholders
-- broad language/runtime sugar
-
-## 18. Major open questions
-
-These need explicit decisions in follow-on revisions:
-
-- exact syscall ABI shape for object operations
-- handle-table layout and inheritance rules
-- exact rights bit layout
-- value encoding format for arguments/results/properties/events
-- queue/port model for event delivery
-- sync vs async method-call surface
-- service publication and multi-client sharing model
-- property caching and coherency rules
-- how POSIX FDs map onto native handles
-- how much of the interface metadata is visible at runtime vs compile time
-
-## 19. Short thesis
-
-The `os1` native object kernel contract should provide a uniform, handle-based kernel substrate for discovering and interacting with heterogeneous objects through properties, methods, events, and structured failures, while remaining honest about isolation boundaries and suitable as the foundation for both the native shell language and a later POSIX compatibility layer.
-
+Status: revised semantic proposal, 2026-11-04. **Not an implemented or frozen ABI.**
+
+The agreed implementation order is descriptors, console, and a read-only initrd
+VFS first; hosted services follow. This document owns the shared semantics.
+The [VFS](object_oriented_vfs_spec.md), [ELF](elf_interface_spec.md), and
+[shell](os1-shell-language-first-draft.md) documents are profiles of it. The
+[refreshed May review](2026-05-10-unified-os-api-architecture-review.md) records
+risks, changed recommendations, and acceptance gates. Definitions also appear
+in the [glossary](../GLOSSARY.md#descriptors-native-objects-and-interface-proposals).
+
+“Must” below describes a requirement on the proposed implementation, not a
+claim about today's kernel. Operation names and symbolic errors are semantic
+names; syscall numbers, layouts, numeric rights, and error values must be pinned
+in reviewed UAPI headers with the first implementation.
+
+## 1. Scope and design decisions
+
+Keep one process resource table and a small set of native interfaces. Files and
+consoles are objects with supported operations and granted rights; future
+processes or services need not pretend to be byte streams. POSIX functions can
+project suitable objects through the same descriptor numbers.
+
+| Decision proposed on 2026-11-04 | Reason and consequence |
+| --- | --- |
+| One fd-shaped descriptor table | One close, duplication, inheritance, and teardown path; stale integers remain possible after slot reuse. |
+| Separate descriptor, open instance, and object | Duplicates share stream position while keeping independent rights and descriptor flags. |
+| Fixed, versioned interface records first | Proves real I/O without requiring reflection, a recursive value format, or a kernel class registry. |
+| Capability-relative namespace lookup | Acquiring a child is an explicit authority check; enumerating names cannot grant child handles. |
+| Native creation defaults to close-on-exec | Prevents accidental persistence through image replacement; POSIX wrappers must request their different defaults explicitly. |
+| Explicit child grants | A child gets a selected resource set, not the parent's entire table or an ambient global namespace. |
+| Hosted calls and queued events later | Gives transport, cancellation, and provider failure their own acceptance gate. |
+
+These choices replace the earlier recommendation to bootstrap the kernel with
+universal properties, typed values, and `Collection` traversal. Properties,
+methods, and events remain useful interface descriptions in userspace. They
+are not three mandatory kernel operations for every resource.
+
+The first slice excludes writable filesystems, links, mounts, mmap, device
+control, sockets, PTYs, fork, multithreaded user processes, hosted RPC, and a
+shell language implementation. Bounds and authority still apply in this
+single-user phase. A future credential policy can restrict capability issuance;
+it cannot silently turn an unprivileged descriptor into an administrator.
+
+## 2. Terms and ownership
+
+| Term | Meaning in this proposal |
+| --- | --- |
+| Object | Resource identity, supported operations, and resource state. An initrd file node and the console device are examples. |
+| Open instance | A reference to an object plus state belonging to one opening, such as a cursor and status flags. It is shared by duplicates. |
+| Descriptor entry | A process-owned reference to an open instance, with granted rights, descriptor flags, and (for directories) a descendant-grant ceiling. |
+| Descriptor / fd | Nonnegative signed 32-bit process-local index into that table. It is neither an address nor a globally unique identity. |
+| Capability | A kernel-enforced reference plus its authority. Knowing a path, PID, interface name, or fd from another process is not a capability. |
+| Runtime reference | A language value owning or borrowing a local value or descriptor. The runtime must distinguish those cases. |
+| Process | An execution and address-space lifetime; holding a process reference does not keep its threads running. |
+| Operation | Later: one accepted asynchronous action with a persistent terminal result. It is not a process group. |
+| Supervisor | Later: an explicit policy owner for starting, stopping, or restarting provider processes. |
+
+```mermaid
+flowchart LR
+    A["Process A: fd 3<br/>rights, descriptor flags"] --> X["Open instance X<br/>cursor, status flags"]
+    B["Process A: fd 7<br/>rights, descriptor flags"] --> X
+    C["Process B: fd 4<br/>rights, descriptor flags"] --> Y["Open instance Y<br/>cursor, status flags"]
+    X --> F["File object"]
+    Y --> F
+```
+
+A second `open` creates a fresh open instance. Duplication and an explicit child
+grant retain the existing open instance. Kernel references held by an in-flight
+operation are additional owners; they are not exposed descriptor entries.
+Reference counting is an implementation option, not a complete service lifetime
+or cycle-collection policy.
+
+## 3. Descriptor lifecycle
+
+### Lookup and reuse
+
+Descriptor slots may be reused after close. Operations must validate the index,
+acquire a reference to the open instance, and snapshot the entry's rights under
+the table's synchronization before dropping that protection. No operation may
+retain a bare table-entry pointer or later resolve an asynchronous request by
+its original fd number. Lookup linearizes either before removal, obtaining the
+old reference, or after removal, observing an invalid or newly allocated entry.
+
+Thus close/reuse cannot redirect an already accepted read to a different file.
+It can redirect a **new** call made with a stale integer. Runtime owned-reference
+wrappers invalidate on close and must not promise generation protection that
+the integer ABI does not provide. Borrowed descriptors cannot outlive their
+owner. Internal wait registrations and later request IDs need their own stable
+identity; fd numbers are unsuitable for that purpose.
+
+### Close and teardown
+
+`close(fd)` removes exactly one entry and makes its number reusable. A bad fd
+returns `BAD_DESCRIPTOR`; successful removal returns success even if final
+resource cleanup is deferred. Do not retry close after successful removal.
+Closing a descriptor neither cancels an accepted operation nor kills a process.
+A blocked console read may finish through its pinned reference; process exit
+must explicitly detach/cancel its wait registrations before reclaiming memory.
+
+Close cannot hold the descriptor-table lock across destruction, provider code,
+user copying, or a blocking wait. Exit stops new operations, detaches waits,
+removes entries, and releases references through an ordered cleanup path.
+Address-space teardown waits until any operation that uses that address space
+has stopped using it. The first slice must reject unsupported concurrent
+user-thread creation rather than assume this remains safe when threads arrive.
+
+### Duplication and flags
+
+Native `duplicate(source, requested_rights, descriptor_flags, descendant_ceiling)` allocates a new
+entry referring to the same open instance. It requires `DELEGATE`; requested
+rights must be a subset of the source rights. Unknown bits and attempted
+amplification fail, with no new entry. Rights are immutable on an existing
+entry in v1; attenuation creates a new one. A directory's requested descendant
+ceiling must also be a subset of the source ceiling; non-directories have none.
+Shared status changes require the
+applicable interface right and affect all duplicates.
+
+`CLOEXEC` belongs to the descriptor. The initial native default is set.
+`NONBLOCK`, where supported, belongs to the open instance. Read-only file and
+directory cursors also belong to the open instance. Unsupported status flags
+are rejected, not silently retained for hypothetical future use.
+
+An explicit replacement operation used for redirection must atomically pin the
+source and replace the target. Failure preserves the target; self-replacement
+must have a defined no-op or error result in the UAPI. A close-then-duplicate
+sequence is not that operation. A POSIX adapter supplies POSIX `dup`/`dup2`
+defaults rather than changing the native defaults.
+
+## 4. Authority and bootstrap
+
+V1 names these rights: `READ`, `WRITE`, `SEEK`, `ENUMERATE`, `LOOKUP`, `INSPECT`,
+`EXECUTE`, and `DELEGATE`. Only rights meaningful for a given interface may be
+granted. Supported features are separate from permissions. Metadata discovery
+never grants access; `INSPECT` reports bounded identity/interface information,
+not arbitrary process memory, device registers, or other principals' handles.
+
+Directory descriptor grants carry an immutable descendant-grant ceiling in
+addition to rights on the directory itself. This ceiling belongs to the entry,
+not the shared open instance: attenuation must not affect other aliases.
+An open succeeds only when requested child rights fit
+**all** of the starting directory's ceiling, any traversed policy boundary,
+and the target provider's allowed rights. Failure is explicit; an open cannot
+silently return a less capable handle than requested. A derived directory
+cannot widen the inherited ceiling. Every operation creating a directory entry
+(open, duplicate, or child grant) validates its requested ceiling. If that entry
+lacks `DELEGATE`, `DELEGATE` is also removed from its effective descendant ceiling,
+and this restriction propagates to all derived directories. Opening `.` cannot
+restore delegation removed from the grant. Retaining other rights in a ceiling
+intentionally permits granting them to children, even when the directory's own
+interface uses different rights. `ENUMERATE` reveals names/limited metadata;
+`LOOKUP` permits resolution. Neither implies the other or unrestricted child
+rights. The VFS profile defines the concrete immutable-initrd policy.
+
+Trusted boot setup creates the initial console and initrd-root grants. A child
+receives only explicitly mapped descriptors and a bounded startup record naming
+its root/cwd and standard streams. Root/cwd are ordinary granted directory
+references, not magical integers or an alternative table. Native `os` is a
+runtime facade over that context. An absolute-path helper uses its supplied
+root; it cannot reopen a more powerful global root. Replacing an image does not
+reset or increase authority. A pathname, UID field, or claimed role sent by a
+caller cannot substitute for a kernel-validated grant.
+
+V1 delegation is duplication or an explicit spawn grant. General IPC handle
+transfer is deferred. A namespace listing or metadata payload carries no
+ambient authority. Closing an issuer's copy does not revoke copies already
+granted. V1 has no general revocation operation; policy requiring revocation
+must not be advertised until a resource-specific contract exists.
+
+## 5. First-slice interfaces and boundary rules
+
+| Interface / operation | Contract |
+| --- | --- |
+| Byte input / `read` | Requires `READ`; returns bytes transferred, zero at end of input, or an error before progress. Empty console input blocks or returns `WOULD_BLOCK` under `NONBLOCK`. |
+| Byte output / `write` | Requires `WRITE`; returns bytes accepted. Console output acceptance does not guarantee physical display or durable storage. |
+| Seekable input / `seek` | Requires `SEEK`; checked signed displacement and nonnegative resulting offset; shared with duplicates. Console seek returns `UNSUPPORTED`. |
+| Directory / `open_at` | Requires `LOOKUP`, explicit child rights, flags, and a descendant ceiling for directory results; resolves relative to a pinned directory capability and creates a new open instance. |
+| Directory / `read_directory` | Requires `ENUMERATE`; bounded records with names and kind hints, not child descriptors. Cursor belongs to the open instance. |
+| Basic object information / `query_info` | Requires `INSPECT`; a fixed versioned record of kind, supported interfaces, and limits, with no recursive schema. |
+| Descriptor / close, duplicate, flags | Table semantics above. Closing an owned descriptor needs no additional right. |
+| Image launch / spawn, exec | Requires executable input authority and explicit startup context; publication rules below. |
+
+Names do not require a separate syscall for every row. The first UAPI should
+choose the smallest dispatch surface that implements them; a generic call
+with unbounded variants is not a prerequisite. Unsupported interface, bad
+descriptor, and denied right are distinct failures. Do not probe a device or
+run provider code just to discover whether a call is authorized.
+
+The first reviewed UAPI must define fixed-width layouts, structure sizes and
+versions, reserved-zero fields, error numbers, and a finite descriptor-table
+limit. All count/offset arithmetic is checked before allocation or access.
+Unknown flags, unsupported versions, nonzero reserved fields, embedded path
+NULs, and oversized records fail without side effects. Kernel outputs initialize
+all bytes, including padding. No raw user address may outlive its owned
+syscall/address-space borrow or cross an address-space boundary. A parked
+synchronous read may retain a destination address only with that ownership and
+teardown synchronization; a returned object identity never contains a pointer.
+
+User buffers are borrowed only for the syscall's lifetime. Work that survives
+the call must own a bounded copy or an explicitly retained resource. Operations
+may return short counts. On failure after progress they report that progress,
+not a negative error implying nothing happened. Zero-length I/O validates the
+descriptor, interface, and rights but does not dereference the buffer. EOF is
+not `WOULD_BLOCK`. An oversized count must not overflow the signed result;
+the UAPI must specify its maximum accepted transfer and bounded chunking.
+
+For initrd reads and directory enumeration, cursor advancement equals bytes or
+complete records successfully delivered. Concurrent calls through duplicates
+must serialize cursor selection, copying, and commit without holding a spinlock
+across faultable copies or sleeping. A zero-progress user-copy failure leaves
+the cursor unchanged. Console input requires reservation/commit or a validated
+copy path so failed delivery does not silently consume input. Console writes
+copy each bounded chunk before making that chunk visible; already emitted
+bytes cannot be rolled back. These requirements are implementation acceptance
+tests, not permission to invent a second user-memory lifetime model.
+
+## 6. Namespace profile
+
+`open_at` takes a relative byte path and an explicit directory. Absolute paths
+are runtime sugar selecting the granted root and removing the leading slash.
+There is no implicit global-root lookup in the native primitive. V1 bounds a
+path to 4096 bytes excluding a terminator, and a component to 255 bytes. Empty
+paths and embedded NULs fail; repeated separators and `.` are accepted, `..`
+is rejected, and a trailing separator requires a directory. `/` in the runtime
+helper denotes `.` relative to its granted root. Names are byte strings with
+no Unicode normalization or case folding. The VFS profile owns archive
+validation and directory-record encoding details.
+
+V1 supports only immutable directories and read-only regular files constructed
+from validated initrd entries. Links, mount traversal, and mutation return
+`UNSUPPORTED`; they cannot fall back to a less constrained resolver. An open
+reference pins its resource independently of the pathname. A future mutable
+namespace must define lookup linearization, rename/unlink, and traversal races
+before enabling those features. `children: Collection<T>` is an optional
+runtime adapter over lookup/enumeration, not an alternate resolver.
+
+## 7. Process creation and image replacement
+
+The first slice preserves the present one-user-thread-per-process execution
+model. No new hosted-object lifecycle is smuggled into ordinary executable
+launch. Initial standard descriptors 0/1/2 are real entries: input with `READ`,
+output/error with `WRITE`, plus explicitly chosen inspection/delegation rights.
+Closing one makes future calls on that slot fail until it is explicitly reused.
+No syscall may route numbers 0/1/2 to the console after their entries are gone.
+
+A native spawn request contains an executable reference with `EXECUTE`, bounded
+argv/envp, a finite source-to-child descriptor map, and root/cwd selections from
+that map. Every source is pinned and checked for `DELEGATE`; target numbers
+are unique and rights and directory descendant ceilings cannot increase.
+Each directory grant specifies its ceiling and obeys the delegation rule above.
+Source entries are not moved. The map
+is applied to a new table, so cycles such as parent 1 -> child 2 and parent 2 ->
+child 1 are unambiguous. No unspecified parent entries are inherited. Child
+flags are explicit; `CLOEXEC` governs later image replacement, not the initial
+spawn load. The startup-record format and aggregate argument limits must be
+reviewed with the UAPI before the VFS/launch milestone is complete.
+
+Construct the image, stack/startup record, descriptor table, process ownership,
+and final saved thread frame before making the child runnable or returning its
+identity as usable. A failure before that point releases all newly acquired
+references/pages and leaves the parent's table intact. Scheduler publication
+is the final step. The loader must consume the already-open executable object;
+it must not reopen the pathname through an unrestricted initrd shortcut. Image
+loading reads checked explicit offsets in the immutable backing object and
+does not change the executable open instance's shared cursor.
+
+Exec prepares a replacement image and startup state before changing the current
+image or descriptors. Failure preserves the original image and descriptor
+flags/references. Its commit installs the new image, detaches `CLOEXEC` entries,
+and preserves other entries with their rights and shared open instances.
+Root/cwd in the replacement startup record must name surviving entries; invalid
+selections fail during preparation. All fallible allocation/validation occurs
+before commit. Deferred destruction can occur after it; failure there must not
+be reported as a recoverable exec failure with the old image still running.
+
+Migration of today's pathname-only `spawn`/`exec` needs an explicit compatibility
+wrapper using the caller's granted root and documented standard descriptors.
+It must not retain a privileged initrd lookup bypass. POSIX fork and complete
+POSIX startup compatibility are outside this slice.
+
+## 8. Later hosted-service contract
+
+This section constrains the next stage; it does not authorize implementation
+before a concrete channel/envelope UAPI and failure tests are reviewed.
+
+A program image, running process, service endpoint, and asynchronous Operation
+are distinct. `spawn` starts an ordinary program. `start_service` starts a
+provider with an explicit supervisor and startup grants. `connect` acquires an
+endpoint through an authorized publisher. Local library loading stays within
+the caller's process and is neither operation.
+
+A service is connectable only after an authenticated READY handshake confirms
+initialization and compatible interfaces. Constructor failure, startup timeout,
+or provider exit before READY fails startup and cleans up unpublished resources.
+Publication does not transfer supervision automatically; a supervisor change
+is explicit. Last client close releases a connection, not an instruction to kill
+the provider. Parent exit, shutdown, restart, and orphan handling follow the
+supervision policy, independently of endpoint reference counts. A retained
+dead endpoint reports peer closure; restart cannot silently rebind it to a new
+provider generation.
+
+### Classes and class-controlled construction
+
+A class is a versioned construction contract implemented by an approved binary;
+a binary can export more than one class. Class identity, interface identity,
+artifact revision, provider-process identity, and object-instance identity are
+distinct. A class exposes a bounded construction-argument schema and the
+interfaces of its result. Metadata describes this contract; it does not execute
+or replace the class's construction code.
+
+**Selected semantics (2026-11-04): the class implementation decides what object
+to return.** The ordinary caller invokes the class with optional arguments and
+receives an object reference or an error. There are no caller-selectable fresh,
+shared, singleton, or reuse modes. The class may allocate a fresh instance,
+return a singleton, select a cached instance, or use a pool, within its granted
+authority and documented behavioral contract. Identity-sensitive behavior must
+be documented, but metadata need not prescribe the implementation's allocation
+strategy. A new client descriptor does not imply a new underlying object.
+
+The public construction hook runs for each accepted construction request and may
+return an existing object. This is a **factory operation** in the protocol/C++
+binding: a static function returns a result/proxy. An ordinary C++ instance
+constructor initializes only a newly allocated implementation object; it cannot
+return a different existing object. Reusing an instance does not automatically
+run that instance initializer again. Provider-process startup is separate from
+both the public construction hook and per-instance initialization.
+
+Construction accepts optional typed arguments with schema-defined defaults,
+required fields, limits, and errors. Keep three inputs separate:
+
+- **Object arguments:** per-request values interpreted by the class's construction
+  hook. The class defines their effect when selecting an existing object.
+- **Process environment:** an explicitly selected bounded string environment
+  for a newly started provider; not rewritten for each construction request.
+- **Capability grants:** explicit startup grants or later attached references,
+  validated independently of argument strings. A path or numeric fd in arguments
+  does not grant access.
+
+An explicit compatibility adapter may translate selected environment strings
+into constructor arguments, with documented parsing and precedence. The native
+API does not equate these mechanisms or implicitly inherit the caller's
+namespace. When returning an existing object, class code must define whether
+arguments select an instance, configure a client session, validate compatibility,
+or fail. Reconfiguring shared state is allowed only as an explicit part of the
+class contract under the required authority; reuse is not an implicit reset.
+
+### Shared instances and service activation
+
+A singleton has a class-defined scope. A static object in one provider process
+is not automatically system-wide. Cross-process acquisition needs an authorized
+class endpoint that reaches the same implementation/registry. A service manager
+can locate and activate that provider, supervise it, and enforce deployment
+policy. The class code still decides whether a construction request allocates
+or returns an existing object. The kernel supplies references, transport, and
+process isolation; neither the kernel nor a regular caller selects the class's
+allocation strategy.
+
+`objects.create(class_ref, arguments)` invokes that construction hook and may
+activate its provider on demand. It is distinct from ordinary `spawn`, explicit
+provider `start_service`, and `connect`, which only acquires an already-ready
+endpoint. A class reference is an authorized construction capability, not a
+pathname that permits arbitrary service registration. Inspecting its metadata
+executes no construction code.
+
+For shared state, the class/runtime registry must use a manager-authorized realm,
+class identity, approved implementation revision, and class-defined instance key.
+The class supplies selection/compatibility logic; callers cannot choose a realm
+or override reuse through generic creation options. A realm is a sharing/security
+domain, not an unchecked string. System-wide scope and privileged initial
+configuration require deployment authorization. The first ordinary caller cannot
+choose the executable, provider environment, or elevated startup grants merely
+by reaching an uninitialized service first. Multi-identity sharing waits for a
+trusted credential model.
+
+The runtime can offer class implementations a race-safe `get_or_create` helper.
+For each selected key it reserves a `CREATING` entry, runs initialization outside
+registry locks, and publishes `READY` only after successful initialization and
+protocol validation. Concurrent requests for that key do not receive a partially
+initialized object. Each request still executes the class's argument validation,
+authorization, and selection logic. Initialization failure cleans up owned
+resources and has an explicit outcome/retry policy. Recursive acquisition of the
+same in-progress key fails rather than deadlocking; broader activation cycles
+need dependency/deadline handling. Quotas bound entries, waiters, and results.
+
+Provider readiness means its class endpoint can accept construction requests;
+object readiness means the selected instance has finished initialization. A
+one-object provider may combine the handshakes initially. A ready provider can
+still fail a particular construction request. Construction must not force a new
+process for every call; multiple objects per process are a later hosting profile.
+
+Every returned reference is separately authorized for the acquiring caller.
+Reusing an object never copies another client's broader rights or shutdown
+authority. The class may return per-client sessions backed by common state.
+Whether two clients observe common mutable state is an interface contract, not
+an inference from a reused PID or matching descriptor numbers.
+
+The registry may retain an instance independently of client references. Eviction
+removes that retention/discovery entry; it does not retarget live references to
+a replacement object. Instance release and provider-process shutdown remain
+separate protocols. A pool must not recycle an instance into another client's
+session while old references still authorize access to its previous contents.
+
+The shared provider's Supervisor belongs to its manager. Closing a client,
+client exit, or a client deadline does not terminate shared work needed by other
+clients. Manager-owned idle shutdown is explicit lifecycle policy. Late/discarded
+construction replies release client grants; bounded request identity/result
+retention must address retry ambiguity. A construction hook may have effects,
+so automatic retry is not safe merely because it is named `create`. A crash ends
+that provider/object incarnation. Old endpoints stay closed; restart creates a
+new generation and implies neither exactly-once initialization nor persistence.
+Upgrade/coexistence policy must be explicit; changing a binary or registry entry
+cannot redirect existing endpoints.
+
+Start with the private one-object service and typed arguments. Add class-controlled
+shared activation after capability attachment, registry concurrency, supervision,
+authorization, argument/reuse, and crash tests exist. The
+[C++ examples](cpp-bindings-and-object-creation.md) illustrate this model; they do
+not add it to the first descriptor/VFS milestone.
+
+### Calls, values, and authority
+
+Use bounded messages with protocol version, stable interface/operation IDs,
+request identity, connection/provider generation, payload length, and a separate
+attached-capability list. A numeric fd in payload bytes is just data. The kernel
+validates message bounds, endpoint rights, and attached-reference transfer;
+generated userspace codecs validate method-specific fields. No recursive class
+registry or interpretation of arbitrary language objects belongs in the kernel.
+The transfer protocol must reserve all destination entries and make acceptance
+atomic; sender retention/move rules must be explicit before enabling transfer.
+
+Interface identity, major compatibility, additive optional members, and unknown
+operation behavior must be specified together. Reusing an ID for an incompatible
+meaning is forbidden. ELF symbols and C++ object layouts are not wire identities.
+Properties are getters with optional explicit setter operations; setting an
+object-valued property does not mutate the returned object's contents. Each
+setter defines validation and atomicity. Remote read-modify-write syntax is
+rejected unless mapped to a specified atomic operation.
+
+### Completion, cancellation, and notifications
+
+An accepted asynchronous Operation progresses once from pending to a terminal
+success, failure, or confirmed cancellation. Its terminal status remains
+queryable while the Operation reference is held. A cancellation request is
+separate from confirmed cancellation; completion may win the race. Closing a
+reference and expiration of a caller's wait are not proof that side effects
+stopped. After an uncertain transport failure the caller may have an unknown
+outcome; automatic replay is forbidden unless the operation is idempotent or
+uses a documented deduplication protocol. At-most-once dispatch alone cannot
+promise exactly-once effects or reliable delivery of the reply.
+
+Wait registration must atomically check state and arm the waiter, or recheck
+under the same synchronization, so completion cannot occur between the check
+and sleep unnoticed. Terminal state is authoritative even if a notification is
+lost. Timeouts use an explicit monotonic clock and unit, with checked deadline
+arithmetic; the existing TSC helper is not yet that public contract.
+
+Events enqueue bounded records; no kernel/provider cross-process callback or
+nested synchronous language callback is part of the baseline. Each stream must
+state ordering and whether it is lossless, coalesced, or lossy. Lossy queues need
+a sticky, queryable overflow indication and sequence/generation information so
+clients can resnapshot. A terminal result cannot exist only in a lossy event.
+Reliable bulk results need a backpressured stream or explicit result retrieval.
+
+Queue owners must bound bytes, records, subscriptions, outstanding requests,
+and retained results. Queue shutdown detaches its subscriptions; the later
+profile must choose whether shutdown is explicit or triggered by the last
+user-visible owner, independently of internal pins. Closing one duplicated
+queue descriptor must not shut down the other owners' queue. Unsubscribing
+prevents future enqueue, while already queued records may remain and must carry
+an unambiguous subscription identity. Subscription delivery cannot implicitly
+grant target control or keep a provider executing. The ownership graph and
+teardown order must be tested for source/queue/subscription cycles before this
+feature ships. No unbounded producer allocation is permitted.
+
+## 9. Errors, compatibility, and extensibility
+
+The first UAPI uses machine-readable status codes and transfer counts; runtime
+exceptions are wrappers. Bad descriptor, unsupported interface, denied right,
+invalid input, exhausted resources, would-block, and end of input have distinct
+semantics. Later service errors distinguish transport/admission failure,
+provider-declared failure, cancellation, and unknown outcome. Optional bounded
+diagnostic text is not a discriminator and may omit sensitive details. No
+arbitrary serialized exception object or unbounded nested cause tree is needed.
+
+The POSIX adapter shares descriptors and open instances, translating supported
+operations and errors. It must document gaps: no fork, signals, writable VFS,
+symlinks, mounts, or complete terminal behavior in v1. Native close-on-exec and
+delegation defaults are intentional; compatibility wrappers select their own
+flags and request sufficient grants explicitly. Do not claim full POSIX
+conformance from fd-shaped indices.
+
+Later writable files, memory mappings, device removal, credential changes,
+revocation, and shared-memory queues each need resource-specific lifetime and
+ordering rules. For example, a mapping pins backing state independently of its
+source descriptor, and device power control requires driver quiescence, not
+just a `WRITE` bit. Leave those interfaces unavailable until their contracts
+are testable.
+
+## 10. Implementation gates
+
+The [review acceptance matrix](2026-05-10-unified-os-api-architecture-review.md#implementation-sequence-and-acceptance)
+is the test plan. Two milestones form the first vertical slice:
+
+1. **Descriptors and console:** fixed UAPI/error vocabulary, table references,
+   rights, duplication/flags, real standard entries, partial-I/O behavior, wait
+   teardown, and process publication/exec cleanup regressions.
+2. **Initrd VFS and launch:** validated immutable namespace, bounded lookup and
+   enumeration, independent opens/shared duplicates, root/cwd grants, executable
+   references, bounded startup arguments, explicit child maps, and no loader
+   authority bypass.
+
+Hosted services are the next milestone, gated on a separate concrete wire and
+supervision profile. Reflection and generated bindings should be grown from
+these exercised interfaces. Neither a polished catalog nor passing unrelated
+boot tests establishes that these contracts have been implemented.

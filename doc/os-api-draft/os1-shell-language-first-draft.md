@@ -1,1279 +1,389 @@
-# os1 Shell Language — First Draft
+# os1 Shell Language and Runtime Profile
 
-## Status
+Status: revised later-stage proposal, 2026-11-04. **Illustrative language and API
+syntax; no shell runtime, hosted-service API, or frozen language ABI is claimed.**
 
-Draft for iteration.
+The [native contract](native_object_kernel_contract.md) owns resource, authority,
+process, and service semantics. The [VFS profile](object_oriented_vfs_spec.md)
+defines namespace behavior; the [ELF profile](elf_interface_spec.md) separates
+image descriptions from executable loading and service invocation. Implement
+and exercise descriptors, console I/O, bounded launch, and the read-only initrd
+VFS before building this language. Hosted services are the next systems stage;
+a full reflective shell is a later client of those interfaces.
 
-This document proposes a first draft of the native `os1` shell / scripting language. The language may eventually support both interpreted and ahead-of-time compiled execution. This draft defines the **semantic model first** and leaves parser/runtime implementation strategy flexible.
+## 1. Purpose and design limits
 
-The language is intended to be:
+The shell should make typed data and granted resources convenient to use while
+keeping the cost and failure modes of remote work visible. Ordinary programs,
+local libraries, and persistent services should each have a clear entry point.
+A resource can expose a byte stream, a directory, or another supported interface
+without pretending that every operation is file I/O.
 
-- concise enough for interactive shell use
-- structured enough for reliable automation
-- typed enough for tooling, reflection, and composition
-- honest about process, object, and isolation boundaries
-- suitable as a native interface **beyond POSIX**, while preserving a path to POSIX compatibility
+Methods, properties, and events are language bindings over explicit protocols.
+They do not require a universal kernel class hierarchy or recursive value ABI.
+Start with generated bindings for fixed interfaces; add interactive discovery
+and syntax only when they simplify a working workflow. Parsing, bytecode,
+optimization, package resolution, and a general FFI remain separate design work.
 
----
+## 2. Values, references, and ownership
 
-## 1. Design goals
+| Language entity | Meaning |
+| --- | --- |
+| Value | A scalar or local structural record/array with defined copy or move behavior. A request record is data in the calling runtime. |
+| Local object/reference | An object in the current process and a runtime reference to it. It is not a kernel descriptor and cannot be sent as a pointer to another process. |
+| Owned descriptor wrapper | A runtime owner of one process-local descriptor entry. Closing it removes that entry once and invalidates that wrapper. |
+| Borrowed descriptor reference | Temporary access through an owner; it cannot outlive that owner or be retained by asynchronous work without acquiring ownership. |
+| Remote service proxy | A local wrapper around an authorized endpoint and its protocol/connection identity. Method calls cross a process boundary. |
+| Process | A reference used for permitted process inspection, waiting, or control. Keeping it does not keep the process executing. |
+| Operation | One accepted asynchronous action with persistent terminal success, failure, or confirmed cancellation. |
+| Supervisor | An explicit policy owner for provider startup, shutdown, restart, and orphan handling. |
 
-The language should:
-
-- support small interactive shell commands
-- support larger scripts and automation workflows
-- expose `os1` native concepts directly
-- keep local data and hosted OS objects distinct
-- provide synchronous and asynchronous invocation models
-- support properties, methods, and events as first-class syntax
-- allow exception-based error handling with compact syntax
-- preserve strong observability and control of the running system
-- support tooling through discoverable metadata and typed interfaces
-
-The language should **not** become:
-
-- a text-only POSIX shell clone
-- a giant general-purpose programming language too early
-- a distributed-object fantasy that hides OS boundaries
-- a GUI scripting system before the core model is coherent
-
----
-
-## 2. Core semantic model
-
-The language has four major runtime categories:
-
-### 2.1 Value types
-
-Examples:
-
-- integers
-- booleans
-- strings
-- byte arrays
-- enums
-- tuples
-- records / structs
-- arrays
-
-These are local to the current process and passed by value unless otherwise specified.
-
-### 2.2 Local objects
-
-Examples:
-
-- script-local collections
-- local helper objects
-- counters
-- local state holders
-- compiler/runtime-generated closures
-
-These live in the script process address space.
-
-### 2.3 Hosted objects
-
-Hosted objects are process-backed OS objects loaded or obtained through the system.
-
-Examples:
-
-- `os.load("/bin/ls")`
-- `os.load("/bin/crop")`
-- future device/service objects
-
-Hosted objects:
-
-- live in protected child processes or equivalent hosted contexts
-- are referenced through handles
-- preserve state across method calls
-- may expose properties, methods, and events
-- can emit events to subscribed callers
-- die when their parent process dies unless later transferred or detached by explicit future policy
-
-### 2.4 Handles
-
-A handle is an owned reference to an object.
-
-Properties of handles:
-
-- reference counted
-- scoped by language lifetime rules
-- may refer to local or hosted objects
-- support multiple aliases
-- determine lifetime of hosted child objects
-- are the unit of access, invocation, and subscription
-
----
-
-## 3. Execution and isolation model
-
-### 3.1 Script process
-
-A shell command or script runs in a script process.
-
-This process owns:
-
-- local values
-- local objects
-- handles to hosted objects
-- event handlers
-- the ambient `os` object
-
-### 3.2 Hosted child process model
-
-`os.load(...)` creates a **hosted child object** backed by a protected child process.
-
-Consequences:
-
-- constructor / initialization executes at load time
-- object state persists until destruction
-- method calls are process-boundary calls, even if syntax looks object-oriented
-- events are delivered across process boundaries
-- if the script process dies, its hosted child objects die too by default
-
-The model is recursive: hosted objects may create further hosted objects, subject to security and ownership rules.
-
-### 3.3 Honesty rule
-
-The language may provide ergonomic syntax, but the design must remain honest:
-
-- hosted method calls are not raw in-process function calls
-- hosted property access may imply IPC / messaging
-- event delivery crosses protection boundaries
-- exceptions crossing hosted boundaries are serialized failures re-raised by the caller runtime
-
----
-
-## 4. Language style
-
-The language should support both:
-
-- compact shell-like usage
-- structured script/program style
-
-Examples:
+Assignment of an owned wrapper to another variable aliases the same runtime
+owner; it does not duplicate its descriptor. `duplicate` is explicit, requires
+`DELEGATE`, and can only retain or reduce rights. Aliases observe a closed owner
+as closed. A separate duplicate remains valid when the original is closed.
+The [descriptor contract](native_object_kernel_contract.md#3-descriptor-lifecycle)
+controls slot reuse: a stale raw fd can refer to a later resource, so wrappers
+must not advertise generation protection that the integer ABI lacks.
 
 ```text
-ls = os.load("/bin/ls")
-ls_arg : type(ls.arg)
-ls_arg.input.mask += "*.jpg"
-ls.run(ls_arg)
+output = os.stdout
+alias = output                 # Same owner, not another kernel entry.
+copy = output.duplicate(rights: [WRITE], flags: [CLOEXEC])
+copy.close()                   # Does not close output or alias.
 ```
 
+This example requires `DELEGATE` on the source grant. Runtime cleanup closes
+owned entries exactly once. Explicit cleanup is preferred for bounded scopes;
+finalization is a fallback, not a deadline, cancellation, or supervision policy.
+The precise language rule for moving owners between scopes remains to be
+specified before implementing closures or asynchronous tasks.
+
+## 3. The injected `os` capability bundle
+
+`os` is a runtime facade over the startup context and explicitly granted service
+endpoints. It is not an ambient path to unrestricted kernel authority. Its
+root/cwd and standard streams are actual granted descriptors. Absolute-path
+helpers resolve from that supplied root; changing syntax cannot obtain a more
+powerful root. Startup environment strings and claimed user identities cannot
+create capabilities.
+
+The [authority rules](native_object_kernel_contract.md#4-authority-and-bootstrap)
+apply to all convenience methods. Opening a child requires the directory's
+lookup authority, its descendant-grant ceiling, and the provider's allowed
+rights. Listing names conveys information, not handles. A `can(...)` or feature
+query is advisory; the real operation must check its current authority.
+
 ```text
-for item in ls.items({ mask: "*.jpg" }) {
-  println(item.path)
+entries = os.fs.read_directory(directory, max_records: 32)
+for entry in entries.records {
+    print(entry.name)           # A bounded record, not a child object handle.
 }
+file = os.fs.open_at(directory, "readme.txt", rights: [READ], flags: [CLOEXEC])
+defer file.close()
 ```
 
----
+This assumes a supplied directory with `ENUMERATE` and `LOOKUP`, and a ceiling
+permitting `READ` on the child. An enumeration-only grant can list the name while
+the open fails. The runtime must preserve that distinction. A future discovery
+catalog similarly returns descriptions; acquiring a process, device, or service
+handle is an explicit, separately authorized action.
 
-## 5. Type system and metadata
+The first namespace is immutable and read-only. Runtime path helpers follow the
+[bounded namespace profile](native_object_kernel_contract.md#6-namespace-profile),
+including rejection of `..`, links, and unsupported mutations. A future
+`children` collection is an adapter over those operations, not another resolver.
 
-### 5.1 Goals
+## 4. Ordinary programs, services, and local modules
 
-The type system should be:
+| Illustrative operation | Result and boundary |
+| --- | --- |
+| `os.spawn(image, argv, envp, grants)` | Starts an ordinary executable; returns a Process reference with explicitly granted observation/control rights. |
+| `os.services.start(image, supervisor, grants, deadline)` | Starts a hosted provider; succeeds only after READY and compatibility validation. Its result identifies the endpoint and separately available process observation. |
+| `os.services.connect(publisher, name, interface)` | Obtains an authorized connection to an already-ready service. It does not silently start a process. |
+| `os.objects.create(class_ref, args)` | Invokes an authorized class construction hook; class code may create or reuse an object. The caller has no allocation/sharing mode. Provider activation can be managed on demand. |
+| `inspect_image(image)` | Reads optional bounded descriptions without executing the image. |
+| `import(module)` | A future local module mechanism; it executes under the caller's authority and does not imply process isolation. |
 
-- discoverable
-- tool-friendly
-- compact enough for scripts
-- strong enough to describe object interfaces
+These names are syntax sketches. The ambiguous `os.load(path)` operation is
+removed: ordinary executable launch, local loading, and hosted construction
+have different authority and lifetime requirements.
 
-### 5.2 Interface discovery
+### Ordinary process startup
 
-Program metadata is discoverable from loadable program images.
-
-Compiler/runtime may inspect metadata to determine:
-
-- object type
-- properties
-- methods
-- events
-- argument types
-- return types
-- exceptions
-- version / compatibility metadata
-
-### 5.3 Type query syntax
-
-This draft accepts:
+The [process contract](native_object_kernel_contract.md#7-process-creation-and-image-replacement)
+requires an executable reference with `EXECUTE`, bounded argv/envp, and an explicit
+source-to-child descriptor map. Every delegated source requires `DELEGATE` and
+child rights cannot increase. Unlisted parent descriptors are not inherited.
+Root/cwd are selected from that map. `CLOEXEC` defaults on for native descriptors;
+it governs a later exec, not whether a listed descriptor enters the initial
+child image. The runtime must validate the child's chosen startup context rather
+than copy the parent's entire table.
 
 ```text
-ls_arg : type(ls.arg)
+program = os.fs.open_at(os.fs.root, "bin/ls", rights: [EXECUTE], flags: [CLOEXEC])
+defer program.close()
+process = os.spawn(program, argv: ["ls", "/"], envp: [], grants: child_context)
+defer process.close()
+result = process.wait()
+print(result.exit_status)
 ```
 
-Meaning:
+`child_context` here is an explicitly prepared, bounded grant map containing
+standard streams and the desired root/cwd. Building it is an authorization
+operation, not shorthand for ambient inheritance. `process.wait()` waits for
+process termination; it is unrelated to service readiness or one method's
+completion. No POSIX fork, signal, or full terminal model is implied.
 
-- `ls.arg` refers to a discoverable interface member/type descriptor
-- `type(...)` resolves the concrete type
-- `ls_arg` is declared with that type
+### Hosted startup and failure
 
-Possible future sugar may exist, but this is acceptable in the first draft.
+A provider initializes through its assigned bootstrap endpoint and publishes an
+authenticated READY record. Constructor failure, malformed/incompatible READY,
+startup timeout, or exit before READY causes startup failure. The Supervisor
+cleans up the unpublished provider and resources according to its explicit
+policy. Initialization may already have produced external effects; failure
+cannot promise general rollback.
 
-### 5.4 Structural data
+The runtime returns no usable proxy before READY. Inspection never runs a
+constructor to discover types. A ready service may still fail at any subsequent
+call, and a retained dead proxy reports peer closure. Restart creates a new
+provider generation; reconnect is explicit and does not replay prior calls.
 
-Structured values should support:
+### Class-controlled construction
 
-- named fields
-- array fields
-- nested records
-- literals
-
-Example:
+A class binary can expose a construction hook with optional typed arguments.
+The ordinary caller invokes it; **the class code decides what object to return**.
+It can create a fresh instance, return a singleton, choose a cached object, or
+return a session over shared state. No regular caller option forces fresh or
+shared creation.
 
 ```text
-{
-  file: item.path
-  dimension: { width: 1024; height: 768 }
-  preserve_aspect_ratio: true
-}
+processor = os.objects.create(text_processor_class, { locale: "C" })
+defer processor.close()
+result = processor.uppercase("hello")
 ```
 
----
+`text_processor_class` is an authorized class reference, not arbitrary executable
+registration. The hook validates arguments on each request. Per-instance
+initialization occurs only for a newly allocated instance. The class contract
+specifies how arguments affect reuse; they do not implicitly rewrite the
+provider's process environment or grant access from path strings. An explicit
+compatibility adapter can accept selected environment values.
 
-## 6. Object lifecycle
+A shared class provider can be activated by a manager and survive client exits.
+Closing the proxy releases the client's grant, not the manager's Supervisor.
+Cross-process singleton scope requires shared registry/lifecycle coordination;
+a static local object is insufficient. Construction can fail or have an unknown
+outcome, so retry needs the same care as other effectful calls. See the
+[canonical construction rules](native_object_kernel_contract.md#classes-and-class-controlled-construction)
+and [C++ binding examples](cpp-bindings-and-object-creation.md).
 
-### 6.1 Loading
+## 5. Process, Operation, and Supervisor lifetimes
 
-The preferred syntax is:
+These types must not be collapsed into a generic `Job`. A future shell job-control
+abstraction would need its own process-group and terminal policy.
+
+| Action | Meaning |
+| --- | --- |
+| Close descriptor/proxy | Release this owner's entry or connection; accepted work may still hold references. It does not implicitly cancel work or kill a provider. |
+| Wait for Operation | Observe its authoritative terminal result, optionally until a caller deadline. |
+| Request cancellation | Ask for cancellation; success of the request is distinct from confirmed cancellation, and completion may win. |
+| Wait for Process | Observe execution termination and retained exit status. Exit-status retention must not require keeping its address space alive. |
+| Request termination | A separately authorized process-control operation with its own completion rules. |
+| Shut down Supervisor | Apply an explicit policy to owned providers and wait or report incomplete shutdown as specified. It is not generic descriptor close. |
+
+For a dedicated service, a script may explicitly create an exclusive-child
+Supervisor and defer its `shutdown_and_wait` operation. A shared provider instead
+survives individual client disconnects under its owner. Parent death, restart,
+orphans, and client-session state follow the declared policy. Reference counting
+alone cannot decide these questions or safely collect cross-service cycles.
+
+A scope that exits while an Operation is pending must follow a declared policy:
+retain the operation in a task scope, or request cancellation and join
+its terminal result. Dropping a wrapper is not proof that work stopped. As with
+spawn, runtime-owned scopes never grant control rights that were not supplied.
+
+## 6. Methods, properties, and local argument records
+
+A remote method uses a known interface version and operation ID with bounded
+request/reply records. A generated binding can check local types, but the
+provider validates all received fields and authority independently. Protocol IDs
+are not ELF symbol addresses or names. Metadata supports discovery; it does not
+freeze an arbitrary language object's layout into the kernel ABI.
+
+A synchronous remote call waits for its own reply and **does not dispatch nested
+language callbacks**. An asynchronous method returns an Operation whose terminal
+result remains queryable. Neither form removes the need for admission limits,
+request identity, deadlines, and provider-death handling.
+
+Properties map to a getter and, optionally, a distinct setter operation. A getter
+returns a snapshot or an explicitly described reference; it may fail or block.
+A setter defines validation and atomicity. To keep interactive inspection
+predictable, default printing, completion, and type inspection must not invoke
+remote getters automatically. Users explicitly request a snapshot or value.
 
 ```text
-obj = os.load("/bin/name")
+value = counter.read()          # Explicit remote getter.
+value = counter.add(1)          # One specified atomic method.
+# counter.value += 1            # Rejected: no implicit remote read/modify/write.
+
+request = { mask: "*.md", max_records: 32 }
+request.mask = "*.txt"          # Ordinary mutation of a local request value.
+page = listing.next(request)    # Bounded encoded copy; no shared struct pointer.
 ```
 
-`os.load(path)`:
+A property spelling such as `counter.value` could be offered as getter syntax,
+with the same remote cost and errors. Compound assignment remains rejected
+unless the interface explicitly binds it to an atomic operation. Assigning an
+object-valued property replaces a reference only if a setter specifies that;
+it never implicitly mutates the referenced object's contents.
 
-- resolves a program image or loadable object source
-- creates a hosted object instance
-- executes initialization / constructor logic
-- returns a handle to the hosted object
+Generated codecs initially cover fixed scalar fields, bounded strings/arrays,
+and documented record types. A numeric fd in a record is data. Actual capability
+transfer uses the kernel-validated attachment mechanism when that later feature
+exists, with explicit rights and ownership on success and failure. Arbitrary
+local references, closures, and serialized exception instances cannot cross the
+boundary by default.
 
-### 6.2 Lifetime
+## 7. Events and explicit dispatch
 
-Object lifetime is determined by:
-
-- handle scope
-- reference count
-- process ownership tree
-
-Default policy:
-
-- handle destruction decrements reference count
-- final release destroys the hosted object
-- parent script death destroys child hosted objects
-
-### 6.3 Multiple references
-
-Multiple references are allowed.
-
-Example:
+Remote events are bounded queued records. Callbacks are local runtime functions
+invoked only on explicit event-loop or await turns; there is no cross-process
+function pointer call. This prevents a blocked synchronous invocation from
+silently reentering the script while its state or locks are half-updated.
 
 ```text
-a = os.load("/bin/ls")
-b = a
+subscription = operation.events.subscribe(queue, filter: "progress")
+defer subscription.close()
+queue.on(subscription, fn(event) { print(event.completed) })
+result = await operation.wait(deadline: deadline)  # An explicit dispatch turn.
 ```
 
-The hosted object survives until both references are gone.
+The syntax is illustrative. An await turn may dispatch registered local
+callbacks; a synchronous `operation.wait()` does not. The first runtime should
+use one explicit dispatcher per script, with no implicit concurrent callback
+execution. Callbacks should not perform blocking remote calls on that dispatcher;
+a future async-callback model needs explicit task scheduling and cancellation.
 
-### 6.4 Cleanup
+Every stream specifies ordering and whether events are reliable, coalesced, or
+lossy. Lossy progress needs a sticky overflow indication plus sequence/generation
+information so the client can request a new snapshot. Terminal completion lives
+in Operation state even when no notification arrives. Bulk results use bounded
+pull reads or a backpressured stream; event callbacks are not an unlimited result
+buffer.
 
-Cleanup should be deterministic where possible.
+Unsubscribing prevents future enqueue. Already queued records can remain and
+carry subscription identity. The runtime marks its callback registration inactive
+and drops those records instead of invoking a removed handler. An already
+executing callback is allowed to finish; unsubscribe does not unwind its stack.
+No new callback begins after local removal. Queue shutdown detaches subscriptions;
+closing one duplicated queue descriptor must not shut down other owners' queue.
+The later queue protocol must choose explicit shutdown or shutdown on the last
+user-visible owner, independently of internal pins. Pending records/attachments
+must be released without ownership cycles.
 
-Future explicit operations may include:
+A callback exception is a local dispatch failure. It is reported to the owning
+task's failure policy; it does not become a provider exception or retroactively
+cancel an unrelated remote call. A long-running handler can delay the single
+runtime dispatcher, so event work must be bounded. Queue quotas, pending-request
+limits, and overflow behavior are part of the interface, not tuning left until
+after implementation.
 
-- `obj.close()`
-- `obj.dispose()`
-- ownership transfer / detach semantics
+## 8. Errors and uncertain outcomes
 
-These are not required for first implementation but should remain possible.
+Runtime exceptions wrap stable status codes; they do not replace them. Preserve
+at least these categories:
 
----
+| Category | Example and required treatment |
+| --- | --- |
+| Local validation / admission failure | Invalid record, denied right, or full request quota; report the documented pre-effect failure. |
+| Provider-declared failure | A valid application result, such as a rejected counter increment, with protocol-specific effect semantics. |
+| Confirmed cancellation | The Operation's terminal result confirms the cancellation contract; merely requesting cancellation is insufficient. |
+| Deadline expired | The caller stopped waiting. The Operation/provider may still be active. |
+| Peer failure / unknown outcome | The provider may have performed the effect before losing its reply. Preserve that uncertainty. |
 
-## 7. Methods
+Do not automatically retry a mutating call after an uncertain failure. An
+idempotent method or explicit durable deduplication protocol may permit replay;
+at-most-once dispatch alone does not provide exactly-once effects. Late replies
+must not be delivered to an unrelated request after slot reuse, and discarded
+replies must release attached capabilities.
 
-### 7.1 Synchronous methods
+Diagnostic text is bounded, optional, and never the error discriminator. Unknown
+codes remain errors. A runtime may construct a local error value from a code,
+request identity, and bounded text; it must not deserialize arbitrary remote
+exception classes or allocate an unbounded cause tree. Even out-of-memory errors
+need a reporting path that does not require allocating another error object.
 
-A synchronous method runs to completion before returning.
+## 9. Illustrative `os` catalog
 
-Example:
+This catalog preserves the long-term direction, not an implementation checklist
+for the first shell. A missing capability or unsupported interface is explicit;
+fields do not imply administrator access. Discovery returns bounded descriptions
+and authorized snapshots, with explicit acquisition for resource handles.
+
+| Facade | Useful surface | Boundary and dependency |
+| --- | --- | --- |
+| `os.process` | Current process identity; permitted state/exit inspection; waiting and explicit control of granted processes. | A PID is not a control capability. Process/handle/thread listings need bounded snapshots; stop/terminate/trace are separate privileged operations. |
+| `os.user` | Current credential description, permitted user lookup, advisory authority queries. | Future credentials/authentication policy. Changing a local UID field cannot authenticate or grant rights. |
+| `os.env` | Local environment variables, locale/timezone preferences, explicit child environment construction. | Mutates this runtime's environment; does not rewrite another process or confer authority. Launch records remain bounded. |
+| `os.fs` | Granted root/cwd, `open_at`, read/seek, bounded directory pages, object information. | Read-only initrd first. Mutation, links, mounts, watches, and writable storage need later resource-specific contracts. |
+| `os.objects` | Class construction with typed optional arguments; class code selects fresh or existing objects. | Requires authorized class references, per-client grants, readiness, and declared reuse/argument behavior; shared activation is a later manager/runtime facility. |
+| `os.services` | Authorized discovery, READY-gated startup, connection, explicit supervision. | Depends on bounded IPC, generated codecs, deadlines, failure handling, and a publisher authority model. |
+| `os.net` | Socket connections, listeners, name resolution, permitted interface/route snapshots. | Later networking protocols and socket lifetime/backpressure contracts. Route or interface administration requires separate grants. |
+| `os.devices` | Enumerated device descriptions, explicit authorized opening, passive snapshots, later change events. | Device IDs/names are not handles. Rescan, reset, power, claim, or release require dedicated control protocols and driver quiescence. |
+| `os.time` | Monotonic deadlines/durations, sleep, later timers; separately identified wall-clock time. | Units, overflow, cancellation, and clock domains must be defined. Existing TSC helpers are not a public deadline API. |
+| `os.observe` | Bounded passive snapshots; later explicit event subscriptions, metrics, and trace sessions. | One facade, avoiding the former conflicting `os.observe(...)` function spelling. Inspection must not trigger rescan, reset, or active tests. |
+| `os.sys` | Build/platform/features and authorized system snapshots; explicit power control when granted. | Version/feature queries do not grant shutdown/reboot authority. Kernel panic is not a general shell action; runtime GC belongs to the runtime. |
+
+Passive observability should precede broad control APIs. Process/device getters
+need clear snapshot boundaries and redaction, not live pointers into mutable
+kernel structures. Enumeration must distinguish a stale description from a
+successful acquisition. Device removal can invalidate an operation even after a
+snapshot reported the device present; the concrete device contract owns that
+failure behavior. An event such as `on_device_removed` supplements a state query
+and cannot be the only way to discover loss.
+
+Standard input/output/error are real descriptor entries. Console byte I/O alone
+does not establish a TTY, PTY, terminal session, line discipline, or job-control
+model. POSIX adapters use the same descriptors and documented mappings; their
+flags and inheritance defaults need not match native `CLOEXEC` defaults.
+
+## 10. Example workflows and acceptance
+
+The first useful script workflow is bounded listing and reading through granted
+directories, followed by ordinary process startup. A listing helper can filter a
+page of local directory-entry records without starting a separate process or
+subscribing to one event per filename. A future crop service receives an explicit
+input/output authority set and fixed request, then exposes bounded output or an
+Operation; it does not gain access merely from receiving path strings.
+
+A hosted counter demonstrates the later boundary:
 
 ```text
-crop.run({
-  file: item.path
-  dimension: { width: 1024; height: 768 }
-})
+started = os.services.start(counter_image, supervisor: supervisor,
+                            grants: service_context, deadline: startup_deadline)
+counter = started.endpoint       # Usable only after READY.
+defer counter.close()
+value = counter.add(1)           # May return an application error or unknown outcome.
+print(value)
 ```
 
-Default rule:
-
-- `.run(...)` is synchronous
-- exceptions abort the current block and bubble outward
-
-### 7.2 Asynchronous methods
-
-Async methods should be explicit, not overloaded onto sync names.
-
-Examples of acceptable future forms:
-
-- `.start(...)`
-- `.run_async(...)`
-- `.begin(...)`
-
-Async methods should return a job/task object.
-
-### 7.3 Methods are real interface members
-
-Hosted objects are not limited to `run`.
-
-Example future methods:
-
-- `crop.configure(...)`
-- `crop.run(...)`
-- `crop.cancel()`
-- `crop.stats()`
-
----
-
-## 8. Properties
-
-### 8.1 Property model
-
-Properties are first-class members of objects.
-
-Kinds:
-
-- read-only
-- writable
-- array/collection
-- computed
-- remote-backed
-
-### 8.2 Property access
-
-Examples:
-
-```text
-ls_arg.input.mask += "*.jpg"
-job.state
-device.name
-os.process.id
-```
-
-### 8.3 Remote property honesty
-
-For hosted objects, property access may imply runtime communication with the hosted process.
-
-Tooling and docs should distinguish:
-
-- cheap local properties
-- cached remote properties
-- uncached remote properties
-
-### 8.4 Property sugar
-
-Properties may map internally to getter/setter methods.
-
-User-visible syntax should remain simple.
-
----
-
-## 9. Events
-
-### 9.1 Event model
-
-Objects may expose events.
-
-Examples:
-
-- `on_item`
-- `on_complete`
-- `on_error`
-- `on_progress`
-- `on_exit`
-- `on_state_changed`
-
-### 9.2 Subscribe
-
-Draft syntax:
-
-```text
-handler = ls.on_item += (item) {
-  println(item.path)
-}
-```
-
-`+=` returns a subscription object handle.
-
-### 9.3 Unsubscribe
-
-Supported forms:
-
-```text
-ls.on_item -= handler
-ls.on_item.clear
-count = ls.on_item.size
-
-sub = ls.on_item += (item) { ... }
-sub.remove()
-```
-
-### 9.4 Subscription object
-
-A subscription object should support at least:
-
-- `remove()`
-- `enabled`
-- `event`
-- `target`
-
-### 9.5 Delivery model
-
-For synchronous hosted calls:
-
-- events emitted during a call are delivered synchronously to the caller runtime
-- event ordering must be preserved within one emitter unless documented otherwise
-- handler exceptions abort current dispatch and bubble unless caught
-
-### 9.6 Event failure policy
-
-Default proposed rule:
-
-- exception in handler halts current handler block
-- if uncaught, it bubbles to the current caller
-- if it escapes all caller levels, the shell / OS catches and reports it
-
-### 9.7 Reentrancy
-
-Reentrant calls back into the same hosted object during active event dispatch are dangerous and should be restricted or explicitly defined later.
-
-First-draft rule:
-
-- do not assume unrestricted reentrancy is safe
-- runtime may reject unsupported reentrant patterns
-
----
-
-## 10. Errors and exceptions
-
-### 10.1 Model
-
-The language uses exception propagation as the primary failure model for synchronous operations.
-
-Rules:
-
-- exception halts current block
-- exception bubbles to the caller
-- uncaught exceptions propagate outward until handled
-- if unhandled at top level, shell/OS reports them
-
-### 10.2 Compact handling syntax
-
-Baseline syntax:
-
-```text
-try {
-  crop.run(...)
-} catch e {
-  println(e.message)
-}
-```
-
-Compact statement form should also be considered:
-
-```text
-crop.run(...) catch e {
-  println(e.message)
-}
-```
-
-### 10.3 Hosted call exception transport
-
-When a hosted object call fails:
-
-- callee-side failure is captured and serialized
-- caller runtime reconstructs and raises a corresponding exception object
-- exception appears to bubble naturally in the caller language model
-
-### 10.4 Exception object shape
-
-Exception objects should contain at least:
-
-- type/category
-- message
-- source object/program
-- optional code
-- optional nested cause
-- optional structured details payload
-
----
-
-## 11. Control flow
-
-The language should support basic structured control flow:
-
-- `if`
-- `else`
-- `for`
-- `while`
-- `return`
-- `break`
-- `continue`
-- `try`
-- `catch`
-
-Later possibilities:
-
-- `defer`
-- `await`
-- `select`
-- pattern matching
-
-Not all are required for first implementation.
-
----
-
-## 12. Native system innovation vs POSIX compatibility
-
-The shell language is **not** intended to be a POSIX shell clone.
-
-Instead:
-
-- the native system model is object-oriented in structure
-- programs/services may be represented as hosted objects
-- methods, properties, and events are first-class
-
-However, POSIX compatibility remains important.
-
-Strategy:
-
-- POSIX compatibility is preserved where practical
-- the native shell language builds on `os1` native object semantics
-- POSIX-style process execution may be exposed through `os.spawn(...)` and related APIs
-- text streams and file descriptors remain available for compatibility scenarios
-- native structured APIs are preferred over text parsing for new automation
-
----
-
-## 13. The `os` object
-
-## 13.1 Purpose
-
-`os` is the built-in ambient system object visible to every script.
-
-It represents the script’s current system context and provides access to:
-
-- process and job control
-- object loading and spawning
-- filesystems and namespaces
-- users, security, permissions
-- devices
-- networking
-- timing
-- observability
-- system-wide event sources
-- introspection and control
-
-The `os` object is the primary bridge between the script and the operating system.
-
-## 13.2 Design principles for `os`
-
-The `os` object should be:
-
-- comprehensive
-- discoverable
-- typed
-- observable
-- script-friendly
-- honest about privilege boundaries
-- compatible with shell use and larger automation programs
-
-It should avoid:
-
-- excessive fragmentation into obscure root objects too early
-- hidden privilege escalation
-- stringly-typed ad hoc commands where typed structure is possible
-
----
-
-## 14. `os` object API — top-level properties
-
-This section lists the first-draft conceptual API, not a frozen ABI.
-
-### 14.1 `os.process`
-
-The current process object.
-
-Suggested properties:
-
-- `id`
-- `parent_id`
-- `session_id`
-- `user`
-- `group`
-- `state`
-- `path`
-- `args`
-- `env`
-- `cwd`
-- `started_at`
-- `uptime`
-- `children`
-- `handles`
-- `threads`
-- `exit_requested`
-- `capabilities`
-- `security_context`
-
-Suggested methods:
-
-- `exit(code = 0)`
-- `kill(signal_or_reason)`
-- `wait()`
-- `spawn(path, args = null)`
-- `load(path)`
-- `open(path, mode = null)`
-- `observe()`
-- `trace(...)`
-- `sleep(duration)`
-
-Suggested events:
-
-- `on_child_start`
-- `on_child_exit`
-- `on_signal`
-- `on_exception`
-- `on_handle_leak_detected` (future)
-- `on_security_violation` (future)
-
-### 14.2 `os.user`
-
-The current user context.
-
-Properties:
-
-- `id`
-- `name`
-- `groups`
-- `home`
-- `shell`
-- `capabilities`
-- `authenticated`
-- `auth_method`
-- `security_labels` (future)
-
-Methods:
-
-- `can(action, target)`
-- `has(capability)`
-- `resolve(name_or_id)`
-- `switch(...)` (privileged / future)
-- `authenticate(...)` (future)
-
-Events:
-
-- `on_reauthenticated`
-- `on_privilege_changed`
-
-### 14.3 `os.env`
-
-Environment and execution settings.
-
-Properties:
-
-- `vars`
-- `path`
-- `locale`
-- `timezone`
-- `terminal`
-- `interactive`
-- `debug`
-- `trace_enabled`
-
-Methods:
-
-- `get(name)`
-- `set(name, value)`
-- `unset(name)`
-
-### 14.4 `os.fs`
-
-Filesystem and namespace access.
-
-Properties:
-
-- `cwd`
-- `root`
-- `mounts`
-- `temp`
-- `devices_path`
-- `services_path`
-
-Methods:
-
-- `open(path, mode = null)`
-- `exists(path)`
-- `stat(path)`
-- `list(path, options = null)`
-- `mkdir(path, options = null)`
-- `remove(path)`
-- `move(from, to)`
-- `copy(from, to)`
-- `watch(path, options = null)`
-- `mount(...)` (privileged)
-- `unmount(...)` (privileged)
-
-Events:
-
-- `on_mount`
-- `on_unmount`
-- `on_namespace_changed`
-- `on_watch_event`
-
-### 14.5 `os.net`
-
-Networking access and system network state.
-
-Properties:
-
-- `interfaces`
-- `routes`
-- `dns`
-- `hostname`
-- `sockets`
-- `online`
-- `firewall_state` (future)
-
-Methods:
-
-- `connect(...)`
-- `listen(...)`
-- `resolve(name)`
-- `ping(...)` (future)
-- `interface(name_or_id)`
-- `route(...)`
-- `socket(...)`
-
-Events:
-
-- `on_interface_up`
-- `on_interface_down`
-- `on_address_changed`
-- `on_route_changed`
-- `on_dns_changed`
-- `on_link_state_changed`
-
-### 14.6 `os.devices`
-
-Device discovery and control.
-
-Properties:
-
-- `all`
-- `pci`
-- `usb`
-- `block`
-- `net`
-- `display`
-- `input`
-- `gpu`
-- `timers`
-- `buses`
-
-Methods:
-
-- `find(filter)`
-- `get(id_or_path)`
-- `enumerate()`
-- `rescan(bus = null)`
-- `observe(device)`
-- `claim(...)` (privileged/future)
-- `release(...)` (privileged/future)
-
-Events:
-
-- `on_device_added`
-- `on_device_removed`
-- `on_device_changed`
-- `on_bus_rescan`
-- `on_device_fault`
-
-### 14.7 `os.time`
-
-Timing and scheduling support.
-
-Properties:
-
-- `now`
-- `uptime`
-- `boot_time`
-- `monotonic`
-- `timezone`
-
-Methods:
-
-- `sleep(duration)`
-- `after(duration, callback = null)`
-- `every(duration, callback = null)`
-- `deadline(timestamp, callback = null)`
-- `measure(block_or_job)`
-
-Events:
-
-- `on_tick` (optional / low-level)
-- `on_timer`
-
-### 14.8 `os.observe`
-
-Observability and tracing.
-
-Properties:
-
-- `enabled`
-- `level`
-- `targets`
-- `buffers`
-- `snapshots`
-- `trace_sessions`
-
-Methods:
-
-- `snapshot(kind = "default")`
-- `trace_start(options = null)`
-- `trace_stop(session = null)`
-- `subscribe(source, filter = null)`
-- `events(filter = null)`
-- `metrics(filter = null)`
-- `inspect(target)`
-- `dump(target, options = null)`
-
-Events:
-
-- `on_trace_event`
-- `on_snapshot_ready`
-- `on_metric_threshold`
-- `on_fault_report`
-- `on_state_change`
-
-### 14.9 `os.sys`
-
-System-wide information and control.
-
-Properties:
-
-- `name`
-- `version`
-- `build`
-- `boot_info`
-- `arch`
-- `platform`
-- `cpu_topology`
-- `memory`
-- `power`
-- `features`
-- `compatibility`
-
-Methods:
-
-- `shutdown(mode = "poweroff")`
-- `reboot(mode = "normal")`
-- `panic(message)` (privileged/debug)
-- `gc()` (if ever relevant to language runtime)
-- `feature(name)`
-- `compat(name)`
-- `log(...)`
-
-Events:
-
-- `on_shutdown_requested`
-- `on_low_memory`
-- `on_power_state_changed`
-- `on_cpu_topology_changed` (future)
-- `on_thermal_event` (future)
-
----
-
-## 15. `os` object API — core methods
-
-### 15.1 `os.load(path, options = null)`
-
-Loads a hosted program object from a path-like identifier.
-
-Input:
-
-- `path`: program image or loadable object path
-- optional load options:
-  - constructor args
-  - security policy
-  - environment overrides
-  - resource limits
-  - trace flags
-
-Returns:
-
-- handle to hosted object
-
-Behavior:
-
-- resolves path
-- validates target
-- creates hosted child object
-- runs constructor
-- returns handle
-
-Potential exceptions:
-
-- not found
-- invalid image
-- incompatible interface
-- permission denied
-- constructor failure
-- resource exhaustion
-
-### 15.2 `os.spawn(path, args = null, options = null)`
-
-POSIX-compatible or one-shot execution-oriented process creation.
-
-Use when persistent object semantics are not required.
-
-Returns:
-
-- process/job object
-
-### 15.3 `os.open(path, mode = null, options = null)`
-
-Open a path-resolved OS object, file, directory, device, channel, or service endpoint as appropriate.
-
-### 15.4 `os.find(query, options = null)`
-
-Find objects/services/devices/processes by structured query.
-
-Future examples:
-
-```text
-gpu = os.find({ kind: "device"; class: "gpu"; index: 0 })
-shell = os.find({ kind: "service"; name: "shell" })
-```
-
-### 15.5 `os.connect(target, options = null)`
-
-Connect to an existing service or endpoint rather than creating a new hosted object.
-
-### 15.6 `os.observe(target = null, options = null)`
-
-Attach observability to a process, object, device, or subsystem.
-
-Returns:
-
-- observation/session object
-
-### 15.7 `os.sleep(duration)`
-
-Suspend current script/process execution for a duration.
-
-### 15.8 `os.require(feature_or_capability)`
-
-Assert that a capability or feature exists.
-
-Throws if missing.
-
-### 15.9 `os.import(module_or_package)`
-
-Future module/package import for script libraries.
-
----
-
-## 16. `os` object API — process observability and control
-
-The language should allow full observability and strong process control.
-
-### Properties to expose
-
-For individual process objects:
-
-- `id`
-- `parent`
-- `children`
-- `path`
-- `cmdline`
-- `state`
-- `exit_code`
-- `threads`
-- `handles`
-- `cpu_time`
-- `memory`
-- `io`
-- `user`
-- `group`
-- `session`
-- `exceptions`
-- `security_context`
-
-### Methods to expose
-
-- `suspend()`
-- `resume()`
-- `kill(reason = null)`
-- `wait()`
-- `observe()`
-- `snapshot()`
-- `stack()` (privileged/debug)
-- `threads()`
-- `handles()`
-- `memory_map()` (privileged/debug)
-- `permissions()`
-- `children()`
-
-### Events to expose
-
-- `on_start`
-- `on_exit`
-- `on_exception`
-- `on_state_change`
-- `on_child_added`
-- `on_child_removed`
-- `on_security_fault`
-- `on_resource_limit_hit`
-- `on_deadlock_suspected` (future)
-- `on_hang_suspected` (future)
-
----
-
-## 17. `os` object API — device observability and control
-
-To support real hardware, virtualization, and future accelerators, the shell language should be able to inspect and observe devices.
-
-### Device properties
-
-- `id`
-- `name`
-- `vendor`
-- `device_id`
-- `class`
-- `subclass`
-- `bus`
-- `location`
-- `driver`
-- `resources`
-- `interrupts`
-- `state`
-- `power_state`
-- `capabilities`
-- `errors`
-- `queues` (for modern devices)
-- `topology`
-
-### Device methods
-
-- `observe()`
-- `rescan()`
-- `driver.bind(...)` (privileged/future)
-- `driver.unbind()` (privileged/future)
-- `reset()` (privileged)
-- `enable()`
-- `disable()`
-- `properties()`
-- `events()`
-- `metrics()`
-
-### Device events
-
-- `on_online`
-- `on_offline`
-- `on_reset`
-- `on_error`
-- `on_driver_bound`
-- `on_driver_unbound`
-- `on_interrupt`
-- `on_queue_event`
-- `on_property_changed`
-
----
-
-## 18. `os` object API — observability-first design
-
-Observability is a first-class shell concern.
-
-The language should be able to access structured system state without parsing text logs.
-
-Examples of observability targets:
-
-- processes
-- threads
-- schedulers
-- CPU topology
-- memory allocators
-- devices
-- block I/O
-- networking
-- event queues
-- exceptions
-- traces
-- metrics
-
-### Example usage
-
-```text
-obs = os.observe(os.process)
-snap = obs.snapshot()
-println("process {} has {} children", snap.id, snap.children.size)
-```
-
-```text
-sub = os.observe.on_trace_event += (ev) {
-  println("[{}] {}", ev.source, ev.message)
-}
-```
-
-### Requirements
-
-- structured snapshots
-- event subscriptions
-- inspectable metrics
-- no forced log scraping
-- privilege-aware access
-
----
-
-## 19. Security and permissions in the language
-
-The shell language must not assume universal privilege.
-
-Important concepts:
-
-- current user identity
-- capability-based checks
-- per-object rights
-- namespace permissions
-- event subscription permissions
-- device/process observability permissions
-
-Example:
-
-```text
-if !os.user.can("observe", target) {
-  println("permission denied")
-  return
-}
-```
-
-Security should be explicit in:
-
-- `os.load`
-- `os.open`
-- `os.connect`
-- observability APIs
-- device control APIs
-- process control APIs
-
----
-
-## 20. POSIX compatibility mapping
-
-The shell language should coexist with POSIX compatibility rather than replace it.
-
-Mapping ideas:
-
-- process-backed hosted objects can still correspond to POSIX processes
-- `os.spawn` and process objects cover classic exec-style workflows
-- files and directories remain path-based objects
-- streams / descriptors remain available
-- POSIX shell compatibility, if added, should be layered and not dictate native semantics
-
----
-
-## 21. Example scripts
-
-### 21.1 Persistent hosted-object example
-
-```text
-ls = os.load("/bin/ls")
-crop = os.load("/bin/crop")
-
-ls_arg : type(ls.arg)
-ls_arg.input.mask += "*.jpg"
-
-cropped = 0
-failed = 0
-
-sub = ls.on_item += (item) {
-  crop.run({
-    file: item.path
-    dimension: {1024, 768}
-    preserve_aspect_ratio: true
-  }) catch e {
-    println("crop failed for {}: {}", item.path, e.message)
-    failed++
-    return
-  }
-
-  cropped++
-}
-
-ls.run(ls_arg)
-println("{} files cropped, {} failed.", cropped, failed)
-```
-
-### 21.2 Process observation
-
-```text
-obs = os.observe(os.process)
-
-obs.on_state_change += (s) {
-  println("process state: {}", s.state)
-}
-```
-
-### 21.3 Device discovery
-
-```text
-gpu = os.devices.find({ class: "gpu"; index: 0 })
-if gpu != null {
-  println("gpu driver: {}", gpu.driver.name)
-}
-```
-
-### 21.4 POSIX-style one-shot execution
-
-```text
-job = os.spawn("/bin/ls", { path: "/tmp" })
-job.wait()
-println("exit: {}", job.exit_code)
-```
-
----
-
-## 22. Open design questions
-
-These are still unresolved and need iteration:
-
-- interpreted first, compiled first, or dual model?
-- exact syntax for imports/modules
-- whether remote property access should be visually marked in some cases
-- how async syntax should look
-- whether event handlers run on the caller thread or runtime event loop
-- reentrancy rules for hosted-object callbacks
-- exact security model for subscriptions and observability
-- cycle handling with reference counting and subscriptions
-- how much reflection is available at runtime
-- versioning strategy for program metadata and interface compatibility
-
----
-
-## 23. Recommended implementation order
-
-1. local values/objects, declarations, blocks, `if`, `for`, `return`
-2. built-in `os` object with minimal `load`, `spawn`, `open`, `sleep`
-3. hosted object handles
-4. synchronous method calls
-5. properties
-6. events and subscriptions
-7. exception propagation
-8. runtime metadata/type reflection
-9. observability APIs
-10. async jobs and future syntax sugar
-11. compiler / optimizer / packaging strategy
-
----
-
-## 24. Short thesis
-
-The native `os1` shell language should be a typed scripting/programming language centered on a first-class `os` object, local values, hosted process-backed objects, methods, properties, and events. It should enable full system observability and control without hiding protection boundaries, while remaining concise enough for shell usage and compatible with a staged POSIX compatibility story.
+`counter_image`, `supervisor`, and `service_context` are explicit granted inputs.
+This example closes the client connection only. A script that owns an exclusive
+provider must also explicitly invoke its Supervisor's shutdown policy; a client
+of a shared service must not terminate it merely by leaving scope.
+
+| Gate | Acceptance cases |
+| --- | --- |
+| Fixed native bindings | Console/descriptor/VFS contracts pass before language work; owned aliases and duplicates close correctly, and stale raw fds are never treated as stable identities. |
+| Startup context | Missing delegation and attempted rights amplification fail; child maps are explicit; bounded arguments and successful/failed exec preserve the documented entries. |
+| Class construction | No client allocation-policy override; arguments validated on new and reused results; concurrent shared activation and per-client grants follow the class contract. |
+| First service binding | READY gates use; constructor failure, timeout, provider death, reconnect, and no automatic replay preserve their distinct outcomes. |
+| Remote properties and records | Local mutation changes only local data; remote compound assignment is rejected absent an atomic method; inspection triggers no provider execution. |
+| Operation/event binding | Wait registration cannot lose completion; terminal state survives notification loss; callback dispatch occurs only at explicit turns; unsubscribe/queue shutdown release resources without treating one duplicate's close as shutdown. |
+| Discovery/catalog growth | Names grant no child handles; resource exhaustion is bounded; denied inspection does not silently invoke a more privileged fallback. |
+
+Before implementing a language parser, settle wrapper ownership across closures,
+async scope exit, and explicit dispatch syntax with small runtime tests using the
+first service protocols. The broad catalog and reflective metadata should grow
+from those exercised interfaces rather than dictate the first kernel ABI.

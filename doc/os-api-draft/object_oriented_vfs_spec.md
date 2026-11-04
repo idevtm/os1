@@ -1,221 +1,421 @@
-# Object-Oriented VFS Structure Specification
+# Native Namespace and VFS Contract
 
-## 1. Purpose
+## Status and authority
 
-This document specifies the initial structure of a virtual filesystem (VFS) for an object-oriented operating system.
+Proposed contract, revised 2026-11-04. This document specifies the namespace and
+file profile of the [native object kernel contract](native_object_kernel_contract.md).
+Requirements below describe the proposed interface; they do not claim that a VFS,
+handle table, credentials, or these operations are implemented. The
+[draft index](README.md) separates the proposal from current source behavior.
 
-In this design, the VFS is not only a filesystem abstraction. It is a kernel-managed hierarchical namespace that resolves paths to object handles. Each handle grants access to a typed object interface made of properties, methods, and events.
+The native contract owns descriptor representation, rights, argument/result
+encoding, failure transport, duplication, close, and process inheritance. This
+document supplies namespace acquisition, enumeration, and file-open semantics.
+Operation names here identify semantic operations, not assigned syscall numbers.
+The shell and POSIX bindings use these same contracts.
 
-The VFS has two roles:
+The first profile contains descriptor-backed console streams, a read-only initrd
+namespace, regular-file reads, bounded metadata, and explicit root/cwd handles.
+Hosted providers, writable filesystems, mutable mounts, links, user mappings,
+device control, and the broad `/os` tree are later profiles. Appendix A preserves
+the larger object catalog as illustrative design material.
 
-1. Expose persistent storage objects such as files and directories.
-2. Expose runtime OS objects such as processes, devices, services, drivers, sessions, and kernel subsystems.
+## 1. Objects, names, open instances, and descriptors
 
-The native model is object-oriented. A POSIX-like file API may later be implemented as a compatibility layer over this model.
+These concepts have distinct identities and lifetimes:
 
----
-
-## 2. Core Concepts
-
-### 2.1 Object
-
-An object is a kernel-known entity that can be accessed through a handle.
-
-Examples:
-
-- File
-- Directory
-- Process
-- Thread
-- Device
-- Driver
-- Service
-- Memory region
-- Event subscription
-- Kernel subsystem
-
-Each object has:
-
-- Stable object identity while alive
-- Object kind
-- Optional path in the VFS namespace
-- Interface descriptor
-- Access control rules
-- Lifetime and reference-counting rules
-
-Not every object needs a global path. Temporary or private objects may be handle-only.
-
----
-
-### 2.2 Handle
-
-A handle is a process-local reference to an object.
-
-A handle contains or implies:
-
-- Referenced object
-- Granted rights
-- Owning process
-- Optional per-open state
-- Optional cursor or stream position
-- Optional subscription state
-
-Paths are for discovery. Handles are for authority.
-
-Example:
+| Concept | Meaning |
+| --- | --- |
+| Object | A live resource implementation with an identity; a file node owns file contents and metadata. |
+| Namespace entry | A name-to-object binding within one directory. A name belongs to the binding, not uniquely to the object. |
+| Open instance | A session created by opening an object. It owns the file or directory cursor and supported status flags. |
+| Descriptor entry | A process-local reference to an open instance, with immutable rights, descriptor flags such as close-on-exec, and a descendant-grant ceiling for directories. |
+| Namespace authority | The scope and grant ceiling carried by a directory descriptor, used to authorize acquisition of descendant objects. The ceiling is not shared open-instance state. |
 
 ```text
-/os/devices/gpu0 -> resolve path -> authorize -> object handle
+directory entry -> file object
+descriptor A -> open instance X -> file object
+descriptor B -> open instance X -> file object   (duplicate of A)
+descriptor C -> open instance Y -> file object   (independent open)
 ```
 
-After a handle is created, operations should use the handle directly rather than repeatedly resolving the path.
+An independent file open creates a new instance with offset zero. Duplication
+and explicit inheritance share the existing instance; descriptor rights and
+flags remain separate. Attenuation creates a new descriptor; existing descriptor
+rights are immutable. Reducing a new duplicate's rights or descendant ceiling
+does not alter another descriptor. The same rule applies when a file is exposed through native methods
+or a compatibility `read` wrapper.
 
----
+An object may eventually have several names, or remain alive without a name.
+Returned paths, numeric IDs, device indices, and names are descriptive values;
+none permits reopening an object without authorization. A retained handle does
+not retarget when a path is removed or reused.
 
-### 2.3 Interface Descriptor
+## 2. Namespace interface and authority derivation
 
-Each object exposes an interface descriptor.
-
-The descriptor lists only three interface categories:
-
-- Properties
-- Methods
-- Events
-
-Other concepts are modeled through properties whose types come from class libraries:
-
-- Streams are read-only properties of type `Stream<T>`. The stream object may be mutated through its own methods, such as `write`, `seek`, or `flush`, if the caller has the required rights.
-- Memory regions are properties of type `Collection<MemoryStream>` for extensible region sets, or `MemoryArray` for fixed memory layouts.
-- Child objects are properties of type `Collection<T>`, where `T` is the child object type, such as `Collection<Process>`, `Collection<Device>`, or `Collection<File>`.
-
-This keeps the interface model small while still allowing complex OS objects to expose rich structure.
-
-Early implementations may use static numeric IDs. Later implementations may support richer metadata embedded in ELF sections, service descriptors, or class-library metadata.
-
----
-
-### 2.4 Class Libraries
-
-The OS should expose one or more class libraries that define reusable object and value types used by VFS interfaces.
-
-The most important one is the standard class library. It should define primitive and common compound types used across the OS.
-
-Examples:
+The canonical namespace operations are:
 
 ```text
-Bool
-Int32
-UInt64
-String
-Uuid
-Timestamp
-Duration
-Result<T>
-Optional<T>
-List<T>
-Collection<T>
-Dictionary<K, V>
-Map<K, V>
-Stream<T>
-MemoryStream
-MemoryArray
-ObjectRef<T>
-EventSubscription
+open_at(directory_handle, relative_path, requested_rights,
+        descriptor_flags, requested_descendant_ceiling)
+    -> opened_handle
+read_directory(directory_handle, output_buffer, output_budget)
+    -> complete_entry_records, bytes_delivered
 ```
 
-Class libraries can be:
+The resolver uses a single-component lookup/open interface internally. A kernel
+provider supplies component lookup and object opening; it does not implement a
+second whole-path parser. The resolver acquires a stable reference to each
+selected object and authorizes that same object before publishing the result.
+Path input is copied once into bounded kernel-owned storage before traversal.
 
-- Built into the kernel ABI for fundamental types.
-- Provided by OS-level runtime libraries for richer structures.
-- Extended by drivers, services, filesystems, and user-installed components.
+Lookup and enumeration have separate rights. A caller may open a known allowed
+name without being allowed to list siblings. Permission to enumerate names does
+not imply permission to open those names. File access rights and directory
+lookup rights are also different operations.
 
-The kernel does not need to fully understand every high-level class. It only needs enough type information to validate access, route calls, preserve ABI compatibility, and enforce rights. Richer interpretation can be handled by user-space libraries and language bindings.
+Every acquisition must satisfy:
 
----
+1. The caller holds a valid directory handle and permission to traverse each
+   required component under its namespace authority.
+2. The requested target rights are supported by that target and permitted by
+   the trusted target policy for the caller's kernel-issued identity.
+3. The namespace handle's descendant grant ceiling permits those target rights.
 
-## 3. Native VFS Operation Model
+The returned handle grants exactly the requested rights or the acquisition fails.
+It never silently substitutes a weaker grant or invents broader rights. A grant
+ceiling maps authority to target operations: intersecting a directory `LOOKUP`
+bit with a file `READ` bit is not a meaningful authorization algorithm.
 
-The native VFS API should be based on a small set of uniform object operations.
+Descendant handles retain the restrictions of the scope from which they were
+derived. The requested ceiling for a derived directory must be a subset of the
+starting descriptor's effective ceiling and every traversed policy boundary.
+Non-directory results have no descendant ceiling. A directory descriptor without
+`DELEGATE` also loses `DELEGATE` from its effective descendant ceiling; this
+restriction propagates to derived directories. Opening `.` cannot restore it.
+Other rights intentionally retained in a ceiling can be granted to children,
+even when they are not operations on the directory itself.
+To prevent reacquiring an operation through a new open, the grant must remove
+it from the ceiling as well as from the directory's direct rights. For example,
+a lookup-only grant that must never enumerate descendants omits `ENUMERATE`
+from both. Attenuating direct rights alone does not erase factory authority
+intentionally retained in the ceiling.
 
-Conceptual operations:
+A child directory cannot obtain an unrestricted root through an object property,
+provider callback, parent reference, or numeric identity. Duplication and spawn
+grants require `DELEGATE` and validate both requested rights and a directory's
+requested ceiling. Native-created descriptors default to `CLOEXEC`; explicit
+child grants and compatibility wrappers use the native contract's flag rules.
 
-```text
-open(path, requested_rights) -> handle
-close(handle)
-describe(handle) -> interface descriptor
-get_property(handle, property_id) -> value
-call_method(handle, method_id, args) -> result
-subscribe_event(handle, event_id) -> subscription_handle
-unsubscribe_event(subscription_handle)
-wait(handles[], timeout) -> event
-```
+The immutable-initrd provider has these maximum supported grants:
 
-Stream I/O, memory mapping, and child traversal are not special VFS syscall categories in the semantic model. They are method calls on objects returned through properties.
+| Target | Provider maximum; the caller's ceiling can narrow it further |
+| --- | --- |
+| Directory | `LOOKUP`, `ENUMERATE`, `INSPECT`, `DELEGATE`. |
+| Regular file | `READ`, `SEEK`, `INSPECT`, `EXECUTE`, `DELEGATE`. |
 
-Examples:
+Trusted bootstrap chooses actual root/cwd rights and descendant ceilings. No
+archive owner, permission bit, interface description, or caller-supplied UID can
+widen them. There is no UID/ACL policy engine in this profile. `EXECUTE` permits
+use as an image input; loading still validates the executable format, and neither
+execution nor image metadata increases the child's grants. The provider grants
+no write or namespace-mutation authority.
 
-```text
-file.data.read(request)
-file.data.write(request)
-process.memory_regions.get(index).map(request)
-directory.children.lookup("name")
-```
+`children` is an optional runtime collection adapter over these operations.
+It is not the traversal primitive or an additional authority source. Its list
+items are entry information; opening an item uses the same authorized
+`open_at`. Generic collections, reflection, and object-valued properties are
+therefore not prerequisites for the first VFS.
 
-The exact syscall ABI can be decided later. This document describes the semantic model.
+## 3. Roots, cwd, and path grammar
 
----
+The process receives explicit namespace root and current-directory handles in
+its bootstrap context. The runtime's `os` binding wraps those grants. There is
+no ordinary operation that reacquires the machine's unrestricted root or an
+administrative OS object.
 
-## 4. Top-Level VFS Layout
+Native `open_at` accepts only relative paths. The runtime convenience `open`
+selects its supplied root for an absolute path and its supplied cwd for a relative
+path. It checks the original path's size, strips all leading separators from an
+absolute path, substitutes `.` if none remains, then invokes that same resolver. An absolute argument passed directly to
+`open_at` fails; it never ignores the supplied directory handle.
 
-Initial proposed namespace:
+The first profile fixes these parsing rules:
 
-```text
-/
-  os/
-    system/
-    kernel/
-    processes/
-    threads/
-    memory/
-    devices/
-    drivers/
-    services/
-    sessions/
-    users/
-    mounts/
-    events/
-    logs/
-  dev/        optional POSIX-style compatibility projection for device nodes
-  home/
-  bin/
-  lib/
-  tmp/
-  proc/       optional POSIX-style compatibility projection for processes
-  sys/        optional POSIX-style compatibility projection for system/device metadata
-```
+| Input | Rule |
+| --- | --- |
+| Encoding | Length-delimited bytes, compared case-sensitively; no Unicode normalization, glob expansion, selector syntax, or URL decoding in the kernel. |
+| Size | At most 4096 path bytes, excluding any C-binding terminator; each ordinary component is 1–255 bytes. NUL is invalid inside the supplied path. |
+| Separator | `/` separates components; repeated separators are accepted. A literal slash cannot occur in a name. |
+| `.` | Refers to the current directory in the walk; it cannot turn a regular file into a directory. |
+| `..` | Rejected anywhere, including at the root; it is not clamped or normalized away. |
+| Empty path | Invalid. Use `.` to open the supplied directory. |
+| Trailing separator | Requires the selected target to be a directory. |
+| Absolute path | Accepted only by the runtime wrapper against its supplied root. `/` opens that root using `.`; native `open_at` rejects leading separators. |
+| Links and mounts | No symbolic links, object links, dynamic mounts, or mount-crossing behavior in this profile. |
 
-The `/os` branch is the native object namespace.
+Shells and display tools must escape names that are not valid or unambiguous text.
+Native bytes remain unchanged. Brackets in a component have no selector meaning;
+illustrative names such as `/os/processes/42` use ordinary components.
 
-The `/home`, `/bin`, `/lib`, and `/tmp` branches are storage-backed namespace branches.
+The loader imports the initrd into one immutable directory tree. After validating
+and excluding the archive format's required name terminator, archive names
+must be relative; empty names, embedded NULs, parent components, overlong names, unsupported
+entry kinds, and file/directory name collisions fail validation. Removing `.` and
+repeated separators must not create two entries with the same normalized path.
+Synthesized parent directories are not duplicate archive entries: a single
+explicit entry for that directory may supply its metadata. A root directory
+entry spelled `.` may describe the existing root once and cannot create a file.
+A malformed image fails import before any of its tree is published. The loader
+and runtime resolver must not expose different interpretations of its names.
 
-The `/dev`, `/proc`, and `/sys` branches are optional POSIX-style compatibility projections. They should not be the primary native interface.
+A restricted root does not erase other granted capabilities. If a parent passes
+an outside directory handle, that is intentional additional authority. Namespace
+restriction is one part of isolation, not a complete sandbox claim.
 
-Recommended interpretation:
+## 4. Directory enumeration
 
-| Branch        | Role                                                                                                                                                       |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/os/devices` | Native object-oriented device namespace. Devices expose properties, methods, and events.                                                                   |
-| `/dev`        | POSIX-style compatibility projection. Exposes device-node-like views backed by native device objects.                                                      |
-| `/proc`       | POSIX-style compatibility projection for process information. Backed by `/os/processes`.                                                                   |
-| `/sys`        | POSIX-style compatibility projection for system, bus, driver, and device metadata. Backed by `/os/system`, `/os/kernel`, `/os/devices`, and `/os/drivers`. |
+A short [C++ listing example](cpp-bindings-and-object-creation.md#1-listing-a-directory)
+shows the proposed binding over these operations.
 
-For example, `/dev/net0`, `/dev/fb0`, `/dev/tty0`, or `/dev/input0` may exist as compatibility views, but the canonical native objects should be `/os/devices/net[0]`, `/os/devices/gpu[0]`, `/os/devices/keyboard[0]`, and so on.
+Enumeration returns bounded records containing name bytes, object kind, and any
+explicitly permitted basic information. It returns no child handles, raw pointers,
+or reopen tokens. Diagnostic IDs remain non-authoritative.
 
----
+The directory cursor belongs to the open instance. An independent open starts
+at the first entry; duplicate descriptors and explicitly inherited references
+share the cursor. There is no caller-selected continuation cookie in v1. Every
+read requires `ENUMERATE` on the descriptor used for that call. An independent
+open is the first profile's way to restart iteration; byte-stream seek does not
+seek a directory.
 
-## 5. Branch Specifications
+The UAPI must pin a versioned directory-record layout with fixed-width header
+fields for total record size, name length, and kind, followed by the name bytes.
+Names are 1–255 bytes without a NUL terminator or slash; records never contain
+`.` or `..`. The chosen alignment and all reserved fields must be defined and
+padding initialized to zero. Kind is a hint, not proof of supported operations
+or a child grant. No runtime object or recursive value encoding is required.
 
-## 5.1 `/os/system`
+The implementation returns complete records only. With a positive output budget,
+zero bytes means enumeration is complete. A zero-budget call validates the
+handle/interface/right but does not advance the cursor or imply completion. If
+an entry remains but no complete record fits initially, it reports
+`BUFFER_TOO_SMALL` and the required
+minimum space without skipping the next record. Once any complete records have
+been delivered, insufficient remaining space or a later copy failure returns
+their positive completed count; the next undelivered record remains pending.
+Its required size is reported on a subsequent zero-progress short-buffer call.
+Cursor advancement commits only for complete records successfully delivered;
+a zero-progress copy failure leaves it unchanged. Calls through duplicates
+serialize selection, delivery, and cursor commit without
+holding a spinlock across user copying. Ordering is stable for the immutable
+tree but need not be sorted. `count`, if exposed, describes this visible listing,
+not all objects a more privileged caller might see.
+
+Dynamic inventories and mutable directories require a later version and
+consistency contract. A list followed by open is not a transaction: the latter
+must authorize and open the object actually bound at that time. An API needing
+an atomic list-and-acquire operation must define it explicitly with bounded
+handle creation and rights derivation.
+
+## 5. Files, byte streams, and per-open state
+
+The initial regular-file open instance directly implements the byte-stream
+interface. Metadata and byte I/O use the same authorized instance. A caller does
+not need to fetch a `data` property and allocate another descriptor for each read.
+
+| Operation | First-profile meaning |
+| --- | --- |
+| Read | Copy up to the requested byte count from the open instance's cursor and advance it by the reported completed count. |
+| Explicit-offset read | Read at a supplied offset without changing the shared cursor, if this operation is advertised. |
+| Seek | Change the regular-file instance's position using checked arithmetic. Non-seekable objects reject it. |
+| Metadata | Return bounded copied information such as kind, size, and identity, subject to the handle's inspection grant. |
+| Duplicate | With `DELEGATE`, create another descriptor for the same open instance; requested rights and any directory ceiling cannot increase. |
+| Close | Remove the caller's descriptor and release its reference; it does not logically shut down aliases. |
+| Write, truncate, create, unlink, rename | Unavailable on the read-only initrd. The operation fails explicitly; the namespace remains unchanged. |
+
+The native contract defines request-size bounds and failure representation. Byte
+I/O must distinguish an empty successful request, EOF, partial progress, and
+would-block. A nonempty regular-file read returning zero means EOF. A console
+with no input does not report EOF merely because no byte is currently available:
+it blocks or returns would-block according to the supported mode.
+
+Cursor-based operations on a shared instance serialize their cursor updates.
+The completed byte count determines advancement; callers must not retry reported
+progress from the beginning. Zero-length requests still validate the handle,
+rights, and operation kind. Unsupported or unknown flags fail instead of being
+silently accepted. `NONBLOCK`, where supported for console input, belongs to the
+open instance; append is unsupported on the read-only initrd. `CLOEXEC` belongs
+to the descriptor. A copy fault before progress leaves the cursor unchanged;
+after progress the operation reports only bytes successfully delivered.
+
+The kernel pins an open instance while servicing an operation. A concurrent close
+or descriptor-number reuse cannot redirect that operation to a new resource.
+Closing the final descriptor releases the instance only after any in-flight
+operation's internal references are released.
+
+If a later binding retains `file.data`, it returns an attenuated alias to the
+same open instance. It never implicitly reopens the file or widens rights. A
+borrowed runtime view may reuse the existing descriptor; creating a new owned
+descriptor requires `DELEGATE` and follows ordinary duplication rules. A
+read-only property binding does not by itself make the returned stream read-only.
+`Stream.close()` is not a separate object-wide shutdown operation: a binding may
+spell descriptor close that way only when its descriptor ownership is explicit.
+
+## 6. Program images and authority lifetime
+
+Program execution resolves the program image through the same namespace rules
+and retains the authorized image reference through validation and loading. It
+does not check one path and later reopen that string with loader privileges.
+The image requires `EXECUTE`; readable bytes alone do not authorize execution.
+The loader uses checked explicit offsets and leaves any shared file cursor
+unchanged. Child descriptor grants additionally require `DELEGATE` on their
+sources, as specified by the native process contract. Execution does not confer
+device access or administrative authority.
+
+The child receives the explicitly selected root/cwd and descriptor map defined
+by the native process contract. The child's namespace cannot widen because an
+image advertises permissions or because the shell's `os` binding is comprehensive.
+
+Handle rights are grants, not continuous rechecks of path names. For later mutable
+filesystems, changing a namespace permission affects future acquisitions unless
+an explicit revocation contract says otherwise. Unlink removes a name; already
+open regular files remain attached to the original object. Creating an attenuated
+duplicate or closing one descriptor does not revoke other copies.
+
+General forced revocation is not part of the first profile. Device/provider death
+is a separate liveness condition: old handles retain the old identity and return
+a terminal gone/unavailable failure. They never attach to a replacement object
+that reused a path or number.
+
+## 7. Passive metadata, devices, and mapping boundaries
+
+Initial inspection exposes bounded copies of explicitly permitted information.
+It does not grant raw process memory, kernel addresses, live handles belonging
+to another process, MMIO, or DMA buffers. Metadata discovery never authorizes a
+method advertised in that metadata.
+
+A passive snapshot must not reset, power-cycle, reconfigure, acknowledge
+destructive device status, or perform an active diagnostic. Such operations
+require explicit control authority and driver coordination. Getters may allocate
+or gather safe cached information; “read-only” is not permission to hide hardware
+changes. This distinction matters for the existing ACPI observation finding in
+the [project review](../2026-11-03-review.md).
+
+The first profile exposes no user mapping interface. Later `MemoryObject` and
+address-space `Mapping` contracts must define bounds, backing kind, protection
+ceilings, cache attributes, retained references, and invalidation completion.
+Mappability is an explicit interface, not a consequence of implementing a stream.
+An MMIO register bank is not a generic `MemoryStream`: register width, ordering,
+and read side effects require a device-specific contract.
+
+Mappings hold their own backing references; a future POSIX-compatible mapping
+can outlive the descriptor used to create it. Removing mappings must complete
+required CPU invalidation before backing storage is reused. Device requests keep
+buffers and provider state alive until completion or proven cancellation. Driver
+unbind/reset closes admission, drains or cancels work, stops hardware access,
+and synchronizes callbacks before releasing resources. A quiescence failure
+requires retained/quarantined resources, not reuse of memory still reachable by
+DMA. These are admission requirements for future mapping/device profiles.
+
+## 8. POSIX projection
+
+Compatibility shares the native lifetime and authority rules; it does not create
+a second resource table or bypass the namespace resolver.
+
+| Compatibility operation | Native contract |
+| --- | --- |
+| `open` / `openat` | Authorized namespace acquisition creating a fresh open instance; the binding applies the defined root/cwd policy. |
+| `read` / `write` | Byte-stream operations on the existing open instance, subject to rights and supported operations. |
+| `lseek` | Seek on a seekable open instance. |
+| `close` | Descriptor release. |
+| `dup` / explicit inheritance | Another descriptor for the same open instance; rights do not increase. |
+| `stat` / `fstat` | Bounded metadata using authorized lookup or the existing handle. |
+| Directory iteration | Bounded `read_directory` records using the shared directory-instance cursor; the binding may buffer delivered records. |
+| `exec` | Load the authorized image and apply the native process contract's descriptor/bootstrap rules. |
+
+This is an incremental compatibility target, not a POSIX conformance claim.
+In particular v1 rejects `..` and links, does not provide writable filesystems,
+and does not implement mmap, sockets, PTYs, fork, or general readiness multiplexing.
+Bindings must document differences rather than silently emulate them with broader
+authority. Non-stream native objects reject byte I/O; they need not pretend to
+be files.
+
+Future `poll`/`select`/`epoll` projections require a race-free readiness protocol;
+a lossy `data_available` event is insufficient. Future flush/sync operations need
+defined durability and failure guarantees; successful write completion alone is
+not proof that data survives power loss.
+
+## 9. Required validation and extension gates
+
+The first implementation must demonstrate:
+
+- Independent opens have independent cursors; duplicates share a cursor while
+  keeping descriptor flags and attenuated rights separate.
+- Enumerate-only handles cannot acquire children; lookup-only handles need not
+  disclose sibling names. Object-valued aliases cannot amplify rights. A
+  directory duplicate has its own ceiling, and a nondelegable directory cannot
+  recover `DELEGATE` through `open_at(".")` or a child directory.
+- Restricted-root absolute/relative wrappers, direct absolute `open_at`, `..`,
+  empty/NUL/overlength input, duplicate separators, and trailing separators follow
+  the rules above. Namespace aliases cannot reacquire global authority.
+- Initrd import rejects invalid and duplicate normalized entries; loader and VFS
+  use one interpretation of names and the same authorized image object. Loader
+  reads do not change its shared file cursor.
+- Enumeration never reports partial records or grants handles. Duplicates share
+  the directory cursor, separate opens do not, insufficient output space does
+  not skip entries, and zero-progress copy failure preserves position.
+- Close versus in-flight I/O and descriptor reuse preserves the selected open
+  instance. Allocation or output-construction failure leaks no handles.
+- Partial reads, EOF, zero-length requests, unsupported writes, and non-seekable
+  streams follow their advertised contract.
+- Passive inspection invokes no hardware control operations and exposes no
+  unauthorized addresses or live handles.
+
+| Extension | Contract required before admission |
+| --- | --- |
+| Mutable directories | Atomic name operations, locking/retry behavior, retained-open semantics, cross-provider rename failure, and enumeration consistency. |
+| Links and mounts | Scope-preserving traversal under concurrent rename, loop bounds, mount ownership, and no implicit escape to another root. |
+| User-hosted providers | Bounded IPC, provider-death handling, explicit caller/grant context, and no blocking provider calls while namespace locks are held. |
+| Writable storage | Append/partial-write rules, truncate interactions, flush ordering, durability, and crash behavior. |
+| Events/readiness | Queue limits, ordering, overflow, subscription authority/lifetime, and race-free readiness observation. |
+| Memory mapping and device control | Protection ceilings, complete unmap/revocation barriers, device/session identity, DMA quiescence, and failure-safe teardown. |
+| Mutable credentials and revocation | Trusted identity changes, handling of retained capabilities, grant-domain rules, in-flight operation behavior, and completion guarantees. |
+
+These extensions are independent profiles; the first VFS does not need a generic
+class library or the entire object catalog to establish stable authority and
+lifetime semantics.
+
+## Appendix A. Illustrative future object catalog
+
+The following branch schemas preserve the broader native-object direction. They
+are examples, not v1 requirements, fixed member IDs, or permission grants. Their
+request/result types need separate bounded schemas before implementation.
+Properties are read-only views in these examples; methods perform explicit state
+changes. Object-valued results always obey the native grant-derivation rules.
+Every listed method requires its own explicit operation grant; no generic
+`CALL` or inspection grant authorizes every method. “Admin” below denotes a
+future resource-specific grant, not a global mode bit or a defined v1 right.
+Events require authorized subscriptions with bounded payloads; diagnostic event
+loss cannot substitute for terminal operation results or readiness.
+
+These paths are conventions within a process's supplied namespace. There is no
+requirement to publish them globally, and possessing a path string never grants
+access. `/dev`, `/proc`, and `/sys` may later project explicitly authorized native
+objects; they must not become alternative authority roots.
+
+| Branch/family | Explicit admission and authority boundary |
+| --- | --- |
+| `/os/system`, `/os/kernel` | Separate basic inspection from system administration and sensitive debug access. Reboot, shutdown, symbol lookup, dumps, and log control are not implied by discovery. |
+| `/os/processes`, `/os/threads` | Self/basic metadata and process inspection/control are distinct grants. A PID or listed handle ID never grants a process handle or memory access. |
+| `/os/devices` | Separate device information, data sessions, and reset/configuration authority. Opening an inspection view cannot claim a device or map its registers. |
+| `/os/drivers` | Bind/unbind/reload requires driver-management authority and the quiescence/lifetime contract in §7. |
+| `/os/services` | Discovery, connection, and supervision are distinct grants; connect creates an authorized client session, not an administrative service handle. |
+| `/os/memory` | Statistics do not expose backing memory. Allocation, process-memory access, and mappings require their own bounded grants and mapping profile. |
+| `/os/events`, `/os/logs` | Subscription authority and payload visibility match the source; queues have explicit resource budgets and overflow rules. |
+| `/home`, `/bin`, `/lib`, `/tmp` | Publishing a branch does not imply a writable filesystem. Mutations require both a writable provider and explicit namespace/file rights. |
+
+### A.1 `/os/system`
 
 Represents the operating system as a high-level object.
 
@@ -225,7 +425,7 @@ Example path:
 /os/system
 ```
 
-### Properties
+#### Properties
 
 | Property     | Type      | Access    | Description                                              |
 | ------------ | --------- | --------- | -------------------------------------------------------- |
@@ -237,17 +437,17 @@ Example path:
 | `hostname`   | string    | read-only | System hostname. Use `set_hostname` method to change it. |
 | `machine_id` | uuid      | read-only | Stable machine identifier, if available.                 |
 
-### Methods
+#### Methods
 
 | Method             | Arguments    | Result         | Description                                      |
 | ------------------ | ------------ | -------------- | ------------------------------------------------ |
-| `get_capabilities` | none         | CapabilityList | Returns supported OS capabilities.               |
+| `get_features`     | none         | FeatureList    | Returns supported features, not authority.               |
 | `shutdown`         | ShutdownMode | void           | Requests system shutdown. Requires admin rights. |
 | `reboot`           | RebootMode   | void           | Requests system reboot. Requires admin rights.   |
 | `sync`             | none         | void           | Flushes dirty system state to storage.           |
 | `set_hostname`     | string       | void           | Changes system hostname. Requires admin rights.  |
 
-### Events
+#### Events
 
 | Event                | Payload         | Description                  |
 | -------------------- | --------------- | ---------------------------- |
@@ -257,7 +457,7 @@ Example path:
 
 ---
 
-## 5.2 `/os/kernel`
+### A.2 `/os/kernel`
 
 Represents kernel-level state and diagnostic information.
 
@@ -267,7 +467,7 @@ Example path:
 /os/kernel
 ```
 
-### Properties
+#### Properties
 
 | Property         | Type   | Access    | Description                            |
 | ---------------- | ------ | --------- | -------------------------------------- |
@@ -278,7 +478,7 @@ Example path:
 | `panic_count`    | u64    | read-only | Number of recorded kernel panics.      |
 | `debug_enabled`  | bool   | read-only | Whether debug facilities are enabled.  |
 
-### Methods
+#### Methods
 
 | Method            | Arguments   | Result         | Description                                            |
 | ----------------- | ----------- | -------------- | ------------------------------------------------------ |
@@ -286,17 +486,17 @@ Example path:
 | `dump_state`      | DumpOptions | DiagnosticDump | Produces diagnostic state. Requires privileged rights. |
 | `set_log_level`   | LogLevel    | void           | Changes kernel log verbosity. Requires admin rights.   |
 
-### Events
+#### Events
 
 | Event       | Payload       | Description                                 |
 | ----------- | ------------- | ------------------------------------------- |
-| `panic`     | PanicInfo     | Fired when a kernel panic is recorded.      |
+| `panic`     | PanicInfo     | Best-effort retained panic report; delivery during a panic is not guaranteed.      |
 | `warning`   | KernelWarning | Fired for significant kernel warnings.      |
 | `log_entry` | LogEntry      | Fired for kernel log entries if subscribed. |
 
 ---
 
-## 5.3 `/os/processes`
+### A.3 `/os/processes`
 
 Directory-like branch containing process objects.
 
@@ -304,22 +504,22 @@ Example paths:
 
 ```text
 /os/processes
-/os/processes[1]
-/os/processes[42]
-/os/processes[42]/threads
-/os/processes[42]/memory
+/os/processes/1
+/os/processes/42
+/os/processes/42/threads
+/os/processes/42/memory
 ```
 
-### Branch Object: `/os/processes`
+#### Branch Object: `/os/processes`
 
-#### Properties
+##### Properties
 
 | Property        | Type | Access    | Description                                   |
 | --------------- | ---- | --------- | --------------------------------------------- |
-| `count`         | u64  | read-only | Number of live processes.                     |
+| `count`         | u64  | read-only | Number of processes visible to this caller.                     |
 | `next_pid_hint` | u64  | read-only | Diagnostic hint for next PID. Not stable ABI. |
 
-#### Methods
+##### Methods
 
 | Method         | Arguments          | Result        | Description                                    |
 | -------------- | ------------------ | ------------- | ---------------------------------------------- |
@@ -327,16 +527,16 @@ Example paths:
 | `spawn`        | SpawnRequest       | ProcessHandle | Creates a process.                             |
 | `find_by_name` | string             | ProcessList   | Finds processes by executable or service name. |
 
-#### Events
+##### Events
 
 | Event             | Payload         | Description                      |
 | ----------------- | --------------- | -------------------------------- |
 | `process_created` | ProcessInfo     | Fired when a process is created. |
 | `process_exited`  | ProcessExitInfo | Fired when a process exits.      |
 
-### Process Object: `/os/processes/{pid}`
+#### Process Object: `/os/processes/{pid}`
 
-#### Properties
+##### Properties
 
 | Property          | Type         | Access    | Description                              |
 | ----------------- | ------------ | --------- | ---------------------------------------- |
@@ -350,7 +550,7 @@ Example paths:
 | `memory_bytes`    | u64          | read-only | Resident memory estimate.                |
 | `exit_code`       | i64          | read-only | Exit code if exited.                     |
 
-#### Methods
+##### Methods
 
 | Method             | Arguments         | Result           | Description                                                     |
 | ------------------ | ----------------- | ---------------- | --------------------------------------------------------------- |
@@ -358,9 +558,9 @@ Example paths:
 | `resume`           | none              | void             | Resumes the process. Requires rights.                           |
 | `terminate`        | TerminateRequest  | void             | Terminates the process. Requires rights.                        |
 | `open_memory_view` | MemoryViewRequest | MemoryViewHandle | Opens controlled memory access. Requires debugger/admin rights. |
-| `list_handles`     | none              | HandleList       | Lists process handles if permitted.                             |
+| `list_handles`     | none              | HandleList       | Lists permitted descriptor metadata, never live handles.                             |
 
-#### Events
+##### Events
 
 | Event           | Payload          | Description                       |
 | --------------- | ---------------- | --------------------------------- |
@@ -372,7 +572,7 @@ Example paths:
 
 ---
 
-## 5.4 `/os/devices`
+### A.4 `/os/devices`
 
 Directory-like branch containing discovered hardware and virtual devices.
 
@@ -380,23 +580,23 @@ Example paths:
 
 ```text
 /os/devices
-/os/devices/keyboard[0]
-/os/devices/mouse[0]
-/os/devices/net[0]
-/os/devices/gpu[0]
-/os/devices/disk[0]
+/os/devices/keyboard/0
+/os/devices/mouse/0
+/os/devices/net/0
+/os/devices/gpu/0
+/os/devices/disk/0
 ```
 
-### Branch Object: `/os/devices`
+#### Branch Object: `/os/devices`
 
-#### Properties
+##### Properties
 
 | Property               | Type | Access    | Description                           |
 | ---------------------- | ---- | --------- | ------------------------------------- |
 | `count`                | u64  | read-only | Number of visible devices.            |
 | `enumeration_complete` | bool | read-only | Whether initial enumeration finished. |
 
-#### Methods
+##### Methods
 
 | Method          | Arguments         | Result     | Description                                    |
 | --------------- | ----------------- | ---------- | ---------------------------------------------- |
@@ -404,7 +604,7 @@ Example paths:
 | `find_by_class` | DeviceClass       | DeviceList | Lists devices by class.                        |
 | `rescan`        | RescanOptions     | void       | Requests device rescan. Requires admin rights. |
 
-#### Events
+##### Events
 
 | Event            | Payload    | Description                      |
 | ---------------- | ---------- | -------------------------------- |
@@ -412,9 +612,9 @@ Example paths:
 | `device_removed` | DeviceInfo | Fired when a device disappears.  |
 | `device_changed` | DeviceInfo | Fired when device state changes. |
 
-### Network Device Object: `/os/devices/net[0]`
+#### Network Device Object: `/os/devices/net/0`
 
-#### Properties
+##### Properties
 
 | Property       | Type        | Access    | Description                                                   |
 | -------------- | ----------- | --------- | ------------------------------------------------------------- |
@@ -429,7 +629,7 @@ Example paths:
 | `rx_bytes`     | u64         | read-only | Received byte count.                                          |
 | `tx_bytes`     | u64         | read-only | Transmitted byte count.                                       |
 
-#### Methods
+##### Methods
 
 | Method           | Arguments    | Result       | Description                                     |
 | ---------------- | ------------ | ------------ | ----------------------------------------------- |
@@ -439,7 +639,7 @@ Example paths:
 | `reset`          | none         | void         | Resets the device. Requires admin rights.       |
 | `get_statistics` | none         | NetworkStats | Returns detailed statistics.                    |
 
-#### Events
+##### Events
 
 | Event             | Payload     | Description                                                |
 | ----------------- | ----------- | ---------------------------------------------------------- |
@@ -447,9 +647,9 @@ Example paths:
 | `packet_received` | PacketInfo  | Fired when packets arrive, depending on subscription mode. |
 | `error`           | DeviceError | Fired when device errors occur.                            |
 
-### GPU Device Object: `/os/devices/gpu[0]`
+#### GPU Device Object: `/os/devices/gpu/0`
 
-#### Properties
+##### Properties
 
 | Property             | Type   | Access    | Description               |
 | -------------------- | ------ | --------- | ------------------------- |
@@ -462,27 +662,27 @@ Example paths:
 | `queue_count`        | u32    | read-only | Number of exposed queues. |
 | `fault_count`        | u64    | read-only | Number of GPU faults.     |
 
-#### Methods
+##### Methods
 
 | Method           | Arguments           | Result          | Description                        |
 | ---------------- | ------------------- | --------------- | ---------------------------------- |
 | `create_buffer`  | GpuBufferCreateInfo | GpuBufferHandle | Creates a GPU buffer object.       |
-| `destroy_buffer` | GpuBufferHandle     | void            | Destroys a GPU buffer.             |
+| `retire_buffer`  | GpuBufferHandle     | RetireResult    | Stops new submissions; releases backing only after quiescence.             |
 | `submit`         | GpuSubmitRequest    | GpuSubmitResult | Submits commands to a GPU queue.   |
 | `wait_idle`      | Timeout             | WaitResult      | Waits until GPU work is idle.      |
 | `reset`          | none                | void            | Resets GPU. Requires admin rights. |
 
-#### Events
+##### Events
 
 | Event             | Payload               | Description                                        |
 | ----------------- | --------------------- | -------------------------------------------------- |
 | `faulted`         | GpuFaultInfo          | Fired when GPU faults.                             |
 | `memory_pressure` | GpuMemoryPressureInfo | Fired when GPU memory pressure changes.            |
-| `work_completed`  | GpuCompletionInfo     | Fired when submitted work completes, if requested. |
+| `work_completed`  | GpuCompletionInfo     | Optional completion notification; retained operation results remain authoritative. |
 
 ---
 
-## 5.5 `/os/drivers`
+### A.5 `/os/drivers`
 
 Branch containing loaded driver objects.
 
@@ -495,13 +695,13 @@ Example paths:
 /os/drivers/simple_framebuffer
 ```
 
-### Properties
+#### Properties
 
 | Property | Type | Access    | Description               |
 | -------- | ---- | --------- | ------------------------- |
 | `count`  | u64  | read-only | Number of loaded drivers. |
 
-### Driver Object Properties
+#### Driver Object Properties
 
 | Property             | Type        | Access    | Description                             |
 | -------------------- | ----------- | --------- | --------------------------------------- |
@@ -511,7 +711,7 @@ Example paths:
 | `bound_device_count` | u64         | read-only | Number of devices bound to this driver. |
 | `provider_path`      | string      | read-only | Path to driver image or provider.       |
 
-### Driver Object Methods
+#### Driver Object Methods
 
 | Method            | Arguments     | Result            | Description                                         |
 | ----------------- | ------------- | ----------------- | --------------------------------------------------- |
@@ -520,7 +720,7 @@ Example paths:
 | `reload`          | ReloadOptions | void              | Reloads driver if supported. Requires admin rights. |
 | `get_diagnostics` | none          | DriverDiagnostics | Returns diagnostic info.                            |
 
-### Driver Object Events
+#### Driver Object Events
 
 | Event           | Payload           | Description                         |
 | --------------- | ----------------- | ----------------------------------- |
@@ -531,7 +731,7 @@ Example paths:
 
 ---
 
-## 5.6 `/os/services`
+### A.6 `/os/services`
 
 Branch containing long-running service objects.
 
@@ -544,13 +744,13 @@ Example paths:
 /os/services/network_manager
 ```
 
-### Branch Properties
+#### Branch Properties
 
 | Property | Type | Access    | Description                    |
 | -------- | ---- | --------- | ------------------------------ |
 | `count`  | u64  | read-only | Number of registered services. |
 
-### Branch Methods
+#### Branch Methods
 
 | Method    | Arguments             | Result        | Description                          |
 | --------- | --------------------- | ------------- | ------------------------------------ |
@@ -559,7 +759,7 @@ Example paths:
 | `stop`    | ServiceStopRequest    | void          | Stops a service. Requires rights.    |
 | `restart` | ServiceRestartRequest | void          | Restarts a service. Requires rights. |
 
-### Branch Events
+#### Branch Events
 
 | Event                  | Payload            | Description                       |
 | ---------------------- | ------------------ | --------------------------------- |
@@ -567,7 +767,7 @@ Example paths:
 | `service_unregistered` | ServiceInfo        | Fired when a service unregisters. |
 | `service_failed`       | ServiceFailureInfo | Fired when a service fails.       |
 
-### Service Object Properties
+#### Service Object Properties
 
 | Property            | Type          | Access    | Description                                                           |
 | ------------------- | ------------- | --------- | --------------------------------------------------------------------- |
@@ -577,7 +777,7 @@ Example paths:
 | `restart_policy`    | RestartPolicy | read-only | Service restart policy. Use `set_restart_policy` method to change it. |
 | `interface_version` | u32           | read-only | Service interface version.                                            |
 
-### Service Object Methods
+#### Service Object Methods
 
 | Method               | Arguments         | Result        | Description                                  |
 | -------------------- | ----------------- | ------------- | -------------------------------------------- |
@@ -588,7 +788,7 @@ Example paths:
 | `open_client`        | ClientOpenRequest | ClientHandle  | Opens a client session to the service.       |
 | `set_restart_policy` | RestartPolicy     | void          | Changes service restart policy if permitted. |
 
-### Service Object Events
+#### Service Object Events
 
 | Event                 | Payload            | Description                |
 | --------------------- | ------------------ | -------------------------- |
@@ -600,9 +800,11 @@ Example paths:
 
 ---
 
-## 5.7 `/os/memory`
+### A.7 `/os/memory`
 
-Branch exposing system memory information and controlled memory objects.
+Branch exposing memory statistics and, in a later profile, explicitly authorized
+memory factories. The physical and virtual paths below describe statistics views;
+their names do not authorize arbitrary address access or mapping.
 
 Example paths:
 
@@ -612,7 +814,7 @@ Example paths:
 /os/memory/virtual
 ```
 
-### Properties
+#### Properties
 
 | Property                   | Type | Access    | Description                  |
 | -------------------------- | ---- | --------- | ---------------------------- |
@@ -622,7 +824,7 @@ Example paths:
 | `kernel_reserved_bytes`    | u64  | read-only | Kernel-reserved memory.      |
 | `user_committed_bytes`     | u64  | read-only | User-space committed memory. |
 
-### Methods
+#### Methods
 
 | Method            | Arguments              | Result             | Description                              |
 | ----------------- | ---------------------- | ------------------ | ---------------------------------------- |
@@ -630,7 +832,7 @@ Example paths:
 | `get_statistics`  | none                   | MemoryStatistics   | Returns memory statistics.               |
 | `compact`         | CompactOptions         | CompactResult      | Requests memory compaction if supported. |
 
-### Events
+#### Events
 
 | Event                | Payload          | Description                         |
 | -------------------- | ---------------- | ----------------------------------- |
@@ -639,7 +841,7 @@ Example paths:
 
 ---
 
-## 5.8 `/os/events`
+### A.8 `/os/events`
 
 Branch exposing event-related primitives.
 
@@ -650,14 +852,14 @@ Example paths:
 /os/events/timers
 ```
 
-### Properties
+#### Properties
 
 | Property              | Type | Access    | Description                                             |
 | --------------------- | ---- | --------- | ------------------------------------------------------- |
 | `subscription_count`  | u64  | read-only | Number of active event subscriptions visible to caller. |
 | `timer_resolution_ns` | u64  | read-only | Timer resolution.                                       |
 
-### Methods
+#### Methods
 
 | Method               | Arguments            | Result           | Description                      |
 | -------------------- | -------------------- | ---------------- | -------------------------------- |
@@ -665,26 +867,28 @@ Example paths:
 | `create_event_queue` | EventQueueCreateInfo | EventQueueHandle | Creates an event queue.          |
 | `wait_many`          | WaitManyRequest      | WaitManyResult   | Waits on multiple event sources. |
 
-### Events
+#### Events
 
 | Event            | Payload                | Description                                             |
 | ---------------- | ---------------------- | ------------------------------------------------------- |
 | `timer_fired`    | TimerInfo              | Generic timer event if using branch-level subscription. |
-| `queue_overflow` | EventQueueOverflowInfo | Fired when an event queue overflows.                    |
+| `queue_overflow` | EventQueueOverflowInfo | Overflow status is retained outside the full queue; a notification is optional.                    |
 
 ---
 
-## 5.9 `/home`, `/bin`, `/lib`, `/tmp`
+### A.9 `/home`, `/bin`, `/lib`, `/tmp`
 
 Storage-backed branches.
 
-These are provided by filesystem providers such as ext2, FAT32, initramfs, tmpfs, or future native filesystems.
+Later filesystem providers may back these branches. The first slice only supplies
+read-only initrd files; the mutations, ownership model, events, and writable
+providers below require separate profiles.
 
-### File Object Properties
+#### File Object Properties
 
 | Property        | Type        | Access    | Description                                     |
 | --------------- | ----------- | --------- | ----------------------------------------------- |
-| `name`          | string      | read-only | File name.                                      |
+| `name`          | string      | read-only | Advisory opened-entry name, when available; not unique object identity.                                      |
 | `size`          | u64         | read-only | File size.                                      |
 | `storage_size`  | u64         | read-only | File backend storage size.                      |
 | `created_at`    | timestamp   | read-only | Creation time if supported.                     |
@@ -692,47 +896,52 @@ These are provided by filesystem providers such as ext2, FAT32, initramfs, tmpfs
 | `owner_user_id` | u64         | read-only | Owning user. Use method to change it.           |
 | `permissions`   | Permissions | read-only | File permissions. Use method to change them.    |
 | `content_type`  | string      | read-only | Optional content type. Use method to change it. |
-| `data`          | Stream      | read-only | Main byte stream of the file.                   |
+| `data`          | StreamHandle | read-only | Optional attenuated alias to the same open instance; direct byte I/O is primary.                   |
 
-### File Object Methods
+#### File Object Methods
 
 | Method             | Arguments    | Result     | Description                                         |
 | ------------------ | ------------ | ---------- | --------------------------------------------------- |
 | `truncate`         | u64          | void       | Changes file size.                                  |
-| `sync`             | none         | void       | Flushes file state to storage.                      |
+| `sync`             | none         | void       | Requests the provider-defined durability barrier; requires the writable-storage profile.                      |
 | `clone`            | CloneOptions | FileHandle | Clones file if supported.                           |
 | `get_extents`      | none         | ExtentList | Returns storage extents if supported and permitted. |
 | `set_owner`        | UserId       | void       | Changes file owner if permitted.                    |
 | `set_permissions`  | Permissions  | void       | Changes file permissions if permitted.              |
 | `set_content_type` | string       | void       | Changes optional content type if supported.         |
 
-### File Object Events
+#### File Object Events
 
 | Event              | Payload                | Description                                                  |
 | ------------------ | ---------------------- | ------------------------------------------------------------ |
 | `modified`         | FileChangeInfo         | Fired when file content changes.                             |
 | `metadata_changed` | FileMetadataChangeInfo | Fired when metadata changes.                                 |
-| `deleted`          | FileDeleteInfo         | Fired before or after file deletion, depending on semantics. |
+| `deleted`          | FileDeleteInfo         | Reports committed removal of a name; retained open instances may remain alive. |
 
-### Directory Object Properties
+#### Directory Object Properties
 
 | Property             | Type        | Access    | Description                                        |
 | -------------------- | ----------- | --------- | -------------------------------------------------- |
-| `name`               | string      | read-only | Directory name.                                    |
+| `name`               | string      | read-only | Advisory opened-entry name, when available; not unique object identity.                                    |
 | `entry_count`        | u64         | read-only | Number of entries if cheaply available.            |
 | `storage_size`       | u64         | read-only | Storage size for the directory.                    |
-| `file_size`          | u64         | read-only | Recursive sum of file sizes.                       |
-| `file_storage_size`  | u64         | read-only | Recursive sum of file backend storage sizes.       |
+| `file_size`          | u64         | read-only | Cached bounded advisory total of visible file sizes, if available. |
+| `file_storage_size`  | u64         | read-only | Cached bounded advisory total of visible backend storage, if available. |
 | `owner_user_id`      | u64         | read-only | Owning user. Use method to change it.              |
 | `permissions`        | Permissions | read-only | Directory permissions. Use method to change them.  |
-| `children`           | Collection  | read-only | Child files, directories, mounts, or object links. |
+| `children`           | `Collection<DirectoryEntryInfo>` | read-only | Runtime adapter over bounded enumeration; records grant no child authority. |
 
-### Directory Object Methods
+Recursive totals cannot trigger unbounded traversal in a property getter. A
+provider without a suitable bounded snapshot must omit the optional property;
+explicit recomputation belongs to a separately authorized asynchronous operation
+with resource limits and cancellation.
+
+#### Directory Object Methods
 
 | Method             | Arguments              | Result             | Description                                 |
 | ------------------ | ---------------------- | ------------------ | ------------------------------------------- |
 | `list`             | DirectoryListOptions   | DirectoryEntryList | Lists entries.                              |
-| `lookup`           | string                 | ObjectHandle       | Resolves a child by name.                   |
+| `open_at`          | OpenChildRequest       | ObjectHandle       | Opens an authorized child with explicit requested rights and ceiling.                   |
 | `create_file`      | CreateFileRequest      | FileHandle         | Creates a file.                             |
 | `create_directory` | CreateDirectoryRequest | DirectoryHandle    | Creates a directory.                        |
 | `unlink`           | string                 | void               | Removes an entry.                           |
@@ -741,7 +950,7 @@ These are provided by filesystem providers such as ext2, FAT32, initramfs, tmpfs
 | `set_owner`        | UserId                 | void               | Changes directory owner if permitted.       |
 | `set_permissions`  | Permissions            | void               | Changes directory permissions if permitted. |
 
-### Directory Object Events
+#### Directory Object Events
 
 | Event              | Payload                     | Description                     |
 | ------------------ | --------------------------- | ------------------------------- |
@@ -751,471 +960,3 @@ These are provided by filesystem providers such as ext2, FAT32, initramfs, tmpfs
 | `metadata_changed` | DirectoryMetadataChangeInfo | Fired when metadata changes.    |
 
 ---
-
-## 6. Interface Attribute Categories
-
-Each VFS object interface contains exactly three categories:
-
-- Properties
-- Methods
-- Events
-
-Additional structures such as streams, memory regions, child branches, maps, dictionaries, arrays, and collections are represented as property types.
-
-## 6.1 Properties
-
-Properties are named, typed values attached to an object.
-
-Properties are externally read-only. Objects are changed by calling methods, not by assigning property values directly.
-
-This means a property may expose a mutable object, while the property binding itself remains read-only. For example, a file's `data` property may return a `Stream<byte>`. The caller cannot replace `file.data`, but may call `file.data.write(...)` if the stream grants write rights.
-
-Properties may be:
-
-- Static
-- Dynamic
-- Computed
-- Privileged
-- Object-valued
-- Collection-valued
-- Stream-valued
-- Memory-valued
-
-Example property descriptor:
-
-```text
-PropertyDescriptor {
-  id: u32
-  name: string
-  type_id: TypeId
-  required_rights: Rights
-  flags: cached | dynamic | privileged | volatile | object_ref | collection_ref | stream_ref | memory_ref
-}
-```
-
----
-
-## 6.2 Methods
-
-Methods are typed operations callable on an object.
-
-Example method descriptor:
-
-```text
-MethodDescriptor {
-  id: u32
-  name: string
-  argument_type: TypeId
-  result_type: TypeId
-  required_rights: Rights
-  flags: may_block | privileged | async | idempotent
-}
-```
-
-Methods should replace ad-hoc `ioctl`-style command blobs in the native OS model.
-
----
-
-## 6.3 Events
-
-Events are typed notifications emitted by objects.
-
-Example event descriptor:
-
-```text
-EventDescriptor {
-  id: u32
-  name: string
-  payload_type: TypeId
-  required_rights: Rights
-  flags: edge_triggered | level_triggered | queued | lossy
-}
-```
-
-Event delivery should be unified through subscription handles and wait operations.
-
----
-
-## 6.4 Standard Library Interface Types
-
-Streams, memory regions, collections, dictionaries, and maps are modeled as normal typed objects from class libraries, not as separate interface descriptor categories.
-
-The standard class library should provide common reusable types such as:
-
-```text
-List<T>
-Collection<T>
-Dictionary<K, V>
-Map<K, V>
-Stream<T>
-MemoryStream
-MemoryArray
-ObjectRef<T>
-```
-
-Example stream-like type:
-
-```text
-class Stream<T> {
-  properties:
-    position: UInt64
-    length: Optional<UInt64>
-    readable: Bool
-    writable: Bool
-    seekable: Bool
-
-  methods:
-    read(ReadRequest) -> ReadResult<T>
-    write(WriteRequest<T>) -> WriteResult
-    seek(SeekRequest) -> u64
-    flush()
-    close()
-
-  events:
-    data_available(StreamDataInfo)
-    closed(StreamCloseInfo)
-    error(StreamErrorInfo)
-}
-```
-
-Example collection type:
-
-```text
-class Collection<T> {
-  properties:
-    count: u64
-
-  methods:
-    list(ListOptions) -> List<T>
-    get(CollectionKey) -> Optional<T>
-    contains(CollectionKey) -> Bool
-
-  events:
-    added(T)
-    removed(T)
-    changed(T)
-}
-```
-
-Example memory types:
-
-```text
-class MemoryStream : Stream<byte> {
-  methods:
-    map(MapRequest) -> MemoryMapping
-    protect(ProtectionRequest) -> Result<Void>
-}
-
-class MemoryArray {
-  properties:
-    length: u64
-    element_size: u64
-
-  methods:
-    get(index: u64) -> MemoryStream
-    map(index: u64, request: MapRequest) -> MemoryMapping
-}
-```
-
----
-
-## 6.5 Memory Region Modeling
-
-Memory regions are not descriptor categories. They are properties whose types come from the standard class library or an OS-level memory class library.
-
-Examples:
-
-- A process may expose `memory_regions: Collection<MemoryStream>`.
-- A framebuffer device may expose `framebuffer: MemoryStream`.
-- A fixed hardware register bank may expose `registers: MemoryArray`.
-- A file may expose `data: Stream<byte>` and may also support a `map` method through the stream implementation.
-
-Use `Collection<MemoryStream>` when the number of regions can change.
-
-Use `MemoryArray` when the layout is fixed and indexed.
-
-Memory access rights are enforced by the returned memory object and its methods, not by a separate VFS memory-region operation category.
-
----
-
-## 7. Rights Model
-
-Access control should be operation-level, not only path-level.
-
-Suggested rights:
-
-```text
-RIGHT_DESCRIBE
-RIGHT_GET_PROPERTY
-RIGHT_CALL_METHOD
-RIGHT_SUBSCRIBE_EVENT
-RIGHT_ENUMERATE_COLLECTION
-RIGHT_CREATE_COLLECTION_ITEM
-RIGHT_DELETE_COLLECTION_ITEM
-RIGHT_ADMIN
-RIGHT_DELEGATE
-```
-
-A handle carries a subset of rights granted at open time or delegated from another process.
-
-Example:
-
-```text
-handle to /os/devices/gpu0:
-  DESCRIBE
-  GET_PROPERTY
-  CALL_METHOD:create_buffer
-  CALL_METHOD:submit
-  SUBSCRIBE_EVENT:work_completed
-```
-
-Fine-grained method/property/event rights may later be represented by per-interface-item permission masks.
-
----
-
-## 8. Object Lifetime
-
-Objects may be:
-
-- Persistent and path-backed
-- Runtime and path-backed
-- Runtime and handle-only
-- Ephemeral event or result objects
-
-Examples:
-
-| Object             | Path-backed | Persistent | Notes                                                       |
-| ------------------ | ----------- | ---------- | ----------------------------------------------------------- |
-| File               | yes         | yes        | Backed by storage.                                          |
-| Directory          | yes         | yes        | Backed by storage or object provider.                       |
-| Process            | yes         | no         | Exists while process exists.                                |
-| GPU buffer         | usually no  | no         | Usually handle-only.                                        |
-| Event subscription | no          | no         | Handle-only.                                                |
-| Service            | yes         | no/maybe   | Runtime service, optionally configured by persistent files. |
-| Shared memory      | optional    | no/maybe   | May be named or anonymous.                                  |
-
----
-
-## 9. Provider Model
-
-A VFS branch is backed by an object provider.
-
-A branch is normally represented as an object with a `children` property of type `Collection<T>`. Directory traversal is therefore a method call on a collection object, not a separate descriptor category.
-
-Examples:
-
-- ext2 provider
-- FAT32 provider
-- tmpfs provider
-- process manager provider
-- device manager provider
-- service manager provider
-- driver manager provider
-- kernel diagnostics provider
-
-A provider implements object lookup and object operations for a namespace subtree.
-
-Conceptual provider interface:
-
-```text
-Provider {
-  open(path, requested_rights) -> object_handle
-  describe(object) -> interface_descriptor
-  get_property(object, property_id) -> value
-  call_method(object, method_id, args) -> result
-  subscribe_event(object, event_id) -> subscription_handle
-}
-```
-
-Lookup, listing, stream I/O, and memory mapping are still supported, but through normal object interfaces:
-
-```text
-directory.children.get(name)
-directory.children.list(options)
-file.data.read(request)
-file.data.write(request)
-process.memory_regions.get(index).map(request)
-```
-
----
-
-## 10. POSIX Compatibility Projection
-
-POSIX compatibility should be implemented as a layer over native object handles.
-
-Mapping:
-
-| POSIX concept       | Native object model                                      |
-| ------------------- | -------------------------------------------------------- |
-| file descriptor     | object handle                                            |
-| `open`              | `open`                                                   |
-| `read`              | get `data: Stream<byte>` property, call `read` method    |
-| `write`             | get `data: Stream<byte>` property, call `write` method   |
-| `stat`              | property query                                           |
-| `opendir`           | open directory object                                    |
-| `readdir`           | call directory `list` method                             |
-| `ioctl`             | legacy wrapper over `call_method`                        |
-| `mmap`              | call `map` on `MemoryStream` or mappable `Stream` object |
-| `poll/select/epoll` | event subscription and `wait_many`                       |
-
-The native model should not be reduced to POSIX semantics.
-
----
-
-## 11. Minimal Implementation Milestones
-
-### Milestone 1: Kernel Object Base
-
-Implement:
-
-- `Object`
-- `ObjectKind`
-- `Handle`
-- `Rights`
-- Basic object table per process
-
-Required operations:
-
-```text
-open
-close
-info
-```
-
----
-
-### Milestone 2: Directory and File Objects
-
-Implement:
-
-- Root directory
-- Directory lookup
-- Directory list
-- Basic file object
-- Read-only `data` property of type `Stream<byte>` for file data
-
----
-
-### Milestone 3: `/os` Runtime Namespace
-
-Implement synthetic runtime branches:
-
-```text
-/os/system
-/os/processes
-/os/devices
-```
-
-Expose basic read-only properties.
-
----
-
-### Milestone 4: Properties
-
-Add generic:
-
-```text
-get_property
-```
-
-Use properties for:
-
-- System info
-- Process state
-- Device state
-- File metadata
-- File `data: Stream<byte>`
-- Directory `children: Collection<FileSystemObject>`
-
----
-
-### Milestone 5: Methods
-
-Add generic:
-
-```text
-call_method
-```
-
-Use methods for:
-
-- Stream `read` and `write`
-- Process `terminate`
-- Directory `children.get` / `children.list`, or direct `lookup` / `list` while bootstrapping
-- Directory `create_file`, `create_directory`, `unlink`
-- Device `reset`
-- Service `start` and `stop`
-
----
-
-### Milestone 6: Events
-
-Add:
-
-```text
-subscribe_event
-unsubscribe_event
-wait
-wait_many
-```
-
-Use events for:
-
-- Process exit
-- Timer fired
-- Device change
-- File or directory change
-- Stream `data_available`
-
----
-
-## 12. Open Design Questions
-
-1. Should object interfaces be described by compact binary descriptors, text schemas, or both?
-2. Should method/property/event IDs be globally stable, per-interface stable, or dynamically assigned at load time?
-3. Should all objects expose a minimum common interface?
-4. How much type information should the kernel understand?
-5. Should the kernel validate method argument schemas, or only route opaque typed payloads?
-6. Should in-process loaded ELF objects use the same descriptor format as out-of-process services?
-7. How should object references be serialized across IPC boundaries?
-8. Should there be a native object query language, or only directory traversal and explicit method calls?
-9. How should POSIX compatibility handle non-file objects?
-10. Which branches are required for the first bootable milestone?
-11. Which parts of the standard class library are kernel ABI and which are OS runtime ABI?
-12. Should `Collection<T>` expose mutation directly, or should all mutations happen on the owning object through explicit methods?
-
----
-
-## 13. Recommended First Version
-
-The first version should be deliberately small.
-
-Recommended initial native object kinds:
-
-```text
-Directory
-File
-System
-Process
-Device
-Service
-Stream
-Collection
-EventSubscription
-```
-
-Recommended initial operations:
-
-```text
-open
-close
-describe_basic
-get_property
-call_method
-subscribe_event
-wait
-```
-
-Initial `File` objects should expose `data: Stream<byte>`. Initial `Directory` objects should expose `children: Collection<FileSystemObject>`. Reading, writing, listing, lookup, and traversal then become method calls on those standard objects.
-
-The critical early decision is to make VFS resolve paths to object handles, not merely file descriptors. Everything else can evolve from that foundation.

@@ -274,6 +274,7 @@ References: [concurrency and memory-model references](REFERENCES.md#concurrency-
 | LFENCE, SFENCE, MFENCE | x86 fence instructions for the specified load, store, or combined memory-ordering requirements. Choosing a fence requires matching the relevant instruction and memory-type rules. |
 | TSO | Total Store Order: a memory-model name commonly used for x86 behavior. Store buffering still permits some observations that differ from a simple “every CPU sees everything immediately” model. |
 | Data race, race condition | A data race involves conflicting unsynchronized accesses and is undefined behavior under the applicable C++ rules. A broader race condition is a timing-dependent correctness bug, even when individual accesses are atomic. |
+| Linearization point | The instant at which a concurrent operation is treated as taking effect relative to other operations, such as descriptor removal versus acquisition of an in-flight reference. |
 | Lost wakeup | A thread starts waiting after the event it needed has already been signaled, then remains blocked because the condition and wait registration were not coordinated. |
 | Deadlock, lock order | Deadlock occurs when participants cannot progress because each waits on resources the others retain. A consistent lock-acquisition order helps prevent cycles but must cover every participating path. |
 | Lock contention | Multiple execution contexts compete for the same lock. Correctness can hold while contention still limits throughput or increases latency. |
@@ -604,6 +605,7 @@ These terms describe software interfaces and process behavior. The API drafts ex
 | Auxiliary vector / `auxv` | A typed sequence of extra process-startup values supplied by a loader, such as platform or executable information. `AT_NULL` marks its end in the System V model. |
 | `errno` / error ABI | `errno` is the conventional C/POSIX error indicator; an error ABI specifies how errors cross an interface, including numeric codes, return values, and partial success. |
 | Blocking / nonblocking I/O | A blocking operation may suspend its caller until progress is possible; a nonblocking operation returns promptly if it cannot currently proceed. |
+| `NONBLOCK` | Proposed open-instance status flag selecting nonblocking behavior where supported; duplicates share it. Empty input then reports would-block rather than EOF. |
 | Partial I/O | A successful transfer of fewer bytes than requested; callers must use the returned length rather than assume the whole request completed. |
 | IPC | **Interprocess Communication**: mechanisms for exchanging data or notifications between processes, such as messages, pipes, shared memory, or mediated object calls. |
 | Pipe | A kernel-managed byte channel commonly connecting one process's output to another's input. |
@@ -647,7 +649,7 @@ The distinctions among headers, sections, segments, symbols, and relocations fol
 | Stripped binary | A binary from which selected symbols or debugging metadata have been removed; required loadable code and data can remain unchanged. |
 | ELF note | A structured ELF metadata record with an owner/name, type, and payload, used for auxiliary information. |
 | `.os.interface` / `.os.iface.v1` | Proposed section names in the API drafts for serialized descriptions of a program object's properties, methods, events, and types. |
-| OSIF | The proposed interface-header magic identifier in the ELF interface draft; it is a format tag rather than an established external ABI. |
+| OSIF | A magic identifier sketched in the earlier ELF interface draft. The revised proposal leaves the metadata encoding unfrozen; this is not an established file format or ABI. |
 | Exported symbol | A symbol deliberately made available to other components, often as part of a library or runtime interface. |
 | Constructor / initialization | Code that establishes a program or object instance's starting state before ordinary operations are used. |
 | Runtime binding | Connecting a metadata-described operation to the code or mediated invocation that implements it. |
@@ -661,24 +663,35 @@ The project-specific names in this section come from the [native API drafts](os-
 | --- | --- |
 | Resource | An entity whose access and lifetime the OS manages, such as an open file, process, device, memory object, or communication endpoint. |
 | FD / file descriptor | A process-local integer identifying an open resource entry. The integer is a reference used by APIs, not the file's bytes or a kernel pointer. |
-| Descriptor table / handle table | A process-owned mapping from exposed identifiers to resource references and associated rights, flags, or per-open state. |
+| Descriptor table / handle table | A process-owned mapping from indices to descriptor entries. The proposal stores rights and descriptor flags in each entry, with a reference to shared open-instance state. |
+| Descriptor entry | One process-owned grant to an open instance: rights, descriptor flags, and (for directories) a descendant-grant ceiling. Closing it removes that grant, not every alias. |
 | Handle | An opaque reference through which a caller accesses a resource. The native drafts attach ownership and rights to handles rather than exposing raw kernel addresses. |
 | Descriptor — overloaded term | It can mean a resource-table entry, a schema describing an object interface, or a hardware structure; the surrounding subsystem determines which meaning applies. |
-| Open file description / per-open state | The shared state of an open instance, such as position and status flags; several descriptors can refer to one instance. |
+| Open instance / open file description / per-open state | State belonging to one opening, such as position and status flags. Duplicates and explicit child grants share it; independent opens create separate instances. |
 | Standard input / output / error | The conventional input, output, and diagnostic streams, normally exposed as descriptors 0, 1, and 2. |
 | `open` / `close` | Acquiring a resource reference and releasing it. Closing one reference need not destroy an object still held elsewhere. |
 | `dup` / duplication | Creating another descriptor referring to an existing resource, with sharing and rights behavior specified by the API. |
-| Descriptor inheritance / close-on-exec | Rules governing which descriptors survive process creation or program replacement; close-on-exec marks one for closure during a successful `exec`. |
+| Descriptor inheritance / close-on-exec / `CLOEXEC` | Rules governing which descriptors survive process creation or program replacement; the per-descriptor close-on-exec flag marks one for closure during a successful `exec`. |
+| Startup record / bootstrap context | A bounded versioned record proposed for program entry, describing arguments, environment, and explicitly granted descriptor roles such as root, cwd, and standard streams. |
 | Generation-tagged handle | An identifier containing or checking a generation value so a stale reference can be distinguished from a newly reused table slot. |
 | Native object | A resource exposed through the proposed OS object model rather than solely through a POSIX file-operation projection. |
 | Object image | A loadable description or executable unit from which an object may be instantiated; it is distinct from a live instance. |
+| Object class / class binary | A construction contract and its binary implementation; one binary can export several classes. Class identity is separate from interface identity and live instance identity. |
+| Construction hook / factory | Class code invoked with optional typed arguments that returns a new or existing object reference. A C++ binding exposes it as a result-returning factory, not an instance constructor. |
+| Singleton / shared instance | An object intentionally reused by class code within a declared scope. Cross-process sharing requires coordinated registry, authority, and lifetime rules; it is not implied by a process-local static. |
+| Realm / activation registry | A manager-authorized sharing domain and the records coordinating class/provider activation within it. Ordinary clients cannot select another security domain using an unchecked name. |
+| Constructor arguments | Bounded typed inputs to a class construction hook, with defined defaults and reuse behavior. They are separate from process environment strings and capability grants. |
 | Object instance | The live resource, state, and operations associated with a particular object at runtime. |
 | Kernel-native object | An object implemented by the kernel rather than loaded from a user-provided executable image. |
 | Hosted object / hosted load | A proposed object whose implementation runs in a protected process and is accessed through mediated calls. |
 | In-process object / local object | An object implemented inside the caller's own process, sharing that process's protection boundary. |
 | Process / thread / device object | An object-model view of an existing process, thread, or device, allowing controlled inspection or operations through its interface. |
 | Program-image object | A proposed object representing executable-image information or loading behavior, rather than a running process itself. |
-| Job object | A proposed control and lifetime grouping for related work or processes; its exact membership and ownership rules are API design choices. |
+| Job object | An overloaded name in the earlier drafts for async work or process groups. The revised proposal uses Operation for one action and Supervisor for process-lifetime policy. |
+| Operation / terminal result | One accepted asynchronous action and its persistent success, failure, or confirmed-cancellation result. Completion remains queryable even when a notification is lost. |
+| Supervisor / supervision scope | An explicit owner of provider-process lifecycle policy, including shutdown, owner exit, and restart; separate from client endpoint references. |
+| Hosted endpoint / client session | A communication capability for a particular provider instance, optionally with per-client state. Closing a client reference does not implicitly terminate the provider. |
+| READY handshake | A later service-start protocol confirming that initialization completed and the expected interface can accept calls; ordinary process creation alone does not promise this. |
 | Observation object | A proposed object exposing bounded system-state queries or event access under defined permissions. |
 | Interface descriptor | Metadata identifying an interface and its properties, methods, events, types, versions, and access requirements. |
 | Interface / member ID | A stable identifier naming an interface or a member within it, enabling calls and schema evolution without relying solely on textual names. |
@@ -695,15 +708,20 @@ The project-specific names in this section come from the [native API drafts](os-
 | Backpressure / queue overflow | Pressure created when a producer outpaces a consumer, and the condition where a bounded queue cannot accept another item. |
 | Coalescing | Combining multiple related notifications into fewer records, preserving only the information promised by the event contract. |
 | Cancellation | A request to stop pending work, with explicit rules for completion, resource release, and races with work already finishing. |
+| Unknown outcome | A call outcome where transport failure leaves the caller unable to determine whether effects occurred; a timeout is not proof of rollback or permission to replay. |
+| Idempotence / deduplication | Idempotence means repeating an operation has the specified same effect as applying it once. Deduplication recognizes repeated request identities to avoid reapplying work; its retention and crash guarantees need an explicit protocol. |
 | RPC | **Remote Procedure Call**: invoking an operation across a process or machine boundary through encoded messages and replies. |
+| Canonical interface representation | Language-neutral schema describing stable identities, construction/member signatures, data encoding, bounds, and ownership; input to bindings and discovery rather than a C++ memory layout. |
+| Binding generator / client library | Tool producing language-specific proxy and codec source; the target compiler/linker produce the compiled client library, optionally a shared library. The provider implementation remains separate. |
 | Proxy / stub | Code that represents a remote interface locally or converts between an invocation and its transport messages. |
 | Marshalling / serialization | Encoding values into a defined representation for transfer or storage; unmarshalling/deserialization reconstructs and validates them. |
 | Typed value envelope | A proposed transport record containing type information and a bounded encoded value, rather than arbitrary language-specific objects. |
 | Schema | A definition of permitted fields, types, identities, versions, and constraints for structured data or metadata. |
+| FIDL / Zircon | Fuchsia Interface Definition Language and Fuchsia's kernel, respectively. Their typed codecs and bounded channels are references for separating payload encoding from capability transfer, not adopted os1 dependencies. |
 | Inline / out-of-line value | A value stored directly inside its enclosing message, or separately in a referenced buffer or shared region. |
 | `ObjectRef<T>` | Proposed typed object-reference notation: a reference to an object exposing the expected interface `T`, with ownership and rights defined separately. |
 | `Stream<T>` / byte stream | An ordered sequence of elements, often bytes, consumed or produced through read/write operations. |
-| `Collection<T>` | A proposed typed interface for finding or enumerating related elements or child objects. |
+| `Collection<T>` | A proposed runtime interface over related elements. For namespaces it adapts canonical lookup/enumeration; listing names does not grant child handles. |
 | Iterator / cursor | State identifying progress through a sequence or collection; concurrent changes require defined invalidation or snapshot rules. |
 | Dictionary / map | A collection associating keys with values, distinct from a virtual-memory mapping. |
 | `MemoryStream` / `MemoryArray` | Proposed interface types representing a memory-oriented stream or a fixed-layout memory collection; these names do not themselves grant raw address access. |
@@ -844,6 +862,7 @@ For security terminology, the project references POSIX identity/permission rules
 | Privilege separation | Dividing work among components with different authority so a failure in a less privileged component exposes fewer resources. |
 | Trust boundary | A boundary across which assumptions about identity, input validity, or authority must be reconsidered and enforced. |
 | Rights mask | A set of allowed operations attached to a handle or resource reference, such as reading, invoking, subscribing, or delegating. |
+| Descendant-grant ceiling | A directory descriptor's bound on authority acquired below it. Separate from rights on the directory itself, it can be narrowed on derived grants but never widened by traversal. |
 | Capability — authority | An unforgeable reference or token that conveys authority to perform specified operations on a resource. This differs from hardware feature capabilities or Linux's partitioning of root privileges. |
 | Capability — feature | An advertised supported function or limit, such as an interface feature or PCI capability; support alone is not permission to use it. |
 | ACL | **Access Control List**: a resource-associated list specifying which identities or groups receive which permissions. |
@@ -903,7 +922,7 @@ Terminal processing includes software policy as well as a hardware path; a [line
 | Event loop | A runtime loop dispatching queued events, callbacks, and completions to application code. |
 | Future / asynchronous result | A reference to an operation's eventual result, allowing observation or waiting after the operation has been started. |
 | Module / class library | A reusable software unit, or a collection of types and operations shared by programs and language runtimes. |
-| `os` object | The shell proposal's common object exposing operating-system services; it is a language-facing view over the proposed protected interfaces. |
+| `os` object / capability context | The shell proposal's facade over explicitly supplied roots, streams, and service grants. It does not reacquire an unrestricted global namespace or administrative authority. |
 
 ## Development and reference notation
 
@@ -941,6 +960,7 @@ Terminal processing includes software policy as well as a hardware path; a [line
 | `static_assert` / runtime assertion | A compile-time check versus a condition checked during execution. Runtime assertions may be disabled by build configuration. |
 | `NDEBUG` | A conventional preprocessor macro disabling standard `assert` checks; this project also uses it to disable some debug-only invariants. |
 | Name mangling / vtable | Name mangling encodes language-level names into linker symbols. A virtual-function table supports dynamic dispatch; both are governed by the relevant C++ ABI. |
+| FFI — Foreign Function Interface | A mechanism for calling code across language/runtime conventions within a compatible execution environment. It is distinct from a protocol for calls across process boundaries. |
 | C++ exception / unwinding | Language-level error propagation that transfers control to a handler and may destroy stack objects along the way. It is distinct from a CPU exception such as a page fault. |
 | GC — Garbage Collection | Automatic reclamation of objects no longer live, using techniques such as tracing or reference counting. It does not by itself define deterministic cleanup of kernel resources. |
 | JSON — JavaScript Object Notation | A text format for structured data using objects, arrays, strings, numbers, booleans, and null. Used or proposed for tool results and interface metadata. |
