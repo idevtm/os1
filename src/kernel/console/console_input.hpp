@@ -20,7 +20,10 @@ void console_input_on_keyboard_char(char ascii);
 void console_input_poll_serial();
 // Return true when a complete line is available for readers.
 bool console_input_has_line();
-// Pop the oldest complete line into `buffer`.
-bool console_input_pop_line(char* buffer, size_t buffer_size, size_t& line_length);
 // Return the wait queue used by blocking console-read syscalls.
 WaitQueue& console_input_read_wait_queue();
+
+// Reserve a bounded prefix; copying to userspace happens with no input lock held.
+// A successful reservation must be finished exactly once, committing only delivered bytes.
+bool console_input_reserve(char* buffer, size_t capacity, size_t& count);
+void console_input_finish(size_t delivered);

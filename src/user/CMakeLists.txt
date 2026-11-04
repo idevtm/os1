@@ -47,6 +47,10 @@ function(os1_add_user_cxx_program program_name source_file output_var)
     DEPENDS
       ${USER_COMMON_CXX_SOURCES}
       "${source_file}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/syscall.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/syscall.hpp"
+      "${PROJECT_SOURCE_DIR}/src/uapi/os1/resource.h"
+      "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
       "${USER_LINKER_SCRIPT}"
     VERBATIM
   )
@@ -65,10 +69,16 @@ os1_add_user_cxx_program(smpcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/smpcheck
 os1_add_user_cxx_program(acpiprobe "${CMAKE_CURRENT_SOURCE_DIR}/programs/acpiprobe.cpp" OS1_USER_ACPIPROBE_ELF)
 os1_add_user_cxx_program(ascii "${CMAKE_CURRENT_SOURCE_DIR}/programs/ascii.cpp" OS1_USER_ASCII_ELF)
 
+os1_add_user_cxx_program(fdcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/fdcheck.cpp" OS1_USER_FDCHECK_ELF)
+
+os1_add_user_cxx_program(fdexec "${CMAKE_CURRENT_SOURCE_DIR}/programs/fdexec.cpp" OS1_USER_FDEXEC_ELF)
+
 add_custom_command(
   OUTPUT "${OS1_INITRD_CPIO}"
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${USER_STAGE_DIR}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_STAGE_DIR}/bin"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_FDCHECK_ELF}" "${USER_STAGE_DIR}/bin/fdcheck"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_FDEXEC_ELF}" "${USER_STAGE_DIR}/bin/fdexec"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INIT_ELF}" "${USER_STAGE_DIR}/bin/init"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_SH_ELF}" "${USER_STAGE_DIR}/bin/sh"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_YIELD_ELF}" "${USER_STAGE_DIR}/bin/yield"
@@ -88,6 +98,8 @@ add_custom_command(
     -P
     "${PROJECT_SOURCE_DIR}/cmake/scripts/create_initrd.cmake"
   DEPENDS
+    "${OS1_USER_FDCHECK_ELF}"
+    "${OS1_USER_FDEXEC_ELF}"
     "${OS1_USER_INIT_ELF}"
     "${OS1_USER_SH_ELF}"
     "${OS1_USER_YIELD_ELF}"
@@ -103,6 +115,8 @@ add_custom_command(
 )
 
 add_custom_target(user_programs DEPENDS
+  "${OS1_USER_FDEXEC_ELF}"
+  "${OS1_USER_FDCHECK_ELF}"
   "${OS1_USER_INIT_ELF}"
   "${OS1_USER_SH_ELF}"
   "${OS1_USER_YIELD_ELF}"

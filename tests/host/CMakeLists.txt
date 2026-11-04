@@ -83,6 +83,13 @@ target_compile_options(os1_acpica PRIVATE -O2 -w)
 add_library(os1_host_support
   support/cpu_stubs.cpp
   support/console_input_stub.cpp
+  "${OS1_REPO_ROOT}/src/kernel/console/console_input.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/resource/descriptor.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/resource.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/console_read.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/process.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/proc/user_program.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/fs/initrd.cpp"
   support/debug_stub.cpp
   support/kernel_state_stub.cpp
   support/lapic_stub.cpp
@@ -175,6 +182,7 @@ add_executable(os1_host_tests
   mm/virtual_memory_tests.cpp
   proc/task_registry_tests.cpp
   proc/user_elf_tests.cpp
+  syscall/resource_tests.cpp
   syscall/observe_abi_tests.cpp
 )
 target_link_libraries(os1_host_tests PRIVATE os1_host_support os1_acpica GTest::gtest_main)

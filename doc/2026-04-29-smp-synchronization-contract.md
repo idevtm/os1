@@ -1,6 +1,6 @@
 # SMP Synchronization Contract - 2026-04-29
 
-Created: 2026-04-29. Updated against source: 2026-11-03 (`63e328d`).
+Created: 2026-04-29. Updated against source: 2026-11-04 (console descriptor milestone).
 
 ## Current State
 
@@ -62,6 +62,8 @@ order without updating this document first.
 2. Physical memory allocator: `page_frames` lock.
 3. Virtual memory/address-space ownership locks.
 4. Process table lock.
+   Process descriptor-table locks follow this tier; do not nest two descriptor
+   tables. Snapshot and pin parent grants before installing into a private child.
 5. Thread table and scheduler/run-queue locks.
 6. Wait/IPC/event queues.
 7. Console input queue lock.
@@ -83,6 +85,29 @@ Rules:
 - Locks protect data ownership; they do not replace lifetime rules. Process,
   thread, page-table, and device lifetimes still need explicit ownership transitions.
 
+## Console Descriptor Lifetime
+
+Descriptor lookup checks rights and pins an open instance under the process's
+descriptor lock. Allocation, final reference release, provider calls, and user
+copies happen after unlocking. Close removes one entry; it cannot retarget a
+previously accepted operation. Open instances retain native objects with atomic
+references. No object-to-descriptor ownership cycle is introduced.
+
+A blocked console request owns its instance reference. The console wait lock
+serializes registration, detachment, and cancellation. A detached completion
+pins its thread with `io_pins` until its last access, preventing the BSP reaper
+from releasing the thread or its address space. The waker defers while the
+thread remains current on any CPU. `restore_thread` leaves the outgoing stack
+and CR3 before publishing the next current-thread pointer. This is required
+both for frame ownership and deferred reclamation. This milestone permits one
+user thread per process and has no public unmap or external-kill operation.
+
+Input reservation copies a prefix to kernel storage under the input lock. User
+copy runs unlocked; successful delivery alone commits consumption. A producer
+may append other lines while a reservation exists. Registration rechecks input
+under the wait lock; BSP timer/IRQ service retries ready input, including a waiter
+that had not yet switched away. No scheduler lock is taken under the wait lock.
+
 ## Publication And Reclamation Follow-Ups
 
 The original migration to scheduled AP execution landed in May; it is recorded
@@ -90,9 +115,8 @@ in the [phased SMP plan](2026-05-05-phased-smp-enablement.md) and
 [May review](2026-05-05-review-2.md). The remaining work is correctness under
 that live runtime:
 
-1. Complete a child's entry frame and ownership state before enqueueing it or
-   sending a reschedule IPI. `load_user_program` currently rewrites the frame
-   after ready-thread creation; see
+1. Child descriptor grants and the complete entry frame now precede enqueueing
+   and the reschedule IPI. The post-publication rewrite has been removed; see
    [R1](2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication).
 2. Define address-space reclamation and invalidation completion before adding
    shared address spaces, COW, or public mapping operations. The existing

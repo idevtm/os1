@@ -129,3 +129,19 @@ TEST(VirtualMemory, ClonesKernelAndDirectMapSlots)
     EXPECT_TRUE(target.translate(phys_to_virt(0x700000), physical, flags));
     EXPECT_EQ(0x700000ull, physical);
 }
+
+TEST(VirtualMemory, FailedMappingReturnsUnlinkedDataFrame)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = make_frames(arena);
+    // Leave exactly one frame: data allocation succeeds, page-table allocation fails.
+    std::array<uint64_t, kArenaBytes / kPageSize> held{};
+    size_t count = 0;
+    while(frames.free_page_count() > 1)
+        ASSERT_TRUE(frames.allocate(held[count++]));
+    VirtualMemory vm(frames);
+    ASSERT_EQ(1u, frames.free_page_count());
+    EXPECT_FALSE(vm.allocate_and_map(kUserImageBase, 1, PageFlags::User | PageFlags::Write));
+    EXPECT_EQ(1u, frames.free_page_count());
+    while(count) EXPECT_TRUE(frames.free(held[--count]));
+}

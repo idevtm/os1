@@ -171,7 +171,8 @@ Current kernel folders:
 | [../src/kernel/platform/](../src/kernel/platform) | ACPI/PCI machine discovery, normalized platform state, CPU/APIC topology publication, IRQ routing records, PCI config/capability helpers, MSI/MSI-X programming, and device-probe sequencing. | `platform.hpp`, `types.hpp`, `state.hpp`, `init.cpp`, `acpi.hpp`, `pci.hpp`, `pci_config.hpp`, `pci_capability.hpp`, `pci_msi.hpp`, `irq_registry.hpp`, `irq_routing.hpp`, `device_probe.hpp` |
 | [../src/kernel/storage/](../src/kernel/storage) | Generic request-shaped block abstractions above concrete block drivers. | `block_device.hpp`, `README.md` |
 | [../src/kernel/fs/](../src/kernel/fs) | Concrete filesystem/archive parsers. Today this is the boot initrd CPIO parser, not a general namespace. | `initrd.*` |
-| [../src/kernel/vfs/](../src/kernel/vfs) | Future filesystem namespace layer: mount table, path lookup, file descriptors, and filesystem-backed `exec`. | `README.md` |
+| [../src/kernel/resource/](../src/kernel/resource) | Process descriptors, open instances, and native console providers. | `descriptor.hpp` |
+| [../src/kernel/vfs/](../src/kernel/vfs) | Future filesystem namespace layer: mount table, path lookup, and filesystem-backed `exec`. | `README.md` |
 | [../src/kernel/security/](../src/kernel/security) | Future credentials, permissions, and resource-boundary policy. | `README.md` |
 | [../src/kernel/debug/](../src/kernel/debug) | Serial debug logger and fixed-capacity structured event ring. | `debug.*`, `event_ring.*` |
 | [../src/kernel/util/](../src/kernel/util) | Small generic helpers with no subsystem ownership. | `assert.hpp`, `align.hpp`, `ctype.hpp`, `fixed_string.hpp`, `memory.h`, `string.*` |
@@ -786,7 +787,7 @@ Supported operations include:
 - cloning the required supervisor mappings into a process address space
 - destroying the user slot during process teardown
 
-Mapping failure is not fully transactional: `allocate_and_map()` can leak a newly allocated data frame if a required page-table allocation fails before linking it. This failure path and the required rollback check remain open in [review R5](2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame).
+`allocate_and_map()` now frees a data frame when page-table allocation fails before linking it; a forced-exhaustion regression covers the leak from [review R5](2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame). Earlier successfully linked pages remain owned by the address space and are reclaimed by failed-image teardown.
 
 ## CPU, Interrupt, And Trap Architecture
 
@@ -841,8 +842,9 @@ Current syscalls:
 - `exit`
 - `yield`
 - `getpid`
+- `resource` (close, duplicate/replace, query, descriptor/status flags)
 
-This ABI is still intentionally small. It now covers console I/O, observability, and initrd-backed process control, but it is not yet a general POSIX-like descriptor model.
+Console I/O now uses process-owned descriptors, shared open instances, and native object providers. The [console descriptor ABI](console-descriptor-abi.md) specifies the 64-slot table, rights, flags, errors, and bounded I/O. VFS-backed resources and the native startup ABI remain future work.
 
 ### Observability ABI
 
@@ -886,7 +888,7 @@ Scheduling is intentionally simple in policy but no longer single-CPU in shape: 
 
 There is still no priority or nice model, no user-visible affinity control, and no AP-targeted device IRQ steering yet.
 
-The ordinary spawn path has a publication race: `load_user_program()` can enqueue a new user thread and send an AP reschedule IPI before it clears and rebuilds that thread's entry frame. The AP can already be consuming that state. Initialization-before-publication must be restored; [review R1](2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication) records the source evidence. Its relationship to the observed intermittent BIOS child-launch fault is unproven.
+Child image, standard-stream grants, and entry frame now precede scheduler publication; spawn captures the PID before making the child runnable. The post-publication frame rewrite identified in [review R1](2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication) is removed. Context switching leaves the outgoing stack and CR3 before publishing the next current thread. The [implementation record](2026-11-04-console-descriptor-implementation-plan.md) distinguishes regression coverage from the earlier unexplained BIOS failure.
 
 ### User Address Spaces
 
@@ -915,6 +917,7 @@ Current user programs:
 - `/bin/balancecheck` — user-visible run-queue balance verifier built from [`src/user/programs/balancecheck.cpp`](../src/user/programs/balancecheck.cpp)
 - `/bin/smpcheck` — observe-driven SMP state verifier built from [`src/user/programs/smpcheck.cpp`](../src/user/programs/smpcheck.cpp)
 - `/bin/fault` — deliberate page-fault probe built from [`src/user/programs/fault.cpp`](../src/user/programs/fault.cpp)
+- `/bin/fdcheck` and `/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
 - `/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
 - `/bin/acpiprobe` — ACPICA observe probe built from [`src/user/programs/acpiprobe.cpp`](../src/user/programs/acpiprobe.cpp)
 - `/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify 8x16 font rendering on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
@@ -985,7 +988,7 @@ The test ladder is now:
 
 The host unit tests live under `tests/host/` as a separate CMake project. They intentionally do not include the root `CMakeLists.txt`, because the root project is a freestanding `x86_64-elf` build and should continue to reject a hosted compiler.
 
-The current SMP synchronization contract is documented in [SMP Synchronization Contract - 2026-04-29](2026-04-29-smp-synchronization-contract.md). The live runtime uses locks for per-CPU run queues, wait queues, console input, process/thread registries, and the named public page-frame allocator lock. Lock-tier annotations do not enforce lock order. Child publication, TLB lifetime completion, and concurrent AML boundaries need attention before broader resource concurrency; AP-targeted device IRQ steering remains later work.
+The current SMP synchronization contract is documented in [SMP Synchronization Contract - 2026-04-29](2026-04-29-smp-synchronization-contract.md). The live runtime uses locks for per-CPU run queues, wait queues, console input, process/thread registries, and the named public page-frame allocator lock. Lock-tier annotations do not enforce lock order. Child publication now has a deterministic regression; TLB lifetime completion and concurrent AML boundaries still need attention before broader resource concurrency; AP-targeted device IRQ steering remains later work.
 
 ### Local Targets
 
@@ -1130,21 +1133,21 @@ This branch runs build/test commands directly. The unified verification entrypoi
 
 ## Current Constraints And Next Step
 
-The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](2026-11-03-review.md#7-recommended-next-milestones) orders the immediate follow-ups: child publication, passive ACPI observation, IST allocation failure, mapping rollback, smoke-runner settling, and qualification of the exact current kernel on the preserved G74SX image. Passing QEMU tests alone do not qualify physical media or close the unresolved BIOS launch fault.
+The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](2026-11-03-review.md#7-recommended-next-milestones) identified publication and mapping leaks now addressed by the console milestone. Passive ACPI observation, IST allocation failure, smoke-runner settling, and qualification of the exact current kernel on the preserved G74SX image remain follow-ups. Passing QEMU tests alone do not qualify physical media or close the unresolved BIOS launch fault.
 
 Major constraints that remain:
 
 - the broad final-kernel identity map is gone, but boot still retains narrow low bootstrap identity exceptions for the live handoff stack and AP startup state until early stack handoff and AP startup are redesigned
 - the framebuffer path is a text presenter, not a graphics stack
 - userland is still initrd-backed and single-user rather than filesystem-backed and multiuser
-- there is no per-process file-descriptor or handle table; `spawn` and `exec` accept only a path, with no `argv`/`envp` and no errno discipline
+- console descriptors, rights, duplication, close, flags, and bounded errors are implemented; `spawn` and `exec` still accept only a path, without `argv`/`envp`, arbitrary child maps, or VFS executable authority
 - block I/O is request-shaped, interrupt-completed, and supports bounded multi-sector requests up to `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request) through a single contiguous data descriptor; the synchronous wrappers chunk by `BlockDevice::max_sectors_per_request`; Flush is rejected, so successful write completion is not a durability contract; there is still no block scheduler, request merging, filesystem-facing buffer cache, or per-page user-buffer scatter-gather (which awaits user-DMA pinning)
 - PCI INTx fallback now resolves through ACPICA `_PRT` data when firmware
   provides it, with firmware-populated `interrupt_line` retained as the
   secondary fallback
 - DMA is coherent direct-map only; there is no low-address allocator, pinned
   user-buffer mapping, cacheability policy, or IOMMU
-- the kernel small-object allocator at [src/kernel/mm/kmem.cpp](../src/kernel/mm/kmem.cpp) is active infrastructure (builtin caches at 16/32/64/128/256/512/1024 bytes, named caches via `kmem_cache_create`, large-allocation page-run path, debug-build poisoning + redzones + leak dump, `OS1_OBSERVE_KMEM` snapshot kind, `kmem` shell built-in, smoke marker `kmem complete`). Current consumers include the process/thread registries, ARP cache, device-binding registry, PCI BAR claim registry, DMA allocation registry, and IRQ route registry. The next allocator growth is VFS/file/network resource lifetime, not first-use validation
+- the kernel small-object allocator at [src/kernel/mm/kmem.cpp](../src/kernel/mm/kmem.cpp) is active infrastructure (builtin caches at 16/32/64/128/256/512/1024 bytes, named caches via `kmem_cache_create`, large-allocation page-run path, debug-build poisoning + redzones + leak dump, `OS1_OBSERVE_KMEM` snapshot kind, `kmem` shell built-in, smoke marker `kmem complete`). Current consumers include the process/thread registries, descriptor/open-instance storage, ARP cache, device-binding registry, PCI BAR claim registry, DMA allocation registry, and IRQ route registry. The next allocator growth is VFS/file/network resource lifetime, not first-use validation
 - hot-remove exists as a driver/resource lifecycle path, but there are no PCIe
   or ACPI hotplug event sources yet
 - APs come up through ACPI-derived bring-up, install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, and participate in per-CPU scheduling; device IRQ steering is still BSP-first
@@ -1152,11 +1155,11 @@ Major constraints that remain:
 - xHCI brings up HID boot keyboards but does not yet handle USB hubs, mice past recognition, or USB mass storage
 - NVMe and AHCI are still follow-on work
 
-The next feature milestone is to encode and implement the approved minimum process-resource semantics, followed by console descriptors, bounded argument/environment handoff, and a read-only initrd VFS. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
+The next feature milestone extends the implemented console descriptors to a read-only initrd VFS and bounded argument/environment handoff. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
 
-- implement the approved descriptor/handle identity, ownership, rights, close/dup, waiting, error, and spawn/exec semantics after specifying their concrete UAPI encoding and synchronization details; the broader reflective object model remains a proposal (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md) and drafts under [os-api-draft/](os-api-draft/))
+- extend the exercised console descriptor contract to directory/file interfaces, explicit child maps, startup records, and executable-reference launch; the broader reflective object model remains a proposal (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md) and drafts under [os-api-draft/](os-api-draft/))
 - add `argv`/`envp` handoff in the initrd-backed loader so the shell can pass arguments and a real `init` can evolve apart from `/bin/sh`
-- use the existing small-object allocator for VFS inode/dentry state, descriptor tables, packet buffers, and other resource-lifetime records as those subsystems land
+- use the existing small-object allocator for VFS inode/dentry state, packet buffers, and other resource-lifetime records as those subsystems land
 - per-page user-buffer scatter-gather and DMA pinning, once the user-process side of the storage path needs them; bounded multi-sector requests already work today through a single contiguous data descriptor
 - an initrd-backed read-only VFS and VFS-backed `exec`, then additional filesystems once their block and persistence contracts are defined
 - a small multiuser/permissions foundation (uid/gid, file ownership, credentials field on `Process`) so Milestone F can meaningfully run SSH

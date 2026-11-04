@@ -275,6 +275,9 @@ bool VirtualMemory::allocate_and_map(uint64_t virtual_address,
         if(!map_physical(
                virtual_address + i * kPageSize, physical_page, 1, flags | PageFlags::Present))
         {
+            // This data frame never became owned by the page tables. Earlier
+            // mappings remain owned by the address space and its teardown.
+            frames_.free(physical_page);
             return false;
         }
     }

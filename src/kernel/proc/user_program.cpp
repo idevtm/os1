@@ -182,13 +182,19 @@ Thread* load_user_program(PageFrameContainer& frames,
     }
     process->parent = parent;
 
+    const long grants = parent ? descriptor_inherit_standard(parent->descriptors, process->descriptors)
+                               : descriptor_bootstrap_console(process->descriptors);
+    if(grants < 0)
+    {
+        reap_process(process, frames);
+        return nullptr;
+    }
+    // create_user_thread initializes the complete entry frame before publication.
     Thread* thread = create_user_thread(process, entry, user_rsp, frames, start_ready);
     if(nullptr == thread)
     {
         reap_process(process, frames);
         return nullptr;
     }
-    prepare_user_thread_entry(thread, entry, user_rsp);
-
     return thread;
 }

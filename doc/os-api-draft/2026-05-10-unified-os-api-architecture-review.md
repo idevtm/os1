@@ -1,7 +1,7 @@
 # Unified OS API Architecture Review — 2026-05-10
 
-**Refreshed: 2026-11-04. Status: review with approved first-slice semantic
-decisions; no implemented or frozen binary ABI.**
+**Refreshed: 2026-11-04. Status: approved first-slice semantics, with a console
+implementation follow-up below; no frozen binary ABI.**
 
 The original filename and review date are retained for existing links. This
 refresh supersedes the May recommendations below; the original text remains in
@@ -42,7 +42,17 @@ implementation evidence remain explicit gates. The next step is to encode and
 implement the bounded first contract, with the runtime prerequisites below;
 the entire catalog and service/security completeness remain later work.
 
-## Current implementation and evidence limits
+## Implementation follow-up — 2026-11-04
+
+The [console descriptor milestone](../console-descriptor-abi.md) now implements
+resource entries, shared instances, rights, flags, close/dup/query, bounded I/O,
+wait retention, and exec cleanup. It fixes the R1 frame rewrite and R5 unlinked
+allocation leak, and captures spawn results before publication. The
+[dated implementation record](../2026-11-04-console-descriptor-implementation-plan.md)
+contains regression evidence and limitations. VFS/startup and hosted-service
+gates below remain open; ungated ACPI power transitions remain separate work.
+
+## Review baseline and evidence limits
 
 | Source evidence | Current behavior and implication |
 | --- | --- |
@@ -414,15 +424,15 @@ interfaces, and namespace/I/O behavior. The
 [canonical approval record](native_object_kernel_contract.md#approved-decisions--2026-11-04)
 defines that scope. These no longer await a choice of architectural direction.
 
-The remaining first-slice work is concrete UAPI/startup encoding, limits, lock
-placement/order, reference-counter mechanics, implementation, and acceptance
-tests. Approval does not close existing runtime defects or establish tested
+The console subset now has concrete UAPI encoding, limits, lock placement,
+reference mechanics, and regression evidence linked above. The remaining
+first-slice work is VFS/startup encoding and its implementation/acceptance tests. Approval does not close existing runtime defects or establish tested
 conformance. Later service, shared-activation, and event boundaries below still
 need their own implementation contracts:
 
-1. **First UAPI:** numeric operation/error/right assignments; record sizes,
-   alignment, reserved fields; descriptor and transfer limits; exact duplicate
-   replacement semantics; maximum directory record and short-buffer reporting.
+1. **VFS UAPI:** extend the console encoding with lookup, enumeration, seek,
+   maximum directory records, and short-buffer reporting. Console operation/error/
+   right numbers, duplicate replacement, and descriptor/transfer limits are implemented.
 2. **First process-start ABI:** entry registers/stack, argv/envp and bootstrap
    record layout/aggregate budgets, legacy call migration, and executable policy
    for this single-identity initrd. Loader and user startup must change together.

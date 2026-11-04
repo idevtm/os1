@@ -40,6 +40,7 @@ enum class ThreadWaitReason : uint32_t
 
 struct ConsoleReadWaitState
 {
+    OpenInstance* instance = nullptr;
     uint64_t user_buffer = 0;
     uint64_t length = 0;
 };
@@ -84,6 +85,8 @@ struct Thread
     ThreadWaitState wait{};
     Thread* registry_next = nullptr;
     Thread* wait_link = nullptr;
+    volatile uint32_t io_pins = 0;
+    bool console_cancelled = false;
     cpu* scheduler_cpu = nullptr;
     cpu* run_queue_cpu = nullptr;
     uint64_t affinity_mask = ~0ull;
@@ -130,8 +133,6 @@ void relink_runnable_threads();
 void set_current_thread(Thread* thread);
 // Mark a thread ready and update its owning process state if needed.
 void mark_thread_ready(Thread* thread, cpu* target = nullptr);
-// Block the current thread until console input can complete a read.
-void block_current_thread_on_console_read(uint64_t user_buffer, uint64_t length);
 // Block the current thread until a block-I/O completion flag is signaled.
 void block_current_thread_on_block_io(Completion* completion);
 // clear a thread's wait metadata after the wait has completed.

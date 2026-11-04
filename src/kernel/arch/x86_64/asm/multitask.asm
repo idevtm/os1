@@ -35,11 +35,16 @@ kernel_thread_start:
 ; Install the selected thread into per-CPU state, load its CR3/RSP0, and resume
 ; from the embedded TrapFrame.
 restore_thread:
-	mov [gs:CPU_CURRENT_THREAD], rdi
+	; Leave the outgoing stack AND address space before publishing that it is
+	; no longer current. The BSP may then complete its read or reap it. Use the
+	; permanent per-CPU stack for restore scratch, never the outgoing stack.
+	mov rsp, [gs:CPU_SELF]
+	add rsp, CPU_STACK_TOP
 	mov rax, [rdi + THREAD_KERNEL_STACK_TOP]
 	mov [gs:CPU_TSS_RSP0], rax
 	mov rax, [rdi + THREAD_ADDRESS_SPACE_CR3]
 	mov cr3, rax
+	mov [gs:CPU_CURRENT_THREAD], rdi
 	lea rdi, [rdi + THREAD_FRAME]
 	jmp restore_frame_ptr
 

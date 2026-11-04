@@ -11,9 +11,16 @@ volatile uint32_t g_lapic_registers[1024]{};
 }
 
 volatile uint32_t* lapic = g_lapic_registers;
+struct cpu;
+static void (*reschedule_callback)(const cpu*) = nullptr;
+void lapic_stub_on_reschedule(void (*callback)(const cpu*)) { reschedule_callback = callback; }
+void host_reschedule_delivered(const cpu* target) {
+    if(reschedule_callback) reschedule_callback(target);
+}
 
 void lapic_stub_reset()
 {
+    reschedule_callback = nullptr;
     for(size_t index = 0; index < (sizeof(g_lapic_registers) / sizeof(g_lapic_registers[0])); ++index)
     {
         g_lapic_registers[index] = 0;

@@ -1,7 +1,8 @@
 # OS API Drafts
 
 Revised 2026-11-04. These documents contain approved first-slice semantic
-decisions and later design proposals, **not implemented contracts or a frozen
+decisions and later design proposals. The [console descriptor subset](../console-descriptor-abi.md)
+is implemented; the full proposals are **not implemented contracts or a frozen
 binary ABI**. The selected first implementation
 is descriptors, console, and a read-only initrd VFS; hosted services follow.
 

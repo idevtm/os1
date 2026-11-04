@@ -2,6 +2,7 @@
 // kernel stacks, saved TrapFrame initialization, wait-state transitions, and
 // CPU-local current-thread publication.
 #include "proc/thread.hpp"
+#include "syscall/console_read.hpp"
 
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
@@ -674,17 +675,6 @@ static bool block_current_thread(ThreadWaitState wait, WaitQueue* queue = nullpt
     return true;
 }
 
-void block_current_thread_on_console_read(uint64_t user_buffer, uint64_t length)
-{
-    ThreadWaitState wait{};
-    wait.reason = ThreadWaitReason::ConsoleRead;
-    wait.console_read = ConsoleReadWaitState{
-        .user_buffer = user_buffer,
-        .length = length,
-    };
-    (void)block_current_thread(wait, &console_input_read_wait_queue());
-}
-
 void block_current_thread_on_block_io(Completion* completion)
 {
     if(nullptr == completion)
@@ -760,7 +750,9 @@ void mark_current_thread_dying(int exit_status)
     }
 
     thread->exit_status = exit_status;
+    cancel_console_read(thread);
     clear_thread_wait(thread);
+    if(thread->process) descriptor_close_all(thread->process->descriptors);
     if(thread->process)
     {
         IrqSpinGuard guard(g_process_table_lock);

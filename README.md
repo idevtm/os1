@@ -17,9 +17,11 @@ The [2026-11-03 review](doc/2026-11-03-review.md) records the validation and its
 limits, including an unresolved intermittent BIOS child-launch fault and
 source-confirmed lifecycle and allocation defects. ACPI observation currently
 attempts device power transitions; `/bin/acpiprobe` is not a passive inventory
-command. Descriptors, argv/envp, VFS, credentials, and a general network stack
-remain future work; the Native API documents record approved first-slice
-semantics and later proposals, with binary ABI details still to specify.
+command. The [console descriptor milestone](doc/console-descriptor-abi.md) now provides real
+process entries, rights, duplication, close, flags, and retained I/O references.
+The [dated implementation plan](doc/2026-11-04-console-descriptor-implementation-plan.md)
+records validation. Bounded argv/envp, initrd VFS, credentials, and a general
+network stack remain future work.
 
 ## Prerequisites
 

@@ -13,6 +13,7 @@
 #include "syscall/console_read.hpp"
 #include "syscall/observe.hpp"
 #include "syscall/process.hpp"
+#include "syscall/resource.hpp"
 #include "syscall/wait.hpp"
 
 Thread* handle_syscall(TrapFrame* frame)
@@ -26,11 +27,11 @@ Thread* handle_syscall(TrapFrame* frame)
     switch(frame->rax)
     {
         case os1_sys_write:
+            if(frame->rdi >= OS1_DESCRIPTOR_LIMIT) { frame->rax = OS1_ERR_BAD_DESCRIPTOR; return thread; }
             frame->rax = (uint64_t)sys_write(
                 ProcessSyscallContext{
                     .frames = &page_frames,
                     .kernel_root_cr3 = g_kernel_root_cr3,
-                    .write_console_bytes = write_console_bytes,
                     .write_cr3 = write_cr3,
                 },
                 (int)frame->rdi,
@@ -38,22 +39,17 @@ Thread* handle_syscall(TrapFrame* frame)
                 (size_t)frame->rdx);
             return thread;
         case os1_sys_read: {
-            long read_result = -1;
-            if((int)frame->rdi != 0)
-            {
-                frame->rax = (uint64_t)-1;
+            long read_result = OS1_ERR_INVALID;
+            if(read_or_block(page_frames, thread, frame->rdi, frame->rsi, frame->rdx, read_result)) {
+                frame->rax = static_cast<uint64_t>(read_result);
                 return thread;
             }
-            if(try_complete_console_read(
-                   page_frames, thread, frame->rsi, (size_t)frame->rdx, read_result))
-            {
-                frame->rax = (uint64_t)read_result;
-                return thread;
-            }
-
-            block_current_thread_on_console_read(frame->rsi, frame->rdx);
             return schedule_next(false);
         }
+        case os1_sys_resource:
+            frame->rax = static_cast<uint64_t>(sys_resource(page_frames, thread,
+                frame->rdi, frame->rsi, frame->rdx));
+            return thread;
         case os1_sys_exit:
             mark_current_thread_dying((int)frame->rdi);
             return schedule_next(false);
@@ -79,7 +75,6 @@ Thread* handle_syscall(TrapFrame* frame)
                 ProcessSyscallContext{
                     .frames = &page_frames,
                     .kernel_root_cr3 = g_kernel_root_cr3,
-                    .write_console_bytes = write_console_bytes,
                     .write_cr3 = write_cr3,
                 },
                 frame->rdi));
@@ -100,7 +95,6 @@ Thread* handle_syscall(TrapFrame* frame)
                 ProcessSyscallContext{
                     .frames = &page_frames,
                     .kernel_root_cr3 = g_kernel_root_cr3,
-                    .write_console_bytes = write_console_bytes,
                     .write_cr3 = write_cr3,
                 },
                 frame->rdi));

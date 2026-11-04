@@ -134,6 +134,11 @@ bool ipi_send_reschedule(const cpu* target)
                          g_reschedule_vector,
                          0);
     const bool sent = ipi_send(target->id, g_reschedule_vector);
+#if defined(OS1_HOST_TEST)
+    // Hardware-boundary seam: host tests may model an AP consuming publication.
+    extern void host_reschedule_delivered(const cpu*);
+    if(sent) host_reschedule_delivered(target);
+#endif
     if(!sent)
     {
         kernel_event::record(OS1_KERNEL_EVENT_IPI_RESCHED,

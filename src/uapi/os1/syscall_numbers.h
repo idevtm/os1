@@ -21,4 +21,5 @@ enum
     os1_sys_spawn = 7,
     os1_sys_waitpid = 8,
     os1_sys_exec = 9,
+    os1_sys_resource = 10,
 };

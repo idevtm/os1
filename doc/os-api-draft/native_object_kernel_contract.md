@@ -1,7 +1,8 @@
 # Native Object Kernel Contract
 
 Status: first-slice semantic decisions approved, 2026-11-04; later service and
-reflection contracts remain proposals. **Not an implemented or frozen binary ABI.**
+reflection contracts remain proposals. The [console milestone](../console-descriptor-abi.md)
+is implemented; the complete contract is **not implemented or a frozen binary ABI**.
 
 The agreed implementation order is descriptors, console, and a read-only initrd
 VFS first; hosted services follow. This document owns the shared semantics.
@@ -30,9 +31,9 @@ Their numbers identify the approval groups, not the sections of this document.
 | 5. Initial interfaces | Descriptor lifecycle/flags/atomic replacement, byte I/O, seekable input, directory open/enumerate, and bounded basic information. Fixed records and common authorization/dispatch; each object implements only supported interfaces. Internal C++ inheritance/function tables are not the userspace ABI. |
 | 6. Namespace and I/O | Explicit directory capabilities, separate lookup/enumeration rights, immutable initrd, bounded byte paths, no links or parent traversal initially; independent opens have independent cursors, duplicates share them; cursor advancement follows successful delivery including partial progress. |
 
-Numeric assignments, record layouts, finite limits, startup encoding, exact
-lock placement/order, and reference-counter mechanics remain implementation
-specification work. The approved semantics must be preserved while resolving
+Console numeric assignments, records, limits, lock placement, and reference
+mechanics are specified in the [implemented console ABI](../console-descriptor-abi.md).
+VFS and startup encodings remain implementation specification work. The approved semantics must be preserved while resolving
 those details. Approval neither implements these facilities nor approves every
 later hosted-service, reflection, or event proposal. Acceptance tests remain
 required before claiming runtime conformance.

@@ -93,6 +93,8 @@ set(KERNEL_PLATFORM_SOURCES
 )
 
 set(KERNEL_PROC_SOURCES
+  resource/descriptor.cpp
+  syscall/resource.cpp
   proc/process.cpp
   proc/reaper.cpp
   proc/thread.cpp

@@ -5,6 +5,7 @@
 #include "handoff/memory_layout.h"
 #include "proc/thread.hpp"
 #include "syscall/wait.hpp"
+#include "syscall/console_read.hpp"
 
 namespace
 {
@@ -17,7 +18,7 @@ bool thread_is_current_on_any_cpu(const Thread* thread)
 
     for(cpu* owner = g_cpu_boot; nullptr != owner; owner = owner->next)
     {
-        if(owner->current_thread == thread)
+        if(__atomic_load_n(&owner->current_thread, __ATOMIC_ACQUIRE) == thread)
         {
             return true;
         }
@@ -36,7 +37,8 @@ void reap_dead_threads(PageFrameContainer& frames)
             for(Thread* candidate = first_thread(); nullptr != candidate; candidate = next_thread(candidate))
             {
                 if((ThreadState::Dying == candidate->state) &&
-                   !thread_is_current_on_any_cpu(candidate))
+                   !thread_is_current_on_any_cpu(candidate) &&
+                   atomic_load_acquire(&candidate->io_pins) == 0)
                 {
                     thread = candidate;
                     break;
@@ -48,6 +50,9 @@ void reap_dead_threads(PageFrameContainer& frames)
         {
             break;
         }
+
+        cancel_console_read(thread);
+        if(atomic_load_acquire(&thread->io_pins) != 0) continue;
 
         // Thread teardown is deferred until some *other* thread enters the kernel.
         // That keeps us from freeing the current kernel stack out from under the CPU
@@ -62,6 +67,7 @@ void reap_dead_threads(PageFrameContainer& frames)
 
         if(owner && !process_has_threads(owner))
         {
+            descriptor_close_all(owner->descriptors);
             if(ProcessState::Zombie == owner->state)
             {
                 wake_child_waiters(frames, owner->parent);
