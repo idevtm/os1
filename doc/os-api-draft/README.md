@@ -24,6 +24,9 @@ is descriptors, console, and a read-only initrd VFS; hosted services follow.
 6. [C++ bindings and object construction](cpp-bindings-and-object-creation.md)
    gives short examples, dynamic discovery, binary-to-binding tooling, and
    construction hooks that can return new or existing objects.
+7. [IPC transport design](ipc-transport-design.md) records the approved sync/async
+   request/reply direction, retained Operations, properties/events, and staged
+   implementation through later shared buffers and optional rings.
 
 The kernel contract takes precedence for shared semantics; profiles own their
 specific rules. Preserve that distinction when changing a draft. The
@@ -41,14 +44,18 @@ specific rules. Preserve that distinction when changing a draft. The
   shortcut when loading an already-authorized executable.
 - Later services with READY handshakes, separate supervision, persistent
   completion state, and honest timeout/crash outcomes.
+- One copied IPC protocol for synchronous and asynchronous calls; property
+  operations and bounded queued events; shared bulk buffers after capability
+  attachments, with shared-memory rings deferred until measurements justify them.
 - Class-controlled construction with optional typed arguments: the ordinary
   caller has no fresh/shared policy switch; the implementation selects the object.
 
 The six [first-slice decision groups](native_object_kernel_contract.md#approved-decisions--2026-11-04)
 were approved on 2026-11-04: descriptor ABI, ownership/synchronization, blocking
 and teardown, process startup, initial interfaces, and namespace/I/O behavior.
-Later service and reflection work remains proposed. Numeric UAPI
-assignments, layouts, resource budgets, and the startup record are now specified
+The IPC design direction and implementation sequence are also approved on
+2026-11-04; implementation, concrete wire encodings, and reflection remain future
+work. Numeric UAPI assignments, layouts, resource budgets, and the startup record are now specified
 in the implemented ABI documents; later-service encodings remain open. The
 [acceptance matrix](2026-05-10-unified-os-api-architecture-review.md#implementation-sequence-and-acceptance)
 separates first-slice requirements from later service/event gates.

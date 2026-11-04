@@ -226,7 +226,8 @@ contracts; it is not implied by the first private service's READY message.
 
 ## 6. Invocation and fixed records
 
-A useful first protocol is a small counter service:
+The first private service is TextProcessor with a bounded text method. A small
+counter is a second protocol to challenge the same dispatch/completion model:
 
 | Illustrative member | Fixed-record meaning |
 | --- | --- |
@@ -240,9 +241,10 @@ prototype can use one outstanding call per connection, a small fixed message
 limit, and no application-level capability transfer. A second real protocol
 should test the abstractions before introducing a general schema interpreter.
 
-The later envelope carries protocol/interface/operation identity, request
-identity, provider/connection generation, payload length, and a separate
-attached-capability list. Payload bytes never turn a numeric fd into authority.
+The copied IPC envelope carries protocol/interface/operation identity, request
+identity, provider/connection generation, payload length, and a separately
+specified later attached-capability extension. Payload bytes never turn a
+numeric fd into authority.
 The kernel validates the envelope and transfers; generated userspace codecs
 validate method records. Capability-transfer ownership, destination reservation,
 and cleanup on every rejected, unread, or discarded message must be specified
@@ -255,6 +257,12 @@ an operation with defined validation and atomicity. Remote `counter.value += 1`
 cannot silently become a getter followed by a setter; use the atomic `add`
 method. Mutable request records in the client's memory are ordinary local
 values and do not imply shared-memory properties in the provider.
+
+The approved [IPC design](ipc-transport-design.md) supplies one protocol for both
+synchronous and asynchronous calls. The synchronous facade performs submit,
+wait, result retrieval, and close; the asynchronous facade returns a retained
+Operation after admission. Provider dispatch is identical. Shared bulk buffers
+are a later transport option, not a different method or completion contract.
 
 ## 7. Completion, errors, and events
 
@@ -284,12 +292,17 @@ loss/overflow reporting, subscription identity, and teardown.
 | Gate | Evidence required before moving on |
 | --- | --- |
 | Descriptor/VFS foundation | The native contract's console, immutable namespace, bounded launch, authority, and teardown acceptance tests pass. |
-| First hosted service | Fixed counter protocol; explicit Supervisor; READY/failure/deadline tests; provider death before and after an effect; no automatic replay; bounded queues and request correlation. |
+| First copied IPC prototype | Fixed TextProcessor protocol, private endpoints, retained Operations, explicit supervisor ownership, READY/failure checks, provider death, bounded admission and reply authority. Untimed prototype only; supervised hang/timeout guarantees await the deadline/cleanup gate. |
+| Subscriptions and deadlines | Bounded progress queues, atomic property watch/snapshot, explicit dispatch, monotonic timed waits, startup hang and owned-provider cleanup; see the IPC sequence. |
 | Second protocol and codecs | Independent client/provider encoders, malformed payloads, unknown operations/versions, old/new compatibility pairs, and resource exhaustion fail predictably. |
 | Capability attachments | Atomic destination reservation; rights attenuation; specified move/retain behavior; cleanup after timeout, peer death, shutdown with unread messages, and decode rejection. |
 | Class construction and shared activation | Class code selects allocation/reuse; no caller policy override; validated arguments; concurrent initialization, configuration conflicts, denied clients, cycles, timeout, and crash/restart tests; client close cannot stop a shared provider. |
 | Optional image metadata | Offline inspection runs no code; malformed offsets/counts are rejected; inspection/launch use the same artifact; the complete compile/link/strip/package pipeline retains and identifies metadata correctly. |
 | Events and shell binding | Explicit dispatch turns, bounded overflow recovery, durable Operation completion, subscription teardown, and no cross-process or nested synchronous callback invocation. |
+
+The ordered transport steps and detailed tests live in the
+[IPC implementation sequence](ipc-transport-design.md#8-implementation-sequence-and-acceptance).
+The rows above are dependency gates, not a competing chronological plan.
 
 Metadata format, numeric protocol IDs, exact wire layouts, and full supervision
 policy remain implementation decisions requiring review. Those decisions should

@@ -473,6 +473,31 @@ authorization, argument/reuse, and crash tests exist. The
 [C++ examples](cpp-bindings-and-object-creation.md) illustrate this model; they do
 not add it to the first descriptor/VFS milestone.
 
+### Selected IPC direction — 2026-11-04
+
+One copied request/reply protocol will serve synchronous and asynchronous calls.
+The kernel resources are channel endpoints, retained Operations, and reply
+responsibility represented by validated per-request authority. A synchronous
+wrapper submits, waits, retrieves the result, and closes its Operation; an
+asynchronous caller keeps it and continues. Optional combined syscalls preserve
+the same semantics. Providers do not need different handlers for the two styles.
+
+Admission reserves bounded request and completion capacity before publication.
+Terminal results remain retrievable across failed copies and lost notifications.
+Closing a reference or ending a wait does not establish cancellation. Successful
+delivery to the provider marks the point beyond which the kernel generally
+cannot determine whether effects occurred after a crash.
+
+Properties remain getter/setter operations; events use separate bounded queue
+capacity and explicit client dispatch. Shared bulk buffers follow capability
+attachments; shared-memory rings follow only if measurements justify them.
+Caller waiting policy and payload transport are independent choices.
+
+The [IPC implementation profile](ipc-transport-design.md) owns resource mechanics,
+bootstrap, failure histories, shared-memory prerequisites, and the ordered
+acceptance gates. This is approved design direction, not implemented IPC or an
+assigned wire ABI. Class-controlled object selection is unchanged.
+
 ### Calls, values, and authority
 
 Use bounded messages with protocol version, stable interface/operation IDs,
@@ -565,7 +590,10 @@ is the test plan. Two milestones form the first vertical slice:
    references, bounded startup arguments, explicit child maps, and no loader
    authority bypass.
 
-Hosted services are the next milestone, gated on a separate concrete wire and
-supervision profile. Reflection and generated bindings should be grown from
+Hosted services are the next milestone, following the approved
+[IPC sequence](ipc-transport-design.md#8-implementation-sequence-and-acceptance):
+copied requests/Operations, sync/async APIs, subscriptions/deadlines, attachments,
+shared bulk buffers, then optional rings. Concrete wire and supervision
+contracts remain implementation gates. Reflection and generated bindings should be grown from
 these exercised interfaces. Neither a polished catalog nor passing unrelated
 boot tests establishes that these contracts have been implemented.

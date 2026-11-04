@@ -260,6 +260,65 @@ Before implementing these later facilities, demonstrate:
   idle policy, upgrades, registry scope, and instance-state persistence are
   specified before claiming general system-service behavior.
 
-Start with static generated bindings and a private provider. Shared class
+Start with statically linked typed bindings and a private provider; handwritten
+codecs precede generation from two exercised protocols. Shared class
 activation and reflection follow the exercised protocol. Dynamic client linking
 and in-process implementation loading have separate admission gates.
+
+## 8. Synchronous and asynchronous IPC
+
+The [approved IPC design](ipc-transport-design.md) uses one provider protocol for
+both styles. These names remain illustrative SDK APIs, not current os1 headers.
+The initial implementation can use handwritten typed codecs; generated bindings
+follow evidence from two protocols.
+
+```cpp
+// processor already holds an authorized, ready object endpoint.
+auto text = checked(processor.uppercase("hello")); // Submit, wait, retrieve.
+
+auto pending = checked(processor.uppercase_async("hello"));
+do_other_work();
+checked(pending.wait());
+auto same_text = checked(pending.result());
+```
+
+Both calls encode the same member ID and bounded arguments and reach the same
+provider handler. Async submission returns after the kernel has accepted and
+copied the ordinary request bytes. It does not require a different provider
+method or create a client thread. The pending wrapper owns an Operation;
+completion remains queryable until release, including after a failed result
+copy. A synchronous wrapper does not pump arbitrary application callbacks.
+
+Properties and events build on that protocol at the subscriptions stage:
+
+```cpp
+auto settings = checked(processor.get_settings());
+checked(processor.set_settings(
+    {.locale = "en"}, {.expected_revision = settings.revision}));
+
+auto job = checked(processor.process_async(document));
+auto subscription = checked(job.on_progress(
+    events, [](const Progress& p) { show_progress(p.percent); }));
+
+events.run_until(job); // Explicit dispatch on this application's thread.
+auto output = checked(job.result()); // Result survives lost progress events.
+```
+
+These particular members and revision checks are protocol examples. The setter
+validates and updates atomically in the provider. Subscribing after submission
+may miss earlier progress; a watch API requiring an initial state must return
+an atomic snapshot/revision or implement sequence-based catch-up. Destruction of
+a subscription must follow the specified unsubscribe/drain barrier before
+callback captures are freed.
+
+Closing `pending` or timing out a future wait drops interest or ends waiting;
+neither confirms that provider effects stopped. No automatic retry follows an
+unknown outcome. Timed waits require the monotonic clock and deadline machinery
+specified in the IPC profile. Class construction still selects the object in
+class code; neither invocation style adds a fresh/shared option.
+
+Later bulk operations can attach a shared-buffer capability and offset/length
+instead of copying large payloads. The buffer profile must specify immutable
+publication, mappings, and backing lifetime; passing a pointer or an ordinary
+integer fd is not a substitute. Channel replies and retained Operation semantics
+remain the same. Shared-memory rings are a separate later optimization.

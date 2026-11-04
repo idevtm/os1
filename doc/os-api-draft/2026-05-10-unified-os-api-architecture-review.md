@@ -62,6 +62,16 @@ current tree. Descriptor/VFS/startup implementation has superseded those missing
 facilities. Hosted-service gates remain open; ungated ACPI power transitions
 remain separate work.
 
+## IPC design follow-up — 2026-11-04
+
+The selected design is now recorded in the [IPC transport profile](ipc-transport-design.md):
+one request/reply mechanism, retained Operations, sync/async facades, property
+operations, and explicit queued events. Shared bulk buffers follow attachment
+and mapping contracts; shared-memory rings require performance evidence. The
+implementation sequence below supersedes the earlier service/event ordering.
+This follow-up changes documents only; IPC, event subscriptions, timed waits,
+and shared memory are not implemented by it.
+
 ## Historical review baseline and evidence limits
 
 | Source evidence | Current behavior and implication |
@@ -418,13 +428,23 @@ This is a future test plan, not a list of checks run during this review.
 | 0. Runtime foundation | Fix child publication and loader failure cleanup; separate passive observe from power control. | Forced publication interleaving, allocation/mapping failure cleanup, passive-observe side-effect test; investigate the recorded BIOS failure independently. |
 | 1. Descriptors and console | One bounded table, open instances, immutable rights, real 0/1/2, close/duplicate/flags, fixed errors. | Close/reuse with pinned work; table exhaustion; attenuation and denied-operation tests; alias cleanup; blocked-read exit; short I/O and later-copy failure. |
 | 2. Initrd VFS and launch | Validated immutable namespace, lookup/enumeration, shared cursors, bounded startup record, explicit child grants, executable-reference loading. | Path/record boundary tests; duplicate archive rejection; list-without-open/open-without-list; independent-open versus duplicate cursors; no root escape; argv/envp bounds; every spawn/exec precommit failure preserves old state and leaks nothing. |
-| 3. First hosted service | Static ET_EXEC provider, private endpoint, one request, READY handshake, explicit supervisor, bounded messages and errors. | Startup failure/hang/parent exit; request/crash/timeout/late-reply matrix; no automatic replay; old endpoint stays closed after restart; no metadata requirement. |
-| 4. Reusable protocols | Second interface, generated codecs, optional metadata inspection, attached handles only when needed. | Strict decoder negative tests; old/new compatibility matrix; all-or-nothing reference transfer; quota/failure ownership tests; stripped-image inspection behavior. |
-| 4b. Shared class activation | Class-owned construction hooks, typed arguments, manager activation, scoped registry, and separately granted client references. | Class alone selects allocation/reuse; no caller policy overrides; race/cycle/configuration/denial/timeout tests; no shared-provider kill on client exit; explicit upgrade and restart generations. |
-| 5. Events and shell | Persistent completion, bounded queues, explicit event loop, native syntax over proven bindings. | Lost-wakeup interleavings; overflow recovery; unsubscribe/dispatch teardown; no sync callback deadlock; local/remote alias and close tests. |
+| 3. Copied IPC core and call APIs | Private TextProcessor, bounded endpoints, retained Operations, reply authority, READY handshake; sync wrapper and async submission share one protocol. | Transactional admission, descriptor/queue exhaustion, receive/result copy faults, lost-wakeup races, abandoned operations, authorized one-time reply, provider death and no replay. Untimed prototype does not claim startup-hang recovery. |
+| 4. Properties, subscriptions, and deadlines | Configuration operations, bounded progress events, explicit dispatch, monotonic timed waits, and owned-provider cleanup. | Atomic updates/watch snapshot, overflow recovery, reply capacity protected from event pressure, unsubscribe/drain, timeout/completion/cancellation races, startup hangs and supervisor cleanup. |
+| 5. Capability attachments | Explicit bounded transfer separate from payload integers. | Rights attenuation, atomic destination reservation, specified copy/move ownership, cleanup for failed/unread/discarded messages, peer death and shutdown. |
+| 6. Shared bulk buffers | Channel control messages with buffer capabilities and ranges. | Immutable publication despite sender aliases, bounds/rights, mapping/backing lifetime, TLB retirement, cancellation/crash cleanup. |
+| 7. Optional shared-memory rings | Alternate message transport only if measurements justify it. | Ordering, wraparound, backpressure, check/arm/recheck wakeups, hostile-peer validation, and producer/consumer death. |
 
-Stages 1–2 are the selected first vertical slice. They do not wait for the
-complete later-service schema or shell. Stage 0 fixes affecting a path must
+The [IPC profile](ipc-transport-design.md#8-implementation-sequence-and-acceptance)
+owns the detailed transport sequence approved on 2026-11-04. A second fixed
+protocol precedes codec generation and schema-driven discovery; that tooling
+need not wait for shared memory. Shared class activation follows attachments and
+its own registry/supervision gates: class code alone selects allocation/reuse,
+concurrent acquisition publishes a ready instance, and client close cannot kill
+a shared provider. Metadata inspection and shell bindings retain their separate
+compatibility, no-code-execution, and explicit-dispatch requirements.
+
+Stages 1–2 are implemented, with validation linked in the follow-up above. They
+do not wait for the complete later-service schema or shell. Stage 0 fixes affecting a path must
 land before that path's new ownership is relied on.
 
 ## Decisions still required before coding each boundary
@@ -435,28 +455,29 @@ interfaces, and namespace/I/O behavior. The
 [canonical approval record](native_object_kernel_contract.md#approved-decisions--2026-11-04)
 defines that scope. These no longer await a choice of architectural direction.
 
-The console subset now has concrete UAPI encoding, limits, lock placement,
-reference mechanics, and regression evidence linked above. The remaining
-first-slice work is VFS/startup encoding and its implementation/acceptance tests. Approval does not close existing runtime defects or establish tested
-conformance. Later service, shared-activation, and event boundaries below still
-need their own implementation contracts:
+The console and initrd VFS/startup subsets now have concrete UAPI encoding,
+limits, reference mechanics, and regression evidence linked above. The approved
+IPC direction selects synchronous/asynchronous calls over one copied protocol,
+then subscriptions/deadlines, attachments, shared buffers, and optional rings.
+This records design agreement, not a runtime implementation or assigned wire ABI.
 
-1. **VFS UAPI:** extend the console encoding with lookup, enumeration, seek,
-   maximum directory records, and short-buffer reporting. Console operation/error/
-   right numbers, duplicate replacement, and descriptor/transfer limits are implemented.
-2. **First process-start ABI:** entry registers/stack, argv/envp and bootstrap
-   record layout/aggregate budgets, legacy call migration, and executable policy
-   for this single-identity initrd. Loader and user startup must change together.
-3. **First service:** endpoint admission and ownership, wire header/layout,
-   version negotiation, supervisor transitions, monotonic deadline API, request
-   identity/late replies, and finite resource limits.
-4. **Shared construction:** class publication/bootstrap, optional argument schema,
-   reuse effects, authorized realm/registry, per-client grants, activation request
-   identity, crash/upgrade policy, and provider-versus-object readiness.
-5. **First events:** a concrete acyclic registration graph or cycle-breaking
-   shutdown protocol, user-visible queue ownership versus internal pins, and a
-   dispatch/drain barrier for callback captures.
+Before implementing each boundary, pin:
 
-Keep these decisions with the canonical contract and its profiles until their
-size or independent lifecycle justifies separate specifications. Creating eight
-new overlapping foundational documents would recreate the original drift.
+1. **Copied IPC:** numeric operations and rights, exact envelope layout, request
+   IDs/generations, queue/Operation/reply budgets, reply-authority representation,
+   lock order, ownership graph, failed-copy handling, and late-reply cleanup.
+2. **Events and deadlines:** queue ownership versus internal pins, overflow and
+   watch/snapshot rules, unsubscribe/drain barriers, monotonic units, timer queue,
+   timeout arbitration, and actual supervisor termination/reaping support.
+3. **Capability attachments:** copy/move ownership, atomic admission/delivery,
+   destination exhaustion, and cleanup after rejection, unread data, or death.
+4. **Shared construction:** class publication/bootstrap, typed argument/reuse
+   rules, authorized registry scope, per-client grants, concurrent initialization,
+   provider-versus-object readiness, and crash/upgrade policy.
+5. **Shared buffers:** snapshot versus enforced sealing, alias restrictions,
+   mapping rights and lifetimes, quotas, unmap, TLB retirement, and crash cleanup.
+   Rings need their own memory-order and hostile-peer contract plus measurements.
+
+Keep shared semantics in the canonical contract, IPC mechanics in its profile,
+and illustrative bindings in the C++ document. Do not duplicate independent
+ownership models in the ELF, shell, or metadata specifications.

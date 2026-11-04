@@ -21,8 +21,9 @@ without pretending that every operation is file I/O.
 
 Methods, properties, and events are language bindings over explicit protocols.
 They do not require a universal kernel class hierarchy or recursive value ABI.
-Start with generated bindings for fixed interfaces; add interactive discovery
-and syntax only when they simplify a working workflow. Parsing, bytecode,
+Start with typed bindings for fixed interfaces; generated codecs follow two
+exercised protocols under the [IPC sequence](ipc-transport-design.md). Add
+interactive discovery and syntax only when they simplify a working workflow. Parsing, bytecode,
 optimization, package resolution, and a general FFI remain separate design work.
 
 ## 2. Values, references, and ownership
