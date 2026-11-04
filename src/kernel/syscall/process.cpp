@@ -4,6 +4,7 @@
 
 #include "debug/debug.hpp"
 #include "mm/user_copy.hpp"
+#include "proc/startup.hpp"
 #include "proc/thread.hpp"
 #include "proc/user_program.hpp"
 #include "util/fixed_string.hpp"
@@ -86,29 +87,22 @@ long sys_exec(const ProcessSyscallContext& context, uint64_t user_path)
         return -1;
     }
 
-    uint64_t new_cr3 = 0;
-    uint64_t entry = 0;
-    uint64_t user_rsp = 0;
-    if(!load_user_program_image(
-           *context.frames, context.kernel_root_cr3, path, new_cr3, entry, user_rsp))
-    {
+    OpenInstance* image = nullptr;
+    if(resolve_process_image(thread->process, path, image) < 0)
         return -1;
-    }
-
-    descriptor_close_exec(thread->process->descriptors);
-    const uint64_t old_cr3 = thread->address_space_cr3;
-    thread->address_space_cr3 = new_cr3;
-    thread->process->address_space.cr3 = new_cr3;
-    thread->process->state = ProcessState::Running;
-    copy_fixed_string(thread->process->name, sizeof(thread->process->name), path);
-    prepare_user_thread_entry(thread, entry, user_rsp);
-    context.write_cr3(new_cr3);
-
-    if((0 != old_cr3) && (old_cr3 != new_cr3) &&
-       !destroy_user_address_space(*context.frames, old_cr3))
-    {
-        debug("exec old address-space teardown failed for ")(path)();
-    }
-
-    return 0;
+    InstanceRef pin(image);
+    os1_startup_record startup{};
+    startup.version = OS1_STARTUP_VERSION;
+    startup.size = sizeof(startup);
+    startup.root_fd = thread->process->root_fd;
+    startup.cwd_fd = thread->process->cwd_fd;
+    size_t length = 0;
+    while(path[length])
+        ++length;
+    for(size_t i = 0; i <= length; ++i)
+        startup.strings[i] = path[i];
+    startup.argc = 1;
+    startup.string_bytes = length + 1;
+    const long result = replace_process_image(context, thread, image, startup, path);
+    return result < 0 ? -1 : result;
 }

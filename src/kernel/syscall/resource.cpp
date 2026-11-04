@@ -1,6 +1,7 @@
 #include "syscall/resource.hpp"
 
 #include "mm/user_copy.hpp"
+#include "syscall/vfs.hpp"
 
 long sys_resource(
     PageFrameContainer& frames, Thread* thread, uint64_t fd, uint64_t operation, uint64_t argument)
@@ -9,6 +10,8 @@ long sys_resource(
         return OS1_ERR_INVALID;
     if(fd >= OS1_DESCRIPTOR_LIMIT)
         return OS1_ERR_BAD_DESCRIPTOR;
+    if(operation >= OS1_RESOURCE_DUPLICATE_SCOPED && operation <= OS1_RESOURCE_FILE_INFO)
+        return sys_vfs(frames, thread, static_cast<int>(fd), operation, argument);
     auto& table = thread->process->descriptors;
     switch(operation)
     {

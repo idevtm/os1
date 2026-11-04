@@ -43,6 +43,7 @@ struct Process
     WaitQueue child_exit_waiters;
     Process* registry_next = nullptr;
     DescriptorTable descriptors;
+    int root_fd = -1, cwd_fd = -1;
 };
 
 // Initialize the kmem-backed process registry.

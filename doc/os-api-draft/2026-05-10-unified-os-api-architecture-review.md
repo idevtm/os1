@@ -1,7 +1,7 @@
 # Unified OS API Architecture Review — 2026-05-10
 
-**Refreshed: 2026-11-04. Status: approved first-slice semantics, with a console
-implementation follow-up below; no frozen binary ABI.**
+**Refreshed: 2026-11-04. Status: approved first-slice semantics, with console and VFS/startup
+implementation follow-ups below; no frozen binary ABI.**
 
 The original filename and review date are retained for existing links. This
 refresh supersedes the May recommendations below; the original text remains in
@@ -49,10 +49,20 @@ resource entries, shared instances, rights, flags, close/dup/query, bounded I/O,
 wait retention, and exec cleanup. It fixes the R1 frame rewrite and R5 unlinked
 allocation leak, and captures spawn results before publication. The
 [dated implementation record](../2026-11-04-console-descriptor-implementation-plan.md)
-contains regression evidence and limitations. VFS/startup and hosted-service
-gates below remain open; ungated ACPI power transitions remain separate work.
+contains regression evidence and limitations. The subsequent
+[initrd VFS/startup milestone](../initrd-vfs-abi.md) adds the immutable namespace,
+checked factory ceilings, shared cursor reservations, bounded startup records,
+explicit child maps, and authorized executable-reference launch. Its
+[implementation record](../2026-11-04-initrd-vfs-implementation-plan.md) records
+host tests and UEFI/BIOS `ls`, `cat`, and restricted-child evidence, including a
+reproduced page-table teardown defect fixed during exec validation.
 
-## Review baseline and evidence limits
+The source-baseline table below describes the earlier `b182aa1` review, not the
+current tree. Descriptor/VFS/startup implementation has superseded those missing
+facilities. Hosted-service gates remain open; ungated ACPI power transitions
+remain separate work.
+
+## Historical review baseline and evidence limits
 
 | Source evidence | Current behavior and implication |
 | --- | --- |
@@ -65,7 +75,8 @@ gates below remain open; ungated ACPI power transitions remain separate work.
 
 The November review's [R1 publication defect](../2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication)
 and [R5 mapping-failure leak](../2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame)
-remain runtime work. The former publishes a child with an initialized entry
+were runtime work at that baseline and are fixed by the console milestone.
+The former published a child with an initialized entry
 frame, then rewrites that saved frame after another CPU may already be using it.
 Adding inherited capabilities to that path without correcting
 publication would make the ownership problem worse. The [R2 observation finding](../2026-11-03-review.md#r2--p1-acpi-observation-performs-ungated-power-transitions)

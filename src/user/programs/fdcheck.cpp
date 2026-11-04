@@ -11,7 +11,7 @@
         }                                                                      \
     } while(0)
 
-int main()
+int main(int, char**)
 {
     constexpr uint32_t rights = OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE;
     os1_resource_info info{};

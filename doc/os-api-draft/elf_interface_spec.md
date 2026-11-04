@@ -20,9 +20,11 @@ process, and acquiring a usable service endpoint are separate operations.
 Today's [ELF validator](../../src/kernel/proc/user_elf.cpp) accepts x86-64
 `ET_EXEC` images. The [loader](../../src/kernel/proc/user_program.cpp) constructs
 images from loadable segments, and [crt0](../../src/user/lib/crt0.cpp) calls
-`main(void)`. That establishes neither a service protocol nor a reflective
-runtime. Bounded argv/envp, startup grants, and publication rules must first be
-implemented under the [process contract](native_object_kernel_contract.md#7-process-creation-and-image-replacement).
+`main(int, char**)` from a copied startup record. The
+[implemented VFS/startup ABI](../initrd-vfs-abi.md) supplies bounded argv/environment
+data, explicit grants, and executable-reference launch under the
+[process contract](native_object_kernel_contract.md#7-process-creation-and-image-replacement).
+That establishes neither a service protocol nor a reflective runtime.
 Do not change the startup stack independently of crt0 and the reviewed startup
 record ABI.
 

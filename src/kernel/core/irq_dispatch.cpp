@@ -1,6 +1,7 @@
 // Generic IRQ flow around the current legacy PIC/APIC hybrid routing.
 #include "core/irq_dispatch.hpp"
 
+#include "syscall/vfs.hpp"
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/apic/lapic.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
@@ -102,6 +103,7 @@ Thread* handle_irq(TrapFrame* frame)
     if(cpu_on_boot())
     {
         wake_console_readers(page_frames);
+        wake_vfs_waiters(page_frames);
     }
 
     if(nullptr == current_thread())

@@ -5,6 +5,7 @@
 #include "mm/user_address.hpp"
 #include "mm/user_copy.hpp"
 #include "sync/wait_queue.hpp"
+#include "syscall/vfs.hpp"
 
 static bool try_complete_console_read(PageFrameContainer& frames,
                                       Thread* thread,
@@ -61,6 +62,11 @@ bool read_or_block(PageFrameContainer& frames,
     if(result < 0)
         return true;
     InstanceRef retained(instance);
+    if(instance->object->kind == OS1_OBJECT_FILE)
+    {
+        result = vfs_read_or_block(frames, thread, instance, user_buffer, length);
+        return result != kVfsBlocked;
+    }
     if(instance->object->kind != OS1_OBJECT_CONSOLE ||
        !(instance->object->interfaces & OS1_INTERFACE_BYTE_INPUT) ||
        !instance->object->reserve_read || !instance->object->finish_read)

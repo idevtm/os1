@@ -172,7 +172,7 @@ Current kernel folders:
 | [../src/kernel/storage/](../src/kernel/storage) | Generic request-shaped block abstractions above concrete block drivers. | `block_device.hpp`, `README.md` |
 | [../src/kernel/fs/](../src/kernel/fs) | Concrete filesystem/archive parsers. Today this is the boot initrd CPIO parser, not a general namespace. | `initrd.*` |
 | [../src/kernel/resource/](../src/kernel/resource) | Process descriptors, open instances, and native console providers. | `descriptor.hpp` |
-| [../src/kernel/vfs/](../src/kernel/vfs) | Future filesystem namespace layer: mount table, path lookup, and filesystem-backed `exec`. | `README.md` |
+| [../src/kernel/vfs/](../src/kernel/vfs) | Immutable initrd directory/file objects, strict import, capability-relative path lookup, and checked child grants. | `initrd.*`, `README.md` |
 | [../src/kernel/security/](../src/kernel/security) | Future credentials, permissions, and resource-boundary policy. | `README.md` |
 | [../src/kernel/debug/](../src/kernel/debug) | Serial debug logger and fixed-capacity structured event ring. | `debug.*`, `event_ring.*` |
 | [../src/kernel/util/](../src/kernel/util) | Small generic helpers with no subsystem ownership. | `assert.hpp`, `align.hpp`, `ctype.hpp`, `fixed_string.hpp`, `memory.h`, `string.*` |
@@ -413,7 +413,7 @@ The shell runs a line-buffered REPL:
 
 1. `write(1, "os1> ")` via `SYSCALL`.
 2. `read(0, buf, N)` blocks on the typed console-read wait state until enter commits a line.
-3. Tokens are dispatched: `help`, `echo`, `pid`, built-in observers (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`) each make one `observe(kind, buf, len)` call and render the resulting fixed-record table; `exec <path>` replaces the shell image in place; unknown tokens resolve via `/bin/<name>` and are run under `spawn` + `waitpid`.
+3. Tokens are dispatched: `help`, `echo`, `pid`, built-in observers (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`) each make one `observe(kind, buf, len)` call and render the resulting fixed-record table; `exec <path> [args...]` replaces the shell image through native `launch`; external commands resolve via `/bin/<name>` and use native `launch` + `waitpid`, forwarding bounded arguments and explicit stream/root/cwd grants.
 4. User exceptions (e.g. `/bin/fault`) are caught in `HandleException`, the thread is marked `Dying`, `ScheduleNext(false)` runs, and `reapDeadThreads` reclaims the thread stack and address space from a different stack on a later trap.
 
 ### Phase 6 — exec and in-place image replacement
@@ -842,9 +842,10 @@ Current syscalls:
 - `exit`
 - `yield`
 - `getpid`
-- `resource` (close, duplicate/replace, query, descriptor/status flags)
+- `resource` (close, duplicate/replace, query, flags, relative open, directory iteration, seek, file information)
+- `launch` (executable-reference spawn/exec with explicit child grants and bounded startup data)
 
-Console I/O now uses process-owned descriptors, shared open instances, and native object providers. The [console descriptor ABI](console-descriptor-abi.md) specifies the 64-slot table, rights, flags, errors, and bounded I/O. VFS-backed resources and the native startup ABI remain future work.
+Console I/O now uses process-owned descriptors, shared open instances, and native object providers. The [console descriptor ABI](console-descriptor-abi.md) specifies the 64-slot table, rights, flags, errors, and bounded I/O. The [initrd VFS and startup ABI](initrd-vfs-abi.md) adds immutable directory/file objects, per-entry descendant ceilings, shared cursor reservations, and executable-reference launch. Startup includes bounded argv/environment strings and explicit root/cwd roles.
 
 ### Observability ABI
 
@@ -917,6 +918,7 @@ Current user programs:
 - `/bin/balancecheck` — user-visible run-queue balance verifier built from [`src/user/programs/balancecheck.cpp`](../src/user/programs/balancecheck.cpp)
 - `/bin/smpcheck` — observe-driven SMP state verifier built from [`src/user/programs/smpcheck.cpp`](../src/user/programs/smpcheck.cpp)
 - `/bin/fault` — deliberate page-fault probe built from [`src/user/programs/fault.cpp`](../src/user/programs/fault.cpp)
+- `/bin/ls`, `/bin/cat`, and `/bin/vfscheck` — directory/file operations, argument forwarding, and restricted native child launch.
 - `/bin/fdcheck` and `/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
 - `/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
 - `/bin/acpiprobe` — ACPICA observe probe built from [`src/user/programs/acpiprobe.cpp`](../src/user/programs/acpiprobe.cpp)
@@ -1133,21 +1135,21 @@ This branch runs build/test commands directly. The unified verification entrypoi
 
 ## Current Constraints And Next Step
 
-The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](2026-11-03-review.md#7-recommended-next-milestones) identified publication and mapping leaks now addressed by the console milestone. Passive ACPI observation, IST allocation failure, smoke-runner settling, and qualification of the exact current kernel on the preserved G74SX image remain follow-ups. Passing QEMU tests alone do not qualify physical media or close the unresolved BIOS launch fault.
+The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](2026-11-03-review.md#7-recommended-next-milestones) identified publication and mapping leaks now addressed by the console milestone. Passive ACPI observation, IST allocation failure, smoke-runner settling, and qualification of the exact current kernel on the preserved G74SX image remain follow-ups. The VFS exec tests reproduced and fixed a page-table teardown defect that freed reserved frames; see the [VFS validation record](2026-11-04-initrd-vfs-implementation-plan.md). This does not retrospectively prove the cause of every earlier intermittent BIOS failure or qualify physical media.
 
 Major constraints that remain:
 
 - the broad final-kernel identity map is gone, but boot still retains narrow low bootstrap identity exceptions for the live handoff stack and AP startup state until early stack handoff and AP startup are redesigned
 - the framebuffer path is a text presenter, not a graphics stack
-- userland is still initrd-backed and single-user rather than filesystem-backed and multiuser
-- console descriptors, rights, duplication, close, flags, and bounded errors are implemented; `spawn` and `exec` still accept only a path, without `argv`/`envp`, arbitrary child maps, or VFS executable authority
+- userland uses an immutable initrd VFS; block-backed filesystems and multiuser policy remain unimplemented
+- console/file/directory descriptors and native `launch` are implemented; legacy pathname spawn/exec resolve through existing namespace grants, while native launch accepts argv/environment data and explicit child maps
 - block I/O is request-shaped, interrupt-completed, and supports bounded multi-sector requests up to `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request) through a single contiguous data descriptor; the synchronous wrappers chunk by `BlockDevice::max_sectors_per_request`; Flush is rejected, so successful write completion is not a durability contract; there is still no block scheduler, request merging, filesystem-facing buffer cache, or per-page user-buffer scatter-gather (which awaits user-DMA pinning)
 - PCI INTx fallback now resolves through ACPICA `_PRT` data when firmware
   provides it, with firmware-populated `interrupt_line` retained as the
   secondary fallback
 - DMA is coherent direct-map only; there is no low-address allocator, pinned
   user-buffer mapping, cacheability policy, or IOMMU
-- the kernel small-object allocator at [src/kernel/mm/kmem.cpp](../src/kernel/mm/kmem.cpp) is active infrastructure (builtin caches at 16/32/64/128/256/512/1024 bytes, named caches via `kmem_cache_create`, large-allocation page-run path, debug-build poisoning + redzones + leak dump, `OS1_OBSERVE_KMEM` snapshot kind, `kmem` shell built-in, smoke marker `kmem complete`). Current consumers include the process/thread registries, descriptor/open-instance storage, ARP cache, device-binding registry, PCI BAR claim registry, DMA allocation registry, and IRQ route registry. The next allocator growth is VFS/file/network resource lifetime, not first-use validation
+- the kernel small-object allocator at [src/kernel/mm/kmem.cpp](../src/kernel/mm/kmem.cpp) is active infrastructure (builtin caches at 16/32/64/128/256/512/1024 bytes, named caches via `kmem_cache_create`, large-allocation page-run path, debug-build poisoning + redzones + leak dump, `OS1_OBSERVE_KMEM` snapshot kind, `kmem` shell built-in, smoke marker `kmem complete`). Current consumers include the process/thread registries, descriptor/open-instance storage, ARP cache, device-binding registry, PCI BAR claim registry, DMA allocation registry, and IRQ route registry. The VFS now also owns allocated tree nodes; further allocator growth includes block-backed file and network resource lifetime
 - hot-remove exists as a driver/resource lifecycle path, but there are no PCIe
   or ACPI hotplug event sources yet
 - APs come up through ACPI-derived bring-up, install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, and participate in per-CPU scheduling; device IRQ steering is still BSP-first
@@ -1155,13 +1157,13 @@ Major constraints that remain:
 - xHCI brings up HID boot keyboards but does not yet handle USB hubs, mice past recognition, or USB mass storage
 - NVMe and AHCI are still follow-on work
 
-The next feature milestone extends the implemented console descriptors to a read-only initrd VFS and bounded argument/environment handoff. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
+The [initrd VFS milestone](2026-11-04-initrd-vfs-implementation-plan.md) now implements read-only namespace access and bounded argument/environment handoff. Hosted-service design follows this foundation. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
 
-- extend the exercised console descriptor contract to directory/file interfaces, explicit child maps, startup records, and executable-reference launch; the broader reflective object model remains a proposal (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md) and drafts under [os-api-draft/](os-api-draft/))
-- add `argv`/`envp` handoff in the initrd-backed loader so the shell can pass arguments and a real `init` can evolve apart from `/bin/sh`
-- use the existing small-object allocator for VFS inode/dentry state, packet buffers, and other resource-lifetime records as those subsystems land
+- define the first bounded hosted-service channel, READY handshake, failure outcomes, and authority transfer before implementing the broader reflective object model (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md))
+- evolve `init` into an explicit supervisor using the implemented startup record and child grants
+- extend the existing allocated VFS node lifetime model to persistent filesystem state and packet buffers as those providers land
 - per-page user-buffer scatter-gather and DMA pinning, once the user-process side of the storage path needs them; bounded multi-sector requests already work today through a single contiguous data descriptor
-- an initrd-backed read-only VFS and VFS-backed `exec`, then additional filesystems once their block and persistence contracts are defined
+- additional filesystem providers once their block and persistence contracts are defined
 - a small multiuser/permissions foundation (uid/gid, file ownership, credentials field on `Process`) so Milestone F can meaningfully run SSH
 - packet ownership, receive buffering, monotonic deadlines, and cancellation before expanding the existing ARP slice into IPv4/UDP/TCP/ICMP, DHCP, and DNS
 - USB hub class, mouse routing past recognition, and USB mass storage as the next USB tier

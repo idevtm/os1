@@ -1,6 +1,6 @@
 #include <os1/syscall.hpp>
 
-int main(void)
+int main(int, char**)
 {
     static const char* messages[] = {
         "[user/yield] tick 0\n",

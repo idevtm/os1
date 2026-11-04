@@ -4,7 +4,8 @@ The first native-resource milestone is implemented for console objects. Its
 shared encoding is [resource.h](../src/uapi/os1/resource.h); it is experimental,
 not a promise of long-term binary compatibility. The broader
 [native contract](os-api-draft/native_object_kernel_contract.md) still specifies
-future VFS/startup and hosted-service work. See the
+the broader native model. The subsequent [VFS/startup ABI](initrd-vfs-abi.md)
+extends this foundation; hosted-service work remains proposed. See the
 [implementation plan and validation](2026-11-04-console-descriptor-implementation-plan.md).
 
 ## Representation and operations
@@ -26,16 +27,16 @@ to `CLOEXEC` and the lowest free slot. Raw C calls specify flags explicitly.
 | 2: duplicate | Pointer to a 24-byte `os1_duplicate_request`: six 32-bit fields, alignment 4. Version 1, exact size, signed target, rights, entry flags, reserved zero. Requires `DELEGATE` and a rights subset. Target -1 selects the lowest free slot; 0–63 atomically replaces that slot after validation. Self-replacement is a no-op only with identical rights/flags. |
 | 3: query | Pointer to a 48-byte `os1_resource_info`, alignment 4. Requires `INSPECT`. Returns version, size, object kind, supported interface bits, granted rights, entry/status flags, transfer/slot limits, and three reserved-zero words. Writes the entire record, returns 0. |
 | 4: set descriptor flags | An unsigned 32-bit value; only `CLOEXEC` (bit 0) is accepted. No additional right is needed to change an owned entry's flag. |
-| 5: set status flags | An unsigned 32-bit value; only `NONBLOCK` (bit 0) is accepted. Currently requires `READ` and byte-input support. Changes are shared by aliases; they affect subsequent reads, not already accepted waits. |
+| 5: set status flags | An unsigned 32-bit value; only `NONBLOCK` (bit 0) is accepted. Currently requires `READ` and console byte-input support. Changes are shared by aliases; they affect subsequent reads, not already accepted waits. |
 
 Unknown operations return `UNSUPPORTED`; unknown flag/right bits, nonzero
 reserved request fields, wrong version/size, or invalid targets return `INVALID`.
 Descriptor register values are checked before narrowing, including high bits.
 Requests are copied before mutation; query snapshots are copied after unlocking.
 The numeric rights are READ=1, WRITE=2, SEEK=4, ENUMERATE=8, LOOKUP=16,
-INSPECT=32, EXECUTE=64, DELEGATE=128. Only console byte-input/output interfaces
-(bits 0/1) and object kind CONSOLE=1 are implemented. Other rights are reserved
-for the next milestone and cannot be acquired from console grants.
+INSPECT=32, EXECUTE=64, DELEGATE=128. Console byte-input/output interfaces use bits 0/1 and kind CONSOLE=1.
+The subsequent VFS milestone uses the other rights for directory/file grants;
+those rights cannot be acquired from console grants.
 
 ## I/O and errors
 
@@ -71,7 +72,8 @@ INSPECT and DELEGATE, with entry flags clear. The pathname spawn compatibility
 bridge grants only existing 0/1/2 to the same child numbers, preserving rights
 and sharing instances. Missing entries stay missing; any present entry without
 DELEGATE rejects launch. Child flags are clear for the initial image, even if
-the parent's entry has CLOEXEC. No other slots are implicitly inherited.
+the parent's entry has CLOEXEC. The subsequent VFS bridge also passes selected root/cwd roles; no other
+slots are implicitly inherited.
 
 Image, grants, and entry frame precede publication. Spawn captures its result
 before enqueueing. Failed exec leaves image and entries unchanged; successful
@@ -81,7 +83,7 @@ retarget it. A detached completion pins the thread/address-space lifetime until
 its last access. See the [synchronization contract](2026-04-29-smp-synchronization-contract.md).
 
 Public user execution still has one thread per process, no unmap, and no
-external kill. Arbitrary child maps, bounded argv/envp, root/cwd grants, initrd
-VFS operations, general wait-many, hosted services, and reflection remain future
-milestones. The internal console reservation callbacks are not their final
+external kill. Arbitrary child maps, bounded argv/envp, root/cwd grants, and
+initrd VFS operations are now specified in the [VFS/startup extension](initrd-vfs-abi.md).
+General wait-many, hosted services, and reflection remain future milestones. The internal console reservation callbacks are not their final
 provider or wire interfaces.

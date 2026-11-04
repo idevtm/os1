@@ -2,7 +2,7 @@
 
 Status: first-slice semantic decisions approved, 2026-11-04; later service and
 reflection contracts remain proposals. The [console milestone](../console-descriptor-abi.md)
-is implemented; the complete contract is **not implemented or a frozen binary ABI**.
+and [VFS/startup milestone](../initrd-vfs-abi.md) are implemented; the complete contract is **not implemented or a frozen binary ABI**.
 
 The agreed implementation order is descriptors, console, and a read-only initrd
 VFS first; hosted services follow. This document owns the shared semantics.
@@ -33,8 +33,9 @@ Their numbers identify the approval groups, not the sections of this document.
 
 Console numeric assignments, records, limits, lock placement, and reference
 mechanics are specified in the [implemented console ABI](../console-descriptor-abi.md).
-VFS and startup encodings remain implementation specification work. The approved semantics must be preserved while resolving
-those details. Approval neither implements these facilities nor approves every
+VFS/startup encodings, bounds, and delivery rules are specified in the
+[implemented VFS/startup ABI](../initrd-vfs-abi.md). The approved semantics govern
+future extensions as well. Approval neither implements these facilities nor approves every
 later hosted-service, reflection, or event proposal. Acceptance tests remain
 required before claiming runtime conformance.
 

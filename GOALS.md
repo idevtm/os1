@@ -288,7 +288,7 @@ Core native-interface goals:
 
 Where practical, POSIX compatibility should be implemented as a compatibility layer or mapping over these native primitives rather than treated as the only system model the kernel may expose.
 
-These are broader design goals. The [API drafts](doc/os-api-draft/README.md) and [unified architecture review](doc/os-api-draft/2026-05-10-unified-os-api-architecture-review.md) record approval on 2026-11-04 of the first-slice descriptor, ownership/waiting, startup, interface, and namespace/I/O semantics. The [console descriptor ABI](doc/console-descriptor-abi.md) now implements one process table with native objects, rights, close/dup/query, flags, bounded I/O, and retained wait references. The next milestone extends that foundation to a read-only initrd VFS and native process startup. Reflection, properties, and event interfaces remain later design work; the full native contract is not implemented or a frozen ABI.
+These are broader design goals. The [API drafts](doc/os-api-draft/README.md) and [unified architecture review](doc/os-api-draft/2026-05-10-unified-os-api-architecture-review.md) record approval on 2026-11-04 of the first-slice descriptor, ownership/waiting, startup, interface, and namespace/I/O semantics. The [console descriptor ABI](doc/console-descriptor-abi.md) now implements one process table with native objects, rights, close/dup/query, flags, bounded I/O, and retained wait references. The [VFS/startup milestone](doc/initrd-vfs-abi.md) now extends that foundation to read-only initrd files, directory operations, bounded arguments/environment, explicit child maps, and executable-reference launch. Reflection, properties, and event interfaces remain later design work; the full native contract is not implemented or a frozen ABI.
 
 ### Process and scheduling model
 
@@ -339,7 +339,7 @@ The system should support persistent storage with a simple, understandable files
 
 Suggested progression:
 
-- expose the existing initrd through a minimal read-only VFS after defining descriptors
+- extend the implemented read-only initrd VFS with block-backed providers after defining their storage and failure contracts
 - add a read-only block-backed filesystem using the existing request/completion block abstraction
 - define flush, ordering, error, and crash behavior before writable filesystem persistence
 - partition awareness later if justified
@@ -439,8 +439,8 @@ The [2026-11-03 review](doc/2026-11-03-review.md) sets the immediate sequence:
 
 1. Close process-publication and failure-path defects, investigate the intermittent BIOS fault, and make ordinary observation passive with constrained power diagnostics.
 2. Correct smoke success handling, integrate the reviewed verification harness, and qualify the exact kernel on the preserved G74SX image.
-3. Approve a minimal descriptor contract and implement console entries 0/1/2, with rights, duplication, close, inheritance, and teardown behavior covered.
-4. Add bounded argv/envp handoff and a read-only initrd VFS, then route executable loading through it.
+3. Completed first slice: console entries 0/1/2 with rights, duplication, close, inheritance, and teardown coverage.
+4. Completed next slice: bounded argv/environment handoff, explicit grants, a read-only initrd VFS, and executable-reference loading. Hosted-service channel and supervision contracts follow.
 5. Establish the persistence or networking prerequisites before choosing the next vertical slice; add credentials and access policy before multiuser or network-exposed operations.
 
 Descriptor design can proceed while the reliability bugs are isolated. Runtime expansion should wait for the relevant lifetime and failure contracts. The longer-term priorities remain:
@@ -484,13 +484,13 @@ The in-repo milestone designs (M1–M5) refine the coarser A–G map below into 
 - serial-drivable shell and smoke coverage on both boot paths
 - structured observability through versioned fixed-record snapshots (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, `irqs`, `kmem`, `acpi`) and a 256-record kernel event ring covering traps, scheduler transitions, IRQs, block I/O, PCI bind, user-copy failures, smoke markers, timer-source choice, `kmem` corruption, NIC RX, AP-online/tick events, reschedule/TLB-shootdown IPIs, thread migration, and run-queue depth
 
-Later follow-ups expected in this area: filesystem-backed loading, richer file-descriptor / handle semantics, arguments/environment passing, and process credentials.
+The [VFS/startup extension](doc/initrd-vfs-abi.md) now provides file-backed loading, directory/file descriptors, argument/environment passing, and explicit child grants. Process credentials and hosted-service semantics remain follow-ups.
 
-### Milestone D: Persistence and local security *(next feature milestone; block read/write baseline implemented, VFS, durability, and multiuser work remain)*
+### Milestone D: Persistence and local security *(next feature milestone; block read/write and initrd VFS implemented; persistent filesystem, durability, and multiuser work remain)*
 
 The 2026-04-30 [driver/device/platform pass](doc/2026-04-29-driver-device-platform-implementation-plan.md) established request-shaped `BlockDevice` I/O with completion, error, and write support; `virtio-blk` runs through MSI-X with INTx fallback. That is a useful baseline, but flush support and a durable-write contract remain open. After the correctness work above, the feature progression is:
 
-1. minimal console descriptors, bounded argv/envp, and a read-only initrd VFS with executable loading through the same namespace;
+1. implemented: console descriptors, bounded argv/environment data, and a read-only initrd VFS with executable loading through the same namespace;
 2. a first read-only block-backed filesystem (FAT32 or a bespoke simple FS), then explicit durability and failure semantics before writable storage;
 3. a small multiuser/permissions foundation (uid/gid, file ownership, user table, credential checks) before multiuser access or Milestone F's remote administration.
 
@@ -498,8 +498,8 @@ Implementation notes grounded in current source:
 
 - bounded multi-sector reads and writes are now in code at [src/kernel/drivers/block/virtio_blk.cpp](src/kernel/drivers/block/virtio_blk.cpp) and exercised by both the boot-time and threaded smokes; the cap is `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request). Future per-page user-buffer scatter-gather requires a user-DMA pinning and ownership contract
 - the kernel small-object allocator at [src/kernel/mm/kmem.cpp](src/kernel/mm/kmem.cpp) is implemented and now has real kernel consumers (process/thread registries, ARP cache, device-binding records, PCI BAR claim records, DMA allocation records, and IRQ route records). The next allocator-related step is to use the same lifetime model for VFS inode/dentry state, descriptor tables, packet buffers, and other resource records as those subsystems land, not to prove first-use viability again
-- encode and implement the approved minimal descriptor semantics: rights, invalid/reused identifiers, per-open state, duplication, inheritance, close, waiting, and teardown. The [canonical approval record](doc/os-api-draft/native_object_kernel_contract.md#approved-decisions--2026-11-04) fixes the first-slice direction; binary layouts, limits, synchronization details, and acceptance tests remain implementation work
-- add bounded argv/envp handoff in the initrd-backed loader under [src/kernel/proc/user_program.cpp](src/kernel/proc/user_program.cpp), with explicit size limits and failure handling, so a real `init` can evolve apart from `/bin/sh` and filesystem-backed `exec` can pass arguments meaningfully
+- preserve the implemented descriptor/VFS rights, per-open state, child grants, cursor delivery, and teardown contracts when adding providers; the [implemented ABI](doc/initrd-vfs-abi.md) pins first-slice layouts, limits, and validation
+- use the implemented startup record and explicit grants to evolve `init` into a supervisor; service readiness, endpoint authority, and crash outcomes need a separate protocol
 - treat USB mass storage as a later storage target, after the USB hub class and the first non-virtio storage path are stable
 
 ### Milestone E: Networking foundation *(driver and ARP probe implemented; IP/UDP/TCP and sockets remain)*

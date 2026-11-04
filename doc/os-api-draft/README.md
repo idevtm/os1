@@ -2,7 +2,7 @@
 
 Revised 2026-11-04. These documents contain approved first-slice semantic
 decisions and later design proposals. The [console descriptor subset](../console-descriptor-abi.md)
-is implemented; the full proposals are **not implemented contracts or a frozen
+and [initrd VFS/startup subset](../initrd-vfs-abi.md) are implemented; the full proposals are **not implemented contracts or a frozen
 binary ABI**. The selected first implementation
 is descriptors, console, and a read-only initrd VFS; hosted services follow.
 
@@ -48,23 +48,23 @@ The six [first-slice decision groups](native_object_kernel_contract.md#approved-
 were approved on 2026-11-04: descriptor ABI, ownership/synchronization, blocking
 and teardown, process startup, initial interfaces, and namespace/I/O behavior.
 Later service and reflection work remains proposed. Numeric UAPI
-assignments, layouts, resource budgets, and the startup record still need a
-concrete review with the first implementation. The
+assignments, layouts, resource budgets, and the startup record are now specified
+in the implemented ABI documents; later-service encodings remain open. The
 [acceptance matrix](2026-05-10-unified-os-api-architecture-review.md#implementation-sequence-and-acceptance)
 separates first-slice requirements from later service/event gates.
 
 ## Current source boundary
 
-At reviewed revision `b182aa1`, the implemented syscall surface remains the
-small ABI in [syscall_numbers.h](../../src/uapi/os1/syscall_numbers.h): console
-`read`/`write`, process control for initrd-backed programs, and `observe`.
-There is no descriptor table, VFS namespace, argv/envp startup, hosted RPC,
-socket/PTY API, or credential policy. The current program loader accesses the
-initrd directly. API draft changes do not change those facts.
+The [console ABI](../console-descriptor-abi.md) and [VFS/startup ABI](../initrd-vfs-abi.md)
+now implement the selected first slice: descriptor ownership, immutable initrd
+lookup/enumeration/read/seek, explicit child grants, bounded argv/environment data,
+and executable-reference launch. C++ `ls`, `cat`, and the restricted `vfscheck`
+child exercise the implementation on both boot paths. Legacy pathname launch
+uses existing namespace grants; it cannot recover a global root.
 
-The [2026-11-03 project review](../2026-11-03-review.md) remains the latest
-whole-project source review. Its child-publication, passive-observation,
-allocation/failure, verification, and hardware follow-ups remain runtime work.
-Fix the affected ownership paths before relying on them for the descriptor/VFS
-milestone; credentials and access policy must precede multiuser or
-network-exposed resource operations.
+Hosted RPC, reflection, dynamic binding, class construction, sockets/PTYs, and
+credential policy remain unimplemented. The [2026-11-03 project review](../2026-11-03-review.md)
+remains the latest whole-project review; the [VFS implementation record](../2026-11-04-initrd-vfs-implementation-plan.md)
+updates this milestone without claiming a new whole-project audit. Passive
+observation, exception-stack allocation failure, and hardware qualification still
+need follow-up before broader trust boundaries are introduced.

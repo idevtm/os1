@@ -83,6 +83,9 @@ target_compile_options(os1_acpica PRIVATE -O2 -w)
 add_library(os1_host_support
   support/cpu_stubs.cpp
   support/console_input_stub.cpp
+  "${OS1_REPO_ROOT}/src/kernel/vfs/initrd.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/vfs.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/proc/startup.cpp"
   "${OS1_REPO_ROOT}/src/kernel/console/console_input.cpp"
   "${OS1_REPO_ROOT}/src/kernel/resource/descriptor.cpp"
   "${OS1_REPO_ROOT}/src/kernel/syscall/resource.cpp"
@@ -182,6 +185,7 @@ add_executable(os1_host_tests
   mm/virtual_memory_tests.cpp
   proc/task_registry_tests.cpp
   proc/user_elf_tests.cpp
+  syscall/vfs_tests.cpp
   syscall/resource_tests.cpp
   syscall/observe_abi_tests.cpp
 )

@@ -1,5 +1,6 @@
 #pragma once
 #include <os1/resource.h>
+#include <os1/vfs.h>
 #include <stddef.h>
 
 #include "sync/smp.hpp"
@@ -21,12 +22,15 @@ struct OpenInstance
     volatile uint32_t references;
     NativeObject* object;
     volatile uint32_t status_flags;
+    volatile bool cursor_busy;
+    uint64_t cursor;
 };
 struct DescriptorEntry
 {
     OpenInstance* instance = nullptr;
     uint32_t rights = 0;
     uint32_t flags = 0;
+    uint32_t descendant_rights = 0;
 };
 struct DescriptorTable
 {
@@ -45,7 +49,8 @@ long descriptor_install(DescriptorTable& table,
                         OpenInstance* instance,
                         uint32_t rights,
                         uint32_t flags,
-                        int target = -1);
+                        int target = -1,
+                        uint32_t descendant_rights = 0);
 long descriptor_acquire(DescriptorTable& table, int fd, uint32_t rights, OpenInstance*& instance);
 long descriptor_close(DescriptorTable& table, int fd);
 long descriptor_duplicate(DescriptorTable& table, int fd, const os1_duplicate_request& request);
@@ -83,3 +88,6 @@ public:
 private:
     OpenInstance* value_;
 };
+
+long descriptor_acquire_entry(DescriptorTable&, int, uint32_t, DescriptorEntry&);
+long descriptor_duplicate_scoped(DescriptorTable&, int, const os1_scoped_duplicate_request&);

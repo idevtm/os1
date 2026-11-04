@@ -1,5 +1,5 @@
 #include <os1/syscall.h>
-int main()
+int main(int, char**)
 {
     os1_resource_info info{};
     if(os1_resource_query(3, &info) != OS1_ERR_BAD_DESCRIPTOR ||

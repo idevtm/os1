@@ -50,6 +50,9 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/syscall.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/syscall.hpp"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/resource.h"
+      "${PROJECT_SOURCE_DIR}/src/uapi/os1/vfs.h"
+      "${PROJECT_SOURCE_DIR}/src/uapi/os1/startup.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/vfs.hpp"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
       "${USER_LINKER_SCRIPT}"
     VERBATIM
@@ -73,12 +76,22 @@ os1_add_user_cxx_program(fdcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/fdcheck.c
 
 os1_add_user_cxx_program(fdexec "${CMAKE_CURRENT_SOURCE_DIR}/programs/fdexec.cpp" OS1_USER_FDEXEC_ELF)
 
+os1_add_user_cxx_program(ls "${CMAKE_CURRENT_SOURCE_DIR}/programs/ls.cpp" OS1_USER_LS_ELF)
+
+os1_add_user_cxx_program(cat "${CMAKE_CURRENT_SOURCE_DIR}/programs/cat.cpp" OS1_USER_CAT_ELF)
+
+os1_add_user_cxx_program(vfscheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/vfscheck.cpp" OS1_USER_VFSCHECK_ELF)
+
 add_custom_command(
   OUTPUT "${OS1_INITRD_CPIO}"
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${USER_STAGE_DIR}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_STAGE_DIR}/bin"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_STAGE_DIR}/bin" "${USER_STAGE_DIR}/etc"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/data/motd" "${USER_STAGE_DIR}/etc/motd"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_FDCHECK_ELF}" "${USER_STAGE_DIR}/bin/fdcheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_FDEXEC_ELF}" "${USER_STAGE_DIR}/bin/fdexec"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_LS_ELF}" "${USER_STAGE_DIR}/bin/ls"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_VFSCHECK_ELF}" "${USER_STAGE_DIR}/bin/vfscheck"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_CAT_ELF}" "${USER_STAGE_DIR}/bin/cat"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INIT_ELF}" "${USER_STAGE_DIR}/bin/init"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_SH_ELF}" "${USER_STAGE_DIR}/bin/sh"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_YIELD_ELF}" "${USER_STAGE_DIR}/bin/yield"
@@ -98,8 +111,12 @@ add_custom_command(
     -P
     "${PROJECT_SOURCE_DIR}/cmake/scripts/create_initrd.cmake"
   DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/motd"
     "${OS1_USER_FDCHECK_ELF}"
     "${OS1_USER_FDEXEC_ELF}"
+    "${OS1_USER_LS_ELF}"
+    "${OS1_USER_CAT_ELF}"
+    "${OS1_USER_VFSCHECK_ELF}"
     "${OS1_USER_INIT_ELF}"
     "${OS1_USER_SH_ELF}"
     "${OS1_USER_YIELD_ELF}"
@@ -115,6 +132,9 @@ add_custom_command(
 )
 
 add_custom_target(user_programs DEPENDS
+  "${OS1_USER_VFSCHECK_ELF}"
+  "${OS1_USER_CAT_ELF}"
+  "${OS1_USER_LS_ELF}"
   "${OS1_USER_FDEXEC_ELF}"
   "${OS1_USER_FDCHECK_ELF}"
   "${OS1_USER_INIT_ELF}"

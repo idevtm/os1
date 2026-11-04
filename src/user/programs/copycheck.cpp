@@ -14,7 +14,7 @@ static const uint8_t kReadOnlyObserveBuffer[sizeof(struct Os1ObserveHeader) +
         os1::user::exit(1);                                  \
     } while(0)
 
-int main(void)
+int main(int, char**)
 {
     uint8_t observe_buffer[sizeof(struct Os1ObserveHeader) +
                            sizeof(struct Os1ObserveSystemRecord)] = {0};

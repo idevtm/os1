@@ -93,6 +93,9 @@ set(KERNEL_PLATFORM_SOURCES
 )
 
 set(KERNEL_PROC_SOURCES
+  vfs/initrd.cpp
+  syscall/vfs.cpp
+  proc/startup.cpp
   resource/descriptor.cpp
   syscall/resource.cpp
   proc/process.cpp

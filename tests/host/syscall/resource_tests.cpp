@@ -5,6 +5,7 @@
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
+#include "proc/startup.hpp"
 #include "proc/user_elf.hpp"
 #include "proc/user_program.hpp"
 #include "resource/descriptor.hpp"
@@ -68,6 +69,7 @@ protected:
     }
     void TearDown() override
     {
+        reset_initrd_namespace_for_test();
         bind_initrd_boot_info(nullptr);
         lapic_stub_on_reschedule(nullptr);
         if(thread)
@@ -361,6 +363,9 @@ struct ImageFixture
         info.modules = &module;
         info.module_count = 1;
         bind_initrd_boot_info(&info);
+        EXPECT_EQ(0, initialize_initrd_namespace());
+        if(current_thread())
+            EXPECT_EQ(0, inherit_process_namespace(nullptr, current_thread()->process));
     }
     ~ImageFixture()
     {

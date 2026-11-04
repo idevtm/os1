@@ -41,6 +41,7 @@ Process* allocate_process_record()
     if(nullptr != process)
     {
         descriptor_table_initialize(process->descriptors);
+        process->root_fd = process->cwd_fd = -1;
         process->child_exit_waiters.lock.reset("process-child-exit");
         process->child_exit_waiters.head = nullptr;
         process->child_exit_waiters.name = "process-child-exit";

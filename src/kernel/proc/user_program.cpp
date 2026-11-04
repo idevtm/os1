@@ -8,11 +8,14 @@
 #include "handoff/memory_layout.h"
 #include "mm/user_copy.hpp"
 #include "mm/virtual_memory.hpp"
+#include "proc/startup.hpp"
 #include "proc/user_elf.hpp"
+#include "util/memory.h"
+#include "vfs/initrd.hpp"
 
 namespace
 {
-bool load_user_elf(PageFrameContainer& frames,
+long load_user_elf(PageFrameContainer& frames,
                    uint64_t kernel_root_cr3,
                    const uint8_t* image,
                    uint64_t image_size,
@@ -22,19 +25,19 @@ bool load_user_elf(PageFrameContainer& frames,
 {
     if((nullptr == image) || (image_size < sizeof(elf::Elf64Header)))
     {
-        return false;
+        return OS1_ERR_BAD_IMAGE;
     }
 
     const auto* header = elf::header_from_image(image, image_size);
     if((nullptr == header) || !user_elf::validate_user_elf_image(*header, image, image_size))
     {
-        return false;
+        return OS1_ERR_BAD_IMAGE;
     }
 
     VirtualMemory vm(frames);
     if(!vm.clone_kernel_mappings(kernel_root_cr3))
     {
-        return false;
+        return OS1_ERR_NO_MEMORY;
     }
 
     for(uint16_t i = 0; i < header->phnum; ++i)
@@ -43,7 +46,7 @@ bool load_user_elf(PageFrameContainer& frames,
         if(nullptr == program)
         {
             destroy_user_address_space(frames, vm.root());
-            return false;
+            return OS1_ERR_BAD_IMAGE;
         }
 
         if(elf::kProgramTypeLoad != program->type)
@@ -58,7 +61,7 @@ bool load_user_elf(PageFrameContainer& frames,
         if(!user_elf::plan_load_segment(*program, image_size, segment))
         {
             destroy_user_address_space(frames, vm.root());
-            return false;
+            return OS1_ERR_BAD_IMAGE;
         }
 
         if(!vm.allocate_and_map(
@@ -67,13 +70,13 @@ bool load_user_elf(PageFrameContainer& frames,
                segment.page_flags))
         {
             destroy_user_address_space(frames, vm.root());
-            return false;
+            return OS1_ERR_NO_MEMORY;
         }
 
         if(!copy_into_address_space(vm, program->vaddr, image + program->offset, program->filesz))
         {
             destroy_user_address_space(frames, vm.root());
-            return false;
+            return OS1_ERR_BAD_IMAGE;
         }
     }
 
@@ -84,7 +87,7 @@ bool load_user_elf(PageFrameContainer& frames,
            PageFlags::Present | PageFlags::Write | PageFlags::User | PageFlags::NoExecute))
     {
         destroy_user_address_space(frames, vm.root());
-        return false;
+        return OS1_ERR_NO_MEMORY;
     }
 
     uint64_t stack_physical = 0;
@@ -93,14 +96,14 @@ bool load_user_elf(PageFrameContainer& frames,
     {
         debug("user stack translation missing at 0x")(kUserStackTop - 8, 16)();
         destroy_user_address_space(frames, vm.root());
-        return false;
+        return OS1_ERR_BAD_IMAGE;
     }
     cr3 = vm.root();
     entry = header->entry;
     // Like kernel threads, first user entry reaches `_start` via `iretq`, so we
     // reserve one dummy slot to match the SysV function-entry stack shape.
     user_rsp = user_elf::initial_stack_pointer();
-    return true;
+    return 0;
 }
 }  // namespace
 
@@ -115,28 +118,18 @@ bool destroy_user_address_space(PageFrameContainer& frames, uint64_t cr3)
     return frames.free(cr3);
 }
 
-bool load_user_program_image(PageFrameContainer& frames,
-                             uint64_t kernel_root_cr3,
-                             const char* path,
-                             uint64_t& user_cr3,
-                             uint64_t& entry,
-                             uint64_t& user_rsp)
+long load_user_object_image(PageFrameContainer& frames,
+                            uint64_t kernel_root_cr3,
+                            OpenInstance* instance,
+                            uint64_t& user_cr3,
+                            uint64_t& entry,
+                            uint64_t& user_rsp)
 {
-    const uint8_t* file_data = nullptr;
-    uint64_t file_size = 0;
-    if(!find_initrd_file(path, file_data, file_size))
-    {
-        debug("initrd missing ")(path)();
-        return false;
-    }
-
-    if(!load_user_elf(frames, kernel_root_cr3, file_data, file_size, user_cr3, entry, user_rsp))
-    {
-        debug("user ELF load failed for ")(path)();
-        return false;
-    }
-
-    return true;
+    if(!instance || instance->object->kind != OS1_OBJECT_FILE)
+        return OS1_ERR_UNSUPPORTED;
+    const auto* file = static_cast<VfsNode*>(instance->object);
+    return load_user_elf(
+        frames, kernel_root_cr3, file->bytes, file->byte_size, user_cr3, entry, user_rsp);
 }
 
 void prepare_user_thread_entry(Thread* thread, uint64_t entry, uint64_t user_rsp)
@@ -169,7 +162,11 @@ Thread* load_user_program(PageFrameContainer& frames,
     uint64_t user_cr3 = 0;
     uint64_t entry = 0;
     uint64_t user_rsp = 0;
-    if(!load_user_program_image(frames, kernel_root_cr3, path, user_cr3, entry, user_rsp))
+    OpenInstance* image = nullptr;
+    if(resolve_process_image(parent, path, image) < 0)
+        return nullptr;
+    InstanceRef image_pin(image);
+    if(load_user_object_image(frames, kernel_root_cr3, image, user_cr3, entry, user_rsp) < 0)
     {
         return nullptr;
     }
@@ -182,19 +179,45 @@ Thread* load_user_program(PageFrameContainer& frames,
     }
     process->parent = parent;
 
-    const long grants = parent ? descriptor_inherit_standard(parent->descriptors, process->descriptors)
-                               : descriptor_bootstrap_console(process->descriptors);
+    long grants = parent ? descriptor_inherit_standard(parent->descriptors, process->descriptors)
+                         : descriptor_bootstrap_console(process->descriptors);
+    if(grants >= 0)
+        grants = inherit_process_namespace(parent, process);
     if(grants < 0)
     {
         reap_process(process, frames);
         return nullptr;
     }
-    // create_user_thread initializes the complete entry frame before publication.
-    Thread* thread = create_user_thread(process, entry, user_rsp, frames, start_ready);
+    os1_startup_record startup{};
+    startup.version = OS1_STARTUP_VERSION;
+    startup.size = sizeof(startup);
+    startup.root_fd = process->root_fd;
+    startup.cwd_fd = process->cwd_fd;
+    size_t length = 0;
+    while(length < sizeof(startup.strings) && path[length])
+        ++length;
+    if(length == sizeof(startup.strings))
+    {
+        reap_process(process, frames);
+        return nullptr;
+    }
+    memcpy(startup.strings, path, length + 1);
+    startup.argc = 1;
+    startup.string_bytes = length + 1;
+    uint64_t argument = 0;
+    if(!install_startup_record(frames, user_cr3, startup, user_rsp, argument))
+    {
+        reap_process(process, frames);
+        return nullptr;
+    }
+    Thread* thread = create_user_thread(process, entry, user_rsp, frames, false);
     if(nullptr == thread)
     {
         reap_process(process, frames);
         return nullptr;
     }
+    thread->frame.rdi = argument;
+    if(start_ready)
+        mark_thread_ready(thread, thread->scheduler_cpu);
     return thread;
 }

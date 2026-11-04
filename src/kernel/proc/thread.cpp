@@ -2,6 +2,7 @@
 // kernel stacks, saved TrapFrame initialization, wait-state transitions, and
 // CPU-local current-thread publication.
 #include "proc/thread.hpp"
+#include "syscall/vfs.hpp"
 #include "syscall/console_read.hpp"
 
 #include "arch/x86_64/apic/ipi.hpp"
@@ -751,6 +752,7 @@ void mark_current_thread_dying(int exit_status)
 
     thread->exit_status = exit_status;
     cancel_console_read(thread);
+    cancel_vfs_wait(thread);
     clear_thread_wait(thread);
     if(thread->process) descriptor_close_all(thread->process->descriptors);
     if(thread->process)

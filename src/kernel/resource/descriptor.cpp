@@ -94,10 +94,15 @@ void descriptor_table_initialize(DescriptorTable& table)
     table.closed = false;
     memset(table.entries, 0, sizeof(table.entries));
 }
-long descriptor_install(
-    DescriptorTable& table, OpenInstance* instance, uint32_t rights, uint32_t flags, int target)
+long descriptor_install(DescriptorTable& table,
+                        OpenInstance* instance,
+                        uint32_t rights,
+                        uint32_t flags,
+                        int target,
+                        uint32_t ceiling)
 {
-    if(!valid_grant(instance, rights, flags) || (target != -1 && !valid_fd(target)))
+    if(!valid_grant(instance, rights, flags) || (target != -1 && !valid_fd(target)) ||
+       (ceiling & ~OS1_RIGHT_ALL) || (ceiling && instance->object->kind != OS1_OBJECT_DIRECTORY))
         return OS1_ERR_INVALID;
     OpenInstance* replaced = nullptr;
     {
@@ -117,7 +122,7 @@ long descriptor_install(
         }
         instance_retain(instance);
         replaced = table.entries[target].instance;
-        table.entries[target] = {instance, rights, flags};
+        table.entries[target] = {instance, rights, flags, ceiling};
     }
     instance_release(replaced);
     return target;
@@ -150,11 +155,13 @@ long descriptor_close(DescriptorTable& table, int fd)
     instance_release(instance);
     return 0;
 }
-long descriptor_duplicate(DescriptorTable& table, int fd, const os1_duplicate_request& r)
+long descriptor_duplicate_scoped(DescriptorTable& table,
+                                 int fd,
+                                 const os1_scoped_duplicate_request& r)
 {
-    if(r.version != OS1_RESOURCE_ABI_VERSION || r.size != sizeof(r) || r.reserved ||
-       (r.rights & ~OS1_RIGHT_ALL) || (r.descriptor_flags & ~OS1_DESCRIPTOR_CLOEXEC) ||
-       (r.target != -1 && !valid_fd(r.target)))
+    if(r.version != OS1_VFS_ABI_VERSION || r.size != sizeof(r) || r.reserved[0] || r.reserved[1] ||
+       ((r.rights | r.descendant_rights) & ~OS1_RIGHT_ALL) ||
+       (r.descriptor_flags & ~OS1_DESCRIPTOR_CLOEXEC) || (r.target != -1 && !valid_fd(r.target)))
         return OS1_ERR_INVALID;
     OpenInstance* replaced = nullptr;
     int target = r.target;
@@ -165,10 +172,13 @@ long descriptor_duplicate(DescriptorTable& table, int fd, const os1_duplicate_re
         if(!valid_fd(fd) || !table.entries[fd].instance)
             return OS1_ERR_BAD_DESCRIPTOR;
         const auto source = table.entries[fd];
+        if(r.descendant_rights & ~source.descendant_rights)
+            return OS1_ERR_ACCESS;
         if(!(source.rights & OS1_RIGHT_DELEGATE) || (r.rights & ~source.rights))
             return OS1_ERR_ACCESS;
         if(target == fd)
-            return (r.rights == source.rights && r.descriptor_flags == source.flags)
+            return (r.rights == source.rights && r.descriptor_flags == source.flags &&
+                    r.descendant_rights == source.descendant_rights)
                        ? fd
                        : OS1_ERR_INVALID;
         if(target == -1)
@@ -184,10 +194,20 @@ long descriptor_duplicate(DescriptorTable& table, int fd, const os1_duplicate_re
         }
         instance_retain(source.instance);
         replaced = table.entries[target].instance;
-        table.entries[target] = {source.instance, r.rights, r.descriptor_flags};
+        table.entries[target] = {
+            source.instance, r.rights, r.descriptor_flags, r.descendant_rights};
     }
     instance_release(replaced);
     return target;
+}
+long descriptor_duplicate(DescriptorTable& table, int fd, const os1_duplicate_request& r)
+{
+    if(r.version != OS1_RESOURCE_ABI_VERSION || r.size != sizeof(r) || r.reserved)
+        return OS1_ERR_INVALID;
+    // Legacy duplication carries no descendant factory authority.
+    const os1_scoped_duplicate_request scoped{
+        OS1_VFS_ABI_VERSION, sizeof(scoped), r.target, r.rights, r.descriptor_flags, 0, {0, 0}};
+    return descriptor_duplicate_scoped(table, fd, scoped);
 }
 long descriptor_query(DescriptorTable& table, int fd, os1_resource_info& result)
 {
@@ -232,7 +252,8 @@ long descriptor_set_status(DescriptorTable& table, int fd, uint32_t flags)
     if(status < 0)
         return status;
     InstanceRef retained(instance);
-    if(!(instance->object->interfaces & OS1_INTERFACE_BYTE_INPUT))
+    if(instance->object->kind != OS1_OBJECT_CONSOLE ||
+       !(instance->object->interfaces & OS1_INTERFACE_BYTE_INPUT))
         return OS1_ERR_UNSUPPORTED;
     atomic_store_release(&instance->status_flags, flags);
     return 0;
@@ -291,5 +312,23 @@ long descriptor_bootstrap_console(DescriptorTable& table)
             return result;
         }
     }
+    return 0;
+}
+
+long descriptor_acquire_entry(DescriptorTable& table,
+                              int fd,
+                              uint32_t rights,
+                              DescriptorEntry& result)
+{
+    result = {};
+    IrqSpinGuard guard(table.lock);
+    if(table.closed)
+        return OS1_ERR_CLOSED;
+    if(!valid_fd(fd) || !table.entries[fd].instance)
+        return OS1_ERR_BAD_DESCRIPTOR;
+    if(rights & ~table.entries[fd].rights)
+        return OS1_ERR_ACCESS;
+    result = table.entries[fd];
+    instance_retain(result.instance);
     return 0;
 }

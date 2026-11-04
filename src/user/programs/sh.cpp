@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <os1/syscall.hpp>
+#include <os1/vfs.hpp>
 
 namespace
 {
@@ -954,9 +955,9 @@ void write_spawn_outcome(const char* command, long pid, int status)
 
 void run_exec(size_t argc, char* argv[kShellMaxTokens])
 {
-    if(argc != 2)
+    if(argc < 2)
     {
-        write_string("usage: exec <path>\n");
+        write_string("usage: exec <path> [args...]\n");
         return;
     }
 
@@ -972,14 +973,15 @@ void run_exec(size_t argc, char* argv[kShellMaxTokens])
     write_string("shell exec start ");
     write_string(path);
     write_char('\n');
-    const long result = os1::user::exec(path);
+    const long result = os1::user::run_program(path, argc - 1, argv + 1, true);
     write_string("shell exec returned ");
     write_signed(result);
     write_char('\n');
 }
 
-void run_external(const char* command)
+void run_external(size_t argc, char** argv)
 {
+    const char* command = argv[0];
     char path[OS1_OBSERVE_INITRD_PATH_BYTES];
     if(!resolve_command_path(command, path, sizeof(path)))
     {
@@ -987,7 +989,7 @@ void run_external(const char* command)
         return;
     }
 
-    const long pid = os1::user::spawn(path);
+    const long pid = os1::user::run_program(path, argc, argv);
     if(pid < 0)
     {
         run_unknown(command);
@@ -1008,7 +1010,7 @@ void run_external(const char* command)
 }
 }  // namespace
 
-int main(void)
+int main(int, char**)
 {
     char line[kShellLineBytes];
     char* tokens[kShellMaxTokens];
@@ -1098,7 +1100,7 @@ int main(void)
         }
         else
         {
-            run_external(tokens[0]);
+            run_external(argc, tokens);
         }
     }
 }

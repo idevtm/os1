@@ -407,6 +407,11 @@ bool prepare_scheduler_timer()
         finish_boot_sequence_thread(1);
     }
 
+    if(initialize_initrd_namespace() < 0)
+    {
+        write_console_line("invalid initrd namespace");
+        finish_boot_sequence_thread(1);
+    }
     Thread* init_thread =
         load_user_program(page_frames, g_kernel_root_cr3, "/bin/init", nullptr, false);
     if(nullptr == init_thread)

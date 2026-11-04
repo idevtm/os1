@@ -138,7 +138,7 @@ bool observe_balanced_runqs(uint32_t& delta, uint64_t& total_runq, uint64_t& mig
 }
 }  // namespace
 
-int main(void)
+int main(int, char**)
 {
     uint64_t pids[kWorkerCount] = {};
     uint32_t started = 0;

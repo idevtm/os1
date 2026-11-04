@@ -7,8 +7,9 @@ extension profiles remain unfrozen. This document specifies the namespace and
 file profile of the [native object kernel contract](native_object_kernel_contract.md).
 The [approval record](native_object_kernel_contract.md#approved-decisions--2026-11-04)
 defines the accepted scope. Requirements below describe the intended interface;
-they do not claim that a VFS, handle table, credentials, or these operations are
-implemented. The
+the console and immutable initrd subset now has an
+[implemented ABI](../initrd-vfs-abi.md). Credentials and extension profiles remain
+unimplemented. The
 [draft index](README.md) separates the proposal from current source behavior.
 
 The native contract owns descriptor representation, rights, argument/result

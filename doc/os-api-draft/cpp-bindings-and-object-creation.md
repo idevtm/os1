@@ -7,6 +7,10 @@ owned descriptor/proxy wrappers release their entries with RAII. The
 [native contract](native_object_kernel_contract.md) owns semantics; this document
 shows their C++ expression, including later reflection and service work.
 
+For compiled first-slice C++ examples, see the [implemented VFS/startup ABI](../initrd-vfs-abi.md)
+and `src/user/programs/ls.cpp`, `cat.cpp`, and `vfscheck.cpp`. The typed service
+SDK and generated `.so` flow below remain proposals.
+
 ## 1. Listing a directory
 
 Use an explicitly granted directory, open a separate enumeration instance, and

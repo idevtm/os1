@@ -91,7 +91,7 @@ bool observe_acpi_probe(Os1ObserveAcpiRecord& record)
 }
 }  // namespace
 
-int main(void)
+int main(int, char**)
 {
     Os1ObserveAcpiRecord record{};
     if(!observe_acpi_probe(record))

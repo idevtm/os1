@@ -126,7 +126,7 @@ bool observed_child_pair(uint64_t first_pid,
 }
 }  // namespace
 
-int main(void)
+int main(int, char**)
 {
     const long first_pid_long = os1::user::spawn(kBusyYieldPath);
     if(first_pid_long < 0)

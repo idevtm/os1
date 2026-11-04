@@ -816,6 +816,7 @@ set(OS1_SMOKE_REJECT_MARKERS
   "[user/smpcheck] fail"
   "[user/acpiprobe] fail"
   "[user/fdcheck] fail"
+  "[user/vfscheck] fail"
   "[user/copycheck] fail"
 )
 
@@ -848,6 +849,9 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "shell spawn fault ok pid=::nope\\n"
   "unknown command: nope::copycheck\\n"
   "shell spawn copycheck ok pid=::fdcheck\\n"
+  "shell spawn fdcheck ok pid=::ls /bin\\n"
+  "shell spawn ls ok pid=::cat /etc/motd\\n"
+  "shell spawn cat ok pid=::vfscheck\\n"
 )
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
@@ -1146,6 +1150,12 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "[user/fdcheck] duplicate output"
     "[user/fdcheck] ok"
     "shell spawn fdcheck ok pid="
+    "shell spawn ls ok pid="
+    "os1: native initrd file reads work."
+    "shell spawn cat ok pid="
+    "[user/vfscheck] restricted child ok"
+    "[user/vfscheck] ok"
+    "shell spawn vfscheck ok pid="
     "idle thread online"
   )
 
@@ -1448,6 +1458,12 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "[user/fdcheck] duplicate output"
     "[user/fdcheck] ok"
     "shell spawn fdcheck ok pid="
+    "shell spawn ls ok pid="
+    "os1: native initrd file reads work."
+    "shell spawn cat ok pid="
+    "[user/vfscheck] restricted child ok"
+    "[user/vfscheck] ok"
+    "shell spawn vfscheck ok pid="
     "idle thread online"
   )
 

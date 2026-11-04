@@ -249,3 +249,62 @@ void copy_cpio_newc_path(char* destination, size_t destination_size, const char*
         destination[index++] = 0;
     }
 }
+
+bool for_each_cpio_newc_entry(const uint8_t* archive,
+                              uint64_t size,
+                              CpioNewcEntryVisitor visit,
+                              void* context)
+{
+    if(!archive || !visit)
+        return false;
+    uint64_t offset = 0;
+    while(offset <= size && size - offset >= sizeof(CpioNewcHeader))
+    {
+        const auto& h = *reinterpret_cast<const CpioNewcHeader*>(archive + offset);
+        if(!magic_matches(h))
+            return false;
+        uint32_t fields[13]{};
+        const char* text = reinterpret_cast<const char*>(&h) + 6;
+        for(unsigned i = 0; i < 13; ++i)
+            if(!parse_hex(text + i * 8, 8, fields[i]))
+                return false;
+        const uint32_t mode = fields[1], links = fields[4], bytes = fields[6], names = fields[11];
+        if(!names || names > 4097 || fields[12])
+            return false;
+        const uint64_t name_start = offset + sizeof(h);
+        if(names > size - name_start)
+            return false;
+        const char* name = reinterpret_cast<const char*>(archive + name_start);
+        if(name[names - 1])
+            return false;
+        for(uint32_t i = 0; i + 1 < names; ++i)
+            if(!name[i])
+                return false;
+        uint64_t data_start = 0, next = 0;
+        if(!align_up_checked(name_start + names, 4, data_start) || data_start > size ||
+           bytes > size - data_start || !align_up_checked(data_start + bytes, 4, next) ||
+           next > size)
+            return false;
+        constexpr char trailer[] = "TRAILER!!!";
+        bool end = names == sizeof(trailer);
+        for(size_t i = 0; end && i < sizeof(trailer); ++i)
+            end = name[i] == trailer[i];
+        if(end)
+        {
+            if(bytes || mode)
+                return false;
+            for(uint64_t i = next; i < size; ++i)
+                if(archive[i])
+                    return false;
+            return true;
+        }
+        const uint32_t kind = mode & 0170000u;
+        if((kind != 0100000u && kind != 0040000u) || (kind == 0100000u && links != 1) ||
+           (kind == 0040000u && bytes))
+            return false;
+        if(!visit(name, names - 1, kind, archive + data_start, bytes, context))
+            return false;
+        offset = next;
+    }
+    return false;
+}
