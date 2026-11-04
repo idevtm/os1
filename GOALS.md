@@ -259,7 +259,7 @@ Later modularization is acceptable where it clearly improves structure, but earl
 
 ### Kernel and userland separation
 
-The project has already crossed the first protected-userland threshold: it boots through a minimal `/bin/init` that immediately `exec`s `/bin/sh`, can load statically linked user ELF programs from an initrd, services a small but real syscall ABI, and has demonstrated killing and reaping a faulting child without panicking the kernel. The [current review](doc/2026-11-03-review.md) also identifies a child-publication race and retains an unresolved intermittent BIOS child-launch fault. Closing those correctness gaps precedes expanding the process model.
+The project has already crossed the first protected-userland threshold: it boots through a minimal `/bin/init` that immediately `exec`s `/bin/sh`, can load statically linked user ELF programs from an initrd, services a small but real syscall ABI, and has demonstrated killing and reaping a faulting child without panicking the kernel. The [console descriptor milestone](doc/2026-11-04-console-descriptor-implementation-plan.md) fixes the child-publication race and adds descriptor ownership and exec cleanup. The intermittent BIOS child-launch fault retained in the [project review](doc/2026-11-03-review.md) is not conclusively explained by passing regressions.
 
 Required eventual capabilities:
 
@@ -288,7 +288,7 @@ Core native-interface goals:
 
 Where practical, POSIX compatibility should be implemented as a compatibility layer or mapping over these native primitives rather than treated as the only system model the kernel may expose.
 
-These are design goals, not implemented contracts. The [API drafts](doc/os-api-draft/README.md) and [unified architecture review](doc/os-api-draft/2026-05-10-unified-os-api-architecture-review.md) record approval on 2026-11-04 of the first-slice descriptor, ownership/waiting, startup, interface, and namespace/I/O semantics, including one fd-shaped table with native object entries and rights. Concrete ABI encoding and implementation remain pending. The first implementation should establish only the resource lifetime and access rules needed for console descriptors and a read-only initrd VFS. Reflection, properties, and event interfaces remain later design work.
+These are broader design goals. The [API drafts](doc/os-api-draft/README.md) and [unified architecture review](doc/os-api-draft/2026-05-10-unified-os-api-architecture-review.md) record approval on 2026-11-04 of the first-slice descriptor, ownership/waiting, startup, interface, and namespace/I/O semantics. The [console descriptor ABI](doc/console-descriptor-abi.md) now implements one process table with native objects, rights, close/dup/query, flags, bounded I/O, and retained wait references. The next milestone extends that foundation to a read-only initrd VFS and native process startup. Reflection, properties, and event interfaces remain later design work; the full native contract is not implemented or a frozen ABI.
 
 ### Process and scheduling model
 
@@ -312,7 +312,7 @@ SMP should come early enough to shape:
 
 The implementation may still progress through simpler intermediate steps, but the architecture should not assume that single-core is the long-term model.
 
-That first SMP baseline now exists on `x86_64`: APs run per-CPU idle threads, take LAPIC timer ticks, use per-CPU run queues, accept remote wakeups via reschedule IPIs, and participate in load-balanced user-thread scheduling. The next priority is process publication and teardown correctness, including address-space reclamation and allocation-failure handling. Device-IRQ steering, lock-order enforcement, and policy refinement remain follow-ups.
+That first SMP baseline now exists on `x86_64`: APs run per-CPU idle threads, take LAPIC timer ticks, use per-CPU run queues, accept remote wakeups via reschedule IPIs, and participate in load-balanced user-thread scheduling. The console milestone adds publication, retained-wait, and mapping-allocation rollback regressions. Shared-address-space reclamation and general invalidation completion remain prerequisites for wider concurrency. Device-IRQ steering, lock-order enforcement, and policy refinement remain follow-ups.
 
 ### Security model
 
