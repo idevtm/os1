@@ -817,6 +817,8 @@ set(OS1_SMOKE_REJECT_MARKERS
   "[user/acpiprobe] fail"
   "[user/fdcheck] fail"
   "[user/vfscheck] fail"
+  "[user/ipccheck] fail"
+  "intf: invalid"
   "[user/copycheck] fail"
 )
 
@@ -852,6 +854,8 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "shell spawn fdcheck ok pid=::ls /bin\\n"
   "shell spawn ls ok pid=::cat /etc/motd\\n"
   "shell spawn cat ok pid=::vfscheck\\n"
+  "shell spawn vfscheck ok pid=::ipccheck\\n"
+  "shell spawn ipccheck ok pid=::intf /bin/textprocessor\\n"
 )
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
@@ -1156,6 +1160,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "[user/vfscheck] restricted child ok"
     "[user/vfscheck] ok"
     "shell spawn vfscheck ok pid="
+    "[user/ipccheck] ok"
+    "shell spawn ipccheck ok pid="
+    "interface TextProcessor id="
+    "method lowercase id=1 input=2 output=2 implemented"
+    "property set enabled id=4 input=3 output=3 implemented"
+    "event progress id=6 input=4 output=0 metadata-only"
+    "shell spawn intf ok pid="
     "idle thread online"
   )
 
@@ -1464,6 +1475,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "[user/vfscheck] restricted child ok"
     "[user/vfscheck] ok"
     "shell spawn vfscheck ok pid="
+    "[user/ipccheck] ok"
+    "shell spawn ipccheck ok pid="
+    "interface TextProcessor id="
+    "method lowercase id=1 input=2 output=2 implemented"
+    "property set enabled id=4 input=3 output=3 implemented"
+    "event progress id=6 input=4 output=0 metadata-only"
+    "shell spawn intf ok pid="
     "idle thread online"
   )
 

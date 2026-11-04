@@ -1,12 +1,15 @@
 # Hosted-object IPC design and implementation sequence
 
-Status: design direction approved on 2026-11-04; **not implemented or a frozen
-UAPI**. This profile owns the IPC implementation plan under the
+Status: design direction approved on 2026-11-04. The first copied IPC prototype
+is implemented; the broader design remains unfrozen. The concrete
+[copied IPC ABI](../copied-ipc-abi.md) specifies numeric operations, records,
+quotas, locking, private TextProcessor, and offline `intf` inspection. Events
+are metadata-only; deadlines, supervision, attachments, and shared memory remain
+future work. This profile owns the sequence under the
 [native object contract](native_object_kernel_contract.md#8-later-hosted-service-contract).
-The [ELF/service profile](elf_interface_spec.md) owns image metadata and provider
-activation; [C++ examples](cpp-bindings-and-object-creation.md#8-synchronous-and-asynchronous-ipc)
-show bindings. Numeric operations, record layouts, quotas, and lock ordering
-still need a concrete implementation specification.
+The [ELF/service profile](elf_interface_spec.md) owns later metadata/activation;
+[C++ examples](cpp-bindings-and-object-creation.md#8-synchronous-and-asynchronous-ipc)
+show the proposed SDK.
 
 ## 1. One protocol, independent waiting and data transport
 
@@ -41,7 +44,8 @@ Endpoints and Operations use the existing descriptor/open-instance ownership
 model. Reply authority is kernel-validated and bound to the receiving endpoint
 and request incarnation; knowing a request ID alone grants no reply permission.
 Whether it is exposed as a descriptor or an endpoint-scoped receipt is a UAPI
-choice, with an explicit budget either way.
+choice, with an explicit budget either way. The implemented prototype selects
+an endpoint-scoped generation/request receipt, not a separate reply descriptor.
 
 A supervisor creates a channel pair, grants the provider endpoint through the
 existing explicit child map, and closes its own copy of that endpoint. Otherwise
@@ -194,6 +198,12 @@ mutable metadata is untrusted even after validation; avoid check/use races.
 Benchmark copying and syscall costs before accepting this extra machinery.
 
 ## 8. Implementation sequence and acceptance
+
+The first implementation covers copied transport, retained Operations, both call
+styles, and private TextProcessor. Example properties and offline metadata were
+brought forward; runtime events remain deferred by user choice. The
+[dated record](../2026-11-04-copied-ipc-implementation-plan.md) records actual
+validation without claiming all later acceptance gates.
 
 | Step | Deliverable | Acceptance evidence |
 | --- | --- | --- |

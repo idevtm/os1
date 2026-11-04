@@ -37,7 +37,10 @@ enum class ThreadWaitReason : uint32_t
     ChildExit = 2,
     BlockIo = 3,
     VfsIo = 4,
+    Ipc = 5,
 };
+
+struct IpcWaitState { OpenInstance* instance = nullptr; };
 
 struct VfsIoWaitState
 {
@@ -73,6 +76,7 @@ struct ThreadWaitState
     {
         ConsoleReadWaitState console_read;
         VfsIoWaitState vfs;
+        IpcWaitState ipc;
         ChildExitWaitState child_exit;
         BlockIoWaitState block_io;
     };

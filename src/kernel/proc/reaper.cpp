@@ -3,6 +3,7 @@
 // re-enters the kernel.
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "syscall/vfs.hpp"
+#include "ipc/channel.hpp"
 #include "handoff/memory_layout.h"
 #include "proc/thread.hpp"
 #include "syscall/wait.hpp"
@@ -54,6 +55,7 @@ void reap_dead_threads(PageFrameContainer& frames)
 
         cancel_console_read(thread);
         cancel_vfs_wait(thread);
+        cancel_ipc_wait(thread);
         if(atomic_load_acquire(&thread->io_pins) != 0) continue;
 
         // Thread teardown is deferred until some *other* thread enters the kernel.

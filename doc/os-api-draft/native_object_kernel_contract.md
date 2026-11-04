@@ -495,8 +495,10 @@ Caller waiting policy and payload transport are independent choices.
 
 The [IPC implementation profile](ipc-transport-design.md) owns resource mechanics,
 bootstrap, failure histories, shared-memory prerequisites, and the ordered
-acceptance gates. This is approved design direction, not implemented IPC or an
-assigned wire ABI. Class-controlled object selection is unchanged.
+acceptance gates. The narrower [copied IPC ABI](../copied-ipc-abi.md) now
+implements private endpoints, retained Operations, TextProcessor methods and
+properties, and offline metadata inspection. Runtime events, supervision, and
+attachments remain later gates. Class-controlled object selection is unchanged.
 
 ### Calls, values, and authority
 

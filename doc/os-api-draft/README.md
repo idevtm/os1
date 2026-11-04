@@ -54,8 +54,8 @@ The six [first-slice decision groups](native_object_kernel_contract.md#approved-
 were approved on 2026-11-04: descriptor ABI, ownership/synchronization, blocking
 and teardown, process startup, initial interfaces, and namespace/I/O behavior.
 The IPC design direction and implementation sequence are also approved on
-2026-11-04; implementation, concrete wire encodings, and reflection remain future
-work. Numeric UAPI assignments, layouts, resource budgets, and the startup record are now specified
+2026-11-04. The [copied IPC prototype](../copied-ipc-abi.md) now assigns a bounded
+wire encoding and implements private TextProcessor; general reflection remains future work. Numeric UAPI assignments, layouts, resource budgets, and the startup record are now specified
 in the implemented ABI documents; later-service encodings remain open. The
 [acceptance matrix](2026-05-10-unified-os-api-architecture-review.md#implementation-sequence-and-acceptance)
 separates first-slice requirements from later service/event gates.
@@ -69,8 +69,11 @@ and executable-reference launch. C++ `ls`, `cat`, and the restricted `vfscheck`
 child exercise the implementation on both boot paths. Legacy pathname launch
 uses existing namespace grants; it cannot recover a global root.
 
-Hosted RPC, reflection, dynamic binding, class construction, sockets/PTYs, and
-credential policy remain unimplemented. The [2026-11-03 project review](../2026-11-03-review.md)
+The [copied IPC ABI](../copied-ipc-abi.md) adds private endpoints, retained
+Operations, synchronous/asynchronous calls, TextProcessor methods/properties,
+and offline `intf /bin/textprocessor` inspection. Progress events are metadata-only.
+Supervised/shared hosted services, runtime reflection, dynamic binding, general
+class construction, sockets/PTYs, and credential policy remain unimplemented. The [2026-11-03 project review](../2026-11-03-review.md)
 remains the latest whole-project review; the [VFS implementation record](../2026-11-04-initrd-vfs-implementation-plan.md)
 updates this milestone without claiming a new whole-project audit. Passive
 observation, exception-stack allocation failure, and hardware qualification still

@@ -2,6 +2,7 @@
 #include "core/irq_dispatch.hpp"
 
 #include "syscall/vfs.hpp"
+#include "ipc/channel.hpp"
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/apic/lapic.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
@@ -60,6 +61,7 @@ void account_scheduler_tick()
 
 Thread* handle_irq(TrapFrame* frame)
 {
+    ipc_drain_wakeups();
     const uint8_t vector = static_cast<uint8_t>(frame->vector);
     const int irq = legacy_irq_from_vector(vector);
     const bool scheduler_tick = timer_vector_is_scheduler_tick(vector);

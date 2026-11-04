@@ -22,8 +22,12 @@ process entries, rights, duplication, close, flags, and retained I/O references.
 The [dated implementation plan](doc/2026-11-04-console-descriptor-implementation-plan.md)
 records validation. The [initrd VFS and native startup milestone](doc/initrd-vfs-abi.md)
 adds directory/file descriptors, `ls`, `cat`, bounded argv/environment handoff,
-explicit child grants, and executable-reference launch. Credentials, hosted
-services, persistent filesystems, and a general network stack remain future work.
+explicit child grants, and executable-reference launch. The
+[copied IPC prototype](doc/copied-ipc-abi.md) adds retained Operations and a private
+`textprocessor` with methods/properties, exercised by `ipccheck`.
+`intf /bin/textprocessor` prints interface records from the binary without running it.
+Events are metadata-only. Credentials, supervised/shared services, persistent
+filesystems, and a general network stack remain future work.
 
 ## Prerequisites
 

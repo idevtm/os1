@@ -1,7 +1,11 @@
 # ELF Interface Metadata and Hosted-Service Profile
 
 Status: revised later-stage proposal, 2026-11-04. **Not implemented or a frozen
-file format, wire ABI, or runtime API.**
+file format, wire ABI, or runtime API.** The narrower
+[copied IPC prototype](../copied-ipc-abi.md#offline-interface-records-and-intf)
+implements versioned flat records in `/bin/textprocessor` and offline `intf`
+inspection. It does not implement the general schema, binding generator, or
+activation protocol proposed here.
 
 The [native contract](native_object_kernel_contract.md) owns descriptor,
 authority, process, and hosted-service semantics. Descriptors, console I/O,

@@ -23,6 +23,8 @@ SECTIONS
     *(.rodata*)
   } :rodata
 
+  .os.interface : { KEEP(*(.os.interface)) } :rodata
+
   . = ALIGN(4096);
 
   .data :

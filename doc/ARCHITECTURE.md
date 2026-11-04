@@ -918,6 +918,7 @@ Current user programs:
 - `/bin/balancecheck` — user-visible run-queue balance verifier built from [`src/user/programs/balancecheck.cpp`](../src/user/programs/balancecheck.cpp)
 - `/bin/smpcheck` — observe-driven SMP state verifier built from [`src/user/programs/smpcheck.cpp`](../src/user/programs/smpcheck.cpp)
 - `/bin/fault` — deliberate page-fault probe built from [`src/user/programs/fault.cpp`](../src/user/programs/fault.cpp)
+- `/bin/textprocessor`, `/bin/ipccheck`, and `/bin/intf` — private copied IPC, retained Operations, methods/properties, and offline interface inspection; progress events are metadata-only. See [the concrete ABI](copied-ipc-abi.md).
 - `/bin/ls`, `/bin/cat`, and `/bin/vfscheck` — directory/file operations, argument forwarding, and restricted native child launch.
 - `/bin/fdcheck` and `/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
 - `/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
@@ -1159,7 +1160,7 @@ Major constraints that remain:
 
 The [initrd VFS milestone](2026-11-04-initrd-vfs-implementation-plan.md) now implements read-only namespace access and bounded argument/environment handoff. Hosted-service design follows this foundation. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
 
-- define the first bounded hosted-service channel, READY handshake, failure outcomes, and authority transfer before implementing the broader reflective object model (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md))
+- extend the [implemented copied IPC prototype](copied-ipc-abi.md) with a second fixed protocol, timed waits/supervision, runtime events, and authority transfer before implementing the broader reflective object model (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md))
 - evolve `init` into an explicit supervisor using the implemented startup record and child grants
 - extend the existing allocated VFS node lifetime model to persistent filesystem state and packet buffers as those providers land
 - per-page user-buffer scatter-gather and DMA pinning, once the user-process side of the storage path needs them; bounded multi-sector requests already work today through a single contiguous data descriptor

@@ -8,6 +8,7 @@
 #include "console/console.hpp"
 #include "core/kernel_state.hpp"
 #include "proc/startup.hpp"
+#include "ipc/channel.hpp"
 #include "proc/thread.hpp"
 #include "sched/scheduler.hpp"
 #include "syscall/abi.hpp"
@@ -26,6 +27,7 @@ Thread* handle_syscall(TrapFrame* frame)
         return nullptr;
     }
 
+    ipc_drain_wakeups();
     switch(frame->rax)
     {
         case os1_sys_write:
@@ -53,6 +55,10 @@ Thread* handle_syscall(TrapFrame* frame)
                 frame->rdi, frame->rsi, frame->rdx));
             if(static_cast<long>(frame->rax) == kVfsBlocked)
                 return schedule_next(false);
+            return thread;
+        case os1_sys_ipc:
+            frame->rax = static_cast<uint64_t>(sys_ipc(page_frames, thread, frame->rdi, frame->rsi, frame->rdx));
+            if(static_cast<long>(frame->rax) == kIpcBlocked) return schedule_next(false);
             return thread;
         case os1_sys_launch:
             frame->rax = static_cast<uint64_t>(sys_launch({.frames = &page_frames,

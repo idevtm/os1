@@ -81,6 +81,7 @@ set_target_properties(
 target_compile_options(os1_acpica PRIVATE -O2 -w)
 
 add_library(os1_host_support
+  "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
   support/cpu_stubs.cpp
   support/console_input_stub.cpp
   "${OS1_REPO_ROOT}/src/kernel/vfs/initrd.cpp"
@@ -154,6 +155,7 @@ target_include_directories(os1_host_support SYSTEM PUBLIC
 )
 
 add_executable(os1_host_tests
+  common/interface_tests.cpp
   common/elf64_tests.cpp
   common/freestanding_string_tests.cpp
   fs/cpio_newc_tests.cpp
@@ -185,6 +187,7 @@ add_executable(os1_host_tests
   mm/virtual_memory_tests.cpp
   proc/task_registry_tests.cpp
   proc/user_elf_tests.cpp
+  syscall/ipc_tests.cpp
   syscall/vfs_tests.cpp
   syscall/resource_tests.cpp
   syscall/observe_abi_tests.cpp

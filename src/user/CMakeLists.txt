@@ -34,6 +34,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       -Wextra
       "-I${CMAKE_CURRENT_SOURCE_DIR}/include"
       "-I${PROJECT_SOURCE_DIR}/src/uapi"
+      "-I${PROJECT_SOURCE_DIR}/src/common"
       -nostdlib
       -nostartfiles
       -nodefaultlibs
@@ -54,6 +55,11 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/startup.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/vfs.hpp"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
+      "${PROJECT_SOURCE_DIR}/src/uapi/os1/ipc.h"
+      "${PROJECT_SOURCE_DIR}/src/common/interface/metadata.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/interface/textprocessor.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/elf/elf64.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/ipc.hpp"
       "${USER_LINKER_SCRIPT}"
     VERBATIM
   )
@@ -82,6 +88,10 @@ os1_add_user_cxx_program(cat "${CMAKE_CURRENT_SOURCE_DIR}/programs/cat.cpp" OS1_
 
 os1_add_user_cxx_program(vfscheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/vfscheck.cpp" OS1_USER_VFSCHECK_ELF)
 
+os1_add_user_cxx_program(textprocessor "${CMAKE_CURRENT_SOURCE_DIR}/programs/textprocessor.cpp" OS1_USER_TEXTPROCESSOR_ELF)
+os1_add_user_cxx_program(ipccheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/ipccheck.cpp" OS1_USER_IPCCHECK_ELF)
+os1_add_user_cxx_program(intf "${CMAKE_CURRENT_SOURCE_DIR}/programs/intf.cpp" OS1_USER_INTF_ELF)
+
 add_custom_command(
   OUTPUT "${OS1_INITRD_CPIO}"
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${USER_STAGE_DIR}"
@@ -91,6 +101,9 @@ add_custom_command(
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_FDEXEC_ELF}" "${USER_STAGE_DIR}/bin/fdexec"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_LS_ELF}" "${USER_STAGE_DIR}/bin/ls"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_VFSCHECK_ELF}" "${USER_STAGE_DIR}/bin/vfscheck"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_TEXTPROCESSOR_ELF}" "${USER_STAGE_DIR}/bin/textprocessor"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_IPCCHECK_ELF}" "${USER_STAGE_DIR}/bin/ipccheck"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INTF_ELF}" "${USER_STAGE_DIR}/bin/intf"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_CAT_ELF}" "${USER_STAGE_DIR}/bin/cat"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INIT_ELF}" "${USER_STAGE_DIR}/bin/init"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_SH_ELF}" "${USER_STAGE_DIR}/bin/sh"
@@ -108,13 +121,18 @@ add_custom_command(
     "-DSTAGE_DIR=${USER_STAGE_DIR}"
     "-DOUTPUT_FILE=${OS1_INITRD_CPIO}"
     "-DCPIO_EXECUTABLE=${OS1_CPIO_EXECUTABLE}"
+    "-DSTRIP_EXECUTABLE=${CMAKE_STRIP}"
     -P
     "${PROJECT_SOURCE_DIR}/cmake/scripts/create_initrd.cmake"
   DEPENDS
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/create_initrd.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/data/motd"
     "${OS1_USER_FDCHECK_ELF}"
     "${OS1_USER_FDEXEC_ELF}"
     "${OS1_USER_LS_ELF}"
+    "${OS1_USER_TEXTPROCESSOR_ELF}"
+    "${OS1_USER_IPCCHECK_ELF}"
+    "${OS1_USER_INTF_ELF}"
     "${OS1_USER_CAT_ELF}"
     "${OS1_USER_VFSCHECK_ELF}"
     "${OS1_USER_INIT_ELF}"
@@ -132,6 +150,9 @@ add_custom_command(
 )
 
 add_custom_target(user_programs DEPENDS
+  "${OS1_USER_TEXTPROCESSOR_ELF}"
+  "${OS1_USER_IPCCHECK_ELF}"
+  "${OS1_USER_INTF_ELF}"
   "${OS1_USER_VFSCHECK_ELF}"
   "${OS1_USER_CAT_ELF}"
   "${OS1_USER_LS_ELF}"

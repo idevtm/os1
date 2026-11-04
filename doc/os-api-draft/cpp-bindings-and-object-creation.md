@@ -9,7 +9,12 @@ shows their C++ expression, including later reflection and service work.
 
 For compiled first-slice C++ examples, see the [implemented VFS/startup ABI](../initrd-vfs-abi.md)
 and `src/user/programs/ls.cpp`, `cat.cpp`, and `vfscheck.cpp`. The typed service
-SDK and generated `.so` flow below remain proposals.
+SDK and generated `.so` flow below remain proposals. For the implemented copied
+IPC prototype, see [the concrete ABI](../copied-ipc-abi.md),
+[ipccheck.cpp](../../src/user/programs/ipccheck.cpp),
+[textprocessor.cpp](../../src/user/programs/textprocessor.cpp), and
+[intf.cpp](../../src/user/programs/intf.cpp). These use handwritten bounded
+records; `progress` is metadata-only.
 
 ## 1. Listing a directory
 
