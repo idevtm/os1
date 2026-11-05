@@ -57,9 +57,9 @@ int main(int argc, char** argv)
         return true;
     };
     bool valid = read_elf(reader, info.byte_size, m);
-    close(fd);
     if(!valid)
     {
+        close(fd);
         print("intf: invalid or absent interface metadata\n");
         return 1;
     }
@@ -116,6 +116,39 @@ int main(int argc, char** argv)
         print(" output=");
         number(a.output);
         print(a.flags ? " implemented\n" : " metadata-only\n");
+    }
+    os1::constructor::Metadata ctor{};
+    const int found = constructor_metadata(fd, ctor);
+    close(fd);
+    if(found < 0)
+    {
+        print("intf: invalid constructor metadata\n");
+        return 1;
+    }
+    if(found)
+    {
+        print("constructor schema=");
+        number(ctor.schema_id);
+        print(" version=");
+        number(ctor.schema_version);
+        print(" size=");
+        number(ctor.payload_bytes);
+        print("\n");
+        for(unsigned i = 0; i < ctor.field_count; ++i)
+        {
+            const auto& f = ctor.fields[i];
+            print("  ");
+            print(f.name);
+            print(": ");
+            print(scalar(f.kind));
+            print(" offset=");
+            number(f.offset);
+            print(" default=");
+            number(f.default_value);
+            print(" cli=--");
+            print(f.option);
+            print("\n");
+        }
     }
     return 0;
 }

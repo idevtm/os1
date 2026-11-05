@@ -170,7 +170,7 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-set(OS1_INITRD_LOAD_ADDRESS 0x90000)
+set(OS1_INITRD_LOAD_ADDRESS 0x82000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -193,7 +193,13 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 128)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 192)
+# Keep the enlarged initrd below conventional-memory firmware/video space.
+set(OS1_INITRD_LOAD_LIMIT 0x9A000)
+math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
+if(OS1_INITRD_LOAD_END GREATER OS1_INITRD_LOAD_LIMIT)
+  message(FATAL_ERROR "BIOS initrd exceeds its low-memory load window")
+endif()
 # Real-hardware boot log area on the BIOS raw image. The loader saves the
 # previous boot's RAM log here before booting again. Everything stays below LBA
 # 2880 so the area remains reachable even when firmware emulates a USB stick as
@@ -818,6 +824,7 @@ set(OS1_SMOKE_REJECT_MARKERS
   "[user/fdcheck] fail"
   "[user/vfscheck] fail"
   "[user/ipccheck] fail"
+  "[user/countercheck] fail"
   "intf: invalid"
   "[user/copycheck] fail"
 )
@@ -856,6 +863,9 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "shell spawn cat ok pid=::vfscheck\\n"
   "shell spawn vfscheck ok pid=::ipccheck\\n"
   "shell spawn ipccheck ok pid=::intf /bin/textprocessor\\n"
+  "shell spawn intf ok pid=::countercheck\\n"
+  "shell spawn countercheck ok pid=::counter --initial 10 --ceiling 100\\n"
+  "shell spawn counter ok pid=::intf /bin/counter\\n"
 )
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
@@ -1165,8 +1175,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "interface TextProcessor id="
     "method lowercase id=1 input=2 output=2 implemented"
     "property set enabled id=4 input=3 output=3 implemented"
-    "event progress id=6 input=4 output=0 metadata-only"
+    "event progress id=6 input=4 output=0 implemented"
     "shell spawn intf ok pid="
+    "[user/countercheck] second client ok"
+    "[user/countercheck] ok"
+    "counter initial=10 ceiling=100"
+    "event changed id=5 input=2 output=0 implemented"
+    "initial: u64 offset=0 default=0 cli=--initial"
     "idle thread online"
   )
 
@@ -1480,8 +1495,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "interface TextProcessor id="
     "method lowercase id=1 input=2 output=2 implemented"
     "property set enabled id=4 input=3 output=3 implemented"
-    "event progress id=6 input=4 output=0 metadata-only"
+    "event progress id=6 input=4 output=0 implemented"
     "shell spawn intf ok pid="
+    "[user/countercheck] second client ok"
+    "[user/countercheck] ok"
+    "counter initial=10 ceiling=100"
+    "event changed id=5 input=2 output=0 implemented"
+    "initial: u64 offset=0 default=0 cli=--initial"
     "idle thread online"
   )
 

@@ -1,4 +1,5 @@
 #include "arch/x86_64/cpu/cpu.hpp"
+#include "ipc/channel.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "proc/startup.hpp"
@@ -124,9 +125,9 @@ protected:
     os1_launch_request launch_request()
     {
         os1_launch_request request{};
-        request.version = 1;
+        request.version = OS1_STARTUP_VERSION;
         request.size = sizeof(request);
-        request.startup.version = 1;
+        request.startup.version = OS1_STARTUP_VERSION;
         request.startup.size = sizeof(request.startup);
         request.startup.root_fd = request.startup.cwd_fd = -1;
         request.startup.argc = 2;
@@ -147,8 +148,8 @@ TEST(VfsAbi, LayoutsAndBounds)
     EXPECT_EQ(24u, sizeof(os1_seek_request));
     EXPECT_EQ(32u, sizeof(os1_file_info));
     EXPECT_EQ(32u, sizeof(os1_scoped_duplicate_request));
-    EXPECT_EQ(2208u, sizeof(os1_startup_record));
-    EXPECT_EQ(2608u, sizeof(os1_launch_request));
+    EXPECT_EQ(2480u, sizeof(os1_startup_record));
+    EXPECT_EQ(2880u, sizeof(os1_launch_request));
     EXPECT_EQ(16u, offsetof(os1_launch_request, startup));
     EXPECT_EQ(272u, OS1_DIRECTORY_RECORD_MAX);
 }
@@ -540,7 +541,7 @@ TEST_F(Vfs, NativeLaunchValidatesEnvelopesAndRejectsBadImagesWithoutChangingPare
     ASSERT_TRUE(copy_to_user(frames, thread, kRequest, &request, sizeof(request)));
     EXPECT_EQ(OS1_ERR_INVALID, sys_launch(context, fd, OS1_LAUNCH_SPAWN, kRequest));
     request = launch_request();
-    request.version = 2;
+    request.version = OS1_STARTUP_VERSION + 1;
     ASSERT_TRUE(copy_to_user(frames, thread, kRequest, &request, sizeof(request)));
     EXPECT_EQ(OS1_ERR_INVALID, sys_launch(context, fd, OS1_LAUNCH_SPAWN, kRequest));
 }
@@ -590,5 +591,64 @@ TEST_F(Vfs, ImageAllocationFailureIsDistinctAndRollsBackPageTables)
     EXPECT_EQ(0u, cr3);
     for(auto frame : held)
         EXPECT_TRUE(frames.free(frame));
+}
+
+TEST_F(Vfs, TypedStartupEnvelopeRejectsMalformedArguments)
+{
+    auto request = launch_request();
+    auto& args = request.startup.constructor;
+    args.schema_id = 42;
+    args.version = 1;
+    args.size = 16;
+    EXPECT_EQ(0, validate_startup(request.startup));
+    args.version = 0;
+    EXPECT_EQ(OS1_ERR_INVALID, validate_startup(request.startup));
+    args.version = 1;
+    args.size = 257;
+    EXPECT_EQ(OS1_ERR_INVALID, validate_startup(request.startup));
+    args.size = 16;
+    args.payload[16] = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, validate_startup(request.startup));
+    args.payload[16] = 0;
+    args.schema_id = 0;
+    EXPECT_EQ(OS1_ERR_INVALID, validate_startup(request.startup));
+}
+TEST_F(Vfs, PrivateProviderLaunchRestrictsGrantsAndCopiesConstructorData)
+{
+    ASSERT_EQ(0, sys_ipc(frames, thread, OS1_IPC_CREATE, 0, kBuffer));
+    os1_ipc_pair pair{};
+    ASSERT_TRUE(copy_from_user(frames, thread, kBuffer, &pair, sizeof(pair)));
+    auto request = launch_request();
+    request.grant_count = 1;
+    request.grants[0] = {pair.provider, 3, OS1_RIGHT_READ | OS1_RIGHT_WRITE, 0, 0, 0};
+    request.startup.constructor = {42, 1, 8, {10}};
+    long image = open("bin/tool", OS1_RIGHT_EXECUTE);
+    ASSERT_GE(image, 0);
+    ProcessSyscallContext context{.frames = &frames, .kernel_root_cr3 = thread->address_space_cr3};
+    request.startup.root_fd = 62;
+    ASSERT_TRUE(copy_to_user(frames, thread, kRequest, &request, sizeof(request)));
+    EXPECT_EQ(OS1_ERR_INVALID, sys_launch(context, image, OS1_LAUNCH_PRIVATE_PROVIDER, kRequest));
+    request.startup.root_fd = -1;
+    request.grants[0].source = pair.client;
+    ASSERT_TRUE(copy_to_user(frames, thread, kRequest, &request, sizeof(request)));
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED,
+              sys_launch(context, image, OS1_LAUNCH_PRIVATE_PROVIDER, kRequest));
+    request.grants[0].source = pair.provider;
+    ASSERT_TRUE(copy_to_user(frames, thread, kRequest, &request, sizeof(request)));
+    long pid = sys_launch(context, image, OS1_LAUNCH_PRIVATE_PROVIDER, kRequest);
+    ASSERT_GT(pid, 0);
+    Thread* child = nullptr;
+    for(auto* t = first_thread(); t; t = next_thread(t))
+        if(t->process->pid == static_cast<uint64_t>(pid))
+            child = t;
+    ASSERT_NE(nullptr, child);
+    EXPECT_TRUE(child->process->private_provider);
+    os1_startup_record startup{};
+    ASSERT_TRUE(copy_from_user(frames, child, child->frame.rdi, &startup, sizeof(startup)));
+    EXPECT_EQ(42u, startup.constructor.schema_id);
+    EXPECT_EQ(10, startup.constructor.payload[0]);
+    EXPECT_EQ(nullptr, child->process->descriptors.entries[0].instance);
+    EXPECT_EQ(nullptr, child->process->descriptors.entries[1].instance);
+    descriptor_close_all(child->process->descriptors);
 }
 }  // namespace

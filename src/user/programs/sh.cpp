@@ -992,7 +992,14 @@ void run_external(size_t argc, char** argv)
     const long pid = os1::user::run_program(path, argc, argv);
     if(pid < 0)
     {
-        run_unknown(command);
+        if(pid == OS1_ERR_INVALID)
+        {
+            write_string("invalid arguments or metadata: ");
+            write_string(command);
+            write_char('\n');
+        }
+        else
+            run_unknown(command);
         return;
     }
 

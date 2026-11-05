@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-#define OS1_STARTUP_VERSION 1u
+#define OS1_STARTUP_VERSION 2u
 #define OS1_ARGUMENT_LIMIT 16u
 #define OS1_ENVIRONMENT_LIMIT 16u
 #define OS1_STARTUP_STRING_BYTES 2048u
@@ -9,6 +9,14 @@
 #define OS1_BOOT_CWD_FD 63
 #define OS1_LAUNCH_SPAWN 0u
 #define OS1_LAUNCH_EXEC 1u
+#define OS1_LAUNCH_PRIVATE_PROVIDER 2u
+#define OS1_CONSTRUCTOR_BYTES 256u
+struct os1_constructor_args
+{
+    uint64_t schema_id;
+    uint32_t version, size;
+    uint8_t payload[OS1_CONSTRUCTOR_BYTES];
+};
 // RDI at _start points to this copied, writable user record. Offsets refer to
 // strings[], include terminating NULs in string_bytes, and never encode pointers.
 struct os1_startup_record
@@ -19,6 +27,7 @@ struct os1_startup_record
     uint32_t argv[OS1_ARGUMENT_LIMIT];
     uint32_t envp[OS1_ENVIRONMENT_LIMIT];
     char strings[OS1_STARTUP_STRING_BYTES];
+    struct os1_constructor_args constructor;
 };
 struct os1_child_grant
 {

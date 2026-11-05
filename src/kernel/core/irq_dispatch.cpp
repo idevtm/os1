@@ -79,6 +79,12 @@ Thread* handle_irq(TrapFrame* frame)
     if(scheduler_tick)
     {
         account_scheduler_tick();
+        if(cpu_on_boot())
+        {
+            const auto calibration = timer_source_lapic_calibration();
+            const uint32_t hz = calibration.frequency_hz ? calibration.frequency_hz : 1000;
+            ipc_timer_tick(1000000000ull / hz);
+        }
         scheduler_handle_timer_tick();
         if(cpu_on_boot())
         {
@@ -113,6 +119,11 @@ Thread* handle_irq(TrapFrame* frame)
         return nullptr;
     }
 
+    if(trap_frame_is_user(*frame) && ipc_stop_requested(current_thread()))
+    {
+        mark_current_thread_dying(OS1_PROVIDER_STOP_STATUS);
+        return schedule_next(false);
+    }
     if(scheduler_tick || reschedule_ipi)
     {
         if(!trap_frame_is_user(*frame) && current_thread()->user_mode)

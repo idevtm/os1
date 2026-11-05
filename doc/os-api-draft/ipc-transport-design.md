@@ -3,9 +3,10 @@
 Status: design direction approved on 2026-11-04. The first copied IPC prototype
 is implemented; the broader design remains unfrozen. The concrete
 [copied IPC ABI](../copied-ipc-abi.md) specifies numeric operations, records,
-quotas, locking, private TextProcessor, and offline `intf` inspection. Events
-are metadata-only; deadlines, supervision, attachments, and shared memory remain
-future work. This profile owns the sequence under the
+quotas, locking, private TextProcessor, and offline `intf` inspection. The
+[Counter/events extension](../counter-events-abi.md) adds a second protocol, typed
+construction, deadlines, volatile subscriptions, and restricted private supervision.
+Shared activation, attachments, and shared memory remain future work. This profile owns the sequence under the
 [native object contract](native_object_kernel_contract.md#8-later-hosted-service-contract).
 The [ELF/service profile](elf_interface_spec.md) owns later metadata/activation;
 [C++ examples](cpp-bindings-and-object-creation.md#8-synchronous-and-asynchronous-ipc)
@@ -146,28 +147,18 @@ application work is a runtime policy that must not require unbounded allocation.
 
 ## 6. Properties, events, and deadlines
 
-Properties use ordinary requests: a getter returns a snapshot/reference and a
-setter defines validation and atomicity. An expected revision may reject a stale
-write; related fields can be updated in one operation. Atomic increment remains
-a method rather than an implicit remote getter/setter pair. A watch operation
-must establish observation and its initial snapshot/revision atomically, or
-provide a documented sequence-based catch-up protocol, to avoid a subscription
-gap.
+Follow-up decisions approved and implemented 2026-11-05 are specified in the
+[Counter/events ABI](../counter-events-abi.md). Properties remain method-like
+operations with provider-side validation and serialized updates. Events broadcast
+to independent bounded subscription queues, only after registration, with explicit
+unsubscribe and loss reporting. There is no history or atomic initial snapshot;
+clients needing state explicitly call getters. Competing-worker queues are deferred.
+Event capacity remains separate from retained Operation completion storage.
 
-Events use bounded subscription queues with ordering, sequence/generation,
-overflow, and shutdown semantics. Coalescing is appropriate for progress when
-declared by that event. Keep event capacity separate from reply completion
-storage so event pressure cannot consume reserved completion capacity. Event
-callbacks execute only during explicit dispatch; Operation results remain
-queryable even when notifications overflow. Define unsubscribe and dispatch/drain
-barriers before callback captures can be destroyed.
-
-Timed waits and startup deadlines require a defined monotonic clock, units,
-overflow handling, timer queue, and race-safe timeout/completion arbitration.
-An initial untimed private prototype must be labelled as such; it does not pass
-the supervised service startup-hang gate. Timeout ends waiting, not execution.
-Terminating and reaping a hung owned provider requires explicit supervisor
-support; the current kernel has no public external-kill API.
+Absolute monotonic deadlines end waits, not accepted work. Private provider stop
+is parent-authorized and completes at safe execution boundaries, including APs
+without periodic timer ticks. Shared service supervision, snapshot/watch protocols,
+cancellation, attachments, and shared mappings have separate later gates.
 
 ## 7. Capability attachments and shared memory
 
@@ -201,7 +192,9 @@ Benchmark copying and syscall costs before accepting this extra machinery.
 
 The first implementation covers copied transport, retained Operations, both call
 styles, and private TextProcessor. Example properties and offline metadata were
-brought forward; runtime events remain deferred by user choice. The
+brought forward; volatile runtime events are now implemented under the follow-up user-approved
+contract: future-only subscriptions, independent bounded queues, explicit
+unsubscribe, no history or automatic snapshot. The
 [dated record](../2026-11-04-copied-ipc-implementation-plan.md) records actual
 validation without claiming all later acceptance gates.
 
@@ -209,7 +202,7 @@ validation without claiming all later acceptance gates.
 | --- | --- | --- |
 | 1. Copied IPC core | Endpoint pair, bounded requests, retained Operations, reply authority; private static TextProcessor provider. | Atomic admission/rollback, queue/descriptor/memory exhaustion, receive/result copy faults, reply authorization, request lifetime, provider death and READY rejection. |
 | 2. Sync and async APIs | Typed handwritten codec; submit/wait/result and synchronous wrapper on the same protocol. | Both styles reach the same handler; reply-before-wait cannot lose a wakeup; results survive copy faults; alias close, abandoned operations, duplicate/late replies, unknown outcomes, and generation reuse. |
-| 3. Properties, subscriptions, timed waits | Configuration getter/setter, progress queue, monotonic deadlines, explicit dispatch, and owned-provider cleanup. | Atomic updates/watch snapshot, overflow recovery, callback teardown, event pressure cannot starve completion storage, timeout/completion/cancellation races, startup hang and supervisor cleanup. |
+| 3. Properties, subscriptions, timed waits | Configuration getter/setter, progress queue, monotonic deadlines, explicit dispatch, and owned-provider cleanup. | Serialized updates, future-only broadcast, overflow reporting, explicit unsubscribe, event/completion capacity separation, deadline/completion races, startup hang and private-provider cleanup. Snapshot/watch and cancellation remain deferred. |
 | 4. Capability attachments | Bounded authorized references in messages. | Rights attenuation, destination exhaustion, atomic acceptance, copy/move semantics, cleanup after decode rejection, peer death, and unread-message shutdown. |
 | 5. Shared bulk buffers | Channel control messages plus explicitly shared immutable inputs and published outputs. | Bounds/rights, writable-alias rejection or snapshot isolation, mapping/backing lifetime, TLB retirement, cancellation and crash cleanup. |
 | 6. Optional shared-memory rings | Alternate bulk message transport if measurements justify it. | Memory ordering, wraparound, full/empty and lost-wakeup races, hostile-peer input, producer/consumer death, and measured improvement over copied IPC. |

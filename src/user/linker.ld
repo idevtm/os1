@@ -24,6 +24,7 @@ SECTIONS
   } :rodata
 
   .os.interface : { KEEP(*(.os.interface)) } :rodata
+  .os.constructor : { KEEP(*(.os.constructor)) } :rodata
 
   . = ALIGN(4096);
 

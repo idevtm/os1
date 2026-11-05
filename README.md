@@ -26,8 +26,10 @@ explicit child grants, and executable-reference launch. The
 [copied IPC prototype](doc/copied-ipc-abi.md) adds retained Operations and a private
 `textprocessor` with methods/properties, exercised by `ipccheck`.
 `intf /bin/textprocessor` prints interface records from the binary without running it.
-Events are metadata-only. Credentials, supervised/shared services, persistent
-filesystems, and a general network stack remain future work.
+The [Counter/events phase](doc/counter-events-abi.md) adds `/bin/counter`, typed
+constructor arguments and CLI conversion, volatile subscriptions, timed waits,
+and parent-owned private-provider supervision. Credentials, shared services,
+persistent filesystems, and a general network stack remain future work.
 
 ## Prerequisites
 

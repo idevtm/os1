@@ -1,5 +1,7 @@
 #include "proc/startup.hpp"
 
+#include <os1/ipc.h>
+
 #include "fs/initrd.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
@@ -17,6 +19,13 @@ long validate_startup(const os1_startup_record& record)
        record.root_fd >= static_cast<int>(OS1_DESCRIPTOR_LIMIT) ||
        record.cwd_fd >= static_cast<int>(OS1_DESCRIPTOR_LIMIT))
         return OS1_ERR_INVALID;
+    const auto& args = record.constructor;
+    if(args.size > OS1_CONSTRUCTOR_BYTES || ((args.schema_id == 0) != (args.version == 0)) ||
+       (!args.schema_id && args.size))
+        return OS1_ERR_INVALID;
+    for(uint32_t i = args.size; i < OS1_CONSTRUCTOR_BYTES; ++i)
+        if(args.payload[i])
+            return OS1_ERR_INVALID;
     uint32_t cursor = 0;
     for(unsigned group = 0; group < 2; ++group)
     {
@@ -271,7 +280,7 @@ long sys_launch(const ProcessSyscallContext& context,
     if(!thread || !thread->process || !thread->user_mode || !context.frames ||
        (mode == OS1_LAUNCH_EXEC && !context.write_cr3))
         return OS1_ERR_INVALID;
-    if(executable >= OS1_DESCRIPTOR_LIMIT || mode > OS1_LAUNCH_EXEC)
+    if(executable >= OS1_DESCRIPTOR_LIMIT || mode > OS1_LAUNCH_PRIVATE_PROVIDER)
         return OS1_ERR_INVALID;
     auto* request = static_cast<os1_launch_request*>(kmalloc(sizeof(os1_launch_request)));
     if(!request)
@@ -297,6 +306,12 @@ long sys_launch(const ProcessSyscallContext& context,
            g.reserved)
             return OS1_ERR_INVALID;
     }
+    if(mode == OS1_LAUNCH_PRIVATE_PROVIDER &&
+       (request->grant_count != 1 || request->grants[0].target != 3 ||
+        request->grants[0].rights != (OS1_RIGHT_READ | OS1_RIGHT_WRITE) ||
+        request->grants[0].descriptor_flags || request->grants[0].descendant_rights ||
+        request->startup.root_fd != -1 || request->startup.cwd_fd != -1))
+        return OS1_ERR_INVALID;
     long result = validate_startup(request->startup);
     if(result < 0)
         return result;
@@ -319,6 +334,15 @@ long sys_launch(const ProcessSyscallContext& context,
     {
         reap_process(child, *context.frames);
         return result;
+    }
+    if(mode == OS1_LAUNCH_PRIVATE_PROVIDER)
+    {
+        if(child->descriptors.entries[3].instance->object->kind != OS1_OBJECT_IPC_PROVIDER)
+        {
+            reap_process(child, *context.frames);
+            return OS1_ERR_UNSUPPORTED;
+        }
+        child->private_provider = true;
     }
     uint64_t cr3 = 0, entry = 0, rsp = 0, argument = 0;
     result =

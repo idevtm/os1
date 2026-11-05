@@ -125,7 +125,7 @@ inline bool validate(const Metadata& m)
             return false;
         if(a.kind == PropertyGet && a.input)
             return false;
-        if(a.kind == Event && (a.flags || a.output))
+        if(a.kind == Event && a.output)
             return false;
         last_id = a.id;
     }
@@ -143,8 +143,9 @@ struct Section
 static_assert(sizeof(Section) == 64);
 // Reader must read exactly size bytes at the requested offset or return false.
 // Inspection does not load/execute the image or trust its virtual addresses.
-template<class Reader>
-bool read_elf(Reader read, uint64_t file_size, Metadata& output)
+template<class Reader, class RecordType, class Validator>
+int read_section(
+    Reader read, uint64_t file_size, const char* wanted, RecordType& output, Validator valid)
 {
     auto range = [&](uint64_t offset, uint64_t size) {
         return offset <= file_size && size <= file_size - offset;
@@ -155,28 +156,30 @@ bool read_elf(Reader read, uint64_t file_size, Metadata& output)
        h.machine != elf::kMachineX86_64 || h.version != 1 || h.ehsize != sizeof(h) ||
        h.shentsize != sizeof(Section) || !h.shnum || h.shnum > 128 || h.shstrndx >= h.shnum ||
        !range(h.shoff, uint64_t(h.shnum) * sizeof(Section)))
-        return false;
+        return -1;
     Section strings{};
     if(!read(h.shoff + uint64_t(h.shstrndx) * sizeof(Section), &strings, sizeof(strings)) ||
        strings.type != 3 || !strings.size || strings.size > 4096 ||
        !range(strings.offset, strings.size))
-        return false;
+        return -1;
     char names[4096]{};
     if(!read(strings.offset, names, strings.size))
-        return false;
+        return -1;
     bool found = false;
     for(unsigned i = 0; i < h.shnum; ++i)
     {
         Section s{};
         if(!read(h.shoff + uint64_t(i) * sizeof(s), &s, sizeof(s)) || s.name >= strings.size)
-            return false;
+            return -1;
         uint64_t length = 0;
         while(s.name + length < strings.size && names[s.name + length])
             ++length;
         if(s.name + length == strings.size)
-            return false;
-        constexpr char wanted[] = ".os.interface";
-        if(length != sizeof(wanted) - 1)
+            return -1;
+        size_t wanted_length = 0;
+        while(wanted[wanted_length])
+            ++wanted_length;
+        if(length != wanted_length)
             continue;
         bool match = true;
         for(unsigned j = 0; j < length; ++j)
@@ -186,11 +189,18 @@ bool read_elf(Reader read, uint64_t file_size, Metadata& output)
             continue;
         if(found || s.type != 1 || s.flags != 2 || s.size != sizeof(output) ||
            !range(s.offset, s.size))
-            return false;
-        if(!read(s.offset, &output, sizeof(output)) || !validate(output))
-            return false;
+            return -1;
+        if(!read(s.offset, &output, sizeof(output)) || !valid(output))
+            return -1;
         found = true;
     }
-    return found;
+    return found ? 1 : 0;
+}
+template<class Reader>
+bool read_elf(Reader read, uint64_t size, Metadata& output)
+{
+    return read_section(read, size, ".os.interface", output, [](const Metadata& m) {
+               return validate(m);
+           }) == 1;
 }
 }  // namespace os1::interface

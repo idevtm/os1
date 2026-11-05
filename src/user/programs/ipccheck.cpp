@@ -59,14 +59,14 @@ int main()
     long image = open("/bin/textprocessor", OS1_RIGHT_EXECUTE);
     CHECK(image >= 0, "image");
     os1_launch_request launch_request{};
-    launch_request.version = 1;
+    launch_request.version = OS1_STARTUP_VERSION;
     launch_request.size = sizeof(launch_request);
-    launch_request.startup.version = 1;
+    launch_request.startup.version = OS1_STARTUP_VERSION;
     launch_request.startup.size = sizeof(launch_request.startup);
     launch_request.startup.root_fd = launch_request.startup.cwd_fd = -1;
     launch_request.grant_count = 1;
     launch_request.grants[0] = {pair.provider, 3, OS1_RIGHT_READ | OS1_RIGHT_WRITE, 0, 0, 0};
-    long pid = launch(image, OS1_LAUNCH_SPAWN, launch_request);
+    long pid = launch(image, OS1_LAUNCH_PRIVATE_PROVIDER, launch_request);
     close(image);
     close(pair.provider);
     CHECK(pid > 0, "private launch");
@@ -75,11 +75,19 @@ int main()
     CHECK(ipc(OS1_IPC_INFO, pair.client, &info) == 0 && info.ready &&
               info.interface_id == interface_id && info.interface_version == 1,
           "ready identity");
+    long events = ipc_subscribe(pair.client, Progress);
+    CHECK(events >= 0, "progress subscription");
     auto request = message(Lowercase);
     Text input{5, {'H', 'e', 'L', 'L', 'O'}};
     payload(request, input);
     os1_ipc_result result{};
     CHECK(ipc_call(pair.client, request, result) == 0 && ok(result, sizeof(Text)), "sync");
+    os1_ipc_event event{};
+    CHECK(ipc(OS1_IPC_EVENT_READ, events, &event) == 0 && event.member == Progress &&
+              event.payload_bytes == sizeof(ProgressValue),
+          "progress event");
+    CHECK(ipc_unsubscribe(events) == 0, "progress unsubscribe");
+    close(events);
     auto lower = value<Text>(result);
     CHECK(lower.length == 5 && lower.bytes[0] == 'h' && lower.bytes[2] == 'l', "lowercase");
     say("lowercase: ");
@@ -92,8 +100,7 @@ int main()
     request.payload[4] = 'x';  // Admission copied the original bytes.
     CHECK(ipc_result(operation, result) == 0 && ok(result, sizeof(Text)), "async result");
     auto upper = value<Text>(result);
-    CHECK(upper.length == 5 && upper.bytes[0] == 'H' && upper.bytes[1] == 'E',
-          "copied uppercase");
+    CHECK(upper.length == 5 && upper.bytes[0] == 'H' && upper.bytes[1] == 'E', "copied uppercase");
     say("uppercase: ");
     write(1, upper.bytes, upper.length);
     say("\n");
@@ -125,8 +132,8 @@ int main()
     request = message(Progress);
     CHECK(ipc_call(pair.client, request, result) == 0 &&
               result.application_status == OS1_ERR_UNSUPPORTED,
-          "event metadata only");
-    say("enabled: false; processed: 3; progress: metadata only\n");
+          "event is not a method");
+    say("enabled: false; processed: 3; progress: volatile event\n");
     close(pair.client);
     int status = -1;
     CHECK(waitpid(pid, &status) == pid && status == 0, "provider exit");

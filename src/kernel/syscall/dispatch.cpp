@@ -27,6 +27,18 @@ Thread* handle_syscall(TrapFrame* frame)
         return nullptr;
     }
 
+    if(ipc_stop_requested(thread))
+    {
+        mark_current_thread_dying(OS1_PROVIDER_STOP_STATUS);
+        return schedule_next(false);
+    }
+    if(thread->process && thread->process->private_provider && frame->rax != os1_sys_ipc &&
+       frame->rax != os1_sys_exit && frame->rax != os1_sys_yield && frame->rax != os1_sys_getpid &&
+       !(frame->rax == os1_sys_resource && frame->rsi <= OS1_RESOURCE_SET_STATUS_FLAGS))
+    {
+        frame->rax = OS1_ERR_ACCESS;
+        return thread;
+    }
     ipc_drain_wakeups();
     switch(frame->rax)
     {

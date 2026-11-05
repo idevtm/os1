@@ -751,6 +751,7 @@ void mark_current_thread_dying(int exit_status)
         return;
     }
 
+    ipc_stop_children(thread->process);
     thread->exit_status = exit_status;
     cancel_console_read(thread);
     cancel_vfs_wait(thread);

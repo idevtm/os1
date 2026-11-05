@@ -40,7 +40,12 @@ enum class ThreadWaitReason : uint32_t
     Ipc = 5,
 };
 
-struct IpcWaitState { OpenInstance* instance = nullptr; };
+struct IpcWaitState
+{
+    OpenInstance* instance = nullptr;
+    uint64_t deadline_ns = UINT64_MAX;
+    long result = 0;
+};
 
 struct VfsIoWaitState
 {
@@ -101,6 +106,7 @@ struct Thread
     Thread* wait_link = nullptr;
     volatile uint32_t io_pins = 0;
     bool console_cancelled = false;
+    volatile bool stop_requested = false;
     cpu* scheduler_cpu = nullptr;
     cpu* run_queue_cpu = nullptr;
     uint64_t affinity_mask = ~0ull;

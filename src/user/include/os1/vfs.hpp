@@ -3,6 +3,8 @@
 #include <os1/vfs.h>
 
 #include <os1/syscall.hpp>
+
+#include "interface/constructor.hpp"
 namespace os1::user
 {
 extern const os1_startup_record* startup_record;
@@ -103,6 +105,31 @@ inline long launch(int executable, uint32_t mode, const os1_launch_request& requ
 {
     return os1_syscall3(os1_sys_launch, executable, mode, reinterpret_cast<uint64_t>(&request));
 }
+// 1: found, 0: absent, negative: malformed file/schema or insufficient authority.
+inline int constructor_metadata(int fd, constructor::Metadata& metadata)
+{
+    os1_file_info info{};
+    if(file_info(fd, &info) < 0)
+        return -1;
+    auto reader = [&](uint64_t offset, void* out, size_t count) {
+        if(offset > INT64_MAX || seek(fd, offset) < 0)
+            return false;
+        auto* bytes = static_cast<uint8_t*>(out);
+        while(count)
+        {
+            long n = read(fd, bytes, count);
+            if(n <= 0)
+                return false;
+            bytes += n;
+            count -= n;
+        }
+        return true;
+    };
+    return interface::read_section(
+        reader, info.byte_size, ".os.constructor", metadata, [](const constructor::Metadata& m) {
+            return constructor::validate(m);
+        });
+}
 // Shell convenience: build an explicit map of present standard streams/root/cwd.
 // Applications needing other grants or rights use launch() directly.
 inline long run_program(const char* path,
@@ -177,9 +204,20 @@ inline long run_program(const char* path,
             request.grants[request.grant_count++] = {fd, fd, info.rights, 0, ceiling, 0};
         }
     }
-    const long executable = open(path, OS1_RIGHT_EXECUTE);
+    const long executable =
+        open(path, OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
     if(executable < 0)
         return executable;
+    constructor::Metadata schema{};
+    int found = constructor_metadata(executable, schema);
+    if(found < 0 ||
+       (found &&
+        !constructor::parse(
+            schema, argc ? argc - 1 : 0, argc ? argv + 1 : nullptr, request.startup.constructor)))
+    {
+        close(executable);
+        return OS1_ERR_INVALID;
+    }
     const long result = launch(executable, replace ? OS1_LAUNCH_EXEC : OS1_LAUNCH_SPAWN, request);
     close(executable);
     return result;

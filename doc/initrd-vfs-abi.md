@@ -99,14 +99,16 @@ request/grant/thread allocation failures also preserve the parent image/table.
 ## Launch and startup
 
 Syscall 11 is `launch(executable_fd, mode, request_pointer)`, with SPAWN=0 and
-EXEC=1. It retains a regular-file instance with EXECUTE; READ alone is insufficient.
+EXEC=1 and restricted PRIVATE_PROVIDER=2 (see [the supervision contract](counter-events-abi.md)). It retains a regular-file instance with EXECUTE; READ alone is insufficient.
 Loading uses that immutable object's bytes, independent of its shared cursor.
 There is no secondary privileged pathname lookup.
 
-The 2608-byte launch request contains a 16-byte envelope, a 2208-byte startup
+Startup ABI version 2 uses a 2880-byte launch request containing a 16-byte envelope, a 2480-byte startup
 record, and sixteen 24-byte grant slots. Limits: 16 argv strings, 16 environment
 strings, 2048 aggregate string bytes including terminators, and 16 child grants.
-Unused offsets, grant slots, string tail, and reserved fields must be zero.
+A 272-byte constructor envelope extends startup with schema ID/version, size, and
+256 bounded payload bytes. See [typed startup](counter-events-abi.md#typed-constructor-metadata-and-startup-version-2).
+Unused offsets, grant slots, string/payload tails, and reserved fields must be zero.
 Strings are packed argv first, then environment, with canonical offsets relative
 to the string array. Environment values are bytes, not capabilities; `KEY=value`
 is a user convention. Root and cwd are descriptor indices or -1, independently.
@@ -127,7 +129,9 @@ retains it through commit.
 
 At `_start`, RDI points to the copied startup record near the stack top; RSP is
 8 modulo 16, below the payload. crt0 constructs a null-terminated argv vector and
-calls `main(int, char**)`. The record remains accessible via
+calls `main(int, char**)`, or a typed-entry adapter when the program supplies one.
+Typed adapters validate/decode constructor data before invoking os_main with a
+separate startup context. The record remains accessible via
 `os1::user::startup_record`. This runtime change requires rebuilding user programs.
 Trusted bootstrap grants console 0/1/2 and separate root/cwd opens in 62/63.
 Closing those entries loses that authority. Pathname spawn/exec compatibility
@@ -141,12 +145,14 @@ Actual compiled examples: [ls.cpp](../src/user/programs/ls.cpp),
 [cat.cpp](../src/user/programs/cat.cpp), and
 [vfscheck.cpp](../src/user/programs/vfscheck.cpp). Convenience wrappers live in
 [vfs.hpp](../src/user/include/os1/vfs.hpp). `run_program` explicitly maps present
-streams/root/cwd; its convenience inspection needs INSPECT. Raw `launch` supports
+streams/root/cwd. Its constructor CLI conversion additionally reads metadata from
+the retained image with READ|SEEK|INSPECT|EXECUTE. Raw `launch` supports
 selected grants without that convenience requirement.
 
 The first slice retains one user thread per process, no user unmap or external
 kill, no mutable mounts, links, credentials, block-backed files, dynamic linker,
-reflection, RPC, or service supervision. `observe` remains a separate privileged
+or general reflection. [Copied IPC and restricted private supervision](counter-events-abi.md)
+are implemented; shared service activation remains later work. `observe` remains a separate privileged
 prototype surface; in particular ACPI power effects must be gated before exposing
 the system to less-trusted or network-facing applications. These are not closed
 by restricting VFS descriptors.

@@ -44,6 +44,7 @@ struct Process
     Process* registry_next = nullptr;
     DescriptorTable descriptors;
     int root_fd = -1, cwd_fd = -1;
+    bool private_provider = false;
 };
 
 // Initialize the kmem-backed process registry.

@@ -2,7 +2,10 @@
 
 Implemented prototype, started 2026-11-04 and validated 2026-11-05. This is the concrete first slice of the
 [approved IPC design](os-api-draft/ipc-transport-design.md); it does not freeze the
-broader service ABI. [Implementation plan and validation](2026-11-04-copied-ipc-implementation-plan.md).
+broader service ABI. The [Counter/events extension](counter-events-abi.md) adds
+timed waits, private supervision, runtime events, and typed construction. This
+page records the original transport; the extension supersedes its deferred-event
+and untimed-only limits. [Implementation plan and validation](2026-11-04-copied-ipc-implementation-plan.md).
 
 ## Endpoints, Operations, and calls
 
@@ -96,7 +99,7 @@ metadata share [textprocessor.hpp](../src/common/interface/textprocessor.hpp).
 | 3 | Property getter `enabled` | Empty → Settings | Snapshot enabled and revision. |
 | 4 | Property setter `enabled` | Settings → Settings | Compare expected revision, atomically update, increment revision. Conflict is application status -100. |
 | 5 | Property getter `processed` | Empty → u64 | Number of successful conversion calls, including calls while disabled. |
-| 6 | Event `progress` | Progress payload | Metadata only; invocation returns application UNSUPPORTED. No subscription or queue exists. |
+| 6 | Event `progress` | Progress payload | Now delivered through volatile subscriptions; invocation as a method returns application UNSUPPORTED. See the Counter/events extension. |
 
 Text is a u32 byte length plus 252 bytes, with a zero tail. It is a byte string;
 non-ASCII bytes remain unchanged. Settings is u64 revision, u32 enabled (0 or 1),
@@ -148,7 +151,8 @@ names, and arrays of up to 8 types, 16 fields, and 8 members. Names are at most
 are zero. Type IDs are one-based array indices; zero means empty. Member IDs
 must be nonzero and strictly increasing. Members record method/getter/setter/
 event kind, implemented flag, and input/output type IDs. Events in this format
-must be marked metadata-only, with their payload in the input type slot.
+use the input type slot for their payload; the implemented flag now distinguishes
+runtime events from descriptive-only declarations.
 
 Types are u8/u32/u64 or flat records of fixed scalar arrays. Field offsets must
 cover each record exactly, without overlap, gaps, or implicit padding. Maximum
@@ -164,5 +168,5 @@ rejects duplicate member IDs, unknown formats, malformed names/types, missing
 metadata, duplicate metadata sections, truncation, and arithmetic-overflow ranges.
 
 The initrd packager strips symbol tables from staged executables to keep both
-boot paths within the existing BIOS 64 KiB initrd slot. Full ELF build artifacts
+boot paths within the BIOS initrd slot (expanded to 96 KiB in the Counter/events phase). Full ELF build artifacts
 are retained; allocated metadata and section headers remain in packaged images.

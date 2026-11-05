@@ -14,7 +14,11 @@ IPC prototype, see [the concrete ABI](../copied-ipc-abi.md),
 [ipccheck.cpp](../../src/user/programs/ipccheck.cpp),
 [textprocessor.cpp](../../src/user/programs/textprocessor.cpp), and
 [intf.cpp](../../src/user/programs/intf.cpp). These use handwritten bounded
-records; `progress` is metadata-only.
+records. The [Counter/events implementation](../counter-events-abi.md) adds
+volatile runtime events, typed constructor records/CLI conversion, and deadlines.
+See [counter.cpp](../../src/user/programs/counter.cpp) and
+[countercheck.cpp](../../src/user/programs/countercheck.cpp). The general SDK below
+remains illustrative.
 
 ## 1. Listing a directory
 

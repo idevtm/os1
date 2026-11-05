@@ -50,3 +50,36 @@ struct os1_ipc_result
     uint32_t payload_bytes, reserved;
     uint8_t payload[OS1_IPC_PAYLOAD_MAX];
 };
+
+#define OS1_IPC_CLOCK 9u
+#define OS1_IPC_WAIT_UNTIL 10u
+#define OS1_IPC_SUBSCRIBE 11u
+#define OS1_IPC_EMIT 12u
+#define OS1_IPC_EVENT_READ 13u
+#define OS1_IPC_UNSUBSCRIBE 14u
+#define OS1_IPC_STOP_CHILD 15u
+#define OS1_OBJECT_SUBSCRIPTION 7u
+#define OS1_INTERFACE_SUBSCRIPTION 64u
+#define OS1_ERR_TIMED_OUT (-20L)
+#define OS1_IPC_SUBSCRIPTION_LIMIT 8u
+#define OS1_IPC_EVENT_LIMIT 8u
+#define OS1_PROVIDER_STOP_STATUS 125
+// CLOCK: fd=argument=0, returns monotonic nanoseconds. STOP_CHILD: fd=0,
+// argument=child PID; only the parent of a restricted provider is authorized.
+struct os1_ipc_deadline
+{
+    uint32_t version, size;
+    uint64_t nanoseconds;
+};
+struct os1_ipc_subscription
+{
+    uint32_t version, size, member, reserved;
+};
+struct os1_ipc_event
+{
+    uint32_t version, size, member, payload_bytes;
+    uint64_t sequence, dropped;
+    uint8_t payload[OS1_IPC_PAYLOAD_MAX];
+};
+// EMIT requires sequence=dropped=0. EVENT_READ returns sequence and lost events
+// since the previous successful read. Unsubscribe clears queued notifications.

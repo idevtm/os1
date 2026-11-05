@@ -55,6 +55,6 @@ constexpr interface::Metadata metadata{
      {GetEnabled, interface::PropertyGet, 1, 0, 3, 0, "enabled"},
      {SetEnabled, interface::PropertySet, 1, 3, 3, 0, "enabled"},
      {GetProcessed, interface::PropertyGet, 1, 0, 1, 0, "processed"},
-     {Progress, interface::Event, 0, 4, 0, 0, "progress"}}};
+     {Progress, interface::Event, 1, 4, 0, 0, "progress"}}};
 static_assert(sizeof(Text) == 256 && sizeof(Settings) == 16);
 }  // namespace os1::textprocessor

@@ -497,8 +497,9 @@ The [IPC implementation profile](ipc-transport-design.md) owns resource mechanic
 bootstrap, failure histories, shared-memory prerequisites, and the ordered
 acceptance gates. The narrower [copied IPC ABI](../copied-ipc-abi.md) now
 implements private endpoints, retained Operations, TextProcessor methods and
-properties, and offline metadata inspection. Runtime events, supervision, and
-attachments remain later gates. Class-controlled object selection is unchanged.
+properties, and offline metadata inspection. The [Counter/events extension](../counter-events-abi.md) implements volatile
+broadcast events, deadlines, restricted private supervision, and typed startup.
+Shared activation and attachments remain later gates. Class-controlled object selection is unchanged.
 
 ### Calls, values, and authority
 

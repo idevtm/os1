@@ -57,6 +57,9 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/ipc.h"
       "${PROJECT_SOURCE_DIR}/src/common/interface/metadata.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/interface/constructor.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/interface/counter.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/startup.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/interface/textprocessor.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/elf/elf64.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/ipc.hpp"
@@ -92,6 +95,9 @@ os1_add_user_cxx_program(textprocessor "${CMAKE_CURRENT_SOURCE_DIR}/programs/tex
 os1_add_user_cxx_program(ipccheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/ipccheck.cpp" OS1_USER_IPCCHECK_ELF)
 os1_add_user_cxx_program(intf "${CMAKE_CURRENT_SOURCE_DIR}/programs/intf.cpp" OS1_USER_INTF_ELF)
 
+os1_add_user_cxx_program(counter "${CMAKE_CURRENT_SOURCE_DIR}/programs/counter.cpp" OS1_USER_COUNTER_ELF)
+os1_add_user_cxx_program(countercheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/countercheck.cpp" OS1_USER_COUNTERCHECK_ELF)
+
 add_custom_command(
   OUTPUT "${OS1_INITRD_CPIO}"
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${USER_STAGE_DIR}"
@@ -103,6 +109,8 @@ add_custom_command(
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_VFSCHECK_ELF}" "${USER_STAGE_DIR}/bin/vfscheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_TEXTPROCESSOR_ELF}" "${USER_STAGE_DIR}/bin/textprocessor"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_IPCCHECK_ELF}" "${USER_STAGE_DIR}/bin/ipccheck"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_COUNTER_ELF}" "${USER_STAGE_DIR}/bin/counter"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_COUNTERCHECK_ELF}" "${USER_STAGE_DIR}/bin/countercheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INTF_ELF}" "${USER_STAGE_DIR}/bin/intf"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_CAT_ELF}" "${USER_STAGE_DIR}/bin/cat"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INIT_ELF}" "${USER_STAGE_DIR}/bin/init"
@@ -132,6 +140,8 @@ add_custom_command(
     "${OS1_USER_LS_ELF}"
     "${OS1_USER_TEXTPROCESSOR_ELF}"
     "${OS1_USER_IPCCHECK_ELF}"
+    "${OS1_USER_COUNTER_ELF}"
+    "${OS1_USER_COUNTERCHECK_ELF}"
     "${OS1_USER_INTF_ELF}"
     "${OS1_USER_CAT_ELF}"
     "${OS1_USER_VFSCHECK_ELF}"
@@ -150,6 +160,8 @@ add_custom_command(
 )
 
 add_custom_target(user_programs DEPENDS
+  "${OS1_USER_COUNTER_ELF}"
+  "${OS1_USER_COUNTERCHECK_ELF}"
   "${OS1_USER_TEXTPROCESSOR_ELF}"
   "${OS1_USER_IPCCHECK_ELF}"
   "${OS1_USER_INTF_ELF}"

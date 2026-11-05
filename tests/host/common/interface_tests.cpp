@@ -3,6 +3,7 @@
 #include <cstring>
 #include <vector>
 
+#include "interface/counter.hpp"
 #include "interface/textprocessor.hpp"
 using namespace os1::interface;
 namespace
@@ -79,7 +80,7 @@ TEST(InterfaceMetadata, CanonicalSchemaAndNegativeRecords)
     bad.members[0].input = 9;
     EXPECT_FALSE(validate(bad));
     bad = m;
-    bad.members[5].flags = implemented;
+    bad.members[5].flags = 2;
     EXPECT_FALSE(validate(bad));
     bad = m;
     bad.types[1].first_field = 16;
@@ -139,5 +140,44 @@ TEST(InterfaceMetadata, OfflineElfBoundsAndSectionUniqueness)
     bad = bytes;
     bad[512 + 14] = 'x';
     EXPECT_FALSE(parse(bad));
+}
+
+TEST(ConstructorMetadata, CallerConversionDefaultsBoundsAndDuplicates)
+{
+    auto schema = os1::counter::constructor_metadata;
+    ASSERT_TRUE(os1::constructor::validate(schema));
+    os1_constructor_args args{};
+    ASSERT_TRUE(os1::constructor::parse(schema, 0, nullptr, args));
+    EXPECT_EQ(0u, os1::constructor::decode(args.payload, 8));
+    EXPECT_EQ(UINT64_MAX, os1::constructor::decode(args.payload + 8, 8));
+    const char* options[] = {"--initial", "10", "--ceiling", "100"};
+    ASSERT_TRUE(os1::constructor::parse(schema, 4, options, args));
+    EXPECT_EQ(10u, os1::constructor::decode(args.payload, 8));
+    auto valid = args;
+    EXPECT_TRUE(os1::constructor::matches(schema, args));
+    for(const char* bad : {"-1", "+1", "1x", "18446744073709551616", ""})
+    {
+        const char* input[] = {"--initial", bad};
+        EXPECT_FALSE(os1::constructor::parse(schema, 2, input, args));
+        EXPECT_EQ(0, std::memcmp(&valid, &args, sizeof(args)));
+    }
+    const char* duplicates[] = {"--initial", "1", "--initial", "2"};
+    EXPECT_FALSE(os1::constructor::parse(schema, 4, duplicates, args));
+    const char* unknown[] = {"--other", "1"};
+    EXPECT_FALSE(os1::constructor::parse(schema, 2, unknown, args));
+    EXPECT_FALSE(os1::constructor::parse(schema, 1, options, args));
+    args.schema_id++;
+    EXPECT_FALSE(os1::constructor::matches(schema, args));
+    args = valid;
+    args.payload[255] = 1;
+    EXPECT_FALSE(os1::constructor::matches(schema, args));
+    schema.fields[1].offset = 0;
+    EXPECT_FALSE(os1::constructor::validate(schema));
+    schema = os1::counter::constructor_metadata;
+    schema.field_count = 9;
+    EXPECT_FALSE(os1::constructor::validate(schema));
+    schema = os1::counter::constructor_metadata;
+    schema.fields[0].kind = Record;
+    EXPECT_FALSE(os1::constructor::validate(schema));
 }
 }  // namespace

@@ -1,11 +1,13 @@
 # ELF Interface Metadata and Hosted-Service Profile
 
-Status: revised later-stage proposal, 2026-11-04. **Not implemented or a frozen
+Status: revised later-stage proposal, 2026-11-05. **Not implemented or a frozen
 file format, wire ABI, or runtime API.** The narrower
 [copied IPC prototype](../copied-ipc-abi.md#offline-interface-records-and-intf)
 implements versioned flat records in `/bin/textprocessor` and offline `intf`
-inspection. It does not implement the general schema, binding generator, or
-activation protocol proposed here.
+inspection. The [Counter extension](../counter-events-abi.md) also implements
+bounded scalar constructor metadata, caller-side CLI conversion, typed startup,
+and runtime events. These do not implement the general schema, binding generator,
+or shared activation protocol proposed here.
 
 The [native contract](native_object_kernel_contract.md) owns descriptor,
 authority, process, and hosted-service semantics. Descriptors, console I/O,
@@ -24,7 +26,8 @@ process, and acquiring a usable service endpoint are separate operations.
 Today's [ELF validator](../../src/kernel/proc/user_elf.cpp) accepts x86-64
 `ET_EXEC` images. The [loader](../../src/kernel/proc/user_program.cpp) constructs
 images from loadable segments, and [crt0](../../src/user/lib/crt0.cpp) calls
-`main(int, char**)` from a copied startup record. The
+`main(int, char**)` or an optional typed-entry adapter from a copied startup
+record. The
 [implemented VFS/startup ABI](../initrd-vfs-abi.md) supplies bounded argv/environment
 data, explicit grants, and executable-reference launch under the
 [process contract](native_object_kernel_contract.md#7-process-creation-and-image-replacement).

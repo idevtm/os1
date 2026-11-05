@@ -71,8 +71,10 @@ uses existing namespace grants; it cannot recover a global root.
 
 The [copied IPC ABI](../copied-ipc-abi.md) adds private endpoints, retained
 Operations, synchronous/asynchronous calls, TextProcessor methods/properties,
-and offline `intf /bin/textprocessor` inspection. Progress events are metadata-only.
-Supervised/shared hosted services, runtime reflection, dynamic binding, general
+and offline `intf /bin/textprocessor` inspection. The [Counter/events extension](../counter-events-abi.md) adds runtime volatile
+events, a second protocol, typed construction/CLI conversion, monotonic deadlines,
+and restricted private supervision.
+Shared hosted services, runtime reflection, dynamic binding, general
 class construction, sockets/PTYs, and credential policy remain unimplemented. The [2026-11-03 project review](../2026-11-03-review.md)
 remains the latest whole-project review; the [VFS implementation record](../2026-11-04-initrd-vfs-implementation-plan.md)
 updates this milestone without claiming a new whole-project audit. Passive

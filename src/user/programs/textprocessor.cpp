@@ -77,6 +77,14 @@ int main()
                         break;
                     }
                     ++processed;
+                    os1_ipc_event event{};
+                    event.version = 1;
+                    event.size = sizeof(event);
+                    event.member = Progress;
+                    event.payload_bytes = sizeof(ProgressValue);
+                    copy_value(event.payload, ProgressValue{text.length, text.length});
+                    if(ipc(OS1_IPC_EMIT, 3, &event) < 0)
+                        return 5;
                     copy_value(reply.payload, text);
                     reply.payload_bytes = sizeof(text);
                     reply.application_status = 0;

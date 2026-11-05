@@ -390,4 +390,170 @@ TEST_F(Ipc, ReadyAndInfoValidateIdentityAndClosure)
     descriptor_close(table(), pair.client);
     EXPECT_EQ(OS1_ERR_PEER_CLOSED, ready());
 }
+
+TEST_F(Ipc, BroadcastSubscriptionsHaveNoHistoryAndIndependentOverflow)
+{
+    ASSERT_EQ(0, ready());
+    os1_ipc_event event{};
+    event.version = 1;
+    event.size = sizeof(event);
+    event.member = 9;
+    event.payload_bytes = 1;
+    event.payload[0] = 42;
+    ASSERT_EQ(0, call(OS1_IPC_EMIT, pair.provider, event));
+    os1_ipc_subscription req{1, sizeof(req), 9, 0};
+    long slow = call(OS1_IPC_SUBSCRIBE, pair.client, req),
+         fast = call(OS1_IPC_SUBSCRIBE, pair.client, req);
+    ASSERT_GE(slow, 0);
+    ASSERT_GE(fast, 0);
+    os1_ipc_event got{};
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, call(OS1_IPC_EVENT_READ, slow, got));
+    for(unsigned i = 0; i < 10; ++i)
+    {
+        ASSERT_EQ(0, call(OS1_IPC_EMIT, pair.provider, event));
+        ASSERT_EQ(0, call(OS1_IPC_EVENT_READ, fast, got));
+        EXPECT_EQ(0u, got.dropped);
+        EXPECT_EQ(i + 2u, got.sequence);
+        EXPECT_EQ(42, got.payload[0]);
+    }
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_EVENT_READ, slow, 0x1000));
+    ASSERT_EQ(0, call(OS1_IPC_EVENT_READ, slow, got));
+    EXPECT_EQ(2u, got.dropped);
+    EXPECT_EQ(2u, got.sequence);
+    ASSERT_EQ(0, call(OS1_IPC_EVENT_READ, slow, got));
+    EXPECT_EQ(0u, got.dropped);
+    EXPECT_EQ(3u, got.sequence);
+    EXPECT_EQ(0, sys_ipc(frames, thread, OS1_IPC_UNSUBSCRIBE, slow, 0));
+    EXPECT_EQ(OS1_ERR_CLOSED, call(OS1_IPC_EVENT_READ, slow, got));
+    EXPECT_EQ(0, sys_ipc(frames, thread, OS1_IPC_UNSUBSCRIBE, slow, 0));
+}
+TEST_F(Ipc, SubscriptionRightsBoundsAndQuotaAreTransactional)
+{
+    os1_ipc_subscription req{1, sizeof(req), 9, 0};
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, call(OS1_IPC_SUBSCRIBE, pair.client, req));
+    ASSERT_EQ(0, ready());
+    req.reserved = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_SUBSCRIBE, pair.client, req));
+    req.reserved = 0;
+    long subscriptions[OS1_IPC_SUBSCRIPTION_LIMIT];
+    for(auto& fd : subscriptions)
+    {
+        fd = call(OS1_IPC_SUBSCRIBE, pair.client, req);
+        ASSERT_GE(fd, 0);
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SUBSCRIBE, pair.client, req));
+    long readonly = alias(subscriptions[0], OS1_RIGHT_READ);
+    ASSERT_GE(readonly, 0);
+    EXPECT_EQ(OS1_ERR_ACCESS, sys_ipc(frames, thread, OS1_IPC_UNSUBSCRIBE, readonly, 0));
+    EXPECT_EQ(0, sys_ipc(frames, thread, OS1_IPC_UNSUBSCRIBE, subscriptions[0], 0));
+    EXPECT_GE(call(OS1_IPC_SUBSCRIBE, pair.client, req), 0);
+    os1_ipc_event event{};
+    event.version = 1;
+    event.size = sizeof(event);
+    event.member = 9;
+    event.sequence = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_EMIT, pair.provider, event));
+    event.sequence = 0;
+    event.payload_bytes = 257;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_EMIT, pair.provider, event));
+    event.payload_bytes = 0;
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_EMIT, pair.client, event));
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_SUBSCRIBE, pair.provider, req));
+}
+TEST_F(Ipc, SubscriptionWaitCloseAndUnsubscribeWakeSafely)
+{
+    ASSERT_EQ(0, ready());
+    os1_ipc_subscription req{1, sizeof(req), 9, 0};
+    long sub = call(OS1_IPC_SUBSCRIBE, pair.client, req);
+    ASSERT_GE(sub, 0);
+    ASSERT_EQ(kIpcBlocked, sys_ipc(frames, thread, OS1_IPC_WAIT, sub, 0));
+    EXPECT_EQ(0, sys_ipc(frames, thread, OS1_IPC_UNSUBSCRIBE, sub, 0));
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    EXPECT_EQ(ThreadState::Ready, thread->state);
+    os1_ipc_event event{};
+    EXPECT_EQ(OS1_ERR_CLOSED, call(OS1_IPC_EVENT_READ, sub, event));
+    long another = call(OS1_IPC_SUBSCRIBE, pair.client, req);
+    ASSERT_GE(another, 0);
+    descriptor_close(table(), pair.provider);
+    EXPECT_EQ(OS1_ERR_PEER_CLOSED, call(OS1_IPC_EVENT_READ, another, event));
+}
+TEST_F(Ipc, DeadlineEndsWaitWithoutCancellingOperationAndReadyWins)
+{
+    ASSERT_EQ(0, ready());
+    long op = submit();
+    ASSERT_GE(op, 0);
+    long now = sys_ipc(frames, thread, OS1_IPC_CLOCK, 0, 0);
+    ASSERT_GE(now, 0);
+    os1_ipc_deadline deadline{1, sizeof(deadline), static_cast<uint64_t>(now) + 100};
+    ASSERT_EQ(kIpcBlocked, call(OS1_IPC_WAIT_UNTIL, op, deadline));
+    ipc_timer_tick(100);
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    EXPECT_EQ(ThreadState::Ready, thread->state);
+    EXPECT_EQ(OS1_ERR_TIMED_OUT, static_cast<long>(thread->frame.rax));
+    os1_ipc_result result{};
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, call(OS1_IPC_RESULT, op, result));
+    os1_ipc_message m{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE, pair.provider, m));
+    auto response_value = response(m);
+    ASSERT_EQ(0, call(OS1_IPC_REPLY, pair.provider, response_value));
+    EXPECT_EQ(0, call(OS1_IPC_WAIT_UNTIL, op, deadline));
+    EXPECT_EQ(0, call(OS1_IPC_RESULT, op, result));
+    EXPECT_EQ(0, result.transport_status);
+}
+TEST_F(Ipc, ExpiredAndMalformedDeadlinesDoNotRegisterWaits)
+{
+    os1_ipc_deadline deadline{1, sizeof(deadline), 0};
+    EXPECT_EQ(OS1_ERR_TIMED_OUT, call(OS1_IPC_WAIT_UNTIL, pair.client, deadline));
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+    deadline.version = 2;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_UNTIL, pair.client, deadline));
+    deadline.version = 1;
+    deadline.nanoseconds = UINT64_MAX;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_UNTIL, pair.client, deadline));
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_WAIT_UNTIL, pair.client, 0x1000));
+    EXPECT_EQ(OS1_ERR_INVALID, sys_ipc(frames, thread, OS1_IPC_CLOCK, 1, 0));
+}
+TEST_F(Ipc, StopRequiresOwnedPrivateProviderAndWakesItsIpcWait)
+{
+    auto* child_process = create_user_process("private-provider", thread->address_space_cr3);
+    ASSERT_NE(nullptr, child_process);
+    child_process->parent = thread->process;
+    auto* child = create_user_thread(child_process, address, address + 4096, frames, false);
+    ASSERT_NE(nullptr, child);
+    EXPECT_EQ(OS1_ERR_ACCESS, sys_ipc(frames, thread, OS1_IPC_STOP_CHILD, 0, child_process->pid));
+    child_process->private_provider = true;
+    OpenInstance* provider = nullptr;
+    ASSERT_EQ(0, descriptor_acquire(table(), pair.provider, 0, provider));
+    ASSERT_EQ(3,
+              descriptor_install(
+                  child_process->descriptors, provider, OS1_RIGHT_READ | OS1_RIGHT_WRITE, 0, 3));
+    instance_release(provider);
+    ASSERT_EQ(kIpcBlocked, sys_ipc(frames, child, OS1_IPC_WAIT, 3, 0));
+    EXPECT_EQ(0, sys_ipc(frames, thread, OS1_IPC_STOP_CHILD, 0, child_process->pid));
+    EXPECT_TRUE(ipc_stop_requested(child));
+    EXPECT_EQ(ThreadState::Ready, child->state);
+    EXPECT_EQ(OS1_ERR_CANCELLED, static_cast<long>(child->frame.rax));
+    descriptor_close_all(child_process->descriptors);
+}
+
+TEST_F(Ipc, ParentExitRequestsStopOnlyForItsPrivateChildren)
+{
+    auto make = [&](bool supervised) {
+        auto* p = create_user_process("child", thread->address_space_cr3);
+        p->parent = thread->process;
+        p->private_provider = supervised;
+        return create_user_thread(p, address, address + 4096, frames, false);
+    };
+    auto* private_child = make(true);
+    auto* ordinary_child = make(false);
+    ASSERT_NE(nullptr, private_child);
+    ASSERT_NE(nullptr, ordinary_child);
+    ipc_stop_children(thread->process);
+    EXPECT_TRUE(ipc_stop_requested(private_child));
+    EXPECT_FALSE(ipc_stop_requested(ordinary_child));
+}
 }  // namespace
