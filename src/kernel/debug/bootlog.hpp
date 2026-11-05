@@ -3,7 +3,7 @@
 // pre-loader reserves one of kBootLogUefiCandidates. The kernel mirrors all
 // debug output into it. After a failure the machine is reset without clearing
 // RAM, and the next loader run saves the log onto the boot stick.
-// See doc/2026-11-02-real-hardware-bootlog.md.
+// See docs/hardware/boot-log.md.
 #pragma once
 
 #include <stddef.h>

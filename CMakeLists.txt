@@ -24,7 +24,7 @@ option(OS1_QEMU_DEBUGCON "Mirror kernel output to QEMU port 0xE9 for no-UART tes
 set(OS1_USB_BASE_IMAGE "" CACHE FILEPATH "Verified base image for kernel-only USB updates")
 # Reject stale profile caches rather than silently switching their image recipe.
 if(DEFINED OS1_USB_PROFILE OR DEFINED OS1_G74SX_BASE_IMAGE)
-  message(FATAL_ERROR "USB profiles were replaced by the os1_usb_kernel_update target. Remove OS1_USB_PROFILE and OS1_G74SX_BASE_IMAGE from the cache (cmake -UOS1_USB_PROFILE -UOS1_G74SX_BASE_IMAGE ...), set OS1_USB_BASE_IMAGE, and build os1_usb_kernel_update. See doc/2026-11-02-real-hardware-bootlog.md.")
+  message(FATAL_ERROR "USB profiles were replaced by the os1_usb_kernel_update target. Remove OS1_USB_PROFILE and OS1_G74SX_BASE_IMAGE from the cache (cmake -UOS1_USB_PROFILE -UOS1_G74SX_BASE_IMAGE ...), set OS1_USB_BASE_IMAGE, and build os1_usb_kernel_update. See docs/hardware/boot-log.md.")
 endif()
 set(OS1_BOOT_DIAGNOSTICS_ENABLED 0)
 if(OS1_BOOT_DIAGNOSTICS)
@@ -205,7 +205,7 @@ endif()
 # Real-hardware boot log area on the BIOS raw image. The loader saves the
 # previous boot's RAM log here before booting again. Everything stays below LBA
 # 2880 so the area remains reachable even when firmware emulates a USB stick as
-# a 1.44 MB floppy. See doc/2026-11-02-real-hardware-bootlog.md.
+# a 1.44 MB floppy. See docs/hardware/boot-log.md.
 set(OS1_BOOTLOG_JOURNAL_LBA 1280)
 set(OS1_BOOTLOG_SLOT_BASE_LBA 1288)
 set(OS1_BOOTLOG_SLOT_SECTORS 392)
@@ -607,7 +607,7 @@ endfunction()
 set(OS1_USB_KERNEL_UPDATE_IMAGE "${OS1_ARTIFACT_DIR}/os1-usb-kernel-update.img")
 if(NOT OS1_USB_BASE_IMAGE OR NOT EXISTS "${OS1_USB_BASE_IMAGE}" OR IS_DIRECTORY "${OS1_USB_BASE_IMAGE}")
   os1_add_unavailable_target(os1_usb_kernel_update
-    "os1_usb_kernel_update requires OS1_USB_BASE_IMAGE pointing to the verified base image. No fresh-image fallback. See doc/2026-11-02-real-hardware-bootlog.md.")
+    "os1_usb_kernel_update requires OS1_USB_BASE_IMAGE pointing to the verified base image. No fresh-image fallback. See docs/hardware/boot-log.md.")
 elseif(OS1_QEMU_DEBUGCON OR OS1_BOOT_DIAGNOSTICS)
   os1_add_unavailable_target(os1_usb_kernel_update
     "os1_usb_kernel_update requires OS1_QEMU_DEBUGCON=OFF and OS1_BOOT_DIAGNOSTICS=OFF to retain the qualified normal-kernel configuration.")

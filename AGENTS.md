@@ -43,9 +43,9 @@ Include review coverage, finding dispositions, and validation evidence in the fi
 
 ## Mandatory impact assessment
 
-Before implementation, read the relevant [project goals](GOALS.md), [architecture](doc/ARCHITECTURE.md), and subsystem or ABI documents.
+Before implementation, read the relevant [project goals](GOALS.md), [architecture](docs/ARCHITECTURE.md), and subsystem or ABI documents.
 Identify the affected requirements by document and section heading.
-Distinguish implemented contracts from proposals in `doc/os-api-draft/` and historical milestone reports.
+Distinguish implemented ABI profiles, accepted designs, proposals, and historical reports through the [Native API index](docs/native-api/README.md).
 
 Assess each area below for every development task.
 Include indirect effects through shared code, tests, dependencies, build settings, and documentation.
@@ -98,7 +98,7 @@ Keep unrelated formatting out of the task diff.
 Write new and revised technical prose in **ASD-STE100 Simplified Technical English, Issue 9**.
 This applies to project instructions, READMEs, architecture notes, API guides, specifications, test guides, reviews, and generated reports.
 Use the [official ASD-STE100 standard](https://www.asd-ste100.org/) as the language authority.
-Use the [project glossary](doc/GLOSSARY.md) for domain terms and their meanings.
+Use the [project glossary](docs/GLOSSARY.md) for domain terms and their meanings.
 The glossary and rules below do not replace the standard or its dictionary.
 
 - Write in the active voice.
@@ -124,9 +124,10 @@ Use diagrams for flows and relationships, tables for comparisons, and byte layou
 Link overview topics to stable headings that contain the full definitions, constraints, and procedures.
 Keep the necessary textual detail alongside the visuals.
 
-Keep technical documents in `doc/`, with subsystem READMEs beside their source.
+Keep technical documents in `docs/`, with subsystem READMEs beside their source.
+Follow the [documentation index](docs/README.md#organization-rules) for topic placement, filenames, and archive policy.
 The root `README.md`, `GOALS.md`, and `AGENTS.md` are exceptions.
-Update [the architecture](doc/ARCHITECTURE.md) when responsibilities or data flows change.
+Update [the architecture](docs/ARCHITECTURE.md) when responsibilities or data flows change.
 Update affected ABI documents when interface contracts change.
 Keep navigation links current.
 Clearly separate current behavior, accepted plans, proposals, and historical evidence.

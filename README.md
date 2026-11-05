@@ -1,9 +1,13 @@
 # os1
 
-`os1` is a self-documented teaching and engineering operating system project: a small, technically serious `x86_64` OS built for clarity, runnable vertical slices, and modern OS concepts rather than feature sprawl. The project stays terminal-first, QEMU-first, and documentation-heavy on purpose, with the current implementation status and a full system diagram in [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md), the longer-term direction in [GOALS.md](GOALS.md), the curated external standards and specification index in [doc/REFERENCES.md](doc/REFERENCES.md), a code-grounded project review in [doc/latest-review.md](doc/latest-review.md), the completed shell/operator milestone captured in [doc/2026-04-23-milestone-5-interactive-shell-and-observability.md](doc/2026-04-23-milestone-5-interactive-shell-and-observability.md), and the 2026 source-tree refactor summary in [doc/2026-04-26-source-tree-refactor.md](doc/2026-04-26-source-tree-refactor.md).
+`os1` is a teaching and engineering operating system for `x86_64`.
+The project favors clarity, runnable milestones, and a terminal-first workflow.
+Start with the [documentation index](docs/README.md), [architecture](docs/ARCHITECTURE.md), and [project goals](GOALS.md).
+The [latest review](docs/latest-review.md) links the most recent whole-project assessment and subsequent implementation evidence.
+Completed milestones and older reviews are in the [archive](docs/archive/README.md).
 
 For computer architecture and OS terminology, see the categorized
-[Glossary](doc/GLOSSARY.md), including TLB, IST, FADT, PCI, and the other terms
+[Glossary](docs/GLOSSARY.md), including TLB, IST, FADT, PCI, and the other terms
 used throughout the project documents.
 
 Today `os1` uses a shared-kernel, dual-entry boot architecture. The default path is a Limine-based UEFI ISO that enters a thin higher-half shim, normalizes bootloader state into `BootInfo`, then transfers control to the shared higher-half kernel core. The legacy BIOS raw image is still built and tested as a compatibility path, loading the same kernel physically before entering it at its higher-half virtual address. The kernel itself is freestanding `C++20`, runs protected user programs loaded from an initrd `cpio` archive, starts a small `/bin/init` that `exec`s `/bin/sh`, exposes `write`/`read`/`observe`/`spawn`/`waitpid`/`exec` through the x86_64 `SYSCALL`/`SYSRET` path, and can present the terminal either through VGA text mode or a minimal framebuffer text renderer. Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives.
@@ -12,38 +16,38 @@ The 2026-05-10 integration replaced the previous AML interpreter with upstream A
 ACPICA supports table discovery, namespace loading, device enumeration, `_PRT` routing, resource parsing, and device power transitions.
 `/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose cached route information through passive userland observation.
 
-In the source tree, the two boot frontends are explicit peers under `src/boot/`: the legacy raw-image BIOS path lives in `src/boot/bios/`, and the modern UEFI shim lives in `src/boot/limine/`. The kernel tree is now split by ownership rather than by bring-up history: `src/kernel/core/` owns orchestration and trap flow, `handoff/` owns the boot contract, `mm/` owns physical/virtual memory, `proc/`, `sched/`, and `sync/` split process/thread lifecycle, scheduling policy, and blocking primitives, `console/` owns terminal streams, `drivers/` owns hardware drivers, `platform/` owns machine discovery, `vfs/` owns the immutable initrd namespace, and `storage/` and `security/` mark broader growth seams. The detailed source-structure contract now lives in [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md).
+In the source tree, the two boot frontends are explicit peers under `src/boot/`: the legacy raw-image BIOS path lives in `src/boot/bios/`, and the modern UEFI shim lives in `src/boot/limine/`. The kernel tree is now split by ownership rather than by bring-up history: `src/kernel/core/` owns orchestration and trap flow, `handoff/` owns the boot contract, `mm/` owns physical/virtual memory, `proc/`, `sched/`, and `sync/` split process/thread lifecycle, scheduling policy, and blocking primitives, `console/` owns terminal streams, `drivers/` owns hardware drivers, `platform/` owns machine discovery, `vfs/` owns the immutable initrd namespace, and `storage/` and `security/` mark broader growth seams. The detailed source-structure contract now lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 The November boot changes add operation without COM1, bounded serial waits,
 PIT-calibrated TSC firmware delays, per-CPU exception stacks, PCI probe failure
 isolation, and a kernel-only update path for the preserved G74SX USB layout.
-The [2026-11-03 review](doc/2026-11-03-review.md) records the validation and its
+The [2026-11-03 review](docs/reviews/2026-11-03-review.md) records the validation and its
 limits, including an unresolved intermittent BIOS child-launch fault and
 source-confirmed lifecycle and allocation defects. ACPI observation now reads cached routes without executing firmware methods.
 `/bin/acpiprobe` reports passive inventory and disabled power control.
-The [passive observation record](doc/2026-11-05-passive-acpi-observation.md) documents this correction. The [console descriptor milestone](doc/console-descriptor-abi.md) now provides real
+The [passive observation record](docs/archive/kernel/2026-11-05-passive-acpi-observation.md) documents this correction. The [console descriptor milestone](docs/native-api/abi/console-descriptor-abi.md) now provides real
 process entries, rights, duplication, close, flags, and retained I/O references.
-The [dated implementation plan](doc/2026-11-04-console-descriptor-implementation-plan.md)
-records validation. The [initrd VFS and native startup milestone](doc/initrd-vfs-abi.md)
+The [dated implementation plan](docs/archive/native-api/2026-11-04-console-descriptor-implementation-plan.md)
+records validation. The [initrd VFS and native startup milestone](docs/native-api/abi/initrd-vfs-abi.md)
 adds directory/file descriptors, `ls`, `cat`, bounded argv/environment handoff,
 explicit child grants, and executable-reference launch. The
-[copied IPC prototype](doc/copied-ipc-abi.md) adds retained Operations and a private
+[copied IPC prototype](docs/native-api/abi/copied-ipc-abi.md) adds retained Operations and a private
 `textprocessor` with methods/properties, exercised by `ipccheck`.
 `intf /bin/textprocessor` prints interface records from the binary without running it.
-The [Counter/events phase](doc/counter-events-abi.md) adds `/bin/counter`, typed
+The [Counter/events phase](docs/native-api/abi/counter-events-abi.md) adds `/bin/counter`, typed
 constructor arguments and CLI conversion, volatile subscriptions, timed waits,
-and parent-owned private-provider supervision. The [shared activation phase](doc/shared-activation-abi.md) adds
+and parent-owned private-provider supervision. The [shared activation phase](docs/native-api/abi/shared-activation-abi.md) adds
 bounded capability attachments and a scoped activation service whose Counter
 class selects singleton reuse; `activationcheck` demonstrates independent clients.
 Credentials, general service discovery, persistent filesystems, and a general
 network stack remain future work.
 
-The [session and rich-parameter implementation](doc/2026-11-05-client-sessions-and-parameters.md)
+The [session and rich-parameter implementation](docs/archive/native-api/2026-11-05-client-sessions-and-parameters.md)
 adds independent budgeted Counter sessions, observer/mutable activation grants,
 and shared constructor/method codecs with typed defaults, descriptions and dot-based
 CLI conversion. Try `intf /bin/paramdemo`, `paramcheck`, and `activationcheck`.
-The [exclusive Buffer ABI](doc/buffer-loans-abi.md) adds Operation-scoped loans and distinct reply outputs.
-`buffercheck` exercises both TextProcessor paths. See the [implementation record](doc/2026-11-05-exclusive-buffer-implementation.md) for validation and limits.
+The [exclusive Buffer ABI](docs/native-api/abi/buffer-loans-abi.md) adds Operation-scoped loans and distinct reply outputs.
+`buffercheck` exercises both TextProcessor paths. See the [implementation record](docs/archive/native-api/2026-11-05-exclusive-buffer-implementation.md) for validation and limits.
 Inline control payloads remain bounded to 256 bytes. Live readers and shared read/write remain deferred.
 
 ## Prerequisites
@@ -265,7 +269,7 @@ smokes. Missing QEMU/OVMF reduces registration; CI sets
 After `cmake --build build`, the registered smokes have their required images.
 They check boot, shell, passive ACPI observation, SMP balance, child-launch, and exec markers through serial logs.
 No-UART tests use debugcon. Monitor-driven tests also exercise keyboard input. The runner now rejects early exit during settling.
-The [reliability record](doc/2026-11-05-reliability-and-clock-plan.md) documents that correction and the new measurement clock.
+The [reliability record](docs/archive/kernel/2026-11-05-reliability-and-clock-plan.md) documents that correction and the new measurement clock.
 Historical BIOS failures remain separate evidence.
 
 ## Local CI With `act`
@@ -344,7 +348,7 @@ The dedicated build directory defaults to `build/usb-write`; set `USB_BUILD_DIR`
 The replacement option requires the verified base image; set `OS1_USB_BASE_IMAGE` if it is stored elsewhere.
 This option updates a local image and writes it to USB; it does not modify files on the stick in place.
 Use the UEFI boot entry for the preserved layout.
-See [USB workflow and validation](doc/2026-11-05-usb-menu.md) for constraints and evidence.
+See [USB workflow and validation](docs/hardware/usb-image-workflow.md) for constraints and evidence.
 
 ## Real-Hardware Boot Logs
 
@@ -378,7 +382,7 @@ original `os1` menu entry; kernel capture and the watchdog are off. Missing or
 unrecognized templates, mismatched ELF payloads and oversized kernels fail
 without falling back to a fresh image. The local template is intentionally not
 committed. Its hash and qualification history are in the
-[G74SX handoff](doc/2026-11-02-g74sx-bringup-debug-plan.md).
+[G74SX handoff](docs/archive/boot/2026-11-02-g74sx-bringup-debug-plan.md).
 
 Fresh-image creation can include the EFI log
 pre-loader and diagnostic menu. This rebuild is **not G74SX-qualified**:
@@ -396,26 +400,23 @@ automatic log harvest)` for verbose bring-up and the deliberate post-init
 watchdog reset. The next warm boot saves the preceding captured log. The BIOS
 path enables full diagnostics when `OS1_BOOT_DIAGNOSTICS=ON`; extract its raw
 log slots with `tools/bootlog_extract.py`. See
-[doc/2026-11-02-real-hardware-bootlog.md](doc/2026-11-02-real-hardware-bootlog.md).
+[docs/hardware/boot-log.md](docs/hardware/boot-log.md).
 
 See [Smoke Tests](#smoke-tests) for the QEMU no-UART regression. Its test channel
 is enabled in CI and must stay off for hardware images.
 
 ## Documentation
 
-- [Goals](GOALS.md) — project direction and design principles
-- [References](doc/REFERENCES.md) — central index of external standards, vendor manuals, protocol RFCs, and public specifications used by the project
-- [Architecture](doc/ARCHITECTURE.md) — current-state source of truth for boot, memory, console, process, and test architecture; includes a system diagram and end-to-end workflow
-- [Glossary](doc/GLOSSARY.md) — computer architecture, firmware, OS, device, API, and development terms grouped by domain
-- [OS API Drafts](doc/os-api-draft/README.md) — design exploration for the descriptor/object model, VFS shape, and user ABI growth; not the live kernel contract
-- [Latest Review](doc/latest-review.md) — current code-grounded project review (recommended entry point for readers)
-- [Driver, Device, And Platform Implementation Plan 2026-04-29](doc/2026-04-29-driver-device-platform-implementation-plan.md) — implementation history for the driver/device/platform substrate; tracks the 2026-04-30 pass that landed the static PCI driver registry, IRQ vector allocator, MSI-X/MSI/INTx fallback, DMA buffers, shared virtio transport, BlockDevice v2, HPET/LAPIC timer migration, `virtio-net`, and xHCI + HID boot keyboard. ACPI has since moved to the ACPICA-backed implementation described in [2026-05-06 ACPICA Integration](doc/2026-05-06-acpica-integration.md) and reviewed in [2026-05-10 Review](doc/2026-05-10-review.md).
-- [SMP Synchronization Contract 2026-04-29](doc/2026-04-29-smp-synchronization-contract.md) — current synchronization vocabulary, locking order, and BSP-only annotation rules carried forward into the operational SMP runtime and the next AP-IRQ follow-up work
-- [Kernel Source Tree Reorganization Plan 2026-04-27](doc/2026-04-27-kernel-source-tree-reorganization-plan.md) — plan and implementation checklist for the current kernel source layout
-- [Milestone 1 Design: Boot Contract And Kernel Stabilization](doc/2026-04-22-milestone-1-boot-contract-and-kernel-stabilization.md) — implemented
-- [Milestone 2 Design: Process Model And Isolation](doc/2026-04-22-milestone-2-process-model-and-isolation.md) — implemented
-- [Milestone 3 Design: Modern Default Boot Path](doc/2026-04-22-milestone-3-modern-default-boot-path.md) — implemented
-- [Milestone 4 Design: Modern Platform Support](doc/2026-04-22-milestone-4-modern-platform-support.md) — implemented
-- [Milestone 5 Design: Interactive Shell And Observability](doc/2026-04-23-milestone-5-interactive-shell-and-observability.md) — implemented
-- [Review 2026-04-19](doc/2026-04-19-review.md) — historical review
-- [Review 2026-04-21](doc/2026-04-21-review.md) — historical review
+Start with the [documentation index](docs/README.md).
+Current guides and contracts are grouped by topic; completed plans and older reviews are archived.
+
+- [Goals](GOALS.md) — project scope and priorities
+- [Architecture](docs/ARCHITECTURE.md) — current system structure and data flow
+- [Native API](docs/native-api/README.md) — contracts, implemented ABI profiles, and proposals
+- [Service roadmap](docs/native-api/roadmap.md) — writable `/tmp`, input services, and persistent USB data
+- [Kernel](docs/kernel/README.md) — synchronization, ACPI, and measurement clock
+- [Hardware](docs/hardware/README.md) — USB image workflow, boot logs, and firmware investigation
+- [Shell](docs/shell/README.md) — current CLI behavior and future language proposal
+- [Latest review](docs/latest-review.md) — latest whole-project snapshot and implementation follow-ups
+- [Glossary](docs/GLOSSARY.md) and [references](docs/REFERENCES.md) — terminology and external specifications
+- [Archive](docs/archive/README.md) — dated reviews, completed plans, and validation evidence
