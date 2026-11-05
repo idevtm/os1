@@ -37,6 +37,10 @@ const HpetInfo* platform_hpet();
 // Read the current HPET main-counter value when HPET is available.
 bool platform_hpet_read_main_counter(uint64_t& counter_value);
 
+// Sample a validated high-resolution clock; false means unavailable.
+// This clock has a separate epoch from the IPC deadline clock.
+bool platform_measurement_sample(uint64_t& nanoseconds, uint64_t& resolution_ns);
+
 // Return the public virtio-blk summary when a virtio block device is present.
 const VirtioBlkDevice* platform_virtio_blk();
 

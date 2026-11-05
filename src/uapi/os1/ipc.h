@@ -163,3 +163,15 @@ struct os1_ipc_result_buffers
 // SUBMIT accepts LOAN. REPLY accepts RETURN or distinct owned MOVE outputs.
 // Unused entries are zero. Receive and result descriptor claims are transactional.
 // RESULT_BUFFERS claims outputs once across all aliases of the Operation.
+
+// Separate measurement timeline: never pass these timestamps to WAIT_UNTIL.
+#define OS1_IPC_MEASURE 27u
+#define OS1_MEASUREMENT_UNAVAILABLE 0u
+#define OS1_MEASUREMENT_HPET 1u
+// MEASURE: fd=0, argument points to output. Source zero means unavailable.
+// Version/size are kernel outputs; reserved fields are zero. Units do not imply accuracy.
+struct os1_measurement
+{
+    uint32_t version, size, source, reserved;
+    uint64_t nanoseconds, resolution_ns;
+};

@@ -28,7 +28,7 @@ menu_cleanup() {
 		stty "$MENU_STTY"
 		MENU_STTY=
 	fi
-	printf '\033[0m\033[?25h' >&2
+	printf '\033[0m\033[?1049l\033[?25h' >&2
 }
 
 menu_record() {
@@ -95,7 +95,7 @@ choose_target() {
 	trap 'menu_cleanup; printf "\n"; exit 130' INT TERM HUP
 
 	stty -echo -icanon min 1 time 0
-	printf '\033[?25l' >&2
+	printf '\033[?1049h\033[?25l' >&2
 
 	while :; do
 		draw_target_menu "$selection"
@@ -127,10 +127,14 @@ choose_target() {
 
 	menu_cleanup
 	trap - INT TERM HUP
-	printf '\033[2J\033[H' >&2
 	record=$(menu_record "$selection")
 	printf '%s\n' "${record%%|*}"
 }
+
+if [ "$(id -u)" -eq 0 ]; then
+	printf 'Run ./os1.sh without sudo; the USB writer requests it only when needed.\n' >&2
+	exit 1
+fi
 
 configure_workspace
 
@@ -143,6 +147,11 @@ elif [ -t 0 ] && [ -t 1 ]; then
 else
 	TARGET=run
 	printf 'No target specified and no interactive terminal is available; defaulting to %s.\n' "$TARGET" >&2
+fi
+
+if [ "$TARGET" = usb ]; then
+	exec python3 -I "$SCRIPT_DIR/scripts/write_usb.py" \
+		--build-dir "${USB_BUILD_DIR:-$SCRIPT_DIR/build/usb-write}" --toolchain "$TOOLCHAIN_FILE"
 fi
 
 cmake --build "$BUILD_DIR"

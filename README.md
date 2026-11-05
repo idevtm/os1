@@ -256,18 +256,17 @@ ctest --test-dir build --output-on-failure --no-tests=error
 ```
 
 With `BUILD_TESTING=ON`, QEMU, and OVMF available, CTest registers eleven QEMU
-smokes and two Python script contracts (HMP acknowledgement and USB kernel
-updates). `OS1_QEMU_DEBUGCON=ON` adds the no-UART smoke, giving the CI
-configuration 12 QEMU smokes and 14 CTest cases. `smoke_all` runs only the QEMU
+smokes and four script contracts.
+The contracts cover HMP acknowledgement, smoke settling, USB kernel updates, and USB menus. `OS1_QEMU_DEBUGCON=ON` adds the no-UART smoke, giving the CI
+configuration 12 QEMU smokes and 16 CTest cases. `smoke_all` runs only the QEMU
 smokes. Missing QEMU/OVMF reduces registration; CI sets
 `OS1_REQUIRE_UEFI_SMOKE=ON` to reject a missing UEFI smoke environment.
 
 After `cmake --build build`, the registered smokes have their required images.
 They check boot, shell, passive ACPI observation, SMP balance, child-launch, and exec markers through serial logs.
-No-UART tests use debugcon. Monitor-driven tests also exercise keyboard input. The runner's
-early-EOF settle-window defect and the unresolved BIOS fault are documented in
-the [current review](doc/2026-11-03-review.md); a green run is not evidence that
-those issues have been fixed.
+No-UART tests use debugcon. Monitor-driven tests also exercise keyboard input. The runner now rejects early exit during settling.
+The [reliability record](doc/2026-11-05-reliability-and-clock-plan.md) documents that correction and the new measurement clock.
+Historical BIOS failures remain separate evidence.
 
 ## Local CI With `act`
 
@@ -324,7 +323,28 @@ The smoke targets cover both boot paths, including the baseline shell, observabi
 
 The helper wrapper scripts remain available as thin CMake frontends:
 
-- `./run.sh`
+- `./os1.sh`
+
+## Build And Write A USB Stick
+
+Run `./os1.sh` and select **Build and write USB stick**, or run `./os1.sh usb` directly.
+
+| Step | Action |
+| --- | --- |
+| Layout | Choose **Replace kernel and initrd** or **Create a fresh boot image**. |
+| Build | Compile the current kernel and initrd as your normal user. |
+| Target | Use the arrow keys to select **Write to disk…**, then press Enter. |
+| Write | Enter your sudo password when requested; the helper writes, verifies, and ejects the disk. |
+
+This workflow currently supports macOS.
+Use Up/Down and Enter in both menus; press `q` or Escape to cancel.
+Selecting a write destination replaces that disk’s contents without a typed confirmation.
+Do not run the whole script with sudo.
+The dedicated build directory defaults to `build/usb-write`; set `USB_BUILD_DIR` to change it.
+The replacement option requires the verified base image; set `OS1_USB_BASE_IMAGE` if it is stored elsewhere.
+This option updates a local image and writes it to USB; it does not modify files on the stick in place.
+Use the UEFI boot entry for the preserved layout.
+See [USB workflow and validation](doc/2026-11-05-usb-menu.md) for constraints and evidence.
 
 ## Real-Hardware Boot Logs
 

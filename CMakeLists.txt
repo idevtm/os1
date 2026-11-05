@@ -170,9 +170,9 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-# Share the existing low-memory staging span: 360 KiB kernel, 192 KiB initrd.
+# Share the existing low-memory staging span: 356 KiB kernel, 196 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x6A000)
+set(OS1_INITRD_LOAD_ADDRESS 0x69000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -195,7 +195,7 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 384)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 392)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
 set(OS1_INITRD_LOAD_LIMIT 0x9A000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
@@ -584,6 +584,14 @@ add_custom_command(
 )
 add_custom_target(os1_usb_image ALL DEPENDS "${OS1_USB_IMAGE}")
 
+# os1.sh handles this menu action so CMake never launches an elevated build.
+add_custom_target(usb
+  COMMAND "${CMAKE_COMMAND}" -E echo "Use ./os1.sh usb for interactive image build and USB writing."
+  VERBATIM)
+os1_register_menu_target(usb
+  "Build and write USB stick"
+  "Choose preserved UEFI or fresh hybrid layout, select a USB disk, verify and eject. macOS only.")
+
 function(os1_add_unavailable_target target_name reason)
   add_custom_target(
     "${target_name}"
@@ -621,9 +629,7 @@ else()
   )
   add_custom_target(os1_usb_kernel_update DEPENDS "${OS1_USB_KERNEL_UPDATE_IMAGE}")
 endif()
-os1_register_menu_target(os1_usb_kernel_update
-  "Update USB kernel in verified base image"
-  "Preserve all other bytes; requires OS1_USB_BASE_IMAGE. Produces os1-usb-kernel-update.img.")
+# Keep the kernel-only target available for scripted use; interactive USB work uses usb.
 
 if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(
@@ -797,6 +803,10 @@ os1_register_menu_target(
 
 include(CTest)
 if(BUILD_TESTING)
+  add_test(NAME os1_usb_menu_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_usb_menu.py")
+  add_test(NAME os1_smoke_settle_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_smoke_settle.py")
   add_test(NAME os1_smoke_monitor_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
       -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_smoke_monitor.py
@@ -1185,6 +1195,8 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "[user/vfscheck] restricted child ok"
     "[user/vfscheck] ok"
     "shell spawn vfscheck ok pid="
+    "[user/buffercheck] clock hpet resolution_ns="
+    "[user/buffercheck] timing bytes=65536 repeats=8 sample=2"
     "[user/buffercheck] sync same identity restored address ok"
     "[user/buffercheck] async distinct output one claim ok"
     "[user/buffercheck] revoked read write and execute faults recovered"
@@ -1526,6 +1538,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "[user/vfscheck] restricted child ok"
     "[user/vfscheck] ok"
     "shell spawn vfscheck ok pid="
+    "[user/buffercheck] timing unavailable high-resolution clock"
     "[user/buffercheck] sync same identity restored address ok"
     "[user/buffercheck] async distinct output one claim ok"
     "[user/buffercheck] revoked read write and execute faults recovered"

@@ -439,9 +439,17 @@ The shell runs a line-buffered REPL:
  (return to user via iretq with new frame)
 ```
 
-The `exec` smoke checks for unwanted return to the *old* shell: the rejected-marker list includes `shell exec returned` and an `echo after-exec` probe. This provides bounded transcript evidence. The current runner can accept early process exit before its advertised settle period completes; see [review R4](2026-11-03-review.md#r4--p2-smoke-runner-reports-a-completed-settle-period-after-early-exit).
+The `exec` smoke checks for unwanted return to the *old* shell: the rejected-marker list includes `shell exec returned` and an `echo after-exec` probe. This provides bounded transcript evidence. The runner now rejects early exit before its settling interval completes.
 
 ## Build Outputs And Boot Artifacts
+
+The [USB workflow](2026-11-05-usb-menu.md) builds current payloads through `os1.sh usb` without administrator privileges.
+A separate macOS helper provides arrow-key menus for image layout and the external physical USB write destination.
+Selecting a write destination starts the writer without a typed confirmation.
+Menus use the alternate terminal screen; the helper restores the normal screen before displaying the sudo password guidance.
+Only the write, readback, and eject stage uses sudo.
+The replacement option retains the base image’s UEFI files and updates the kernel and initrd.
+Its BIOS payload remains historical; the fresh hybrid image supplies both current boot paths.
 
 The CMake build now produces two image families:
 
@@ -473,12 +481,21 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-784`: `kernel_bios.elf`
-- LBA `785-1168`: `initrd.cpio`
+- LBA `65-776`: `kernel_bios.elf`
+- LBA `777-1168`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](2026-11-02-real-hardware-bootlog.md))
 
-The slot sizes come from `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [../CMakeLists.txt](../CMakeLists.txt). The BIOS loader stages the stripped kernel in `[0x10000,0x6A000)` (360 KiB) and the plain initrd in `[0x6A000,0x9A000)` (192 KiB). Kernel C++ and bundled userspace use `-Os`; userspace also discards unreferenced sections while retaining metadata. These changes accommodate sessions and rich-parameter tools without modifying the loader, the 2880-sector raw image, or boot-log placement. ELF-aware checks separately enforce kernel file/staging size, PT_LOAD execution extent plus the 16 KiB reserve, initrd capacity, firmware ceiling, and disk overlap. The reserved execution window and page bitmap remain unchanged. See the [implementation record](2026-11-05-client-sessions-and-parameters.md).
+[CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
+The BIOS loader stages the stripped kernel in `[0x10000,0x69000)` (356 KiB).
+It stages the plain initrd in `[0x69000,0x9A000)` (196 KiB).
+The reliability phase moved the boundary by 4 KiB to fit the expanded benchmark.
+The 2880-sector raw image, firmware ceiling, and boot-log placement remain unchanged.
+Kernel C++ and bundled userspace use `-Os`; userspace discards unreferenced sections while retaining metadata.
+
+ELF-aware checks enforce file size, staging limits, execution extent, reserve space, initrd capacity, and disk overlap.
+The reserved execution window and page bitmap remain unchanged.
+The [reliability record](2026-11-05-reliability-and-clock-plan.md) contains current sizes and validation.
 
 ## The Shared Kernel Contract: `BootInfo`
 
@@ -533,7 +550,7 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x0A000` | temporary page-table scratch used by the BIOS long-mode transition |
 | `0x10000` | BIOS kernel-image load buffer |
-| `0x6A000` | BIOS initrd load buffer (192 KiB slot, ending at `0x9A000`) |
+| `0x69000` | BIOS initrd load buffer (196 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x20000-0x5FFFF` | page-frame bitmap |
 
@@ -820,7 +837,18 @@ The GDT now includes:
 
 The TSS supplies `RSP0` and interrupt stack pointers; hardware task switching is not used. Every context switch updates `cpu_cur()->tss.rsp0` for the next ring-3 interrupt/trap entry that does not select an IST stack.
 
-CPU initialization also allocates a separate IST1 page for NMI, double fault, and machine check. The IDT selects IST1 for these exceptions, but allocation failure currently leaves `tss.ist1` unset without stopping initialization. This is an open failure-path defect, not guaranteed fault containment; see [review R3](2026-11-03-review.md#r3--p2-ist-allocation-failure-leaves-fatal-exceptions-without-their-stack).
+CPU initialization allocates a separate IST1 page for NMI, double fault, and machine check.
+
+```text
+Direct map ready -> allocate IST1 -> load TSS and IDT -> publish CPU online
+                         failure -> halt CPU before IDT load
+```
+
+Both BSP and AP paths halt when allocation fails.
+The early BSP descriptor setup precedes allocation and does not load the kernel IDT.
+The IDT loader independently rejects a zero IST1 pointer, including release builds.
+Repeated setup preserves the existing stack.
+The [reliability record](2026-11-05-reliability-and-clock-plan.md) documents tests and remaining containment limits.
 
 ### Unified `TrapFrame`
 
@@ -890,6 +918,21 @@ The event ring currently stores 256 overwrite-on-full records with monotonic seq
 `/bin/sh events` is a snapshot command. Continuous streaming and `Ctrl-C` cancellation are intentionally deferred until the console/process layer has nonblocking input, cancellation, or signal-like infrastructure.
 
 The ring-3 shell consumes most records through built-ins such as `sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, and `irqs`; `/bin/acpiprobe` consumes the ACPICA snapshot. Keeping these paths explicit avoids turning observability into parsed boot logs.
+
+### Performance measurement clock
+
+The measurement clock is separate from scheduler ticks and IPC deadlines.
+
+| API | Source | Purpose |
+| --- | --- | --- |
+| `OS1_IPC_CLOCK` | BSP ticks at 1000 Hz | Existing IPC deadlines |
+| `OS1_IPC_MEASURE` | Validated 64-bit HPET | Performance measurements |
+
+Boot checks HPET width, period, and counter progress.
+A serialized runtime sample rejects counter rollback or conversion overflow.
+Missing, disabled, invalid, or unsuitable HPET hardware produces an explicit unavailable result.
+The BIOS compatibility path keeps HPET disabled.
+The [measurement ABI](measurement-clock-abi.md) defines timestamps and limitations.
 
 ## Process And Userland Architecture
 
@@ -1049,7 +1092,7 @@ The test ladder is now:
 
 1. Host GoogleTest unit tests for parser, ABI, memory-policy, and page-table logic.
 2. Build-time layout contract scripts for boot image and Limine shim invariants.
-3. Python script contracts for HMP monitor acknowledgements and kernel-only USB image updates.
+3. Python script contracts for HMP monitor acknowledgements, smoke settling, kernel-only USB image updates, and USB menus.
 4. QEMU UEFI and BIOS CTest smokes for boot, platform discovery, shell, observe, SMP balance, spawn, exec, xHCI, and optional no-UART behavior.
 5. Manual QEMU debug runs through the `run*` targets and recorded physical-hardware experiments.
 
@@ -1155,7 +1198,12 @@ With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers eleven 
 - `os1_smoke_spawn_bios`
 - `os1_smoke_exec_bios`
 
-`OS1_QEMU_DEBUGCON=ON` additionally registers `os1_smoke_no_uart`, which removes COM1, captures output through QEMU debugcon, and enters a command through PS/2. `BUILD_TESTING=ON` also registers two Python script contracts, `os1_smoke_monitor_contract` and `os1_usb_kernel_update_contract`. Thus the CI configuration has 12 QEMU smokes plus two contracts (14 root CTest cases); the same complete-tool configuration without debugcon has 11 plus two (13). Missing emulator/firmware prerequisites can reduce registration, so counts must name their configuration. The separate host suite is not part of these totals.
+`OS1_QEMU_DEBUGCON=ON` adds `os1_smoke_no_uart`, which tests debugcon output and PS/2 input without COM1.
+`BUILD_TESTING=ON` registers four script contracts: monitor exchange, smoke settling, USB kernel update, and USB menu.
+The complete CI configuration has 12 QEMU smokes and four contracts, for 16 root CTest cases.
+Without debugcon, the complete-tool configuration has 11 QEMU smokes and four contracts, for 15 root CTest cases.
+Missing emulator or firmware prerequisites can reduce registration.
+The separate host suite is not part of these totals.
 
 The baseline smoke tests cover the common boot and shell transcript on each frontend, including:
 
@@ -1179,7 +1227,10 @@ The dedicated observe, balance, spawn, exec, and xHCI smokes then exercise the o
 - in-place `exec` replacement without the old shell prompt returning
 - xHCI controller bring-up, root-port enumeration, HID boot keyboard configuration, and USB key reports feeding the same console-input path used by PS/2
 
-The current runner can report success after all required markers if its subprocess exits before the configured clean settle interval completes. [Review R4](2026-11-03-review.md#r4--p2-smoke-runner-reports-a-completed-settle-period-after-early-exit) records a reproduction. Passing runs therefore do not prove the advertised interval, and passing retries do not close the separately observed BIOS launch fault. See the [review evidence](2026-11-03-review.md#validation-available-for-this-revision) for the retained results and their limits.
+The smoke runner checks completion of the full requested settling interval before terminating its subprocess.
+Early EOF, closed output pipes, missing markers, and forbidden markers fail validation.
+Seven script regressions cover these boundaries.
+The fix closes review R4; it does not explain historical BIOS launch failures.
 
 ### CI
 
@@ -1192,7 +1243,7 @@ GitHub Actions runs on `ubuntu-24.04` for pushes to `main` and pull requests tar
 - configure with `OS1_REQUIRE_UEFI_SMOKE=ON`, `OS1_KMEM_DEBUG=ON`, and `OS1_QEMU_DEBUGCON=ON`
 - build the default modern artifact
 - explicitly build the BIOS compatibility artifact
-- run the 12 QEMU smokes and two script contracts through root `ctest`
+- run the 12 QEMU smokes and four script contracts through root `ctest`
 
 The same single CI job name is kept for local `act` compatibility.
 
@@ -1200,7 +1251,8 @@ This branch runs build/test commands directly. The unified verification entrypoi
 
 ## Current Constraints And Next Step
 
-The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](2026-11-03-review.md#7-recommended-next-milestones) identified publication and mapping leaks now addressed by the console milestone. IST allocation failure, smoke-runner settling, and qualification of the exact current kernel on the preserved G74SX image remain follow-ups. The VFS exec tests reproduced and fixed a page-table teardown defect that freed reserved frames; see the [VFS validation record](2026-11-04-initrd-vfs-implementation-plan.md). This does not retrospectively prove the cause of every earlier intermittent BIOS failure or qualify physical media.
+The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](2026-11-03-review.md#7-recommended-next-milestones) identified publication and mapping leaks now addressed by the console milestone. The reliability phase addresses IST allocation failure and smoke-runner settling.
+Exact-image physical qualification remains pending. The VFS exec tests reproduced and fixed a page-table teardown defect that freed reserved frames; see the [VFS validation record](2026-11-04-initrd-vfs-implementation-plan.md). This does not retrospectively prove the cause of every earlier intermittent BIOS failure or qualify physical media.
 
 Major constraints that remain:
 

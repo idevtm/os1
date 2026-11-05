@@ -27,7 +27,7 @@ set(OS1_HOST_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 include("${OS1_REPO_ROOT}/cmake/acpica_sources.cmake")
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-set(OS1_INITRD_LOAD_ADDRESS 0x6A000)
+set(OS1_INITRD_LOAD_ADDRESS 0x69000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -175,6 +175,7 @@ add_executable(os1_host_tests
   kernel/load_balancer_tests.cpp
   kernel/runqueue_tests.cpp
   kernel/timer_source_tests.cpp
+  kernel/measurement_clock_tests.cpp
   kernel/pci_bus_tests.cpp
   kernel/pci_capability_tests.cpp
   kernel/pci_msi_tests.cpp

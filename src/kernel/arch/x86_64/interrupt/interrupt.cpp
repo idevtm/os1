@@ -182,6 +182,13 @@ bool Interrupts::initialize()
 
 void Interrupts::load()
 {
+    // This invariant must hold in release builds too, on both BSP and APs.
+    if(!cpu_cur()->tss.ist1)
+    {
+        debug("refusing kernel IDT without exception stack")();
+        for(;;)
+            asm volatile("cli; hlt");
+    }
     lidt(IDT, 256 * sizeof(IDTDescriptor));
 }
 

@@ -4,6 +4,7 @@
 #include "ipc/channel.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
+#include "platform/state.hpp"
 #include "proc/user_program.hpp"
 #include "support/physical_memory.hpp"
 #ifdef assert
@@ -1608,3 +1609,23 @@ TEST_F(IpcBuffers, SameProcessLoanRestoresOwnerRoleAndRevokesBorrowerRole)
     EXPECT_EQ(1u, result.buffers.count);
 }
 }  // namespace
+
+TEST_F(Ipc, MeasurementIsSeparateFromDeadlineClockAndHasExplicitUnavailability)
+{
+    const auto saved = g_platform.hpet;
+    g_platform.hpet = {};
+    const long deadline_before = sys_ipc(frames, thread, OS1_IPC_CLOCK, 0, 0);
+    os1_measurement result{};
+    EXPECT_EQ(0, call(OS1_IPC_MEASURE, 0, result));
+    EXPECT_EQ(1u, result.version);
+    EXPECT_EQ(sizeof(result), result.size);
+    EXPECT_EQ(OS1_MEASUREMENT_UNAVAILABLE, result.source);
+    EXPECT_EQ(0u, result.nanoseconds);
+    EXPECT_EQ(0u, result.resolution_ns);
+    EXPECT_EQ(0u, result.reserved);
+    EXPECT_EQ(deadline_before, sys_ipc(frames, thread, OS1_IPC_CLOCK, 0, 0));
+    EXPECT_EQ(OS1_ERR_INVALID, sys_ipc(frames, thread, OS1_IPC_MEASURE, 1, address));
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_MEASURE, 0, 0));
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_MEASURE, 0, address + 4096 - 1));
+    g_platform.hpet = saved;
+}

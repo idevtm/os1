@@ -12,6 +12,10 @@ inline long ipc_wait(int fd)
 {
     return ipc(OS1_IPC_WAIT, fd);
 }
+inline long ipc_measure(os1_measurement& sample)
+{
+    return ipc(OS1_IPC_MEASURE, 0, &sample);
+}
 inline long ipc_clock()
 {
     return ipc(OS1_IPC_CLOCK, 0);

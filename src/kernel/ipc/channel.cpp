@@ -5,6 +5,7 @@
 #include "buffer/buffer.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
+#include "platform/platform.hpp"
 #include "util/memory.h"
 #ifdef OS1_HOST_TEST
 void (*host_ipc_before_receive)() = nullptr;
@@ -1059,6 +1060,17 @@ long sys_ipc(
 {
     if(!thread || !thread->process)
         return OS1_ERR_INVALID;
+    if(operation == OS1_IPC_MEASURE)
+    {
+        if(fd)
+            return OS1_ERR_INVALID;
+        os1_measurement sample{};
+        sample.version = 1;
+        sample.size = sizeof(sample);
+        if(platform_measurement_sample(sample.nanoseconds, sample.resolution_ns))
+            sample.source = OS1_MEASUREMENT_HPET;
+        return copy_to_user(frames, thread, argument, &sample, sizeof(sample)) ? 0 : OS1_ERR_FAULT;
+    }
     if(operation == OS1_IPC_CLOCK)
     {
         if(fd || argument)

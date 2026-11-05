@@ -76,6 +76,113 @@ os1_ipc_result reply(const os1_ipc_message& m)
     r.request_id = m.request_id;
     return r;
 }
+// Equal logical bytes: copied calls use 252-byte chunks; Buffer calls use one loan.
+int benchmark(int client)
+{
+    os1_measurement begin{}, end{};
+    CHECK(ipc_measure(begin) == 0, "measurement ABI");
+    if(begin.source == OS1_MEASUREMENT_UNAVAILABLE)
+    {
+        say("[user/buffercheck] timing unavailable high-resolution clock\n");
+        return 0;
+    }
+    CHECK(begin.source == OS1_MEASUREMENT_HPET && begin.resolution_ns, "clock source");
+    uint64_t overhead = UINT64_MAX;
+    for(unsigned i = 0; i < 32; ++i)
+    {
+        CHECK(ipc_measure(begin) == 0 && ipc_measure(end) == 0 && end.source == begin.source &&
+                  end.nanoseconds >= begin.nanoseconds,
+              "timestamp monotonicity");
+        const auto elapsed = end.nanoseconds - begin.nanoseconds;
+        if(elapsed < overhead)
+            overhead = elapsed;
+    }
+    say("[user/buffercheck] clock hpet resolution_ns=");
+    number(end.resolution_ns);
+    say(" pair_min_ns=");
+    number(overhead);
+    say("\n");
+    long fd = buffer_create(65536);
+    CHECK(fd >= 0, "benchmark allocation");
+    void* view = nullptr;
+    CHECK(buffer_map(fd, view) == 0, "benchmark mapping");
+    auto* data = static_cast<uint8_t*>(view);
+    const unsigned sizes[] = {252u, 4096u, 65536u};
+    for(unsigned size : sizes)
+    {
+        const unsigned repeats = size == 252 ? 256 : (size == 4096 ? 64 : 8);
+        for(unsigned sample = 0; sample < 3; ++sample)
+        {
+            uint64_t times[2]{};
+            // Alternate order to reduce a consistent first-transport bias.
+            for(unsigned order = 0; order < 2; ++order)
+            {
+                const unsigned transport = (order + sample) % 2;
+                for(unsigned i = 0; i < size; ++i)
+                    data[i] = 'A';
+                CHECK(ipc_measure(begin) == 0 && begin.source, "start clock");
+                for(unsigned run = 0; run < repeats; ++run)
+                {
+                    if(transport == 0)
+                    {
+                        for(unsigned offset = 0; offset < size; offset += 252)
+                        {
+                            Text text{};
+                            text.length = size - offset > 252 ? 252 : size - offset;
+                            for(unsigned i = 0; i < text.length; ++i)
+                                text.bytes[i] = data[offset + i];
+                            auto call = message(Lowercase);
+                            encode(call, text);
+                            os1_ipc_result result{};
+                            CHECK(ipc_call(client, call, result) == 0 && !result.transport_status &&
+                                      !result.application_status &&
+                                      result.payload_bytes == sizeof(Text),
+                                  "copied benchmark");
+                            const auto* output = reinterpret_cast<const Text*>(result.payload);
+                            CHECK(output->length == text.length, "copied length");
+                            for(unsigned i = 0; i < text.length; ++i)
+                                data[offset + i] = output->bytes[i];
+                        }
+                    }
+                    else
+                    {
+                        auto call = request(fd, LowercaseBuffer, 0, size);
+                        os1_ipc_result_buffers result{};
+                        CHECK(ipc_call_buffers(client, call, result) == 0 &&
+                                  !result.result.transport_status &&
+                                  !result.result.application_status && result.buffers.count == 1,
+                              "Buffer benchmark");
+                        ipc_close_buffers(result.buffers);
+                    }
+                }
+                CHECK(ipc_measure(end) == 0 && end.source == begin.source &&
+                          end.nanoseconds >= begin.nanoseconds,
+                      "end clock");
+                times[transport] = end.nanoseconds - begin.nanoseconds;
+                for(unsigned i = 0; i < size; ++i)
+                    CHECK(data[i] == 'a', "benchmark output");
+            }
+            say("[user/buffercheck] timing bytes=");
+            number(size);
+            say(" repeats=");
+            number(repeats);
+            say(" sample=");
+            number(sample);
+            say(" copy_calls=");
+            number(((size + 251) / 252) * repeats);
+            say(" buffer_calls=");
+            number(repeats);
+            say(" copied_ns=");
+            number(times[0]);
+            say(" buffer_ns=");
+            number(times[1]);
+            say("\n");
+        }
+    }
+    CHECK(buffer_unmap(fd, view) == 0, "benchmark unmap");
+    close(fd);
+    return 0;
+}
 long provider(const char* path, os1_ipc_pair& pair)
 {
     if(ipc(OS1_IPC_CREATE, 0, &pair) < 0)
@@ -230,36 +337,7 @@ int main()
               "restored original mapping and alias");
     ipc_close_buffers(result.buffers);
     say("[user/buffercheck] sync same identity restored address ok\n");
-    // CLOCK has tick resolution. Report aggregate time, including control operations.
-    auto copied_request = message(Lowercase);
-    Text copied_text{};
-    copied_text.length = sizeof(copied_text.bytes);
-    for(unsigned i = 0; i < copied_text.length; ++i)
-        copied_text.bytes[i] = bytes[i];
-    encode(copied_request, copied_text);
-    os1_ipc_result copied_result{};
-    uint64_t start = ipc_clock();
-    for(unsigned i = 0; i < 64; ++i)
-        CHECK(ipc_call(pair.client, copied_request, copied_result) == 0 &&
-                  !copied_result.transport_status && !copied_result.application_status,
-              "copied timing");
-    uint64_t copied_ns = ipc_clock() - start;
-    input = request(fd, LowercaseBuffer, 0, 252);
-    start = ipc_clock();
-    for(unsigned i = 0; i < 64; ++i)
-    {
-        CHECK(ipc_call_buffers(pair.client, input, result) == 0 &&
-                  !result.result.transport_status && !result.result.application_status &&
-                  result.buffers.count == 1,
-              "Buffer timing");
-        ipc_close_buffers(result.buffers);
-    }
-    uint64_t buffer_ns = ipc_clock() - start;
-    say("[user/buffercheck] timing bytes=252 repeats=64 copied_ns=");
-    number(copied_ns);
-    say(" buffer_ns=");
-    number(buffer_ns);
-    say("\n");
+    CHECK(benchmark(pair.client) == 0, "benchmark");
     input = request(fd, LowercaseBuffer, UINT64_MAX, 2);
     CHECK(ipc_call_buffers(pair.client, input, result) == 0 &&
               result.result.application_status == OS1_ERR_INVALID && !result.buffers.count &&
