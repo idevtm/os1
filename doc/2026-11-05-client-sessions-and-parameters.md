@@ -132,4 +132,11 @@ Validation completed against the combined final sources:
   and interface sections remain retained after strip/GC.
 - Source-only adversarial passes covered kernel admission/waits, raw parsing,
   protocol binding, provider authority/lifetime and final capacity/build integration;
-  `git diff --check` passed. No commit or push was made.
+  `git diff --check` passed.
+
+Publishing exposed a GCC host-build failure: the legacy kernel `static_assert`
+macro shadowed the native C++ keyword and broke standard-library declarations.
+Removing the obsolete macro restores native compile-time checks. A minimal
+two-argument assertion reproduced the failure before the fix and compiled after
+it; a false assertion still failed compilation. The host suite and image builds
+passed again after this compatibility fix.
