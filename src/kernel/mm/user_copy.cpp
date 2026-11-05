@@ -2,13 +2,19 @@
 // checked, translated, and permission checked before bytes cross into kernel code.
 #include "mm/user_copy.hpp"
 
+#include "arch/x86_64/cpu/cpu.hpp"
 #include "debug/event_ring.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/user_address.hpp"
+#include "mm/user_copy_lock.hpp"
 #include "util/memory.h"
 
 namespace
 {
+Spinlock g_copy_gate{"user-copy-retirement"};
+#if defined(OS1_HOST_TEST)
+thread_local unsigned g_copy_depth = 0;
+#endif
 [[nodiscard]] uint64_t user_copy_pid(const Thread* thread)
 {
     return (thread && thread->process) ? thread->process->pid : 0;
@@ -37,11 +43,33 @@ void record_user_copy_failure(const Thread* thread,
 }
 }  // namespace
 
+void user_copy_lock()
+{
+#if defined(OS1_HOST_TEST)
+    auto& depth = g_copy_depth;
+#else
+    auto& depth = cpu_cur()->user_copy_depth;
+#endif
+    if(depth++ == 0)
+        g_copy_gate.lock();
+}
+void user_copy_unlock()
+{
+#if defined(OS1_HOST_TEST)
+    auto& depth = g_copy_depth;
+#else
+    auto& depth = cpu_cur()->user_copy_depth;
+#endif
+    if(--depth == 0)
+        g_copy_gate.unlock();
+}
+
 bool copy_into_address_space(VirtualMemory& vm,
                              uint64_t virtual_address,
                              const uint8_t* source,
                              uint64_t length)
 {
+    UserCopyGuard copy_guard;
     uint64_t copied = 0;
     while(copied < length)
     {
@@ -68,6 +96,7 @@ bool copy_to_user(PageFrameContainer& frames,
                   const void* source,
                   size_t length)
 {
+    UserCopyGuard copy_guard;
     if((nullptr == thread) || (nullptr == source))
     {
         record_user_copy_failure(thread,
@@ -130,6 +159,7 @@ bool copy_from_user(PageFrameContainer& frames,
                     void* destination,
                     size_t length)
 {
+    UserCopyGuard copy_guard;
     if((nullptr == thread) || (nullptr == destination))
     {
         record_user_copy_failure(thread,

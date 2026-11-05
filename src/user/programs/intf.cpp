@@ -1,5 +1,6 @@
 #include <os1/vfs.hpp>
 
+#include "interface/buffer_metadata.hpp"
 #include "interface/metadata.hpp"
 using namespace os1::user;
 using namespace os1::interface;
@@ -304,6 +305,28 @@ int main(int argc, char** argv)
         print(" output=");
         number(a.output);
         print(a.flags ? " implemented\n" : " metadata-only\n");
+    }
+    os1::buffer_metadata::Metadata buffers{};
+    const int buffer_found = read_section(reader,
+                                          info.byte_size,
+                                          ".os.buffers",
+                                          buffers,
+                                          [&](const os1::buffer_metadata::Metadata& value) {
+                                              return os1::buffer_metadata::validate(value, m);
+                                          });
+    if(buffer_found < 0)
+    {
+        close(fd);
+        print("intf: invalid Buffer metadata\n");
+        return 1;
+    }
+    for(unsigned i = 0; i < buffers.count; ++i)
+    {
+        const auto& b = buffers.members[i];
+        print("Buffer method=");
+        number(b.member);
+        print(" mode=exclusive input=loan reference=attachment,offset,length output=");
+        print(b.output == os1::buffer_metadata::return_input ? "return_same\n" : "move_distinct\n");
     }
     os1::constructor::Metadata ctor{};
     const int found = constructor_metadata(fd, ctor);

@@ -2,12 +2,13 @@
 // the thread currently running on it, so reclamation happens when another thread
 // re-enters the kernel.
 #include "arch/x86_64/cpu/cpu.hpp"
-#include "syscall/vfs.hpp"
-#include "ipc/channel.hpp"
+#include "buffer/buffer.hpp"
 #include "handoff/memory_layout.h"
+#include "ipc/channel.hpp"
 #include "proc/thread.hpp"
-#include "syscall/wait.hpp"
 #include "syscall/console_read.hpp"
+#include "syscall/vfs.hpp"
+#include "syscall/wait.hpp"
 
 namespace
 {
@@ -71,6 +72,8 @@ void reap_dead_threads(PageFrameContainer& frames)
 
         if(owner && !process_has_threads(owner))
         {
+            // Zombies keep their exit record, not Buffer mappings or authority.
+            buffer_process_cleanup(frames, owner);
             descriptor_close_all(owner->descriptors);
             if(ProcessState::Zombie == owner->state)
             {

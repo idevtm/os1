@@ -3,6 +3,7 @@
 // threads are gone.
 #include "proc/process.hpp"
 
+#include "buffer/buffer.hpp"
 #include "debug/debug.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
@@ -271,6 +272,7 @@ bool reap_process(Process* process, PageFrameContainer& frames)
         unlink_process(process);
     }
 
+    buffer_process_cleanup(frames, process);
     if((0 != cr3_to_destroy) && !keep_kernel_process)
     {
         VirtualMemory vm(frames, cr3_to_destroy);

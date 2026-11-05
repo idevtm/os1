@@ -1,5 +1,6 @@
 #include "proc/startup.hpp"
 
+#include "buffer/buffer.hpp"
 #include "fs/initrd.hpp"
 #include "handoff/memory_layout.h"
 #include "ipc/channel.hpp"
@@ -256,6 +257,7 @@ long replace_process_image(const ProcessSyscallContext& context,
         return OS1_ERR_FAULT;
     }
     const uint64_t old = thread->address_space_cr3;
+    buffer_process_exec(*context.frames, thread->process);
     descriptor_close_exec(thread->process->descriptors);
     thread->address_space_cr3 = cr3;
     thread->process->address_space.cr3 = cr3;

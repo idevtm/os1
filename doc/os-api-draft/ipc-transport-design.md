@@ -8,7 +8,9 @@ quotas, locking, private TextProcessor, and offline `intf` inspection. The
 construction, deadlines, volatile subscriptions, and restricted private supervision.
 The [shared activation extension](../shared-activation-abi.md) implements bounded
 copy-only attachments and scoped Counter activation. General discovery, restart
-policy, and shared memory remain future work. This profile owns the sequence under the
+policy, and broader shared-memory modes remain future work.
+The [exclusive Buffer ABI](../buffer-loans-abi.md) implements Operation-scoped loans and distinct reply outputs. Integrated validation remains pending.
+This profile owns the sequence under the
 [native object contract](native_object_kernel_contract.md#8-later-hosted-service-contract).
 The [ELF/service profile](elf_interface_spec.md) owns later metadata/activation;
 [C++ examples](cpp-bindings-and-object-creation.md#8-synchronous-and-asynchronous-ipc)
@@ -81,7 +83,9 @@ Submission must:
 4. Publish the complete request and wake a receiver, or roll back everything.
 
 A failed admission has not published the request. Once submission succeeds,
-ordinary argument buffers may be reused. Full queues return a defined admission
+ordinary copied argument buffers may be reused. This does not apply to
+explicit Buffer loans: their mappings lose access until ownership is returned.
+Full queues return a defined admission
 failure such as WOULD_BLOCK; asynchronous submission must not silently wait for
 capacity. A separate waiting admission policy can be specified later.
 
@@ -186,20 +190,30 @@ Move transfer, unrestricted endpoint graphs, and multi-threaded destination-slot
 reservation remain future gates. Initial launch grants bootstrap the private connection;
 ordinary descriptor integers never replace attachment transfer.
 
-Shared bulk buffers follow attachments. A shared-buffer object owns physical
-pages; mappings retain backing state independently of descriptor lifetime. Pin
-creation limits, mapping rights, offsets/length bounds, unmap, teardown, and TLB
-retirement before implementation. Each process uses its own virtual address.
-A channel request carries an attached buffer capability plus offset and length;
-the reply carries status and, where needed, a result-buffer capability.
+Shared bulk buffers follow attachments. The revised
+[zero-copy ownership proposal](shared-buffer-ownership.md) records the user's
+2026-11-05 direction: allocate and fill a Buffer's own pages, then transfer access
+to those same pages without snapshot copies. Descriptors name stable objects;
+ownership and virtual mappings are separate. Copied control messages carry an
+attached buffer capability plus offset and length. No cross-process pointer is
+transmitted. Each process uses its own virtual address.
 
-The initial bulk profile uses immutable published input and provider-owned output
-published after completion. A read-only receiver mapping does not make input
-immutable while the sender retains writable aliases. Publication requires a
-snapshot or enforced write sealing across existing and future writable mappings,
-including synchronization and TLB shootdowns. The choice remains open until the
-mapping implementation and its tests exist. Cancellation/timeout cannot free
-pages still mapped or accessed by the provider.
+Three fixed access modes are proposed: exclusive ownership with other mappings
+revoked; a single writer with explicitly authorized live read-only observers;
+and cooperative shared read/write. Live readers do not receive an immutable
+snapshot. Recommend implementing exclusive Operation-scoped loans first: revoke
+caller access at successful admission, grant provider access after retirement,
+and revoke provider access before restoring caller access and publishing terminal
+completion. TextProcessor can mutate the input in place and return the same object.
+Permanent ownership moves remain a separate later option. Existing copy-only
+attachments retain their meaning; loans require an explicit protocol extension.
+
+Pin budgets, whole-buffer transfer bounds, all-alias revocation, mapping/backing
+lifetime, teardown and acknowledged TLB retirement before implementation. A timeout
+does not return a still-active loan; provider failure may return partially modified
+contents with an uncertain outcome after safe revocation.
+The [exclusive Buffer ABI](../buffer-loans-abi.md) now defines that implemented subset; integrated validation remains pending.
+Broader modes remain proposals. No implicit snapshot/copy fallback is proposed.
 
 Only later consider shared-memory message rings. They additionally need atomic
 producer/consumer indices, memory-order rules, slot ownership, bounded capacity,
@@ -223,7 +237,7 @@ validation without claiming all later acceptance gates.
 | 2. Sync and async APIs | Typed handwritten codec; submit/wait/result and synchronous wrapper on the same protocol. | Both styles reach the same handler; reply-before-wait cannot lose a wakeup; results survive copy faults; alias close, abandoned operations, duplicate/late replies, unknown outcomes, and generation reuse. |
 | 3. Properties, subscriptions, timed waits | Configuration getter/setter, progress queue, monotonic deadlines, explicit dispatch, and owned-provider cleanup. | Serialized updates, future-only broadcast, overflow reporting, explicit unsubscribe, event/completion capacity separation, deadline/completion races, startup hang and private-provider cleanup. Snapshot/watch and cancellation remain deferred. |
 | 4. Capability attachments and scoped activation (implemented) | Four copied references per message; explicit Counter registry and class-owned singleton hook. | Rights/ceiling attenuation, quota/copy-fault rollback, cycle rejection, one-time claims, peer-death cleanup, queued construction, conflict rejection, shared state/events, and invalid-provider shutdown. Move transfer and general registry discovery remain deferred. |
-| 5. Shared bulk buffers | Channel control messages plus explicitly shared immutable inputs and published outputs. | Bounds/rights, writable-alias rejection or snapshot isolation, mapping/backing lifetime, TLB retirement, cancellation and crash cleanup. |
+| 5. Shared bulk buffers (exclusive subset implemented; validation pending) | Copied control messages with zero-copy Buffer ownership handoff; exclusive call-scoped loans first, live readers and shared read/write later. | Whole-buffer bounds/rights, all-alias revocation, acknowledged TLB retirement, transactional admission/return, timeout and crash cleanup, stable backing identity and retained quotas. |
 | 6. Optional shared-memory rings | Alternate bulk message transport if measurements justify it. | Memory ordering, wraparound, full/empty and lost-wakeup races, hostile-peer input, producer/consumer death, and measured improvement over copied IPC. |
 
 A second fixed protocol (for example, counter read/add/reset) must challenge the

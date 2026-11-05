@@ -1,13 +1,12 @@
-#include "mm/virtual_memory.hpp"
-
-#include "arch/x86_64/apic/ipi.hpp"
-#include "handoff/memory_layout.h"
-#include "support/lapic_stub.hpp"
-#include "support/physical_memory.hpp"
-
 #include <gtest/gtest.h>
 
 #include <array>
+
+#include "arch/x86_64/apic/ipi.hpp"
+#include "handoff/memory_layout.h"
+#include "mm/virtual_memory.hpp"
+#include "support/lapic_stub.hpp"
+#include "support/physical_memory.hpp"
 
 namespace
 {
@@ -162,4 +161,22 @@ TEST(VirtualMemory, TeardownNeverInterpretsUserBytesAsPageTableEntries)
     uint64_t next = 0;
     ASSERT_TRUE(frames.allocate(next));
     EXPECT_GE(next, kEarlyReservedPhysicalEnd);
+}
+
+TEST(VirtualMemory, SharedBackingSurvivesAddressSpaceDestruction)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = make_frames(arena);
+    uint64_t backing = 0;
+    ASSERT_TRUE(frames.allocate(backing));
+    const auto baseline = frames.free_page_count();
+    VirtualMemory vm(frames);
+    ASSERT_TRUE(
+        vm.map_physical(kUserImageBase, backing, 1, PageFlags::User | PageFlags::SharedBacking));
+    const auto root = vm.root();
+    ASSERT_TRUE(vm.destroy_user_slot(kUserPml4Index));
+    ASSERT_TRUE(frames.free(root));
+    EXPECT_EQ(baseline, frames.free_page_count());
+    ASSERT_TRUE(frames.free(backing));
+    EXPECT_EQ(baseline + 1, frames.free_page_count());
 }

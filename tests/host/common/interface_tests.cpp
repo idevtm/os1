@@ -3,6 +3,7 @@
 #include <cstring>
 #include <vector>
 
+#include "interface/buffer_metadata.hpp"
 #include "interface/counter.hpp"
 #include "interface/textprocessor.hpp"
 using namespace os1::interface;
@@ -101,7 +102,7 @@ TEST(InterfaceMetadata, CanonicalSchemaAndNegativeRecords)
     bad.interface_name[0] = '\n';
     EXPECT_FALSE(validate(bad));
     bad = m;
-    bad.members[7].id = 123;
+    bad.types[7].kind = U8;
     EXPECT_FALSE(validate(bad));
 }
 TEST(InterfaceMetadata, OfflineElfBoundsAndSectionUniqueness)
@@ -849,5 +850,107 @@ TEST(RichParameters, DistinctMetadataElfSectionAndTransactionalExtraction)
     bytes[513] = 'X';
     EXPECT_FALSE(rp::read_elf(reader, bytes.size(), out, scratch));
     EXPECT_EQ(0, std::memcmp(&saved, &out, sizeof(out)));
+}
+}  // namespace
+
+namespace
+{
+TEST(BufferMetadata, BoundedProfileAndLegacyLayout)
+{
+    namespace bm = os1::buffer_metadata;
+    const auto& api = os1::textprocessor::metadata;
+    bm::Metadata m{bm::magic,
+                   1,
+                   sizeof(m),
+                   api.interface_id,
+                   api.interface_version,
+                   2,
+                   {{os1::textprocessor::LowercaseBuffer, bm::exclusive, 1, bm::return_input},
+                    {os1::textprocessor::UppercaseBuffer, bm::exclusive, 1, bm::distinct_output}}};
+    ASSERT_TRUE(bm::validate(m, api));
+    EXPECT_EQ(sizeof(Metadata), 1704u);
+    EXPECT_EQ(api.members[0].id, 1u);
+    EXPECT_EQ(api.members[0].input, 2u);
+    EXPECT_EQ(api.members[0].output, 2u);
+    auto bad = m;
+    bad.count = 9;
+    EXPECT_FALSE(bm::validate(bad, api));
+    bad = m;
+    bad.members[0].mode = 2;
+    EXPECT_FALSE(bm::validate(bad, api));
+    bad = m;
+    bad.members[0].output = 3;
+    EXPECT_FALSE(bm::validate(bad, api));
+    bad = m;
+    bad.members[0].input_count = 2;
+    EXPECT_FALSE(bm::validate(bad, api));
+    bad = m;
+    bad.members[1].member = bad.members[0].member;
+    EXPECT_FALSE(bm::validate(bad, api));
+    bad = m;
+    bad.members[0].member = os1::textprocessor::Lowercase;
+    EXPECT_FALSE(bm::validate(bad, api));
+    bad = m;
+    bad.members[0].member = os1::textprocessor::Progress;
+    EXPECT_FALSE(bm::validate(bad, api));
+    bad = m;
+    bad.members[2].member = 9;
+    EXPECT_FALSE(bm::validate(bad, api));
+    bad = m;
+    bad.interface_id++;
+    EXPECT_FALSE(bm::validate(bad, api));
+}
+TEST(BufferMetadata, OfflineSectionValidation)
+{
+    namespace bm = os1::buffer_metadata;
+    const auto& api = os1::textprocessor::metadata;
+    bm::Metadata profile{
+        bm::magic,
+        1,
+        sizeof(profile),
+        api.interface_id,
+        api.interface_version,
+        1,
+        {{os1::textprocessor::LowercaseBuffer, bm::exclusive, 1, bm::return_input}}};
+    auto bytes = image();
+    Section section{};
+    std::memcpy(&section, bytes.data() + 64 + 2 * sizeof(Section), sizeof(section));
+    section.size = sizeof(profile);
+    std::memcpy(bytes.data() + 64 + 2 * sizeof(Section), &section, sizeof(section));
+    std::memset(bytes.data() + 512, 0, 15);
+    std::memcpy(bytes.data() + 513, ".os.buffers", 12);
+    std::memcpy(bytes.data() + 1024, &profile, sizeof(profile));
+    auto parse_profile = [&]() {
+        bm::Metadata output{};
+        return read_section(
+            [&](uint64_t offset, void* out, size_t size) {
+                if(offset > bytes.size() || size > bytes.size() - offset)
+                    return false;
+                std::memcpy(out, bytes.data() + offset, size);
+                return true;
+            },
+            bytes.size(),
+            ".os.buffers",
+            output,
+            [&](const bm::Metadata& m) { return bm::validate(m, api); });
+    };
+    EXPECT_EQ(parse_profile(), 1);
+    bytes[1024] ^= 1;
+    EXPECT_EQ(parse_profile(), -1);
+    bytes[1024] ^= 1;
+    bytes[513] = 'X';
+    EXPECT_EQ(parse_profile(), 0);
+}
+TEST(BufferMetadata, RangeBoundsWithoutOverflow)
+{
+    using namespace os1::textprocessor;
+    EXPECT_TRUE(valid_range({0, 0, 0, 65536}, 1, 65536));
+    EXPECT_TRUE(valid_range({0, 0, 65536, 0}, 1, 65536));
+    EXPECT_FALSE(valid_range({0, 0, 65536, 1}, 1, 65536));
+    EXPECT_FALSE(valid_range({0, 0, UINT64_MAX, 2}, 1, 65536));
+    EXPECT_FALSE(valid_range({0, 0, 1, UINT64_MAX}, 1, 65536));
+    EXPECT_FALSE(valid_range({1, 0, 0, 1}, 1, 65536));
+    EXPECT_FALSE(valid_range({0, 1, 0, 1}, 1, 65536));
+    EXPECT_FALSE(valid_range({0, 0, 0, 1}, 0, 65536));
 }
 }  // namespace

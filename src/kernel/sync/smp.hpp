@@ -43,6 +43,11 @@
 #endif
 #endif
 
+// Lock waiters can run with IF=0. Service TLB requests without taking locks.
+#if !defined(OS1_HOST_TEST)
+void ipi_poll_tlb_shootdown();
+#endif
+
 class Spinlock
 {
 public:
@@ -60,6 +65,7 @@ public:
 #if defined(OS1_HOST_TEST)
                 __atomic_signal_fence(__ATOMIC_ACQ_REL);
 #else
+                ipi_poll_tlb_shootdown();
                 asm volatile("pause" ::: "memory");
 #endif
             }

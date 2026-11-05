@@ -81,6 +81,7 @@ set_target_properties(
 target_compile_options(os1_acpica PRIVATE -O2 -w)
 
 add_library(os1_host_support
+  "${OS1_REPO_ROOT}/src/kernel/buffer/buffer.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
   support/cpu_stubs.cpp
   support/console_input_stub.cpp
@@ -184,6 +185,8 @@ add_executable(os1_host_tests
   mm/kmem_tests.cpp
   mm/page_frame_tests.cpp
   mm/dma_tests.cpp
+  mm/tlb_retirement_tests.cpp
+  mm/buffer_tests.cpp
   mm/user_address_tests.cpp
   mm/virtual_memory_tests.cpp
   proc/task_registry_tests.cpp

@@ -1,5 +1,6 @@
 #include "syscall/resource.hpp"
 
+#include "buffer/buffer.hpp"
 #include "mm/user_copy.hpp"
 #include "syscall/vfs.hpp"
 
@@ -12,6 +13,8 @@ long sys_resource(
         return OS1_ERR_BAD_DESCRIPTOR;
     if(operation >= OS1_RESOURCE_DUPLICATE_SCOPED && operation <= OS1_RESOURCE_FILE_INFO)
         return sys_vfs(frames, thread, static_cast<int>(fd), operation, argument);
+    if(operation >= OS1_RESOURCE_BUFFER_CREATE && operation <= OS1_RESOURCE_BUFFER_UNMAP)
+        return sys_buffer(frames, thread, fd, operation, argument);
     auto& table = thread->process->descriptors;
     switch(operation)
     {

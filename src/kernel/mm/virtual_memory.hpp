@@ -13,6 +13,7 @@ enum class PageFlags : uint64_t
     Present = 1ull << 0,
     Write = 1ull << 1,
     User = 1ull << 2,
+    SharedBacking = 1ull << 9,
     NoExecute = 1ull << 63,
 };
 
@@ -60,6 +61,8 @@ public:
                           uint64_t* first_physical = nullptr);
     // Replace permissions on already-mapped pages.
     bool protect(uint64_t virtual_address, uint64_t num_pages, PageFlags flags);
+    // Clear leaves without releasing shared backing or page-table reservations.
+    bool detach(uint64_t address, uint64_t pages);
     // translate one virtual address and report its physical address plus leaf flags.
     bool translate(uint64_t virtual_address, uint64_t& physical_address, uint64_t& flags) const;
     // Clone the steady-state supervisor mappings required in user CR3s.

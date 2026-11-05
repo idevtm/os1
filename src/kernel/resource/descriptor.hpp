@@ -23,6 +23,8 @@ struct OpenInstance
     NativeObject* object;
     volatile uint32_t status_flags;
     volatile bool cursor_busy;
+    // Files use a byte cursor. Buffers use a borrowed authority generation.
+    // Buffer instances cannot use byte I/O, seek, or directory operations.
     uint64_t cursor;
 };
 struct DescriptorEntry

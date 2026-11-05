@@ -118,6 +118,69 @@ inline long ipc_result(int operation, os1_ipc_result& result)
             return r;
     }
 }
+inline long ipc_submit_buffers(int client, os1_ipc_message_buffers& request)
+{
+    return ipc(OS1_IPC_SUBMIT_BUFFERS, client, &request);
+}
+inline long ipc_reply_buffers(int provider, os1_ipc_result_buffers& result)
+{
+    return ipc(OS1_IPC_REPLY_BUFFERS, provider, &result);
+}
+inline long ipc_receive_buffers(int provider, os1_ipc_message_buffers& message)
+{
+    for(;;)
+    {
+        long status = ipc(OS1_IPC_RECEIVE_BUFFERS, provider, &message);
+        if(status != OS1_ERR_WOULD_BLOCK)
+            return status;
+        status = ipc_wait(provider);
+        if(status < 0)
+            return status;
+    }
+}
+inline long ipc_result_buffers(int operation, os1_ipc_result_buffers& result)
+{
+    for(;;)
+    {
+        long status = ipc(OS1_IPC_RESULT_BUFFERS, operation, &result);
+        if(status != OS1_ERR_WOULD_BLOCK)
+            return status;
+        status = ipc_wait(operation);
+        if(status < 0)
+            return status;
+    }
+}
+inline long ipc_result_buffers_until(int operation,
+                                     os1_ipc_result_buffers& result,
+                                     uint64_t deadline)
+{
+    for(;;)
+    {
+        long status = ipc(OS1_IPC_RESULT_BUFFERS, operation, &result);
+        if(status != OS1_ERR_WOULD_BLOCK)
+            return status;
+        status = ipc_wait_until(operation, deadline);
+        if(status < 0)
+            return status;
+    }
+}
+inline void ipc_close_buffers(os1_ipc_buffers& buffers)
+{
+    for(unsigned i = 0; i < buffers.count; ++i)
+        close(buffers.entries[i].fd);
+    buffers = {};
+}
+inline long ipc_call_buffers(int client,
+                             os1_ipc_message_buffers& request,
+                             os1_ipc_result_buffers& result)
+{
+    const long operation = ipc_submit_buffers(client, request);
+    if(operation < 0)
+        return operation;
+    const long status = ipc_result_buffers(operation, result);
+    close(operation);
+    return status;
+}
 inline long ipc_call(int client, os1_ipc_message& request, os1_ipc_result& result)
 {
     const long operation = ipc(OS1_IPC_SUBMIT, client, &request);

@@ -43,6 +43,8 @@ namespace user_address
 [[nodiscard]] inline bool has_required_user_flags(uint64_t flags, bool require_write)
 {
     const PageFlags page_flags = static_cast<PageFlags>(flags);
+    if((page_flags & PageFlags::Present) != PageFlags::Present)
+        return false;
     if((page_flags & PageFlags::User) != PageFlags::User)
     {
         return false;

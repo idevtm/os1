@@ -15,3 +15,6 @@ bool ipi_initialize();
 [[nodiscard]] bool ipi_is_reschedule_vector(uint8_t vector);
 [[nodiscard]] bool ipi_is_tlb_shootdown_vector(uint8_t vector);
 void ipi_handle_tlb_shootdown();
+
+void ipi_poll_tlb_shootdown();
+void ipi_retire_tlb();

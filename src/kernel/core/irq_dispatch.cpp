@@ -61,8 +61,14 @@ void account_scheduler_tick()
 
 Thread* handle_irq(TrapFrame* frame)
 {
-    ipc_drain_wakeups();
     const uint8_t vector = static_cast<uint8_t>(frame->vector);
+    if(ipi_is_tlb_shootdown_vector(vector))
+    {
+        ipi_handle_tlb_shootdown();
+        acknowledge_irq_vector(vector);
+        return current_thread();
+    }
+    ipc_drain_wakeups();
     const int irq = legacy_irq_from_vector(vector);
     const bool scheduler_tick = timer_vector_is_scheduler_tick(vector);
     const bool reschedule_ipi = ipi_is_reschedule_vector(vector);

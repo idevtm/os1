@@ -1,6 +1,7 @@
 // Register-level syscall switch extracted from the kernel trap file.
 #include "syscall/dispatch.hpp"
 
+#include <os1/buffer.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -34,7 +35,9 @@ Thread* handle_syscall(TrapFrame* frame)
     }
     if(thread->process && thread->process->private_provider && frame->rax != os1_sys_ipc &&
        frame->rax != os1_sys_exit && frame->rax != os1_sys_yield && frame->rax != os1_sys_getpid &&
-       !(frame->rax == os1_sys_resource && frame->rsi <= OS1_RESOURCE_SET_STATUS_FLAGS))
+       !(frame->rax == os1_sys_resource &&
+         (frame->rsi <= OS1_RESOURCE_SET_STATUS_FLAGS ||
+          (frame->rsi >= OS1_RESOURCE_BUFFER_CREATE && frame->rsi <= OS1_RESOURCE_BUFFER_UNMAP))))
     {
         frame->rax = OS1_ERR_ACCESS;
         return thread;

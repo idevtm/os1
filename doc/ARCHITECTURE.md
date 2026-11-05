@@ -162,6 +162,8 @@ Current kernel folders:
 | [../src/kernel/handoff/](../src/kernel/handoff) | Bootloader-to-kernel ABI and fixed early memory layout shared by BIOS, Limine, C++, and NASM. | `boot_info.hpp`, `boot_info.cpp`, `memory_layout.h`, `memory_layout.inc` |
 | [../src/kernel/arch/x86_64/](../src/kernel/arch/x86_64) | x86_64 CPU, APIC, interrupt, assembly, and processor helper code. Generic kernel code should include the narrowest architecture header it needs. | `cpu/`, `apic/`, `interrupt/`, `asm/`, `include/` |
 | [../src/kernel/mm/](../src/kernel/mm) | Physical page allocation, page-table management, direct-map-backed kernel small-object allocation, DMA buffer ownership, user-copy validation, and boot-critical mapping/reservation helpers. | `page_frame.*`, `virtual_memory.*`, `kmem.*`, `dma.*`, `user_copy.*`, `boot_mapping.*`, `boot_reserve.*` |
+| [../src/kernel/buffer/](../src/kernel/buffer) | Dedicated Buffer pages, exclusive ownership, mapping reservations, retained budgets, and transfer batches. | `buffer.*`, `README.md` |
+| [../src/kernel/ipc/](../src/kernel/ipc) | Endpoint admission, retained Operations, reply receipts, subscriptions, and Buffer transition publication. | `channel.*` |
 | [../src/kernel/proc/](../src/kernel/proc) | Process and thread object lifecycle, dynamic process/thread registry ownership, thread frame setup, deferred reaping, and initrd-backed user-program loading. | `process.*`, `thread.*`, `thread_layout.inc`, `reaper.cpp`, `user_program.*` |
 | [../src/kernel/sched/](../src/kernel/sched) | Scheduling policy, runnable selection, scheduler handoff, and idle-thread behavior. | `scheduler.*`, `thread_queue.cpp`, `idle.*` |
 | [../src/kernel/sync/](../src/kernel/sync) | Cross-subsystem synchronization primitives: atomics, BSP/SMP helper vocabulary, wait queues, and completions used by blocking paths. | `atomic.hpp`, `smp.*`, `wait_queue.*` |
@@ -789,6 +791,10 @@ Supported operations include:
 
 `allocate_and_map()` now frees a data frame when page-table allocation fails before linking it; a forced-exhaustion regression covers the leak from [review R5](2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame). Earlier successfully linked pages remain owned by the address space and are reclaimed by failed-image teardown.
 
+Generic `VirtualMemory::free` and `destroy_user_slot` still free frames before an asynchronous TLB shootdown.
+The Buffer retirement barrier does not correct those general VM paths.
+Their broader shared-address-space reclamation limitation remains current.
+
 ## CPU, Interrupt, And Trap Architecture
 
 ### CPU State
@@ -891,6 +897,10 @@ There is still no priority or nice model, no user-visible affinity control, and 
 
 Child image, standard-stream grants, and entry frame now precede scheduler publication; spawn captures the PID before making the child runnable. The post-publication frame rewrite identified in [review R1](2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication) is removed. Context switching leaves the outgoing stack and CR3 before publishing the next current thread. The [implementation record](2026-11-04-console-descriptor-implementation-plan.md) distinguishes regression coverage from the earlier unexplained BIOS failure.
 
+Reaping can complete the current thread's child-exit wait before a CPU handoff.
+The scheduler keeps that awakened thread runnable.
+A deterministic host regression and guest state capture verify this correction.
+
 ### User Address Spaces
 
 Each user process gets:
@@ -902,7 +912,46 @@ Each user process gets:
 
 The kernel validates user pointers through `mm/user_copy.cpp` before copying syscall payloads. That boundary rejects null, non-canonical, overflowing, and out-of-user-range addresses. It also requires user-accessible mappings for reads and user-writable mappings for kernel-to-user writes. The kernel does not rely on deliberate kernel faults as a normal syscall-copy mechanism.
 
-Mapping changes and user-slot teardown in `mm/virtual_memory.cpp` issue `ipi_send_tlb_shootdown()`, which broadcasts CR3 reload requests. There is no remote completion acknowledgement or address-space/range retirement protocol, and teardown releases frames before sending the request. Existing one-thread user processes and BSP reaping limit exposure, but do not establish a general page-reuse contract. Completion and lifetime rules must be defined before shared address spaces, COW, or concurrent user mapping operations; finer invalidation granularity alone does not solve this boundary. See the [review's SMP and memory assessment](2026-11-03-review.md#smp-memory-and-lifetime).
+Buffer ownership changes use acknowledged TLB retirement and serialize kernel user copies.
+The [Buffer ABI](buffer-loans-abi.md#retirement-and-kernel-copies) defines these rules and their validation limits.
+The earlier [SMP assessment](2026-11-03-review.md#smp-memory-and-lifetime) remains relevant to generic VM teardown.
+The Buffer barrier does not change the generic asynchronous frame-release paths.
+General shared address spaces, copy-on-write, and user DMA pinning remain outside the Buffer contract.
+
+### Exclusive Buffer Ownership
+
+The Buffer module transfers exclusive access to dedicated pages through retained Operations.
+It preserves input identity and original mapping addresses across a completed loan.
+
+```text
+Buffer: pages + budget + mapping reservations
+                 |
+IPC: reserve -> revoke -> publish request -> deliver -> retire -> restore -> complete
+                 |
+distinct reply output -> escrow -> one successful result claim
+```
+
+The [public ABI](buffer-loans-abi.md) defines records, rights, limits, failure handling, and runnable examples.
+The [module README](../src/kernel/buffer/README.md) defines internal ownership and synchronization rules.
+The [accepted plan](2026-11-05-exclusive-buffer-plan.md) defines required evidence.
+The [implementation record](2026-11-05-exclusive-buffer-implementation.md) reports current validation and limits.
+
+The Buffer module owns backing pages, authority generations, mapping records, and retained origin budgets.
+IPC owns admission reservations, reply authority, Operation states, and completion visibility.
+IPC reserves each transition under its state lock and performs Buffer work outside that lock.
+Small control records use ordinary copies. Buffer payload pages remain the same physical storage during a loan.
+
+Original mappings become inaccessible before request publication.
+Acknowledged retirement prevents stale translations from retaining access after a transfer.
+A user-copy gate covers translation and direct-map access, including copies from remote wake paths.
+Every online CPU reloads its hardware CR3 before acknowledging retirement.
+Interrupt-disabled waiters service pending acknowledgements. An unresponsive CPU can stall retirement; it cannot permit early ownership publication.
+
+Exec discards old mapping reservations and advances the address-space generation.
+Process cleanup detaches Buffer mappings before page-table destruction.
+`PageFlags::SharedBacking` prevents anonymous-page teardown from freeing retained Buffer backing.
+Retained origin budgets keep storage charges through transfer and process exit.
+Live-reader and shared read/write modes remain proposals.
 
 ### Initrd And ELF Loader
 
@@ -918,7 +967,8 @@ Current user programs:
 - `/bin/balancecheck` — user-visible run-queue balance verifier built from [`src/user/programs/balancecheck.cpp`](../src/user/programs/balancecheck.cpp)
 - `/bin/smpcheck` — observe-driven SMP state verifier built from [`src/user/programs/smpcheck.cpp`](../src/user/programs/smpcheck.cpp)
 - `/bin/fault` — deliberate page-fault probe built from [`src/user/programs/fault.cpp`](../src/user/programs/fault.cpp)
-- `/bin/textprocessor`, `/bin/ipccheck`, and `/bin/intf` — private copied IPC, retained Operations, methods/properties, and offline interface inspection; progress events now use volatile subscriptions. See [the concrete ABI](copied-ipc-abi.md).
+- `/bin/textprocessor`, `/bin/ipccheck`, and `/bin/intf` provide private copied IPC, retained Operations, methods/properties, and offline interface inspection. See [the concrete ABI](copied-ipc-abi.md).
+- `/bin/buffercheck` exercises exclusive loans, same-buffer processing, distinct outputs, and recovery. See [the Buffer ABI](buffer-loans-abi.md).
 - `/bin/activation` and `/bin/activationcheck` — explicitly registered Counter activation, copied capability transfer, class-controlled singleton construction, and independent clients. See [the shared activation ABI](shared-activation-abi.md).
 - `/bin/counter` and `/bin/countercheck` — a second IPC protocol, typed constructor metadata/CLI conversion, event broadcast/overflow/unsubscribe, deadline waits, and restricted provider supervision. See [the phase ABI](counter-events-abi.md).
 - `/bin/ls`, `/bin/cat`, and `/bin/vfscheck` — directory/file operations, argument forwarding, and restricted native child launch.
@@ -1162,7 +1212,7 @@ Major constraints that remain:
 
 The [initrd VFS milestone](2026-11-04-initrd-vfs-implementation-plan.md) now implements read-only namespace access and bounded argument/environment handoff. Hosted-service design follows this foundation. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
 
-- extend the [implemented copied IPC prototype](copied-ipc-abi.md) beyond the [implemented Counter/events phase](counter-events-abi.md) through the [implemented scoped shared activation](shared-activation-abi.md), through [independent client sessions and rich parameters](2026-11-05-client-sessions-and-parameters.md), then add shared-buffer lifetime rules before the broader reflective object model (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md))
+- extend the [implemented copied IPC prototype](copied-ipc-abi.md) beyond the [implemented Counter/events phase](counter-events-abi.md) through the [implemented scoped shared activation](shared-activation-abi.md), through [independent client sessions and rich parameters](2026-11-05-client-sessions-and-parameters.md), through [exclusive Buffer loans](buffer-loans-abi.md), with [recorded validation](2026-11-05-exclusive-buffer-implementation.md), before the broader reflective object model (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md))
 - evolve `init` into an explicit supervisor using the implemented startup record and child grants
 - extend the existing allocated VFS node lifetime model to persistent filesystem state and packet buffers as those providers land
 - per-page user-buffer scatter-gather and DMA pinning, once the user-process side of the storage path needs them; bounded multi-sector requests already work today through a single contiguous data descriptor

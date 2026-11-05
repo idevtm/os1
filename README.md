@@ -38,7 +38,9 @@ The [session and rich-parameter implementation](doc/2026-11-05-client-sessions-a
 adds independent budgeted Counter sessions, observer/mutable activation grants,
 and shared constructor/method codecs with typed defaults, descriptions and dot-based
 CLI conversion. Try `intf /bin/paramdemo`, `paramcheck`, and `activationcheck`.
-Shared-buffer transport is the next phase; inline payloads remain bounded to 256 bytes.
+The [exclusive Buffer ABI](doc/buffer-loans-abi.md) adds Operation-scoped loans and distinct reply outputs.
+`buffercheck` exercises both TextProcessor paths. See the [implementation record](doc/2026-11-05-exclusive-buffer-implementation.md) for validation and limits.
+Inline control payloads remain bounded to 256 bytes. Live readers and shared read/write remain deferred.
 
 ## Prerequisites
 

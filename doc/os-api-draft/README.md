@@ -26,13 +26,13 @@ is descriptors, console, and a read-only initrd VFS; hosted services follow.
    construction hooks that can return new or existing objects.
 7. [IPC transport design](ipc-transport-design.md) records the approved sync/async
    request/reply direction, retained Operations, properties/events, and staged
-   implementation through later shared buffers and optional rings.
+   implementation through exclusive Buffer loans and later optional rings.
 8. [Parameter schemas and CLI values](parameter-schema-and-cli.md) records the implemented bounded
    common method/constructor value model, optional/compound/enum/variant parameters,
    constant defaults, standard descriptions, and schema-resolved dot paths.
 9. [Client sessions and parameter plan](../2026-11-05-client-sessions-and-parameter-plan.md)
    records the original gates, now implemented through sessions, admission budgets,
-   per-session method authority and rich codecs/CLI tooling. Shared buffers remain next.
+   per-session method authority and rich codecs/CLI tooling. Exclusive Buffer loans now have a separate implementation.
    See the [implementation record](../2026-11-05-client-sessions-and-parameters.md).
 
 The kernel contract takes precedence for shared semantics; profiles own their
@@ -99,3 +99,12 @@ such as `options.limit:10`. The [parameter profile](parameter-schema-and-cli.md)
 records alternatives and implemented quoting, conflict, optional/default, description,
 and canonical encoding rules. The [bounded ABI](../rich-parameters-abi.md) adds
 rich constructor/method inputs while preserving the existing scalar ABI.
+
+The user also selected zero-copy ownership handoff for shared-memory objects.
+The [shared-buffer proposal](shared-buffer-ownership.md) compares exclusive access,
+single-writer/live-reader access, and cooperative shared read/write. It recommends
+exclusive Operation-scoped loans first, distinguishes loans from permanent moves,
+and records alias revocation, acknowledged TLB retirement and failure semantics.
+This supersedes the earlier snapshot-first suggestion.
+The [exclusive Buffer ABI](../buffer-loans-abi.md) defines the implemented Operation-loan subset and distinct reply outputs.
+See the [implementation record](../2026-11-05-exclusive-buffer-implementation.md) for validation and limits. Live readers, shared read/write, and general permanent moves remain proposals.

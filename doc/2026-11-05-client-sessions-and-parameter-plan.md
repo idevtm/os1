@@ -163,8 +163,11 @@ current `.os.constructor` v1 and `--name value` examples until a deliberate migr
 is specified. Do not silently reinterpret existing binaries or argv.
 
 Finally, define shared buffers separately: creation budgets, mapping rights,
-immutable inputs/published outputs, offsets and lengths, descriptor versus mapping
-lifetime, unmap/TLB retirement, provider death and partial-output visibility.
+ownership handoff, offsets and lengths, descriptor versus mapping lifetime,
+unmap/TLB retirement, provider death and partial-output visibility. The later
+2026-11-05 [zero-copy revision](os-api-draft/shared-buffer-ownership.md) replaces
+the snapshot-first suggestion: exclusive call-scoped loans are recommended first,
+with single-writer/live-reader and shared read/write modes also described.
 Only then implement a shared-buffer object and transport attachments. Variable
 parameters do not authorize unbounded inline payloads or prematurely imply shared
 memory, dynamic linking, persistence, or transparent restart.

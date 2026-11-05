@@ -60,6 +60,9 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/vfs.hpp"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/ipc.h"
+      "${PROJECT_SOURCE_DIR}/src/uapi/os1/buffer.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/buffer.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/interface/buffer_metadata.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/interface/metadata.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/interface/constructor.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/interface/counter.hpp"
@@ -102,6 +105,7 @@ os1_add_user_cxx_program(cat "${CMAKE_CURRENT_SOURCE_DIR}/programs/cat.cpp" OS1_
 os1_add_user_cxx_program(vfscheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/vfscheck.cpp" OS1_USER_VFSCHECK_ELF)
 
 os1_add_user_cxx_program(textprocessor "${CMAKE_CURRENT_SOURCE_DIR}/programs/textprocessor.cpp" OS1_USER_TEXTPROCESSOR_ELF)
+os1_add_user_cxx_program(buffercheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/buffercheck.cpp" OS1_USER_BUFFERCHECK_ELF)
 os1_add_user_cxx_program(ipccheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/ipccheck.cpp" OS1_USER_IPCCHECK_ELF)
 os1_add_user_cxx_program(paramdemo "${CMAKE_CURRENT_SOURCE_DIR}/programs/paramdemo.cpp" OS1_USER_PARAMDEMO_ELF)
 os1_add_user_cxx_program(paramcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/paramcheck.cpp" OS1_USER_PARAMCHECK_ELF)
@@ -123,6 +127,7 @@ add_custom_command(
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_LS_ELF}" "${USER_STAGE_DIR}/bin/ls"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_VFSCHECK_ELF}" "${USER_STAGE_DIR}/bin/vfscheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_TEXTPROCESSOR_ELF}" "${USER_STAGE_DIR}/bin/textprocessor"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_BUFFERCHECK_ELF}" "${USER_STAGE_DIR}/bin/buffercheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_IPCCHECK_ELF}" "${USER_STAGE_DIR}/bin/ipccheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_ACTIVATION_ELF}" "${USER_STAGE_DIR}/bin/activation"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_ACTIVATIONCHECK_ELF}" "${USER_STAGE_DIR}/bin/activationcheck"
@@ -158,6 +163,7 @@ add_custom_command(
     "${OS1_USER_FDEXEC_ELF}"
     "${OS1_USER_LS_ELF}"
     "${OS1_USER_TEXTPROCESSOR_ELF}"
+    "${OS1_USER_BUFFERCHECK_ELF}"
     "${OS1_USER_IPCCHECK_ELF}"
     "${OS1_USER_ACTIVATION_ELF}"
     "${OS1_USER_ACTIVATIONCHECK_ELF}"
@@ -188,6 +194,7 @@ add_custom_target(user_programs DEPENDS
   "${OS1_USER_COUNTER_ELF}"
   "${OS1_USER_COUNTERCHECK_ELF}"
   "${OS1_USER_TEXTPROCESSOR_ELF}"
+  "${OS1_USER_BUFFERCHECK_ELF}"
   "${OS1_USER_IPCCHECK_ELF}"
   "${OS1_USER_PARAMDEMO_ELF}"
   "${OS1_USER_PARAMCHECK_ELF}"

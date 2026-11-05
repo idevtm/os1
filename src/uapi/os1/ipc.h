@@ -1,4 +1,5 @@
 #pragma once
+#include <os1/buffer.h>
 #include <os1/resource.h>
 #include <stdint.h>
 #define OS1_IPC_VERSION 1u
@@ -143,3 +144,22 @@ struct os1_ipc_account
 // Charge persists through all retained endpoints, Operations and subscriptions.
 // Each session reserves four Operations and two retained subscriptions, with the
 // existing payload, attachment and event bounds. Control CREATE stays independent.
+
+// Buffer envelopes preserve the original records. They never copy Buffer payloads.
+#define OS1_IPC_SUBMIT_BUFFERS 23u
+#define OS1_IPC_RECEIVE_BUFFERS 24u
+#define OS1_IPC_REPLY_BUFFERS 25u
+#define OS1_IPC_RESULT_BUFFERS 26u
+struct os1_ipc_message_buffers
+{
+    os1_ipc_message message;
+    os1_ipc_buffers buffers;
+};
+struct os1_ipc_result_buffers
+{
+    os1_ipc_result result;
+    os1_ipc_buffers buffers;
+};
+// SUBMIT accepts LOAN. REPLY accepts RETURN or distinct owned MOVE outputs.
+// Unused entries are zero. Receive and result descriptor claims are transactional.
+// RESULT_BUFFERS claims outputs once across all aliases of the Operation.

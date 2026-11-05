@@ -1,4 +1,5 @@
 #include "arch/x86_64/cpu/cpu.hpp"
+#include "buffer/buffer.hpp"
 #include "handoff/memory_layout.h"
 #include "ipc/channel.hpp"
 #include "mm/kmem.hpp"
@@ -18,6 +19,7 @@
 #include <cstring>
 #include <thread>
 #include <vector>
+extern void (*host_buffer_before_prepare)();
 namespace
 {
 constexpr uint64_t address = kUserImageBase;
@@ -112,6 +114,10 @@ TEST(IpcAbi, FixedLayouts)
     EXPECT_EQ(72u, sizeof(os1_ipc_capabilities));
     EXPECT_EQ(376u, sizeof(os1_ipc_message_caps));
     EXPECT_EQ(368u, sizeof(os1_ipc_result_caps));
+    EXPECT_EQ(8u, sizeof(os1_ipc_buffer));
+    EXPECT_EQ(40u, sizeof(os1_ipc_buffers));
+    EXPECT_EQ(344u, sizeof(os1_ipc_message_buffers));
+    EXPECT_EQ(336u, sizeof(os1_ipc_result_buffers));
 }
 TEST_F(Ipc, CopiedRequestsRetainedResultsAndOneUseReceipts)
 {
@@ -1126,5 +1132,479 @@ TEST_F(Ipc, WaitManyStopAndSignalledCancellationReleaseEveryPin)
     set_current_thread(nullptr);
     ipc_drain_wakeups();
     thread->stop_requested = false;
+}
+class IpcBuffers : public Ipc
+{
+protected:
+    Thread* caller = nullptr;
+    Thread* provider = nullptr;
+    int provider_fd = -1;
+    void use(Thread* selected)
+    {
+        thread = selected;
+        set_current_thread(thread);
+    }
+    void SetUp() override
+    {
+        Ipc::SetUp();
+        caller = thread;
+        ASSERT_EQ(0, ready());
+        VirtualMemory vm(frames);
+        ASSERT_TRUE(vm.allocate_and_map(address, 1, PageFlags::User | PageFlags::Write));
+        auto* process = create_user_process("buffer-provider", vm.root());
+        ASSERT_NE(nullptr, process);
+        provider = create_user_thread(process, address, address + 4096, frames, false);
+        ASSERT_NE(nullptr, provider);
+        OpenInstance* raw = nullptr;
+        ASSERT_EQ(0, descriptor_acquire(table(), pair.provider, OS1_RIGHT_READ, raw));
+        InstanceRef pin(raw);
+        provider_fd = descriptor_install(
+            process->descriptors,
+            raw,
+            OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE,
+            OS1_DESCRIPTOR_CLOEXEC);
+        ASSERT_GE(provider_fd, 0);
+        ASSERT_EQ(0, descriptor_close(table(), pair.provider));
+    }
+    void TearDown() override
+    {
+        if(provider)
+        {
+            use(provider);
+            cancel_ipc_wait(provider);
+            descriptor_close_all(table());
+            buffer_process_cleanup(frames, provider->process);
+        }
+        if(caller)
+        {
+            use(caller);
+            descriptor_close_all(table());
+            buffer_process_cleanup(frames, caller->process);
+        }
+        set_current_thread(nullptr);
+    }
+    template<class T>
+    long buffer_call(unsigned operation, int fd, T& value)
+    {
+        EXPECT_TRUE(copy_to_user(frames, thread, address, &value, sizeof(value)));
+        long status = sys_buffer(frames, thread, fd, operation, address);
+        EXPECT_TRUE(copy_from_user(frames, thread, address, &value, sizeof(value)));
+        return status;
+    }
+    long create_buffer()
+    {
+        os1_buffer_create value{1, sizeof(value), 4096, OS1_BUFFER_EXCLUSIVE, 0};
+        return buffer_call(OS1_RESOURCE_BUFFER_CREATE, 0, value);
+    }
+    long map_buffer(int fd, uint64_t& mapped)
+    {
+        os1_buffer_map value{1, sizeof(value), 0, 1, 0};
+        long status = buffer_call(OS1_RESOURCE_BUFFER_MAP, fd, value);
+        mapped = value.address;
+        return status;
+    }
+    os1_ipc_message_buffers loan(int fd)
+    {
+        os1_ipc_message_buffers value{};
+        value.message = request();
+        value.buffers.count = 1;
+        value.buffers.entries[0] = {fd, OS1_BUFFER_LOAN};
+        return value;
+    }
+};
+TEST_F(IpcBuffers, SameBufferReturnRetiresAliasesAndClaimsOnce)
+{
+    long fd = create_buffer();
+    ASSERT_GE(fd, 0);
+    uint64_t original = 0;
+    ASSERT_EQ(0, map_buffer(fd, original));
+    const uint8_t initial = 17;
+    ASSERT_TRUE(copy_to_user(frames, thread, original, &initial, 1));
+    long owner_alias =
+        alias(fd, OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE);
+    ASSERT_GE(owner_alias, 0);
+    auto input = loan(fd);
+    long operation = call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input);
+    ASSERT_GE(operation, 0);
+    uint64_t denied = 0;
+    EXPECT_EQ(OS1_ERR_ACCESS, map_buffer(owner_alias, denied));
+    uint8_t byte = 0;
+    EXPECT_FALSE(copy_from_user(frames, thread, original, &byte, 1));
+    use(provider);
+    os1_ipc_message legacy{};
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_RECEIVE, provider_fd, legacy));
+    os1_ipc_message_buffers received{};
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RECEIVE_BUFFERS, provider_fd, 0x1000));
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE_BUFFERS, provider_fd, received));
+    ASSERT_EQ(1u, received.buffers.count);
+    const int borrowed = received.buffers.entries[0].fd;
+    uint64_t mapped = 0;
+    ASSERT_EQ(0, map_buffer(borrowed, mapped));
+    ASSERT_TRUE(copy_from_user(frames, thread, mapped, &byte, 1));
+    EXPECT_EQ(initial, byte);
+    const uint8_t changed = 91;
+    ASSERT_TRUE(copy_to_user(frames, thread, mapped, &changed, 1));
+    os1_ipc_result_buffers reply{};
+    reply.result = response(received.message);
+    reply.result.application_status = -7;
+    reply.buffers.count = 1;
+    reply.buffers.entries[0] = {borrowed, OS1_BUFFER_MOVE};
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_REPLY_BUFFERS, provider_fd, reply));
+    EXPECT_TRUE(copy_from_user(frames, thread, mapped, &byte, 1));
+    auto legacy_reply = reply.result;
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_REPLY, provider_fd, legacy_reply));
+    reply.buffers.entries[0].disposition = OS1_BUFFER_RETURN;
+    ASSERT_EQ(0, call(OS1_IPC_REPLY_BUFFERS, provider_fd, reply));
+    EXPECT_FALSE(copy_from_user(frames, thread, mapped, &byte, 1));
+    EXPECT_EQ(OS1_ERR_ACCESS, map_buffer(borrowed, denied));
+    EXPECT_EQ(OS1_ERR_STALE_REPLY, call(OS1_IPC_REPLY_BUFFERS, provider_fd, reply));
+    use(caller);
+    ASSERT_TRUE(copy_from_user(frames, thread, original, &byte, 1));
+    EXPECT_EQ(changed, byte);
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RESULT_BUFFERS, operation, 0x1000));
+    os1_ipc_result_buffers result{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_BUFFERS, operation, result));
+    EXPECT_EQ(-7, result.result.application_status);
+    ASSERT_EQ(1u, result.buffers.count);
+    os1_buffer_info before{1, sizeof(before)};
+    os1_buffer_info after{1, sizeof(after)};
+    ASSERT_EQ(0, buffer_call(OS1_RESOURCE_BUFFER_INFO, fd, before));
+    ASSERT_EQ(0, buffer_call(OS1_RESOURCE_BUFFER_INFO, result.buffers.entries[0].fd, after));
+    EXPECT_EQ(before.identity, after.identity);
+    long operation_alias = alias(operation, OS1_RIGHT_READ);
+    ASSERT_GE(operation_alias, 0);
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_BUFFERS, operation_alias, result));
+    EXPECT_EQ(0u, result.buffers.count);
+}
+TEST_F(IpcBuffers, DistinctOutputReturnsInputAndRetainsEscrowUntilClaim)
+{
+    long input_fd = create_buffer();
+    ASSERT_GE(input_fd, 0);
+    uint64_t original = 0;
+    ASSERT_EQ(0, map_buffer(input_fd, original));
+    auto input = loan(input_fd);
+    long operation = call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input);
+    ASSERT_GE(operation, 0);
+    use(provider);
+    os1_ipc_message_buffers received{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE_BUFFERS, provider_fd, received));
+    long output_fd = create_buffer();
+    ASSERT_GE(output_fd, 0);
+    uint64_t output_address = 0;
+    ASSERT_EQ(0, map_buffer(output_fd, output_address));
+    uint8_t byte = 42;
+    ASSERT_TRUE(copy_to_user(frames, thread, output_address, &byte, 1));
+    os1_ipc_result_buffers reply{};
+    reply.result = response(received.message);
+    reply.buffers.count = 1;
+    reply.buffers.entries[0] = {static_cast<int32_t>(output_fd), OS1_BUFFER_MOVE};
+    ASSERT_EQ(0, call(OS1_IPC_REPLY_BUFFERS, provider_fd, reply));
+    EXPECT_FALSE(copy_from_user(frames, thread, output_address, &byte, 1));
+    use(caller);
+    EXPECT_TRUE(copy_from_user(frames, thread, original, &byte, 1));
+    std::vector<int> full;
+    for(;;)
+    {
+        long extra = alias(operation, OS1_RIGHT_READ);
+        if(extra < 0)
+            break;
+        full.push_back(extra);
+    }
+    os1_ipc_result_buffers result{};
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_RESULT_BUFFERS, operation, result));
+    ASSERT_FALSE(full.empty());
+    ASSERT_EQ(0, descriptor_close(table(), full.back()));
+    full.pop_back();
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RESULT_BUFFERS, operation, 0x1000));
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_BUFFERS, operation, result));
+    ASSERT_EQ(1u, result.buffers.count);
+    uint64_t claimed = 0;
+    ASSERT_EQ(0, map_buffer(result.buffers.entries[0].fd, claimed));
+    ASSERT_TRUE(copy_from_user(frames, thread, claimed, &byte, 1));
+    EXPECT_EQ(42, byte);
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_BUFFERS, operation, result));
+    EXPECT_EQ(0u, result.buffers.count);
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RESULT_BUFFERS, operation, 0x1000));
+    ASSERT_TRUE(copy_from_user(frames, thread, claimed, &byte, 1));
+    EXPECT_EQ(42, byte);
+}
+TEST_F(IpcBuffers, LiveProviderClosureRestoresDeliveredInputBeforeCompletion)
+{
+    long fd = create_buffer();
+    ASSERT_GE(fd, 0);
+    uint64_t original = 0;
+    ASSERT_EQ(0, map_buffer(fd, original));
+    auto input = loan(fd);
+    long operation = call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input);
+    ASSERT_GE(operation, 0);
+    use(provider);
+    os1_ipc_message_buffers received{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE_BUFFERS, provider_fd, received));
+    uint64_t borrowed = 0;
+    ASSERT_EQ(0, map_buffer(received.buffers.entries[0].fd, borrowed));
+    uint8_t byte = 23;
+    ASSERT_TRUE(copy_to_user(frames, thread, borrowed, &byte, 1));
+    ASSERT_EQ(0, descriptor_close(table(), provider_fd));
+    EXPECT_FALSE(copy_from_user(frames, thread, borrowed, &byte, 1));
+    use(caller);
+    os1_ipc_result_buffers result{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_BUFFERS, operation, result));
+    EXPECT_EQ(OS1_ERR_OUTCOME_UNKNOWN, result.result.transport_status);
+    EXPECT_EQ(0u, result.buffers.count);
+    ASSERT_TRUE(copy_from_user(frames, thread, original, &byte, 1));
+    EXPECT_EQ(23, byte);
+}
+TEST_F(IpcBuffers, TimeoutAndClosedOperationKeepUndeliveredLoan)
+{
+    long fd = create_buffer();
+    ASSERT_GE(fd, 0);
+    uint64_t original = 0;
+    ASSERT_EQ(0, map_buffer(fd, original));
+    auto input = loan(fd);
+    long operation = call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input);
+    ASSERT_GE(operation, 0);
+    os1_ipc_deadline deadline{1, sizeof(deadline), 0};
+    EXPECT_EQ(OS1_ERR_TIMED_OUT, call(OS1_IPC_WAIT_UNTIL, operation, deadline));
+    ASSERT_EQ(0, descriptor_close(table(), operation));
+    uint8_t byte = 0;
+    EXPECT_FALSE(copy_from_user(frames, thread, original, &byte, 1));
+    use(provider);
+    ASSERT_EQ(0, descriptor_close(table(), provider_fd));
+    use(caller);
+    EXPECT_TRUE(copy_from_user(frames, thread, original, &byte, 1));
+}
+TEST_F(IpcBuffers, LegacyCapabilitiesAndDuplicateLoanRejectWithoutRevocation)
+{
+    long fd = create_buffer();
+    ASSERT_GE(fd, 0);
+    uint64_t original = 0;
+    ASSERT_EQ(0, map_buffer(fd, original));
+    os1_ipc_message_caps caps{};
+    caps.message = request();
+    caps.capabilities.count = 1;
+    caps.capabilities.entries[0] = {static_cast<int32_t>(fd), OS1_RIGHT_READ, 0, 0};
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_SUBMIT_CAPS, pair.client, caps));
+    auto input = loan(fd);
+    input.buffers.count = 2;
+    input.buffers.entries[1] = input.buffers.entries[0];
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input));
+    uint8_t byte = 0;
+    EXPECT_TRUE(copy_from_user(frames, thread, original, &byte, 1));
+    use(provider);
+    os1_ipc_message_buffers received{};
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, call(OS1_IPC_RECEIVE_BUFFERS, provider_fd, received));
+}
+TEST_F(IpcBuffers, ReceiveDescriptorExhaustionPreservesWholeBatch)
+{
+    long first = create_buffer();
+    long second = create_buffer();
+    ASSERT_GE(first, 0);
+    ASSERT_GE(second, 0);
+    auto input = loan(first);
+    input.buffers.count = 2;
+    input.buffers.entries[1] = {static_cast<int32_t>(second), OS1_BUFFER_LOAN};
+    long operation = call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input);
+    ASSERT_GE(operation, 0);
+    use(provider);
+    std::vector<int> full;
+    for(;;)
+    {
+        long extra = alias(provider_fd, OS1_RIGHT_READ);
+        if(extra < 0)
+            break;
+        full.push_back(extra);
+    }
+    ASSERT_GE(full.size(), 2u);
+    descriptor_close(table(), full.back());
+    full.pop_back();
+    os1_ipc_message_buffers received{};
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_RECEIVE_BUFFERS, provider_fd, received));
+    descriptor_close(table(), full.back());
+    full.pop_back();
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE_BUFFERS, provider_fd, received));
+    EXPECT_EQ(2u, received.buffers.count);
+    os1_ipc_result_buffers reply{};
+    reply.result = response(received.message);
+    ASSERT_EQ(0, call(OS1_IPC_REPLY_BUFFERS, provider_fd, reply));
+    use(caller);
+    os1_ipc_result_buffers result{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_BUFFERS, operation, result));
+    uint64_t first_map = 0, second_map = 0;
+    EXPECT_EQ(0, map_buffer(first, first_map));
+    EXPECT_EQ(0, map_buffer(second, second_map));
+}
+TEST_F(IpcBuffers, QueueExhaustionDoesNotRevokeOwner)
+{
+    long fd = create_buffer();
+    ASSERT_GE(fd, 0);
+    uint64_t original = 0;
+    ASSERT_EQ(0, map_buffer(fd, original));
+    for(unsigned i = 0; i < OS1_IPC_OPERATION_LIMIT; ++i)
+        ASSERT_GE(submit(), 0);
+    auto input = loan(fd);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input));
+    uint8_t byte = 0;
+    EXPECT_TRUE(copy_from_user(frames, thread, original, &byte, 1));
+}
+TEST_F(IpcBuffers, ConcurrentOperationAliasesClaimDistinctOutputOnce)
+{
+    os1_ipc_message_buffers input{};
+    input.message = request();
+    long operation = call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input);
+    ASSERT_GE(operation, 0);
+    use(provider);
+    os1_ipc_message_buffers received{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE_BUFFERS, provider_fd, received));
+    long fd = create_buffer();
+    ASSERT_GE(fd, 0);
+    os1_ipc_result_buffers reply{};
+    reply.result = response(received.message);
+    reply.buffers.count = 1;
+    reply.buffers.entries[0] = {static_cast<int32_t>(fd), OS1_BUFFER_MOVE};
+    ASSERT_EQ(0, call(OS1_IPC_REPLY_BUFFERS, provider_fd, reply));
+    use(caller);
+    long duplicate = alias(operation, OS1_RIGHT_READ);
+    ASSERT_GE(duplicate, 0);
+    std::atomic<unsigned> entered{0};
+    long status[2]{};
+    auto claim = [&](unsigned index, long descriptor) {
+        entered.fetch_add(1);
+        while(entered.load() < 2)
+            std::this_thread::yield();
+        status[index] = sys_ipc(
+            frames, caller, OS1_IPC_RESULT_BUFFERS, descriptor, address + 512 + index * 512);
+    };
+    std::thread left(claim, 0, operation);
+    std::thread right(claim, 1, duplicate);
+    left.join();
+    right.join();
+    unsigned count = 0;
+    for(unsigned i = 0; i < 2; ++i)
+    {
+        if(status[i] == OS1_ERR_WOULD_BLOCK)
+            status[i] =
+                sys_ipc(frames, caller, OS1_IPC_RESULT_BUFFERS, operation, address + 512 + i * 512);
+        ASSERT_EQ(0, status[i]);
+        os1_ipc_result_buffers result{};
+        ASSERT_TRUE(
+            copy_from_user(frames, caller, address + 512 + i * 512, &result, sizeof(result)));
+        count += result.buffers.count;
+    }
+    EXPECT_EQ(1u, count);
+}
+std::atomic<bool> buffer_transition_entered{false};
+std::atomic<bool> buffer_transition_continue{false};
+void pause_buffer_transition()
+{
+    buffer_transition_entered.store(true);
+    while(!buffer_transition_continue.load())
+        std::this_thread::yield();
+}
+TEST_F(IpcBuffers, ProviderCloseDuringReservedSubmitCancelsBeforePublication)
+{
+    long fd = create_buffer();
+    ASSERT_GE(fd, 0);
+    uint64_t original = 0;
+    ASSERT_EQ(0, map_buffer(fd, original));
+    auto input = loan(fd);
+    ASSERT_TRUE(copy_to_user(frames, caller, address, &input, sizeof(input)));
+    buffer_transition_entered = false;
+    buffer_transition_continue = false;
+    host_buffer_before_prepare = pause_buffer_transition;
+    long status = 0;
+    std::thread submitting(
+        [&] { status = sys_ipc(frames, caller, OS1_IPC_SUBMIT_BUFFERS, pair.client, address); });
+    while(!buffer_transition_entered.load())
+        std::this_thread::yield();
+    // The reserved request remains hidden even before revocation begins.
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK,
+              sys_ipc(frames, provider, OS1_IPC_RECEIVE_BUFFERS, provider_fd, address));
+    EXPECT_EQ(0, descriptor_close(provider->process->descriptors, provider_fd));
+    buffer_transition_continue = true;
+    submitting.join();
+    host_buffer_before_prepare = nullptr;
+    EXPECT_EQ(OS1_ERR_PEER_CLOSED, status);
+    uint8_t byte = 0;
+    EXPECT_TRUE(copy_from_user(frames, caller, original, &byte, 1));
+    os1_buffer_info info{1, sizeof(info)};
+    ASSERT_EQ(0, buffer_call(OS1_RESOURCE_BUFFER_INFO, fd, info));
+    EXPECT_EQ(1u, info.owned);
+}
+TEST_F(IpcBuffers, ProviderCloseDuringDeliveryWaitsForPinnedTransition)
+{
+    long fd = create_buffer();
+    ASSERT_GE(fd, 0);
+    uint64_t original = 0;
+    ASSERT_EQ(0, map_buffer(fd, original));
+    auto input = loan(fd);
+    long operation = call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input);
+    ASSERT_GE(operation, 0);
+    buffer_transition_entered = false;
+    buffer_transition_continue = false;
+    host_ipc_before_receive = pause_buffer_transition;
+    long status = 0;
+    std::thread receiving(
+        [&] { status = sys_ipc(frames, provider, OS1_IPC_RECEIVE_BUFFERS, provider_fd, address); });
+    while(!buffer_transition_entered.load())
+        std::this_thread::yield();
+    EXPECT_EQ(0, descriptor_close(provider->process->descriptors, provider_fd));
+    os1_ipc_result_buffers result{};
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, call(OS1_IPC_RESULT_BUFFERS, operation, result));
+    uint8_t byte = 0;
+    EXPECT_FALSE(copy_from_user(frames, caller, original, &byte, 1));
+    buffer_transition_continue = true;
+    receiving.join();
+    host_ipc_before_receive = nullptr;
+    EXPECT_EQ(0, status);
+    // The final endpoint pin triggers recovery without another provider syscall.
+    EXPECT_TRUE(copy_from_user(frames, caller, original, &byte, 1));
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_BUFFERS, operation, result));
+    EXPECT_EQ(OS1_ERR_OUTCOME_UNKNOWN, result.result.transport_status);
+}
+TEST_F(IpcBuffers, SameProcessLoanRestoresOwnerRoleAndRevokesBorrowerRole)
+{
+    OpenInstance* raw = nullptr;
+    ASSERT_EQ(0,
+              descriptor_acquire(provider->process->descriptors, provider_fd, OS1_RIGHT_READ, raw));
+    InstanceRef pin(raw);
+    long local_provider = descriptor_install(
+        table(),
+        raw,
+        OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE,
+        OS1_DESCRIPTOR_CLOEXEC);
+    ASSERT_GE(local_provider, 0);
+    ASSERT_EQ(0, descriptor_close(provider->process->descriptors, provider_fd));
+    long fd = create_buffer();
+    ASSERT_GE(fd, 0);
+    uint64_t original = 0;
+    ASSERT_EQ(0, map_buffer(fd, original));
+    auto input = loan(fd);
+    long operation = call(OS1_IPC_SUBMIT_BUFFERS, pair.client, input);
+    ASSERT_GE(operation, 0);
+    uint8_t byte = 0;
+    EXPECT_FALSE(copy_from_user(frames, thread, original, &byte, 1));
+    os1_ipc_message_buffers received{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE_BUFFERS, local_provider, received));
+    ASSERT_EQ(1u, received.buffers.count);
+    uint64_t owner_alias_mapping = 0;
+    EXPECT_EQ(OS1_ERR_ACCESS, map_buffer(fd, owner_alias_mapping));
+    uint64_t borrowed = 0;
+    ASSERT_EQ(0, map_buffer(received.buffers.entries[0].fd, borrowed));
+    EXPECT_NE(original, borrowed);
+    byte = 61;
+    ASSERT_TRUE(copy_to_user(frames, thread, borrowed, &byte, 1));
+    os1_ipc_result_buffers reply{};
+    reply.result = response(received.message);
+    reply.buffers.count = 1;
+    reply.buffers.entries[0] = {received.buffers.entries[0].fd, OS1_BUFFER_RETURN};
+    ASSERT_EQ(0, call(OS1_IPC_REPLY_BUFFERS, local_provider, reply));
+    EXPECT_FALSE(copy_from_user(frames, thread, borrowed, &byte, 1));
+    ASSERT_TRUE(copy_from_user(frames, thread, original, &byte, 1));
+    EXPECT_EQ(61, byte);
+    uint64_t denied = 0;
+    EXPECT_EQ(OS1_ERR_ACCESS, map_buffer(received.buffers.entries[0].fd, denied));
+    os1_ipc_result_buffers result{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_BUFFERS, operation, result));
+    EXPECT_EQ(1u, result.buffers.count);
 }
 }  // namespace

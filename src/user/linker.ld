@@ -23,6 +23,7 @@ SECTIONS
     *(.rodata*)
   } :rodata
 
+  .os.buffers : { KEEP(*(.os.buffers)) } :rodata
   .os.interface : { KEEP(*(.os.interface)) } :rodata
   .os.parameter-bindings : { KEEP(*(.os.parameter-bindings)) } :rodata
   .os.parameters : { KEEP(*(.os.parameters)) } :rodata

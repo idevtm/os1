@@ -314,6 +314,18 @@ bool VirtualMemory::protect(uint64_t virtual_address, uint64_t num_pages, PageFl
     return true;
 }
 
+bool VirtualMemory::detach(uint64_t address, uint64_t pages)
+{
+    for(uint64_t i = 0; i < pages; ++i)
+    {
+        uint64_t* leaf = nullptr;
+        if(!walk_to_leaf(address + i * kPageSize, false, false, &leaf))
+            return false;
+        *leaf = 0;
+    }
+    return true;
+}
+
 bool VirtualMemory::translate(uint64_t virtual_address,
                               uint64_t& physical_address,
                               uint64_t& flags) const
@@ -325,19 +337,19 @@ bool VirtualMemory::translate(uint64_t virtual_address,
 
     const uint64_t* pml4 = kernel_physical_pointer<const uint64_t>(root_);
     const uint64_t pml4e = pml4[page_index(virtual_address, 39)];
-    if(0 == pml4e)
+    if(0 == (pml4e & PAGE_PRESENT))
     {
         return false;
     }
     const uint64_t* pml3 = kernel_physical_pointer<const uint64_t>(pml4e & kEntryAddressMask);
     const uint64_t pml3e = pml3[page_index(virtual_address, 30)];
-    if(0 == pml3e)
+    if(0 == (pml3e & PAGE_PRESENT))
     {
         return false;
     }
     const uint64_t* pml2 = kernel_physical_pointer<const uint64_t>(pml3e & kEntryAddressMask);
     const uint64_t pml2e = pml2[page_index(virtual_address, 21)];
-    if(0 == pml2e)
+    if(0 == (pml2e & PAGE_PRESENT))
     {
         return false;
     }
@@ -350,7 +362,7 @@ bool VirtualMemory::translate(uint64_t virtual_address,
     }
     const uint64_t* pml1 = kernel_physical_pointer<const uint64_t>(pml2e & kEntryAddressMask);
     const uint64_t pml1e = pml1[page_index(virtual_address, 12)];
-    if(0 == pml1e)
+    if(0 == (pml1e & PAGE_PRESENT))
     {
         return false;
     }
@@ -398,7 +410,8 @@ void VirtualMemory::destroy_table(uint64_t& entry, int level, bool free_leaf_pag
         {
             if(table[i])
             {
-                frames_.free(table[i] & kEntryAddressMask);
+                if(!(table[i] & static_cast<uint64_t>(PageFlags::SharedBacking)))
+                    frames_.free(table[i] & kEntryAddressMask);
                 table[i] = 0;
             }
         }
@@ -437,7 +450,8 @@ bool VirtualMemory::free(uint64_t start_address, uint64_t num_pages)
         {
             return false;
         }
-        frames_.free(*leaf_entry & kEntryAddressMask);
+        if(!(*leaf_entry & static_cast<uint64_t>(PageFlags::SharedBacking)))
+            frames_.free(*leaf_entry & kEntryAddressMask);
         *leaf_entry = 0;
     }
 

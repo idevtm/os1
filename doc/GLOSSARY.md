@@ -674,6 +674,11 @@ The project-specific names in this section come from the [native API drafts](os-
 | Descriptor inheritance / close-on-exec / `CLOEXEC` | Rules governing which descriptors survive process creation or program replacement; the per-descriptor close-on-exec flag marks one for closure during a successful `exec`. |
 | Startup record / bootstrap context | A bounded versioned record proposed for program entry, describing arguments, environment, and explicitly granted descriptor roles such as root, cwd, and standard streams. |
 | Generation-tagged handle | An identifier containing or checking a generation value so a stale reference can be distinguished from a newly reused table slot. |
+| Buffer (native object) | Dedicated kernel-owned pages with explicit mappings and transfer authority. The [Buffer ABI](buffer-loans-abi.md) implements exclusive Operation loans. |
+| Buffer loan | Temporary exclusive access for one Operation. Terminal handling revokes borrower access and restores surviving origin mappings. |
+| Request escrow / reply escrow | Kernel-held Buffer authority before request delivery or output claim. Neither endpoint can map escrowed pages. |
+| Mapping reservation | A retained original Buffer mapping address and permissions. Completion restores it unless unmap, exec, or exit removed it. |
+| Process incarnation / address-space generation | Separate lifetime identities for process authority and mapping restoration. They prevent reuse from authorizing stale access. |
 | Native object | A resource exposed through the proposed OS object model rather than solely through a POSIX file-operation projection. |
 | Object image | A loadable description or executable unit from which an object may be instantiated; it is distinct from a live instance. |
 | Object class / class binary | A construction contract and its binary implementation; one binary can export several classes. Class identity is separate from interface identity and live instance identity. |

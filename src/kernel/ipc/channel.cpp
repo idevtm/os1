@@ -2,9 +2,13 @@
 
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
+#include "buffer/buffer.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "util/memory.h"
+#ifdef OS1_HOST_TEST
+void (*host_ipc_before_receive)() = nullptr;
+#endif
 namespace
 {
 struct Operation;
@@ -51,6 +55,9 @@ struct Operation : NativeObject
 {
     Connection* connection;
     bool counted, delivered, receiving, complete, claiming;
+    bool submitting, retiring, buffer_mode;
+    BufferLoanBatch* loans;
+    BufferOutputBatch* outputs;
     Capabilities request_caps, result_caps;
     os1_ipc_message request;
     os1_ipc_result result;
@@ -100,7 +107,7 @@ bool ready_locked(NativeObject* object)
     if(!e->provider)
         return c->ready || c->provider_closed;
     for(auto* op : c->pending)
-        if(op && !op->delivered && !op->receiving)
+        if(op && !op->delivered && !op->receiving && !op->submitting && !op->retiring)
             return true;
     return c->client_closed;
 }
@@ -160,15 +167,41 @@ void destroy_operation(NativeObject* object)
     }
     release_caps(op->request_caps);
     release_caps(op->result_caps);
+    buffer_release_outputs(op->outputs);
+    buffer_release_loans(op->loans);
     kfree(op);
     release(c);
+}
+// The caller owns the detached pending reference. Retirement precedes visibility.
+void fail_detached(Operation* op)
+{
+    buffer_finish_loans(op->loans);
+    Capabilities discarded{};
+    {
+        IrqSpinGuard guard(waiters.lock);
+        finish_locked(op, op->delivered ? OS1_ERR_OUTCOME_UNKNOWN : OS1_ERR_PEER_CLOSED);
+        op->retiring = false;
+        discarded = op->request_caps;
+        op->request_caps = {};
+        signal_locked();
+    }
+    release_caps(discarded);
+    object_release(op);
+}
+void detach_locked(Operation* op)
+{
+    for(auto& slot : op->connection->pending)
+        if(slot == op)
+        {
+            slot = nullptr;
+            return;
+        }
 }
 void destroy_endpoint(NativeObject* object)
 {
     auto* e = static_cast<Endpoint*>(object);
     auto* c = e->connection;
     Operation* dropped[OS1_IPC_OPERATION_LIMIT]{};
-    Capabilities discarded[OS1_IPC_OPERATION_LIMIT]{};
     {
         IrqSpinGuard guard(waiters.lock);
         if(e->provider)
@@ -177,11 +210,10 @@ void destroy_endpoint(NativeObject* object)
             for(unsigned i = 0; i < OS1_IPC_OPERATION_LIMIT; ++i)
             {
                 auto* op = c->pending[i];
-                if(!op)
+                // The active transition observes provider_closed before publication.
+                if(!op || op->submitting || op->receiving || op->retiring)
                     continue;
-                finish_locked(op, op->delivered ? OS1_ERR_OUTCOME_UNKNOWN : OS1_ERR_PEER_CLOSED);
-                discarded[i] = op->request_caps;
-                op->request_caps = {};
+                op->retiring = true;
                 dropped[i] = op;
                 c->pending[i] = nullptr;
             }
@@ -190,11 +222,9 @@ void destroy_endpoint(NativeObject* object)
             c->client_closed = true;
         signal_locked();
     }
-    for(unsigned i = 0; i < OS1_IPC_OPERATION_LIMIT; ++i)
-    {
-        release_caps(discarded[i]);
-        object_release(dropped[i]);
-    }
+    for(auto* op : dropped)
+        if(op)
+            fail_detached(op);
     kfree(e);
     release(c);
     ipc_drain_wakeups();
@@ -690,14 +720,31 @@ void rollback_caps(DescriptorTable& table, const os1_ipc_capabilities& output)
     for(unsigned i = 0; i < output.count; ++i)
         descriptor_close(table, output.entries[i].fd);
 }
+enum class Envelope
+{
+    Bytes,
+    Caps,
+    Buffers
+};
 long submit(
-    PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, bool extended)
+    PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, Envelope mode)
 {
     os1_ipc_message_caps envelope{};
-    auto& request = envelope.message;
-    if(!copy_from_user(
-           frames, thread, pointer, &envelope, extended ? sizeof(envelope) : sizeof(request)))
+    os1_ipc_message_buffers buffers{};
+    const bool buffer_mode = mode == Envelope::Buffers;
+    if(buffer_mode)
+    {
+        if(!copy_from_user(frames, thread, pointer, &buffers, sizeof(buffers)))
+            return OS1_ERR_FAULT;
+        envelope.message = buffers.message;
+    }
+    else if(!copy_from_user(frames,
+                            thread,
+                            pointer,
+                            &envelope,
+                            mode == Envelope::Caps ? sizeof(envelope) : sizeof(envelope.message)))
         return OS1_ERR_FAULT;
+    auto& request = envelope.message;
     if(request.version != OS1_IPC_VERSION || request.size != sizeof(request) ||
        request.generation || request.request_id || request.reserved || !request.interface_id ||
        !request.interface_version || !request.member ||
@@ -720,6 +767,7 @@ long submit(
     op->allowed_rights = OS1_RIGHT_READ | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE;
     op->destroy = destroy_operation;
     op->connection = c;
+    op->buffer_mode = buffer_mode;
     retain(c);
     op->request = request;
     op->request_caps = attached.value;
@@ -733,6 +781,7 @@ long submit(
     if(fd < 0)
         return fd;
     long error = 0;
+    bool reserved = false;
     {
         IrqSpinGuard guard(waiters.lock);
         if(c->provider_closed)
@@ -748,6 +797,7 @@ long submit(
             error = OS1_ERR_LIMIT;
         else
         {
+            error = OS1_ERR_LIMIT;
             for(auto& slot : c->pending)
                 if(!slot)
                 {
@@ -755,15 +805,37 @@ long submit(
                     op->request.request_id = c->next_request++;
                     ++c->live_operations;
                     op->counted = true;
+                    op->submitting = true;
                     object_retain(op);
                     slot = op;
-                    signal_locked();
+                    reserved = true;
+                    error = 0;
                     break;
                 }
         }
     }
+    // Admission owns a hidden queue slot. No state lock covers retirement.
+    if(error == 0 && buffer_mode)
+        error = buffer_prepare_loans(frames, thread, buffers.buffers, op->loans);
+    if(reserved)
+    {
+        IrqSpinGuard guard(waiters.lock);
+        if(error == 0 && c->provider_closed)
+            error = OS1_ERR_PEER_CLOSED;
+        if(error < 0)
+            detach_locked(op);
+        else
+        {
+            op->submitting = false;
+            signal_locked();
+        }
+    }
     if(error < 0)
     {
+        buffer_cancel_loans(op->loans);
+        op->loans = nullptr;
+        if(reserved)
+            object_release(op);
         descriptor_close(table, fd);
         return error;
     }
@@ -771,37 +843,58 @@ long submit(
     return fd;
 }
 long receive(
-    PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, bool extended)
+    PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, Envelope mode)
 {
     auto* c = endpoint->connection;
     Operation* chosen = nullptr;
     {
         IrqSpinGuard guard(waiters.lock);
         for(auto* op : c->pending)
-            if(op && !op->delivered && !op->receiving &&
+            if(op && !op->delivered && !op->receiving && !op->submitting && !op->retiring &&
                (!chosen || op->request.request_id < chosen->request.request_id))
                 chosen = op;
         if(!chosen)
             return c->client_closed ? OS1_ERR_PEER_CLOSED : OS1_ERR_WOULD_BLOCK;
-        if(!extended && chosen->request_caps.count)
+        if(chosen->buffer_mode != (mode == Envelope::Buffers) ||
+           (mode == Envelope::Bytes && chosen->request_caps.count))
             return OS1_ERR_UNSUPPORTED;
         chosen->receiving = true;
         object_retain(chosen);
     }
+#ifdef OS1_HOST_TEST
+    if(host_ipc_before_receive)
+        host_ipc_before_receive();
+#endif
     os1_ipc_message_caps envelope{};
-    envelope.message = chosen->request;
+    os1_ipc_message_buffers buffers{};
+    envelope.message = buffers.message = chosen->request;
     auto& table = thread->process->descriptors;
-    long status = install_caps(table, chosen->request_caps, envelope.capabilities);
-    if(status == 0 && !copy_to_user(frames,
-                                    thread,
-                                    pointer,
-                                    &envelope,
-                                    extended ? sizeof(envelope) : sizeof(envelope.message)))
+    long status;
+    if(chosen->buffer_mode)
     {
-        rollback_caps(table, envelope.capabilities);
-        status = OS1_ERR_FAULT;
+        status = buffer_receive_loans(chosen->loans, thread, buffers.buffers);
+        if(status == 0 && !copy_to_user(frames, thread, pointer, &buffers, sizeof(buffers)))
+        {
+            buffer_rollback_receive(chosen->loans, thread, buffers.buffers);
+            status = OS1_ERR_FAULT;
+        }
+    }
+    else
+    {
+        status = install_caps(table, chosen->request_caps, envelope.capabilities);
+        if(status == 0 &&
+           !copy_to_user(frames,
+                         thread,
+                         pointer,
+                         &envelope,
+                         mode == Envelope::Caps ? sizeof(envelope) : sizeof(envelope.message)))
+        {
+            rollback_caps(table, envelope.capabilities);
+            status = OS1_ERR_FAULT;
+        }
     }
     CapGuard consumed;
+    bool failed = false;
     {
         IrqSpinGuard guard(waiters.lock);
         chosen->receiving = false;
@@ -811,76 +904,147 @@ long receive(
             consumed.value = chosen->request_caps;
             chosen->request_caps = {};
         }
+        if(c->provider_closed)
+        {
+            chosen->retiring = true;
+            detach_locked(chosen);
+            failed = true;
+        }
         signal_locked();
     }
+    if(failed)
+        fail_detached(chosen);
     object_release(chosen);
     ipc_drain_wakeups();
     return status;
 }
-
 long reply(
-    PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, bool extended)
+    PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, Envelope mode)
 {
     os1_ipc_result_caps envelope{};
-    auto& result = envelope.result;
-    if(!copy_from_user(
-           frames, thread, pointer, &envelope, extended ? sizeof(envelope) : sizeof(result)))
+    os1_ipc_result_buffers buffers{};
+    if(mode == Envelope::Buffers)
+    {
+        if(!copy_from_user(frames, thread, pointer, &buffers, sizeof(buffers)))
+            return OS1_ERR_FAULT;
+        envelope.result = buffers.result;
+    }
+    else if(!copy_from_user(frames,
+                            thread,
+                            pointer,
+                            &envelope,
+                            mode == Envelope::Caps ? sizeof(envelope) : sizeof(envelope.result)))
         return OS1_ERR_FAULT;
+    auto& result = envelope.result;
     if(result.version != OS1_IPC_VERSION || result.size != sizeof(result) ||
        result.transport_status || result.reserved ||
        !zero_tail(result.payload, result.payload_bytes))
         return OS1_ERR_INVALID;
     CapGuard attached;
-    long captured =
+    long status =
         capture_caps(thread->process->descriptors, envelope.capabilities, attached.value, 0);
-    if(captured < 0)
-        return captured;
+    if(status < 0)
+        return status;
     auto* c = endpoint->connection;
     Operation* completed = nullptr;
     {
         IrqSpinGuard guard(waiters.lock);
         if(result.generation != c->generation)
             return OS1_ERR_STALE_REPLY;
-        for(auto& slot : c->pending)
-            if(slot && slot->delivered && slot->request.request_id == result.request_id)
+        for(auto* op : c->pending)
+            if(op && op->delivered && !op->retiring && op->request.request_id == result.request_id)
             {
-                completed = slot;
-                completed->result = result;
-                completed->complete = true;
-                slot = nullptr;
-                completed->result_caps = attached.value;
-                attached.value = {};
+                if(op->buffer_mode != (mode == Envelope::Buffers))
+                    return OS1_ERR_UNSUPPORTED;
+                completed = op;
+                op->retiring = true;
                 break;
             }
         if(!completed)
             return OS1_ERR_STALE_REPLY;
+    }
+    BufferOutputBatch* outputs = nullptr;
+    if(completed->buffer_mode)
+        status = buffer_prepare_outputs(frames, thread, completed->loans, buffers.buffers, outputs);
+    if(status < 0)
+    {
+        bool failed;
+        {
+            IrqSpinGuard guard(waiters.lock);
+            failed = c->provider_closed;
+            if(failed)
+                detach_locked(completed);
+            else
+                completed->retiring = false;
+        }
+        if(failed)
+            fail_detached(completed);
+        ipc_drain_wakeups();
+        return status;
+    }
+    buffer_finish_loans(completed->loans);
+    {
+        IrqSpinGuard guard(waiters.lock);
+        completed->result = result;
+        completed->result_caps = attached.value;
+        attached.value = {};
+        completed->outputs = outputs;
+        completed->retiring = false;
+        completed->complete = true;
+        detach_locked(completed);
         signal_locked();
     }
     object_release(completed);
     ipc_drain_wakeups();
     return 0;
 }
-long claim_result(PageFrameContainer& frames, Thread* thread, Operation* op, uint64_t pointer)
+long claim_result(
+    PageFrameContainer& frames, Thread* thread, Operation* op, uint64_t pointer, bool buffer_mode)
 {
     os1_ipc_result_caps envelope{};
+    os1_ipc_result_buffers buffers{};
     {
         IrqSpinGuard guard(waiters.lock);
+        if(op->buffer_mode != buffer_mode)
+            return OS1_ERR_UNSUPPORTED;
         if(!op->complete || op->claiming)
             return OS1_ERR_WOULD_BLOCK;
         op->claiming = true;
-        envelope.result = op->result;
+        envelope.result = buffers.result = op->result;
     }
     auto& table = thread->process->descriptors;
-    long status = install_caps(table, op->result_caps, envelope.capabilities);
-    if(status == 0 && !copy_to_user(frames, thread, pointer, &envelope, sizeof(envelope)))
+    long status;
+    if(buffer_mode)
     {
-        rollback_caps(table, envelope.capabilities);
-        status = OS1_ERR_FAULT;
+        status = op->outputs ? buffer_claim_outputs(op->outputs, thread, buffers.buffers) : 0;
+        if(status == 0)
+        {
+            if(copy_to_user(frames, thread, pointer, &buffers, sizeof(buffers)))
+            {
+                if(op->outputs)
+                    buffer_commit_claim(op->outputs);
+            }
+            else
+            {
+                if(op->outputs)
+                    buffer_rollback_claim(op->outputs, thread, buffers.buffers);
+                status = OS1_ERR_FAULT;
+            }
+        }
+    }
+    else
+    {
+        status = install_caps(table, op->result_caps, envelope.capabilities);
+        if(status == 0 && !copy_to_user(frames, thread, pointer, &envelope, sizeof(envelope)))
+        {
+            rollback_caps(table, envelope.capabilities);
+            status = OS1_ERR_FAULT;
+        }
     }
     CapGuard consumed;
     {
         IrqSpinGuard guard(waiters.lock);
-        if(status == 0)
+        if(status == 0 && !buffer_mode)
         {
             consumed.value = op->result_caps;
             op->result_caps = {};
@@ -908,7 +1072,7 @@ long sys_ipc(
         return fd ? OS1_ERR_INVALID : create_pair(frames, thread, argument);
     if(operation == OS1_IPC_WAIT_MANY)
         return fd ? OS1_ERR_INVALID : wait_many(frames, thread, argument);
-    if(operation < OS1_IPC_READY || operation > OS1_IPC_SESSION_CREATE)
+    if(operation < OS1_IPC_READY || operation > OS1_IPC_RESULT_BUFFERS)
         return OS1_ERR_UNSUPPORTED;
     if(fd >= OS1_DESCRIPTOR_LIMIT)
         return OS1_ERR_BAD_DESCRIPTOR;
@@ -916,6 +1080,7 @@ long sys_ipc(
         (operation == OS1_IPC_READY || operation == OS1_IPC_SUBMIT || operation == OS1_IPC_REPLY ||
          operation == OS1_IPC_EMIT || operation == OS1_IPC_UNSUBSCRIBE ||
          operation == OS1_IPC_SUBMIT_CAPS || operation == OS1_IPC_REPLY_CAPS ||
+         operation == OS1_IPC_SUBMIT_BUFFERS || operation == OS1_IPC_REPLY_BUFFERS ||
          operation == OS1_IPC_ACCOUNT_CREATE || operation == OS1_IPC_SESSION_CREATE)
             ? OS1_RIGHT_WRITE
             : OS1_RIGHT_READ;
@@ -985,10 +1150,13 @@ long sys_ipc(
     }
     if(operation == OS1_IPC_EVENT_READ || operation == OS1_IPC_UNSUBSCRIBE)
         return OS1_ERR_UNSUPPORTED;
-    if(operation == OS1_IPC_RESULT_CAPS)
-        return kind == OS1_OBJECT_OPERATION
-                   ? claim_result(frames, thread, static_cast<Operation*>(object), argument)
-                   : OS1_ERR_UNSUPPORTED;
+    if(operation == OS1_IPC_RESULT_CAPS || operation == OS1_IPC_RESULT_BUFFERS)
+        return kind == OS1_OBJECT_OPERATION ? claim_result(frames,
+                                                           thread,
+                                                           static_cast<Operation*>(object),
+                                                           argument,
+                                                           operation == OS1_IPC_RESULT_BUFFERS)
+                                            : OS1_ERR_UNSUPPORTED;
     if(operation == OS1_IPC_RESULT)
     {
         if(kind != OS1_OBJECT_OPERATION)
@@ -1023,19 +1191,40 @@ long sys_ipc(
         }
         return copy_to_user(frames, thread, argument, &info, sizeof(info)) ? 0 : OS1_ERR_FAULT;
     }
-    if(operation == OS1_IPC_SUBMIT || operation == OS1_IPC_SUBMIT_CAPS)
+    if(operation == OS1_IPC_SUBMIT || operation == OS1_IPC_SUBMIT_CAPS ||
+       operation == OS1_IPC_SUBMIT_BUFFERS)
         return e->provider ? OS1_ERR_UNSUPPORTED
-                           : submit(frames, thread, e, argument, operation == OS1_IPC_SUBMIT_CAPS);
+                           : submit(frames,
+                                    thread,
+                                    e,
+                                    argument,
+                                    operation == OS1_IPC_SUBMIT_BUFFERS ? Envelope::Buffers
+                                    : operation == OS1_IPC_SUBMIT_CAPS  ? Envelope::Caps
+                                                                        : Envelope::Bytes);
     if(operation == OS1_IPC_SUBSCRIBE)
         return e->provider ? OS1_ERR_UNSUPPORTED : subscribe(frames, thread, e, argument);
     if(!e->provider)
         return OS1_ERR_UNSUPPORTED;
     if(operation == OS1_IPC_EMIT)
         return emit(frames, thread, e, argument);
-    if(operation == OS1_IPC_RECEIVE || operation == OS1_IPC_RECEIVE_CAPS)
-        return receive(frames, thread, e, argument, operation == OS1_IPC_RECEIVE_CAPS);
-    if(operation == OS1_IPC_REPLY || operation == OS1_IPC_REPLY_CAPS)
-        return reply(frames, thread, e, argument, operation == OS1_IPC_REPLY_CAPS);
+    if(operation == OS1_IPC_RECEIVE || operation == OS1_IPC_RECEIVE_CAPS ||
+       operation == OS1_IPC_RECEIVE_BUFFERS)
+        return receive(frames,
+                       thread,
+                       e,
+                       argument,
+                       operation == OS1_IPC_RECEIVE_BUFFERS ? Envelope::Buffers
+                       : operation == OS1_IPC_RECEIVE_CAPS  ? Envelope::Caps
+                                                            : Envelope::Bytes);
+    if(operation == OS1_IPC_REPLY || operation == OS1_IPC_REPLY_CAPS ||
+       operation == OS1_IPC_REPLY_BUFFERS)
+        return reply(frames,
+                     thread,
+                     e,
+                     argument,
+                     operation == OS1_IPC_REPLY_BUFFERS ? Envelope::Buffers
+                     : operation == OS1_IPC_REPLY_CAPS  ? Envelope::Caps
+                                                        : Envelope::Bytes);
     if(operation != OS1_IPC_READY)
         return OS1_ERR_UNSUPPORTED;
     os1_ipc_info info{};
