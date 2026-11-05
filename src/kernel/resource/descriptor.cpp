@@ -63,17 +63,33 @@ void object_release(NativeObject* object)
        object->destroy)
         object->destroy(object);
 }
-OpenInstance* open_instance(NativeObject* object)
+OpenInstance* open_instance(NativeObject* object, long* error)
 {
+    if(error)
+        *error = OS1_ERR_NO_MEMORY;
     if(!object)
         return nullptr;
+    if(object->acquire_open)
+    {
+        long status = object->acquire_open(object);
+        if(status < 0)
+        {
+            if(error)
+                *error = status;
+            return nullptr;
+        }
+    }
     auto* instance = static_cast<OpenInstance*>(kmalloc(sizeof(OpenInstance), KmallocFlags::Zero));
     if(instance)
     {
         instance->references = 1;
         instance->object = object;
         object_retain(object);
+        if(error)
+            *error = 0;
     }
+    else if(object->release_open)
+        object->release_open(object);
     return instance;
 }
 void instance_retain(OpenInstance* instance)
@@ -84,6 +100,8 @@ void instance_release(OpenInstance* instance)
 {
     if(instance && __atomic_fetch_sub(&instance->references, 1u, __ATOMIC_ACQ_REL) == 1u)
     {
+        if(instance->object->release_open)
+            instance->object->release_open(instance->object);
         object_release(instance->object);
         kfree(instance);
     }

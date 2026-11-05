@@ -5,6 +5,7 @@
 #include "mm/user_copy.hpp"
 #include "util/memory.h"
 #include "vfs/initrd.hpp"
+#include "vfs/tmpfs.hpp"
 
 namespace
 {
@@ -26,6 +27,73 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
         return kCursorBusy;
     CursorReservation guard{instance};
     auto* node = static_cast<VfsNode*>(instance->object);
+    if(node->filesystem)
+    {
+        if(request.operation == OS1_RESOURCE_SEEK)
+        {
+            long result = tmpfs_seek(node, instance->cursor, request.offset, request.origin);
+            if(result >= 0)
+                instance->cursor = result;
+            return result;
+        }
+        size_t delivered = 0;
+        while(delivered < request.length)
+        {
+            uint8_t bytes[OS1_DIRECTORY_RECORD_MAX]{};
+            size_t count = request.length - delivered;
+            if(count > 256)
+                count = 256;
+            uint64_t next = instance->cursor;
+            if(request.operation == kVfsRead)
+            {
+                count = tmpfs_read(node, instance->cursor, bytes, count);
+                if(!count)
+                    break;
+                next += count;
+            }
+            else if(request.operation == kVfsWrite)
+            {
+                if(request.buffer > UINT64_MAX - delivered ||
+                   !copy_from_user(frames, thread, request.buffer + delivered, bytes, count))
+                    return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
+                long result = tmpfs_write(node, instance->cursor, bytes, count);
+                if(result < 0)
+                    return delivered ? static_cast<long>(delivered) : result;
+                instance->cursor += result;
+                delivered += result;
+                continue;
+            }
+            else
+            {
+                os1_directory_entry entry{};
+                if(!tmpfs_next(node, instance->cursor, entry, next))
+                    break;
+                uint32_t required = (sizeof(os1_directory_record) + entry.name_bytes + 7) & ~7u;
+                if(required > request.length - delivered)
+                {
+                    if(delivered)
+                        return delivered;
+                    if(!copy_to_user(frames, thread, request.required, &required, sizeof(required)))
+                        return OS1_ERR_FAULT;
+                    return OS1_ERR_BUFFER_TOO_SMALL;
+                }
+                os1_directory_record header{OS1_VFS_ABI_VERSION,
+                                            required,
+                                            static_cast<uint16_t>(entry.name_bytes),
+                                            static_cast<uint16_t>(entry.kind),
+                                            0};
+                memcpy(bytes, &header, sizeof(header));
+                memcpy(bytes + sizeof(header), entry.name, entry.name_bytes);
+                count = required;
+            }
+            if(request.buffer > UINT64_MAX - delivered ||
+               !copy_to_user(frames, thread, request.buffer + delivered, bytes, count))
+                return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
+            instance->cursor = next;
+            delivered += count;
+        }
+        return delivered;
+    }
     if(request.operation == OS1_RESOURCE_SEEK)
     {
         uint64_t base = request.origin == OS1_SEEK_CUR   ? instance->cursor
@@ -130,6 +198,18 @@ long vfs_read_or_block(PageFrameContainer& frames,
         return OS1_ERR_INVALID;
     return perform_or_block(frames, thread, {instance, buffer, length, 0, 0, kVfsRead, 0});
 }
+long vfs_write_or_block(PageFrameContainer& frames,
+                        Thread* thread,
+                        OpenInstance* instance,
+                        uint64_t buffer,
+                        size_t length)
+{
+    if(length > OS1_IO_MAX_BYTES)
+        return OS1_ERR_INVALID;
+    if(!tmpfs_node(instance->object) || instance->object->kind != OS1_OBJECT_FILE)
+        return OS1_ERR_UNSUPPORTED;
+    return perform_or_block(frames, thread, {instance, buffer, length, 0, 0, kVfsWrite, 0});
+}
 long sys_vfs(
     PageFrameContainer& frames, Thread* thread, int fd, uint64_t operation, uint64_t argument)
 {
@@ -178,13 +258,14 @@ long sys_vfs(
         if(kind != OS1_OBJECT_FILE && kind != OS1_OBJECT_DIRECTORY)
             return OS1_ERR_UNSUPPORTED;
         const auto* node = static_cast<VfsNode*>(entry.instance->object);
-        os1_file_info info{OS1_VFS_ABI_VERSION,
-                           sizeof(info),
-                           kind,
-                           entry.descendant_rights,
-                           node->byte_size,
-                           OS1_DIRECTORY_RECORD_MAX,
-                           0};
+        os1_file_info info{
+            OS1_VFS_ABI_VERSION,
+            sizeof(info),
+            kind,
+            entry.descendant_rights,
+            node->filesystem ? tmpfs_info(const_cast<VfsNode*>(node)).byte_size : node->byte_size,
+            OS1_DIRECTORY_RECORD_MAX,
+            0};
         return copy_to_user(frames, thread, argument, &info, sizeof(info)) ? 0 : OS1_ERR_FAULT;
     }
     if(operation == OS1_RESOURCE_READ_DIRECTORY)

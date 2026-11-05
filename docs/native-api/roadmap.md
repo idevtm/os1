@@ -3,7 +3,8 @@
 This roadmap connects the implemented Native API to writable storage and device services.
 Source baseline: `5da388a67355a614014bf04f7c7c3197a77b715a`, reviewed on 2026-11-05.
 The user selected an in-memory filesystem at `/tmp` and kernel-resident hardware drivers for these milestones.
-Except for the linked Console v1 profile, the interfaces below remain proposed contracts without assigned ABI records.
+Console v1 and [Directory/File v1](abi/tmpfs-abi.md) now have implemented ABI records.
+Other service interfaces below remain proposed contracts.
 
 ```mermaid
 flowchart TD
@@ -26,12 +27,12 @@ flowchart TD
 | Area | Implemented | Work still needed |
 | --- | --- | --- |
 | Object authority | Process descriptors, rights, shared open instances, explicit launch grants | Service-specific method policy and scoped discovery |
-| Calls | Copied sync/async requests, retained Operations, reply receipts, peer failure, kernel Console dispatch | Kernel Buffer borrowing and additional service protocols |
+| Calls | Copied sync/async requests, retained Operations, reply receipts, peer failure, kernel Console and filesystem dispatch | Kernel Buffer borrowing and additional service protocols |
 | Events | Bounded volatile broadcast subscriptions, future events only, unsubscribe, drop reporting | Device-state recovery after loss and device removal |
 | Shared state | Independent sessions and bounded admission; class-controlled Counter singleton | Reusable service bootstrap and lifecycle beyond the scoped Counter example |
 | Typed metadata | Offline interfaces; bounded rich constructor/method inputs and CLI conversion | Stable service schemas; broader output/event descriptions and generated bindings later |
 | Bulk data | Exclusive zero-copy Buffer loans, returned input identity, distinct output objects | Kernel-service integration; separate DMA ownership and quiescence rules for devices |
-| Files | Immutable initrd, per-open cursors, capability-relative lookup and enumeration | Writable nodes, mutation rights, mounts, quotas, and persistent storage |
+| Files | Immutable initrd, writable `/tmp`, native mutation, quotas, per-open cursors, capability-relative lookup | Kernel Buffer transfers, additional mount semantics, and persistent storage |
 | Devices | Internal block requests; xHCI boot-keyboard input | Native device endpoints, usable mouse events, USB storage, broader hardware qualification |
 
 The descriptor decision no longer blocks VFS, sockets, PTYs, or redirection at the foundational level.
@@ -54,7 +55,7 @@ The [capability rules](abi/shared-activation-abi.md#copied-capability-attachment
 The first service examples must prove their actual connection topology within these rules.
 A combined attachment envelope is needed only when a concrete operation requires both kinds simultaneously.
 General graph transfer must not become an implicit requirement for simple file operations.
-The proposed first filesystem providers run in the kernel alongside their driver adapters.
+The temporary filesystem providers run in the kernel; future persistent providers can share that boundary.
 Internal filesystem-to-driver work can retain one top-level loan until all accesses end, without a second cross-process loan.
 Do not add hidden payload copies to work around unsupported forwarding.
 Use dedicated Buffers when a smaller authorized data range must remain isolated from unrelated bytes.
@@ -103,6 +104,10 @@ Keep illustrative SDK syntax separate from compiled examples.
 
 ## Milestone 1: writable RAM filesystem
 
+The bounded copied-transfer slice is implemented; [its ABI](abi/tmpfs-abi.md) defines current behavior.
+The [implementation record](../archive/filesystems/2026-11-06-tmpfs-implementation.md) records tests and costs.
+Exclusive Buffer transfers remain deferred, so the bulk-I/O row below is not complete.
+
 Implement an in-memory filesystem at `/tmp`, not a block device formatted with another filesystem.
 This is the selected meaning of the temporary RAM disk.
 Its contents disappear on reboot; it makes no durability promise.
@@ -120,11 +125,9 @@ Keep the initrd immutable.
 | Bulk I/O | Copied small requests and exclusive Buffer ranges for larger transfers |
 | Mount integration | Trusted startup mounts `/tmp`; child root/cwd grants retain existing confinement rules |
 
-Define whether sparse writes zero-fill gaps and when quota charges are released.
-An unlinked open file must remain valid until its last retained reference ends.
-For the first slice, propose disabling execution from `/tmp`.
-Writable executable loading requires a separate immutable-image or snapshot contract.
-This restriction remains a proposal until the implementation plan fixes its scope.
+Implemented sparse writes zero-fill gaps; final release refunds unlinked-node and data charges.
+Unlinked files remain valid while retained references exist.
+Execution from `/tmp` is disabled. Writable executable loading requires a separate immutable-image or snapshot contract.
 
 Acceptance: create, write, read, list, rename, truncate, and remove through native service clients.
 Test two clients, access denial, quota exhaustion, allocation failure, unlink with open handles, and teardown during accepted I/O.
@@ -268,7 +271,8 @@ This document promotion does not imply ABI stability or approval of every illust
 ## Immediate implementation slice
 
 The [kernel console slice](kernel-console-plan.md) establishes dispatch, independent authority, retained completion, and bounded admission.
-Next, define writable namespace rights and implement `/tmp` through that boundary.
+The [temporary filesystem slice](abi/tmpfs-abi.md) now uses that boundary with mutation rights and resource-capability results.
+Next, qualify keyboard hardware and define input-service events and recovery snapshots.
 Add kernel Buffer borrowing when a concrete bulk-data method requires it.
 Keyboard diagnosis can proceed independently; input-service integration reuses the same adapter.
 Persistent USB data follows the block, partition, durability, and update-preservation contracts above.

@@ -12,7 +12,10 @@
 #define OS1_RIGHT_INSPECT (1u << 5)
 #define OS1_RIGHT_EXECUTE (1u << 6)
 #define OS1_RIGHT_DELEGATE (1u << 7)
-#define OS1_RIGHT_ALL 255u
+#define OS1_RIGHT_CREATE (1u << 8)
+#define OS1_RIGHT_REMOVE (1u << 9)
+#define OS1_RIGHT_RENAME (1u << 10)
+#define OS1_RIGHT_ALL 2047u
 #define OS1_DESCRIPTOR_CLOEXEC 1u
 #define OS1_STATUS_NONBLOCK 1u
 #define OS1_INTERFACE_BYTE_INPUT 1u

@@ -19,6 +19,7 @@ parent traversal, normalized duplicate entries, file/directory collisions,
 links, and other node types reject the entire import. Missing parent directories
 are synthesized; one explicit directory entry may complete a synthesized node.
 No partially imported namespace is published.
+Startup adds the empty `/tmp` mount before publication; a conflicting initrd name rejects startup.
 
 Limits are 64 MiB of archive data, 2048 nodes including the root, and 64 named
 components of import depth. The depth limit also bounds recursive destruction.
@@ -35,7 +36,8 @@ such effective authority without direct DELEGATE. Enumeration returns names,
 never descriptors. No ordinary syscall obtains a global root from a path string.
 
 Directory rights: LOOKUP, ENUMERATE, INSPECT, DELEGATE. Regular file rights:
-READ, SEEK, INSPECT, EXECUTE, DELEGATE. No write or filesystem mutation is exposed.
+READ, SEEK, INSPECT, EXECUTE, DELEGATE. These immutable objects expose no write or mutation methods.
+The [temporary filesystem extension](tmpfs-abi.md) adds writable nodes at `/tmp` and expands trusted descendant ceilings.
 File mode bits in newc are not a credential policy: EXECUTE is granted by directory
 capability ceilings and a usable program must also pass the ELF validator.
 

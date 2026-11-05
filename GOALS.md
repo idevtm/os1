@@ -356,7 +356,7 @@ The system should support persistent storage with a simple, understandable files
 Selected progression:
 
 1. Completed for Console: native kernel service dispatch preserves descriptor authority and retained-operation lifetime.
-2. Implement an in-memory writable filesystem at `/tmp`; keep the initrd immutable.
+2. Completed for bounded copied transfers: [writable `/tmp`](docs/native-api/abi/tmpfs-abi.md), with an immutable initrd. Kernel Buffer transfers remain deferred.
 3. Define block geometry, bounds, write ordering, Flush, failure, and device-removal behavior.
 4. Add USB mass storage and a bounded data-partition view.
 5. Select a filesystem, validate read-only access, then implement writable persistence and recovery.
@@ -459,7 +459,7 @@ The project is not trying to:
 The [Native API service roadmap](docs/native-api/roadmap.md) sets the next functional sequence:
 
 1. Completed for Console: connect native IPC to a kernel service with explicit authority, bounded admission, and retained lifetime.
-2. Implement the selected in-memory writable filesystem at `/tmp`.
+2. Completed for bounded copied transfers: [writable `/tmp`](docs/native-api/abi/tmpfs-abi.md). Kernel Buffer transfers remain deferred.
 3. Qualify USB keyboard input and deliver mouse events through native input objects.
 4. Implement block durability, USB mass storage, partition access, and a persistent writable data filesystem.
 5. Preserve stored data during boot-image updates.
@@ -512,7 +512,7 @@ The [VFS/startup extension](docs/native-api/abi/initrd-vfs-abi.md) now provides 
 
 ### Milestone D: writable storage, input services, and local security
 
-Console descriptors, startup grants, immutable initrd VFS, and bounded object IPC are implemented.
+Console descriptors, startup grants, immutable initrd VFS, bounded writable `/tmp`, and bounded object IPC are implemented.
 The [service roadmap](docs/native-api/roadmap.md) gives the detailed sequence and acceptance tests.
 
 | Next slice | Required outcome |
@@ -568,7 +568,7 @@ Some earlier open questions have since been resolved in source or in the milesto
 
 The following are not fully decided yet and should be revisited explicitly:
 
-- kernel-service protocols beyond Console, scoped discovery, and each additional service's authority and lifetime rules
+- kernel-service protocols beyond Console and temporary files, scoped discovery, and each additional service's authority and lifetime rules
 - first persistent filesystem choice; the temporary filesystem is an in-memory `/tmp`
 - process and address-space reclamation guarantees, followed by AP-targeted device IRQ steering, lock-order assertions, and scheduler-policy refinement
 - cancellation, durable completion, and timeout outcomes for device I/O and networking; basic IPC deadlines already exist

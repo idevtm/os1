@@ -776,6 +776,9 @@ Filesystem terminology is illustrated by the [Linux VFS overview](https://www.ke
 | SCSI — Small Computer System Interface | A family of storage command and interface standards. USB storage can use SCSI commands without a physical SCSI bus. |
 | UAS — USB Attached SCSI | A USB storage protocol with command queuing; distinct from the simpler Bulk-Only Transport profile. |
 | Bounce buffer | An intermediate buffer used when a device cannot directly access the original memory range or its layout. |
+| Sparse file | A file with logical ranges that have no allocated data pages; reads return zeros for those ranges. |
+| Unlink | Removal of a namespace entry; retained open references can keep the object and its data alive. |
+| Directory cookie | An opaque enumeration position; `/tmp` assigns increasing cookies to created or renamed entries. |
 | RAM filesystem / `tmpfs` | A filesystem backed primarily by memory; `tmpfs` specifically denotes a temporary in-memory filesystem with OS-defined backing and accounting behavior. |
 | FAT | **File Allocation Table**: a filesystem family that records file cluster chains in an allocation table. |
 | FAT12 / FAT16 / FAT32 | FAT variants named for their allocation-entry representation; FAT32 reserves some bits rather than providing 32 unrestricted cluster-number bits. |

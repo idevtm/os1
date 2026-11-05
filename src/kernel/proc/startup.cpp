@@ -10,6 +10,7 @@
 #include "util/fixed_string.hpp"
 #include "util/memory.h"
 #include "vfs/initrd.hpp"
+#include "vfs/tmpfs.hpp"
 
 long validate_startup(const os1_startup_record& record)
 {
@@ -143,7 +144,7 @@ long inherit_process_namespace(Process* parent, Process* child)
             if(!instance.get())
                 return OS1_ERR_NO_MEMORY;
             const long status = descriptor_install(
-                child->descriptors, instance.get(), kDirectoryRights, 0, fd, kInitrdCeiling);
+                child->descriptors, instance.get(), kDirectoryRights, 0, fd, kNamespaceCeiling);
             if(status < 0)
                 return status;
         }

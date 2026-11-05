@@ -4,6 +4,7 @@
 
 #include "handoff/memory_layout.h"
 #include "vfs/initrd.hpp"
+#include "vfs/tmpfs.hpp"
 
 namespace
 {
@@ -82,9 +83,17 @@ long initialize_initrd_namespace()
     if(!g_boot_info || !g_boot_info->module_count)
         return OS1_ERR_BAD_IMAGE;
     const auto& module = g_boot_info->modules[0];
-    return vfs_import_initrd(kernel_physical_pointer<const uint8_t>(module.physical_start),
-                             module.length,
-                             g_initrd_root);
+    NativeObject* root = nullptr;
+    long status = vfs_import_initrd(
+        kernel_physical_pointer<const uint8_t>(module.physical_start), module.length, root);
+    if(status < 0)
+        return status;
+    status = tmpfs_mount(root);
+    if(status < 0)
+        object_release(root);
+    else
+        g_initrd_root = root;
+    return status;
 }
 NativeObject* initrd_namespace_root()
 {

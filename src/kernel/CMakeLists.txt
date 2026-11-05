@@ -97,6 +97,7 @@ set(KERNEL_PROC_SOURCES
   ipc/channel.cpp
   ipc/kernel_provider.cpp
   vfs/initrd.cpp
+  vfs/tmpfs.cpp
   syscall/vfs.cpp
   proc/startup.cpp
   resource/descriptor.cpp

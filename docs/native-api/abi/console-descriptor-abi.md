@@ -5,7 +5,7 @@ shared encoding is [resource.h](../../../src/uapi/os1/resource.h); it is experim
 not a promise of long-term binary compatibility. The broader
 [native contract](../object-contract.md) still specifies
 the broader native model. The subsequent [VFS/startup ABI](initrd-vfs-abi.md)
-extends this foundation. [Copied IPC](copied-ipc-abi.md) implements hosted calls; [Console IPC](kernel-console-abi.md) adds kernel service dispatch. See the
+extends this foundation. The [temporary filesystem ABI](tmpfs-abi.md) adds CREATE=256, REMOVE=512, and RENAME=1024; ALL is now 2047. [Copied IPC](copied-ipc-abi.md) implements hosted calls; [Console IPC](kernel-console-abi.md) adds kernel service dispatch. See the
 [implementation plan and validation](../../archive/native-api/2026-11-04-console-descriptor-implementation-plan.md).
 
 ## Representation and operations

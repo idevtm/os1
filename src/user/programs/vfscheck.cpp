@@ -1,5 +1,7 @@
 #include <os1/vfs.hpp>
 
+#include "tmpfs_check.hpp"
+
 using namespace os1::user;
 #define CHECK(condition, message)                                               \
     do                                                                          \
@@ -24,6 +26,8 @@ bool equal(const char* a, const char* b)
 
 int main(int argc, char** argv)
 {
+    if(argc == 2 && equal(argv[1], "tmpfs"))
+        return os1::tmpfs_check::child();
     if(argc == 2)
     {
         CHECK(equal(argv[0], "vfscheck") && equal(argv[1], "restricted"), "argv");
@@ -37,6 +41,9 @@ int main(int argc, char** argv)
         write(1, success, sizeof(success) - 1);
         return 0;
     }
+    CHECK(os1::tmpfs_check::run(), "tmpfs protocol");
+    constexpr char tmp_ok[] = "[user/vfscheck] tmpfs native two clients compatibility unlink ok\n";
+    write(1, tmp_ok, sizeof(tmp_ok) - 1);
     const long file = open("/etc/motd", OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_DELEGATE);
     CHECK(file >= 0, "open file");
     const long alias = duplicate(file, OS1_RIGHT_READ | OS1_RIGHT_SEEK);

@@ -170,9 +170,9 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-# Share the existing low-memory staging span: 356 KiB kernel, 196 KiB initrd.
+# Share the existing low-memory staging span: 348 KiB kernel, 204 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x69000)
+set(OS1_INITRD_LOAD_ADDRESS 0x67000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -195,7 +195,7 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 392)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 408)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
 set(OS1_INITRD_LOAD_LIMIT 0x9A000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
@@ -1193,6 +1193,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "os1: native initrd file reads work."
     "shell spawn cat ok pid="
     "[user/vfscheck] restricted child ok"
+    "[user/vfscheck] tmpfs native two clients compatibility unlink ok"
     "[user/vfscheck] ok"
     "shell spawn vfscheck ok pid="
     "[user/buffercheck] clock hpet resolution_ns="
@@ -1537,6 +1538,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "os1: native initrd file reads work."
     "shell spawn cat ok pid="
     "[user/vfscheck] restricted child ok"
+    "[user/vfscheck] tmpfs native two clients compatibility unlink ok"
     "[user/vfscheck] ok"
     "shell spawn vfscheck ok pid="
     "[user/buffercheck] timing unavailable high-resolution clock"

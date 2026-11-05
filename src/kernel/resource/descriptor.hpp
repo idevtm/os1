@@ -16,6 +16,8 @@ struct NativeObject
     bool (*reserve_read)(char*, size_t, size_t&) = nullptr;
     void (*finish_read)(size_t) = nullptr;
     void (*write_bytes)(const char*, size_t) = nullptr;
+    long (*acquire_open)(NativeObject*) = nullptr;
+    void (*release_open)(NativeObject*) = nullptr;
 };
 struct OpenInstance
 {
@@ -42,7 +44,7 @@ struct DescriptorTable
 };
 void object_retain(NativeObject* object);
 void object_release(NativeObject* object);
-OpenInstance* open_instance(NativeObject* object);
+OpenInstance* open_instance(NativeObject* object, long* error = nullptr);
 void instance_retain(OpenInstance* instance);
 void instance_release(OpenInstance* instance);
 void descriptor_table_initialize(DescriptorTable& table);

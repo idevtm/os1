@@ -52,12 +52,13 @@ The [documentation index](README.md) groups current contracts by topic and separ
 ## Native objects and OS services
 
 The Native API has implemented descriptor authority and bounded IPC between user programs.
-Console now also uses a bounded kernel provider adapter with the same retained Operation transport.
+Console and writable `/tmp` use a bounded kernel provider adapter with the same retained Operation transport.
 
 | Current path | Implemented behavior | Planned integration |
 | --- | --- | --- |
 | Console | Descriptor I/O plus copied IPC `write`, `try_read`, and `info` | Input events and scoped service discovery |
-| Initrd | Descriptor/resource syscalls | Writable filesystem protocols through the kernel provider adapter |
+| Initrd | Immutable descriptor/resource syscalls | Native bindings for immutable resources |
+| `/tmp` | Native Directory/File methods and descriptor I/O, mutation rights, quotas, retained unlinked files | Kernel Buffer transfers and additional mount semantics |
 | User providers | Copied calls, Operations, capabilities, sessions, volatile events, and exclusive Buffer loans | Reusable scoped service bootstrap and discovery |
 | Hardware drivers | Kernel-resident C++ interfaces and request/completion mechanisms | Kernel-hosted BlockDevice and input service objects |
 
@@ -69,8 +70,14 @@ The [Console ABI](native-api/abi/kernel-console-abi.md) binds a ready IPC client
 A single kernel worker invokes bounded callbacks outside IRQ context and global IPC locks.
 Accepted Operations retain their source resource through completion and result delivery.
 The [roadmap](native-api/roadmap.md#shared-service-foundation) extends this boundary without moving hardware drivers into userspace.
-It also defines `/tmp`, input services, and persistent USB data as the next functional milestones.
+It records the bounded `/tmp` slice and the remaining input-service and persistent USB milestones.
 The existing ABI profiles remain authoritative for current layouts and behavior.
+
+The [temporary filesystem ABI](native-api/abi/tmpfs-abi.md) binds Directory/File services from existing `/tmp` grants.
+Directory bindings capture descendant ceilings and return opened resources through retained capability results.
+A filesystem lock protects nodes, sparse pages, and quotas; open instances retain separate cursor reservations.
+The mount rejects name collisions before publication. Unlinked nodes remain charged until final release.
+
 
 ## Glossary
 
@@ -202,7 +209,7 @@ Current kernel folders:
 | [../src/kernel/storage/](../src/kernel/storage) | Generic request-shaped block abstractions above concrete block drivers. | `block_device.hpp`, `README.md` |
 | [../src/kernel/fs/](../src/kernel/fs) | Concrete filesystem/archive parsers. Today this is the boot initrd CPIO parser, not a general namespace. | `initrd.*` |
 | [../src/kernel/resource/](../src/kernel/resource) | Process descriptors, open instances, and native console providers. | `descriptor.hpp` |
-| [../src/kernel/vfs/](../src/kernel/vfs) | Immutable initrd directory/file objects, strict import, capability-relative path lookup, and checked child grants. | `initrd.*`, `README.md` |
+| [../src/kernel/vfs/](../src/kernel/vfs) | Initrd import, writable `/tmp`, capability-relative lookup, mutation, quotas, and retained node lifetime. | `initrd.*`, `tmpfs.*`, `README.md` |
 | [../src/kernel/security/](../src/kernel/security) | Future credentials, permissions, and resource-boundary policy. | `README.md` |
 | [../src/kernel/debug/](../src/kernel/debug) | Serial debug logger and fixed-capacity structured event ring. | `debug.*`, `event_ring.*` |
 | [../src/kernel/util/](../src/kernel/util) | Small generic helpers with no subsystem ownership. | `assert.hpp`, `align.hpp`, `ctype.hpp`, `fixed_string.hpp`, `memory.h`, `string.*` |
@@ -509,21 +516,22 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-776`: `kernel_bios.elf`
-- LBA `777-1168`: `initrd.cpio`
+- LBA `65-760`: `kernel_bios.elf`
+- LBA `761-1168`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
-The BIOS loader stages the stripped kernel in `[0x10000,0x69000)` (356 KiB).
-It stages the plain initrd in `[0x69000,0x9A000)` (196 KiB).
-The reliability phase moved the boundary by 4 KiB to fit the expanded benchmark.
+The BIOS loader stages the stripped kernel in `[0x10000,0x67000)` (348 KiB).
+It stages the plain initrd in `[0x67000,0x9A000)` (204 KiB).
+The temporary filesystem slice moved the boundary by 8 KiB to fit the expanded regression program.
 The 2880-sector raw image, firmware ceiling, and boot-log placement remain unchanged.
 Kernel C++ and bundled userspace use `-Os`; userspace discards unreferenced sections while retaining metadata.
 
 ELF-aware checks enforce file size, staging limits, execution extent, reserve space, initrd capacity, and disk overlap.
 The reserved execution window and page bitmap remain unchanged.
-The [reliability record](archive/kernel/2026-11-05-reliability-and-clock-plan.md) contains current sizes and validation.
+The [temporary filesystem record](archive/filesystems/2026-11-06-tmpfs-implementation.md) contains current sizes and validation.
+The [reliability record](archive/kernel/2026-11-05-reliability-and-clock-plan.md) preserves the preceding layout measurements.
 
 ## The Shared Kernel Contract: `BootInfo`
 
@@ -578,7 +586,7 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x0A000` | temporary page-table scratch used by the BIOS long-mode transition |
 | `0x10000` | BIOS kernel-image load buffer |
-| `0x69000` | BIOS initrd load buffer (196 KiB slot, ending at `0x9A000`) |
+| `0x67000` | BIOS initrd load buffer (204 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x20000-0x5FFFF` | page-frame bitmap |
 
@@ -1286,7 +1294,7 @@ Major constraints that remain:
 
 - the broad final-kernel identity map is gone, but boot still retains narrow low bootstrap identity exceptions for the live handoff stack and AP startup state until early stack handoff and AP startup are redesigned
 - the framebuffer path is a text presenter, not a graphics stack
-- userland uses an immutable initrd VFS; block-backed filesystems and multiuser policy remain unimplemented
+- userland uses an immutable initrd and bounded writable `/tmp`; block-backed filesystems and multiuser policy remain unimplemented
 - console/file/directory descriptors and native `launch` are implemented; legacy pathname spawn/exec resolve through existing namespace grants, while native launch accepts argv/environment data and explicit child maps
 - block I/O is request-shaped, interrupt-completed, and supports bounded multi-sector requests up to `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request) through a single contiguous data descriptor; the synchronous wrappers chunk by `BlockDevice::max_sectors_per_request`; Flush is rejected, so successful write completion is not a durability contract; there is still no block scheduler, request merging, filesystem-facing buffer cache, or per-page user-buffer scatter-gather (which awaits user-DMA pinning)
 - PCI INTx fallback now resolves through ACPICA `_PRT` data when firmware
@@ -1304,7 +1312,7 @@ Major constraints that remain:
 
 The [initrd VFS milestone](archive/native-api/2026-11-04-initrd-vfs-implementation-plan.md) now implements read-only namespace access and bounded argument/environment handoff. Bounded hosted IPC is also implemented; general kernel-service integration remains planned. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
 
-- integrate the [implemented Native API](native-api/README.md) with kernel services, then writable `/tmp`, input devices, and persistent USB data; see the [service roadmap](native-api/roadmap.md)
+- integrate the [implemented Native API](native-api/README.md) with kernel services, extending bounded writable `/tmp` with bulk transfers, input devices, and persistent USB data; see the [service roadmap](native-api/roadmap.md)
 - evolve `init` into an explicit supervisor using the implemented startup record and child grants
 - extend the existing allocated VFS node lifetime model to persistent filesystem state and packet buffers as those providers land
 - per-page user-buffer scatter-gather and DMA pinning, once the user-process side of the storage path needs them; bounded multi-sector requests already work today through a single contiguous data descriptor

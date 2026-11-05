@@ -40,7 +40,8 @@ Attenuating endpoint transport rights does not change those captured rights.
 Create a separate binding with reduced service rights before delegation when that reduction is required.
 
 No ambient service lookup, provider descriptor, registration syscall, or class activation is exposed.
-The fixed internal provider table currently contains only Console v1.
+The fixed internal provider table contains Console v1 and the [Directory/File v1 providers](tmpfs-abi.md).
+The limits below apply across all three providers.
 Separate console bindings share the existing underlying console state.
 
 ## Members and records

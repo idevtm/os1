@@ -16,7 +16,19 @@ The 2026-05-10 integration replaced the previous AML interpreter with upstream A
 ACPICA supports table discovery, namespace loading, device enumeration, `_PRT` routing, resource parsing, and device power transitions.
 `/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose cached route information through passive userland observation.
 
-In the source tree, the two boot frontends are explicit peers under `src/boot/`: the legacy raw-image BIOS path lives in `src/boot/bios/`, and the modern UEFI shim lives in `src/boot/limine/`. The kernel tree is now split by ownership rather than by bring-up history: `src/kernel/core/` owns orchestration and trap flow, `handoff/` owns the boot contract, `mm/` owns physical/virtual memory, `proc/`, `sched/`, and `sync/` split process/thread lifecycle, scheduling policy, and blocking primitives, `console/` owns terminal streams, `drivers/` owns hardware drivers, `platform/` owns machine discovery, `vfs/` owns the immutable initrd namespace, and `storage/` and `security/` mark broader growth seams. The detailed source-structure contract now lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The boot frontends are peers: `src/boot/bios/` owns the legacy raw-image path, and `src/boot/limine/` owns the UEFI shim.
+Kernel directories separate these responsibilities:
+
+| Directory under `src/kernel/` | Responsibility |
+| --- | --- |
+| `core/`, `handoff/` | Orchestration, trap flow, and boot contract |
+| `mm/` | Physical and virtual memory |
+| `proc/`, `sched/`, `sync/` | Process/thread lifetime, scheduling, and blocking primitives |
+| `console/`, `drivers/`, `platform/` | Terminal streams, hardware drivers, and machine discovery |
+| `vfs/` | Immutable initrd namespace and writable `/tmp` |
+| `storage/`, `security/` | Storage and security subsystem boundaries |
+
+The [architecture](docs/ARCHITECTURE.md) defines the full source structure.
 
 The November boot changes add operation without COM1, bounded serial waits,
 PIT-calibrated TSC firmware delays, per-CPU exception stacks, PCI probe failure
@@ -49,6 +61,10 @@ CLI conversion. Try `intf /bin/paramdemo`, `paramcheck`, and `activationcheck`.
 The [exclusive Buffer ABI](docs/native-api/abi/buffer-loans-abi.md) adds Operation-scoped loans and distinct reply outputs.
 `buffercheck` exercises both TextProcessor paths. See the [implementation record](docs/archive/native-api/2026-11-05-exclusive-buffer-implementation.md) for validation and limits.
 Inline control payloads remain bounded to 256 bytes. Live readers and shared read/write remain deferred.
+
+The [temporary filesystem ABI](docs/native-api/abi/tmpfs-abi.md) adds native Directory/File methods, mutation rights, and bounded writable `/tmp`.
+Run `vfscheck` to check native clients, descriptor access, sparse files, and unlink lifetime.
+Kernel Buffer transfers and persistent storage remain deferred.
 
 The [kernel Console adapter](docs/native-api/abi/kernel-console-abi.md) adds copied IPC `write`, `try_read`, and the `info` property.
 `ipccheck` exercises two processes with independent service authority and retained asynchronous results.

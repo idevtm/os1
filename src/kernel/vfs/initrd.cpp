@@ -3,6 +3,7 @@
 #include "fs/cpio_newc.hpp"
 #include "mm/kmem.hpp"
 #include "util/memory.h"
+#include "vfs/tmpfs.hpp"
 
 namespace
 {
@@ -165,8 +166,10 @@ long vfs_resolve(NativeObject* directory, const char* path, size_t size, NativeO
         return validation;
     if(!directory || directory->kind != OS1_OBJECT_DIRECTORY)
         return OS1_ERR_NOT_DIRECTORY;
-    auto* node = static_cast<VfsNode*>(directory);
+    object_retain(directory);
+    NativeObject* current = directory;
     size_t start = 0;
+    long status = 0;
     for(size_t i = 0; i <= size; ++i)
     {
         if(i < size && path[i] != '/')
@@ -174,22 +177,40 @@ long vfs_resolve(NativeObject* directory, const char* path, size_t size, NativeO
         const size_t count = i - start;
         if(count)
         {
-            if(node->kind != OS1_OBJECT_DIRECTORY)
-                return OS1_ERR_NOT_DIRECTORY;
+            if(current->kind != OS1_OBJECT_DIRECTORY)
+            {
+                status = OS1_ERR_NOT_DIRECTORY;
+                break;
+            }
             if(!(count == 1 && path[start] == '.'))
             {
-                node = lookup(node, path + start, count);
-                if(!node)
-                    return OS1_ERR_NOT_FOUND;
+                NativeObject* child = nullptr;
+                auto* node = static_cast<VfsNode*>(current);
+                if(node->filesystem)
+                    status = tmpfs_lookup(node, path + start, count, child);
+                else
+                {
+                    child = lookup(node, path + start, count);
+                    if(child)
+                        object_retain(child);
+                    else
+                        status = OS1_ERR_NOT_FOUND;
+                }
+                if(status < 0)
+                    break;
+                object_release(current);
+                current = child;
             }
         }
         start = i + 1;
     }
-    if(path[size - 1] == '/' && node->kind != OS1_OBJECT_DIRECTORY)
-        return OS1_ERR_NOT_DIRECTORY;
-    object_retain(node);
-    result = node;
-    return 0;
+    if(status == 0 && path[size - 1] == '/' && current->kind != OS1_OBJECT_DIRECTORY)
+        status = OS1_ERR_NOT_DIRECTORY;
+    if(status < 0)
+        object_release(current);
+    else
+        result = current;
+    return status;
 }
 long vfs_open(DescriptorTable& table,
               int directory,
@@ -223,9 +244,7 @@ long vfs_open(DescriptorTable& table,
         status = OS1_ERR_INVALID;
     else
     {
-        result = open_instance(object);
-        if(!result)
-            status = OS1_ERR_NO_MEMORY;
+        result = open_instance(object, &status);
     }
     object_release(object);
     return status;
