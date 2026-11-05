@@ -170,9 +170,9 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-# Share the existing low-memory staging span: 348 KiB kernel, 204 KiB initrd.
+# Share the existing low-memory staging span: 352 KiB kernel, 200 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x67000)
+set(OS1_INITRD_LOAD_ADDRESS 0x68000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -195,7 +195,7 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 408)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 400)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
 set(OS1_INITRD_LOAD_LIMIT 0x9A000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")

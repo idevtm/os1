@@ -516,15 +516,15 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-760`: `kernel_bios.elf`
-- LBA `761-1168`: `initrd.cpio`
+- LBA `65-768`: `kernel_bios.elf`
+- LBA `769-1168`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
-The BIOS loader stages the stripped kernel in `[0x10000,0x67000)` (348 KiB).
-It stages the plain initrd in `[0x67000,0x9A000)` (204 KiB).
-The temporary filesystem slice moved the boundary by 8 KiB to fit the expanded regression program.
+The BIOS loader stages the stripped kernel in `[0x10000,0x68000)` (352 KiB).
+It stages the plain initrd in `[0x68000,0x9A000)` (200 KiB).
+The temporary filesystem slice moved the boundary by 4 KiB to fit the expanded regression program.
 The 2880-sector raw image, firmware ceiling, and boot-log placement remain unchanged.
 Kernel C++ and bundled userspace use `-Os`; userspace discards unreferenced sections while retaining metadata.
 
@@ -586,7 +586,7 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x0A000` | temporary page-table scratch used by the BIOS long-mode transition |
 | `0x10000` | BIOS kernel-image load buffer |
-| `0x67000` | BIOS initrd load buffer (204 KiB slot, ending at `0x9A000`) |
+| `0x68000` | BIOS initrd load buffer (200 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x20000-0x5FFFF` | page-frame bitmap |
 

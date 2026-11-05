@@ -67,14 +67,15 @@ The full ASD-STE100 Issue 9 dictionary is unavailable; prose follows the reposit
 ### Implementation findings
 
 The initial build exceeded the old 196 KiB initrd slot: the expanded image required 203,776 bytes.
-Redistribute the existing staging span to a 348 KiB kernel slot and a 204 KiB initrd slot at `0x67000`.
+The first candidate redistributed the staging span to a 348 KiB kernel slot and a 204 KiB initrd slot at `0x67000`.
 The `0x9A000` firmware ceiling and all overlap checks remain unchanged.
 This does not enlarge the combined load window or remove regression programs.
 
-## Validation record
+## First-candidate validation record
 
 The implementation includes native Directory/File providers, descriptor interoperability, mutation authority, sparse data, quotas, and retained unlink lifetime.
-The implementation revision is the commit containing this record on `codex/tmpfs`; the PR identifies its exact commit hash.
+The first implementation revision is `067c4da0a21bd97b3bc7dd5992d327708a4d644a` on `codex/tmpfs`.
+The CI correction below records the subsequent staging adjustment.
 Source manifest SHA-256: `8a52862160d1ac267e66d9154738cf86f03150d42b23009d8e7d38664ed1c03b`.
 The manifest includes changed source, tests, and CMake files; documentation changes do not alter it.
 
@@ -105,7 +106,7 @@ Socket failures were environment restrictions, not product failures. No integrat
 Logs are in `build/tmpfs-evidence/`: `final-host-tests.log`, `final-integration.log`, `final-socket-checks.log`, and build logs.
 The directory is ignored build output; the tables here preserve the results in version control.
 
-## Comparable runtime and artifact measurements
+## First-candidate runtime and artifact measurements
 
 Baseline: merged main `1b6a3cd058934e448527d3bcab87b693393c0d49`.
 Both runs used macOS 26.6.2 arm64, GCC 11.2.0, QEMU 11.1.3, and the existing Debug build.
@@ -139,7 +140,7 @@ Filesystem throughput, CPU utilization, and physical-device latency remain unmea
 | `os1.iso` | 4,388,864 | 4,401,152 | +12,288 | +0.28% |
 | `os1.raw` | 1,474,560 | 1,474,560 | +0 | +0.00% |
 
-The 348 KiB BIOS kernel slot has 3,584 bytes free; the 204 KiB initrd slot has 5,120 bytes free.
+The first candidate had 3,584 bytes free in its 348 KiB BIOS kernel slot and 5,120 bytes in its 204 KiB initrd slot.
 Further growth needs another explicit layout decision. The fixed raw image size and `0x9A000` ceiling are unchanged.
 
 ## Memory accounting
@@ -186,3 +187,43 @@ The corrected layout also links current measurements while preserving historical
 The secret scan found only measurement hashes and a scan-reference sentence; no credentials were found.
 Physical hardware has not been tested for this revision. Run `vfscheck` on a fresh image for the next hardware check.
 Kernel Buffer borrowing, persistent data, input-service events, public mounts, and mutable executable snapshots remain separate work.
+
+## CI toolchain correction
+
+CI run [42122783961](https://github.com/idevtm/os1/actions/runs/42122783961) passed host tests but rejected the first candidate's BIOS kernel slot.
+The CI kernel required 356,864 bytes, exceeding the 356,352-byte slot by 512 bytes.
+The same build produced a 200,704-byte initrd. The local initrd required 203,776 bytes.
+
+The corrected split uses a 352 KiB kernel slot and a 200 KiB initrd slot at `0x68000`.
+Kernel LBAs are 65–768; initrd LBAs are 769–1168.
+Both compiler outputs fit this split; the combined staging span, `0x9A000` ceiling, and boot-log placement remain unchanged.
+The existing failing boot-contract check is retained as the regression guard.
+The correction changes layout constants and current documentation; filesystem code and host-test behavior are unchanged.
+It requires rebuilt images, renewed UEFI/BIOS/SMP validation, comparable measurements, and a focused independent review.
+Earlier candidate measurements above remain historical evidence.
+
+### Corrected-layout measurements
+
+The corrected layout uses the same baseline workload, compiler, firmware, and machine configuration described above.
+Source manifest SHA-256: `a68320a4616ae6b8002db04904ccf0845aa69be06572271191c013b8ff5653ce`.
+The PR identifies the exact correction commit; the source manifest covers all changed source, tests, and CMake files against main.
+
+| Workload | Corrected samples, seconds | Median change from main |
+| --- | --- | --- |
+| `os1_smoke_spawn` | 10.017296, 9.978923, 9.949853 | -0.063650 s (-0.63%) |
+| `os1_smoke_spawn_bios` | 8.247629, 8.251108, 8.240207 | -0.016706 s (-0.20%) |
+
+All six runs passed; the small timing changes still do not establish a performance improvement.
+Artifact byte sizes are unchanged from the first candidate; layout constants and image contents changed.
+The local kernel slot now has 7,680 bytes free; the local initrd slot has 1,024 bytes free.
+The initial CI artifacts would leave 3,584 kernel bytes and 4,096 initrd bytes under the corrected bounds.
+The CI compiler was GCC 16.2.0; the local compiler was GCC 11.2.0.
+The revised CI build must verify those bounds with regenerated artifacts.
+
+Logs: `corrected-build.log`, `corrected-integration.log`, and `final-frozen-*.log` in `build/tmpfs-evidence/`.
+The `first-candidate/` evidence subdirectory preserves earlier local logs and source/artifact manifests.
+
+The corrected layout passed all 16 integration tests in one run (55.72 seconds), including UEFI, BIOS, SMP, xHCI, and no UART.
+The 355 host-test result remains applicable because the correction changes no host-test source or configuration.
+The focused independent review found no defects in the layout arithmetic, capacity, overlap rules, or documentation.
+Local links and the documented C++ example passed again. The correction contains no credentials.
