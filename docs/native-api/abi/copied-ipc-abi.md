@@ -78,10 +78,10 @@ User copies, allocation, descriptor-table calls, destruction, and scheduler call
 occur outside the IPC lock. Process-table lock precedes IPC lock when registering.
 Exit/reaping removes wait registrations before releasing their instances.
 
-This slice has untimed waits, no cancellation API, no wait-many, no supervisor,
-no public external kill, no attachments, and no shared memory. A hung provider
-can leave READY or a call waiting forever. It is a private cooperative prototype,
-not the later supervised startup/recovery contract.
+The original slice provided only untimed cooperative waits.
+Subsequent profiles add [deadlines and private supervision](counter-events-abi.md), [capabilities](shared-activation-abi.md), [wait-many](client-sessions-abi.md#bounded-wait-many), and [exclusive Buffer loans](buffer-loans-abi.md).
+Untimed calls can still wait indefinitely on an unresponsive provider.
+General operation cancellation, external kill, and automatic restart/replay remain unsupported.
 
 ## TextProcessor protocol and examples
 
@@ -89,8 +89,8 @@ not the later supervised startup/recovery contract.
 launch grant, with READ|WRITE. It receives no root/cwd or standard streams. Its
 code initializes enabled=true, revision=1, processed=0, publishes READY, serves
 requests sequentially, and exits after client closure. This private activation
-has no shared registry or singleton resolver; later construction stays controlled
-by class code, with no caller fresh/shared switch.
+has no shared registry or singleton resolver.
+[Counter activation](shared-activation-abi.md) demonstrates class-controlled reuse with no caller fresh/shared switch.
 
 Interface ID: `0x545850524f433031`, version 1. The checked-in typed layouts and
 metadata share [textprocessor.hpp](../../../src/common/interface/textprocessor.hpp).
@@ -162,7 +162,8 @@ cover each record exactly, without overlap, gaps, or implicit padding. Maximum
 wire type size is 256 bytes. Nested/recursive types, variable-layout containers,
 semantic constraints such as revision comparison, compatibility hashes, dynamic
 binding, and generated `.so` files are not provided by this first structural
-format. Those remain later schema/toolchain work.
+format. The separate [rich-parameter records](rich-parameters-abi.md) support bounded recursive constructor/method inputs.
+General reflective schemas and generated bindings remain later toolchain work.
 
 The reader requires an ELF64 little-endian x86-64 executable, bounded section
 count (128), bounded section-name table (4096 bytes), one read-only allocated
@@ -171,5 +172,14 @@ rejects duplicate member IDs, unknown formats, malformed names/types, missing
 metadata, duplicate metadata sections, truncation, and arithmetic-overflow ranges.
 
 The initrd packager strips symbol tables from staged executables to keep both
-boot paths within the BIOS initrd slot (192 KiB after the [sessions/parameters phase](../../archive/native-api/2026-11-05-client-sessions-and-parameters.md)). Full ELF build artifacts
+boot paths within the 196 KiB BIOS initrd slot.
+The [sessions/parameters phase](../../archive/native-api/2026-11-05-client-sessions-and-parameters.md) used an earlier 192 KiB slot. Full ELF build artifacts
 are retained; allocated metadata and section headers remain in packaged images.
+
+## Public member names
+
+The metadata validator requires `snake_case` for methods, properties, and events.
+Names start with a lowercase ASCII letter and contain lowercase letters, digits, or single underscores.
+Trailing and repeated underscores are invalid.
+Type and interface names retain the bounded-name validation and may use `UpperCamelCase`.
+This naming rule does not change numeric member IDs or wire layouts.

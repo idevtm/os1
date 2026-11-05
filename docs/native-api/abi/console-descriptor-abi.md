@@ -5,7 +5,7 @@ shared encoding is [resource.h](../../../src/uapi/os1/resource.h); it is experim
 not a promise of long-term binary compatibility. The broader
 [native contract](../object-contract.md) still specifies
 the broader native model. The subsequent [VFS/startup ABI](initrd-vfs-abi.md)
-extends this foundation; hosted-service work remains proposed. See the
+extends this foundation. [Copied IPC](copied-ipc-abi.md) implements hosted calls; [Console IPC](kernel-console-abi.md) adds kernel service dispatch. See the
 [implementation plan and validation](../../archive/native-api/2026-11-04-console-descriptor-implementation-plan.md).
 
 ## Representation and operations
@@ -82,8 +82,11 @@ retention. A queued read owns its accepted instance, so close/reuse cannot
 retarget it. A detached completion pins the thread/address-space lifetime until
 its last access. See the [synchronization contract](../../kernel/smp-synchronization.md).
 
-Public user execution still has one thread per process, no unmap, and no
-external kill. Arbitrary child maps, bounded argv/envp, root/cwd grants, and
+Public user execution still has one thread per process and no general-purpose address-space unmap or external kill.
+The [Buffer ABI](buffer-loans-abi.md) provides explicit unmap for Buffer mappings.
+Arbitrary child maps, bounded argv/envp, root/cwd grants, and
 initrd VFS operations are now specified in the [VFS/startup extension](initrd-vfs-abi.md).
-General wait-many, hosted services, and reflection remain future milestones. The internal console reservation callbacks are not their final
-provider or wire interfaces.
+Bounded IPC [wait-many](client-sessions-abi.md#bounded-wait-many) and hosted services are implemented in subsequent profiles.
+General reflection and file/device polling remain future work.
+[Console IPC](kernel-console-abi.md) adapts the internal console callbacks to its versioned request protocol.
+The callbacks themselves are not a userspace wire interface.

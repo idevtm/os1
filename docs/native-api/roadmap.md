@@ -3,14 +3,14 @@
 This roadmap connects the implemented Native API to writable storage and device services.
 Source baseline: `5da388a67355a614014bf04f7c7c3197a77b715a`, reviewed on 2026-11-05.
 The user selected an in-memory filesystem at `/tmp` and kernel-resident hardware drivers for these milestones.
-The interfaces below are proposed implementation contracts, not existing ABI assignments.
+Except for the linked Console v1 profile, the interfaces below remain proposed contracts without assigned ABI records.
 
 ```mermaid
 flowchart TD
     P[Programs and shell] --> G[Granted service or directory capabilities]
     G --> I[Native methods, properties, and events]
     I --> T[Copied control records, Operations, Buffer loans]
-    T --> K[Planned kernel provider adapter]
+    T --> K[Kernel provider adapter]
     T --> U[Existing userspace provider transport]
     K --> C[Console and writable /tmp]
     K --> H[Keyboard and mouse drivers]
@@ -26,7 +26,7 @@ flowchart TD
 | Area | Implemented | Work still needed |
 | --- | --- | --- |
 | Object authority | Process descriptors, rights, shared open instances, explicit launch grants | Service-specific method policy and scoped discovery |
-| Calls | Copied sync/async requests, retained Operations, reply receipts, peer failure | Kernel provider dispatch with equivalent lifetime and admission rules |
+| Calls | Copied sync/async requests, retained Operations, reply receipts, peer failure, kernel Console dispatch | Kernel Buffer borrowing and additional service protocols |
 | Events | Bounded volatile broadcast subscriptions, future events only, unsubscribe, drop reporting | Device-state recovery after loss and device removal |
 | Shared state | Independent sessions and bounded admission; class-controlled Counter singleton | Reusable service bootstrap and lifecycle beyond the scoped Counter example |
 | Typed metadata | Offline interfaces; bounded rich constructor/method inputs and CLI conversion | Stable service schemas; broader output/event descriptions and generated bindings later |
@@ -61,7 +61,9 @@ Use dedicated Buffers when a smaller authorized data range must remain isolated 
 
 ## Shared service foundation
 
-Build one kernel-hosted provider adapter, first exercised by console access.
+The first kernel-hosted adapter now exposes [Console v1](abi/kernel-console-abi.md).
+It binds existing console grants and dispatches copied requests through one bounded worker queue.
+General service discovery, kernel Buffer borrowing, and broader lifecycle control remain planned.
 Keep hardware drivers in the kernel, as selected by the user.
 Native object interfaces describe the public boundary; they do not require a process boundary for every driver.
 Existing user providers retain their current transport.
@@ -265,13 +267,16 @@ This document promotion does not imply ABI stability or approval of every illust
 
 ## Immediate implementation slice
 
-Implement the kernel provider adapter with one narrow console protocol.
-Prove two clients, asynchronous completion, authority denial, and cleanup before adding writable state.
-Then implement `/tmp` through that boundary.
+The [kernel console slice](kernel-console-plan.md) establishes dispatch, independent authority, retained completion, and bounded admission.
+Next, define writable namespace rights and implement `/tmp` through that boundary.
+Add kernel Buffer borrowing when a concrete bulk-data method requires it.
 Keyboard diagnosis can proceed independently; input-service integration reuses the same adapter.
 Persistent USB data follows the block, partition, durability, and update-preservation contracts above.
 
-## Impact assessment and evidence
+## Original roadmap impact assessment and evidence
+
+This section records the earlier documentation-only promotion.
+The [console implementation record](kernel-console-plan.md) contains the subsequent runtime impact and validation.
 
 | Area | Assessment |
 | --- | --- |

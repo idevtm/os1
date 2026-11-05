@@ -50,6 +50,12 @@ The [exclusive Buffer ABI](docs/native-api/abi/buffer-loans-abi.md) adds Operati
 `buffercheck` exercises both TextProcessor paths. See the [implementation record](docs/archive/native-api/2026-11-05-exclusive-buffer-implementation.md) for validation and limits.
 Inline control payloads remain bounded to 256 bytes. Live readers and shared read/write remain deferred.
 
+The [kernel Console adapter](docs/native-api/abi/kernel-console-abi.md) adds copied IPC `write`, `try_read`, and the `info` property.
+`ipccheck` exercises two processes with independent service authority and retained asynchronous results.
+The [implementation record](docs/native-api/kernel-console-plan.md) contains checks, measurements, and review results.
+Native object handles retain the current `fd` encoding and shared resource table.
+Public methods, properties, and events use `snake_case`; types and interfaces may use `UpperCamelCase`.
+
 ## Prerequisites
 
 Required build tools:

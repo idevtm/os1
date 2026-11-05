@@ -175,3 +175,15 @@ struct os1_measurement
     uint32_t version, size, source, reserved;
     uint64_t nanoseconds, resolution_ns;
 };
+
+// Bind an implemented kernel interface using authority from fd, not a global name.
+// Returns one ready CLOEXEC client; argument is an input-only record.
+#define OS1_IPC_BIND_KERNEL 28u
+#define OS1_IPC_KERNEL_BINDING_LIMIT 16u
+#define OS1_IPC_KERNEL_OPERATION_LIMIT 4u
+struct os1_ipc_kernel_binding
+{
+    uint32_t version, size;
+    uint64_t interface_id;
+    uint32_t interface_version, rights;
+};

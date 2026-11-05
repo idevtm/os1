@@ -300,7 +300,8 @@ Implemented profiles cover descriptors, console, immutable initrd, copied IPC, r
 Class code controls whether construction returns a new or existing object; ordinary callers cannot override that choice.
 
 The [service roadmap](docs/native-api/roadmap.md) connects these mechanisms to kernel services, drivers, and ordinary programs.
-A common kernel provider adapter, scoped service discovery, and subsystem-specific contracts remain to be implemented.
+The [kernel Console adapter](docs/native-api/abi/kernel-console-abi.md) now implements bounded copied dispatch with retained Operations and captured service authority.
+Scoped service discovery and additional subsystem contracts remain to be implemented.
 Hardware drivers stay in the kernel initially.
 Generated C++ bindings, general reflection, and a reflective shell are later tools, not prerequisites for writable storage or input services.
 The ABI remains experimental.
@@ -354,7 +355,7 @@ The system should support persistent storage with a simple, understandable files
 
 Selected progression:
 
-1. Add native kernel service dispatch while preserving existing descriptor authority and retained-operation lifetime.
+1. Completed for Console: native kernel service dispatch preserves descriptor authority and retained-operation lifetime.
 2. Implement an in-memory writable filesystem at `/tmp`; keep the initrd immutable.
 3. Define block geometry, bounds, write ordering, Flush, failure, and device-removal behavior.
 4. Add USB mass storage and a bounded data-partition view.
@@ -457,7 +458,7 @@ The project is not trying to:
 
 The [Native API service roadmap](docs/native-api/roadmap.md) sets the next functional sequence:
 
-1. Connect native IPC to kernel services with explicit authority, bounded admission, and retained lifetime.
+1. Completed for Console: connect native IPC to a kernel service with explicit authority, bounded admission, and retained lifetime.
 2. Implement the selected in-memory writable filesystem at `/tmp`.
 3. Qualify USB keyboard input and deliver mouse events through native input objects.
 4. Implement block durability, USB mass storage, partition access, and a persistent writable data filesystem.
@@ -567,7 +568,7 @@ Some earlier open questions have since been resolved in source or in the milesto
 
 The following are not fully decided yet and should be revisited explicitly:
 
-- kernel-service dispatch, scoped discovery, and service-specific authority beyond the implemented descriptor, property, event, and session contracts
+- kernel-service protocols beyond Console, scoped discovery, and each additional service's authority and lifetime rules
 - first persistent filesystem choice; the temporary filesystem is an in-memory `/tmp`
 - process and address-space reclamation guarantees, followed by AP-targeted device IRQ steering, lock-order assertions, and scheduler-policy refinement
 - cancellation, durable completion, and timeout outcomes for device I/O and networking; basic IPC deadlines already exist

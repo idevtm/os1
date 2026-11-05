@@ -39,6 +39,7 @@ Documents can contain proposals after promotion, provided their scope and status
 
 | Capability | Current contract |
 | --- | --- |
+| Kernel-hosted Console methods, information property, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |
 | Descriptors, rights, lifetime, console | [Console descriptor ABI](abi/console-descriptor-abi.md) |
 | Immutable files/directories, launch grants, argv/environment | [Initrd VFS and startup ABI](abi/initrd-vfs-abi.md) |
 | Sync/async copied calls, retained Operations, TextProcessor, offline `intf` | [Copied IPC ABI](abi/copied-ipc-abi.md) |
@@ -49,12 +50,20 @@ Documents can contain proposals after promotion, provided their scope and status
 | Exclusive zero-copy request loans and reply Buffer outputs | [Buffer loans ABI](abi/buffer-loans-abi.md) |
 | High-resolution measurement, separate from scheduling deadlines | [Measurement clock ABI](../kernel/measurement-clock-abi.md) |
 
+The [approved object-handle model](object-contract.md#object-handles-and-interoperability) keeps one resource table for native and descriptor-compatible APIs.
+The current encoding remains `fd`; general typed owning/borrowed C++ wrappers remain SDK work.
+
+## Latest implementation
+
+The [kernel console plan](kernel-console-plan.md) records the first kernel provider adapter slice and its validation evidence.
+
 ## What remains
 
-The transport mechanisms support the next vertical slices, but uniform OS-service dispatch does not exist yet.
-Console and initrd objects currently use descriptor syscalls; hardware drivers use internal kernel interfaces.
+Console now supports both descriptor I/O and native copied IPC through a kernel provider adapter.
+Initrd objects still use descriptor syscalls; hardware drivers use internal kernel interfaces.
 The [roadmap](roadmap.md#shared-service-foundation) connects these paths through native service contracts.
 
-General service discovery, method-specific authority, writable namespace rules, durable storage, and input recovery need concrete protocols.
+General service discovery, writable namespace rules, durable storage, and input recovery need concrete protocols.
+Console bindings capture method-specific authority; each additional service needs its own policy.
 Generated SDKs, `.so` bindings, a reflective shell, userspace drivers, and shared-memory rings are not prerequisites for those milestones.
 Class code continues to select new or existing object instances; ordinary callers receive no creation-policy override.

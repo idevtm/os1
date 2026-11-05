@@ -52,17 +52,23 @@ The [documentation index](README.md) groups current contracts by topic and separ
 ## Native objects and OS services
 
 The Native API has implemented descriptor authority and bounded IPC between user programs.
-The remaining integration work is a common object-call boundary for kernel services.
+Console now also uses a bounded kernel provider adapter with the same retained Operation transport.
 
 | Current path | Implemented behavior | Planned integration |
 | --- | --- | --- |
-| Console and initrd | Native objects accessed through descriptor/resource syscalls | Kernel provider adapter with native methods, properties, and events |
+| Console | Descriptor I/O plus copied IPC `write`, `try_read`, and `info` | Input events and scoped service discovery |
+| Initrd | Descriptor/resource syscalls | Writable filesystem protocols through the kernel provider adapter |
 | User providers | Copied calls, Operations, capabilities, sessions, volatile events, and exclusive Buffer loans | Reusable scoped service bootstrap and discovery |
 | Hardware drivers | Kernel-resident C++ interfaces and request/completion mechanisms | Kernel-hosted BlockDevice and input service objects |
 
-[Descriptor objects](../src/kernel/resource/descriptor.hpp) and [IPC](../src/kernel/ipc/channel.hpp) share process resource ownership.
-They do not yet provide universal method dispatch for console, files, or drivers.
-The [roadmap](native-api/roadmap.md#shared-service-foundation) proposes that adapter without moving hardware drivers into userspace.
+[Descriptor objects](../src/kernel/resource/descriptor.hpp) and [IPC](../src/kernel/ipc/channel.hpp) share one process resource table.
+An object handle selects a rights-bearing entry, which retains an open instance and its native object.
+The current handle encoding is `fd`; it is not global object identity.
+The [approved handle model](native-api/object-contract.md#object-handles-and-interoperability) defines ownership, transfer, typed-reference direction, and compatibility boundaries.
+The [Console ABI](native-api/abi/kernel-console-abi.md) binds a ready IPC client from an existing console grant.
+A single kernel worker invokes bounded callbacks outside IRQ context and global IPC locks.
+Accepted Operations retain their source resource through completion and result delivery.
+The [roadmap](native-api/roadmap.md#shared-service-foundation) extends this boundary without moving hardware drivers into userspace.
 It also defines `/tmp`, input services, and persistent USB data as the next functional milestones.
 The existing ABI profiles remain authoritative for current layouts and behavior.
 

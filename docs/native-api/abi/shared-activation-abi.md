@@ -122,4 +122,6 @@ retained Operation/subscription saturation, grant alias budgets, observer mutati
 denial, independent events/disconnect, provider death, sticky failure and scope shutdown.
 See the [implementation record](../../archive/native-api/2026-11-05-client-sessions-and-parameters.md) and
 [kernel session ABI](client-sessions-abi.md). Private Counter and TextProcessor
-remain compatible. Shared buffers, general registry discovery and restart are deferred.
+remain compatible. The [Buffer ABI](buffer-loans-abi.md) adds exclusive loans through separate envelopes.
+It does not add Buffer methods to Counter.
+General registry discovery, restart, simultaneous readers, and shared writers remain deferred.

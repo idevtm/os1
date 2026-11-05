@@ -3,12 +3,14 @@
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "buffer/buffer.hpp"
+#include "ipc/kernel_provider.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "platform/platform.hpp"
 #include "util/memory.h"
 #ifdef OS1_HOST_TEST
 void (*host_ipc_before_receive)() = nullptr;
+int host_ipc_kernel_allocation_budget = -1;
 #endif
 namespace
 {
@@ -27,6 +29,9 @@ struct Connection
     volatile uint32_t references;
     uint32_t live_operations, live_subscriptions;
     Account* account;
+    const KernelProvider* kernel;
+    OpenInstance* source;
+    uint32_t service_rights;
     bool account_created;
     uint64_t generation, next_request;
     bool client_closed, provider_closed, ready;
@@ -55,6 +60,7 @@ void release_caps(Capabilities& caps)
 struct Operation : NativeObject
 {
     Connection* connection;
+    Operation* kernel_next;
     bool counted, delivered, receiving, complete, claiming;
     bool submitting, retiring, buffer_mode;
     BufferLoanBatch* loans;
@@ -77,6 +83,10 @@ WaitQueue waiters{"ipc-state"};
 WaitQueue signalled{"ipc-signalled"};
 uint64_t next_generation = 1;
 uint64_t monotonic_ns = 0;
+uint32_t kernel_bindings = 0;
+Operation* kernel_head = nullptr;
+Operation* kernel_tail = nullptr;
+
 void retain(Connection* c)
 {
     (void)atomic_fetch_add(&c->references, 1u);
@@ -91,6 +101,12 @@ void release(Connection* c)
         IrqSpinGuard guard(waiters.lock);
         --account->live;
     }
+    if(c->kernel)
+    {
+        IrqSpinGuard guard(waiters.lock);
+        --kernel_bindings;
+    }
+    instance_release(c->source);
     kfree(c);
     object_release(account);
 }
@@ -114,6 +130,10 @@ bool ready_locked(NativeObject* object)
 }
 long ready_selection_locked(const IpcWaitState& wait)
 {
+    // Only the kernel worker registers an empty selection; user WAIT_MANY
+    // validates count >= 1. It shares IPC's post-context-save wakeup discipline.
+    if(!wait.count)
+        return kernel_head ? 0 : OS1_ERR_WOULD_BLOCK;
     for(unsigned i = 0; i < wait.count; ++i)
         if(ready_locked(wait.instances[i]->object))
             return i;
@@ -506,6 +526,87 @@ long create_pair(PageFrameContainer& frames,
     }
     return 0;
 }
+bool kernel_allocation_allowed()
+{
+#ifdef OS1_HOST_TEST
+    if(host_ipc_kernel_allocation_budget == 0)
+        return false;
+    if(host_ipc_kernel_allocation_budget > 0)
+        --host_ipc_kernel_allocation_budget;
+#endif
+    return true;
+}
+long bind_kernel(PageFrameContainer& frames, Thread* thread, uint64_t fd, uint64_t pointer)
+{
+    if(fd >= OS1_DESCRIPTOR_LIMIT)
+        return OS1_ERR_BAD_DESCRIPTOR;
+    os1_ipc_kernel_binding request{};
+    if(!copy_from_user(frames, thread, pointer, &request, sizeof(request)))
+        return OS1_ERR_FAULT;
+    constexpr uint32_t service_rights = OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT;
+    if(request.version != 1 || request.size != sizeof(request) || !request.rights ||
+       (request.rights & ~service_rights))
+        return OS1_ERR_INVALID;
+    auto* provider = kernel_provider(request.interface_id, request.interface_version);
+    if(!provider)
+        return OS1_ERR_UNSUPPORTED;
+    DescriptorEntry grant{};
+    long status = descriptor_acquire_entry(thread->process->descriptors, fd, 0, grant);
+    if(status < 0)
+        return status;
+    InstanceRef source(grant.instance);
+    if((request.rights & ~grant.rights))
+        return OS1_ERR_ACCESS;
+    if(source.get()->object->kind != provider->object_kind)
+        return OS1_ERR_UNSUPPORTED;
+    auto* c = kernel_allocation_allowed()
+                  ? static_cast<Connection*>(kmalloc(sizeof(Connection), KmallocFlags::Zero))
+                  : nullptr;
+    auto* client = kernel_allocation_allowed()
+                       ? static_cast<Endpoint*>(kmalloc(sizeof(Endpoint), KmallocFlags::Zero))
+                       : nullptr;
+    if(!c || !client)
+    {
+        kfree(c);
+        kfree(client);
+        return OS1_ERR_NO_MEMORY;
+    }
+    {
+        IrqSpinGuard guard(waiters.lock);
+        if(!next_generation || kernel_bindings >= OS1_IPC_KERNEL_BINDING_LIMIT)
+        {
+            guard.unlock();
+            kfree(c);
+            kfree(client);
+            return OS1_ERR_LIMIT;
+        }
+        ++kernel_bindings;
+        c->generation = next_generation++;
+    }
+    c->references = 1;
+    c->kernel = provider;
+    c->source = source.take();
+    c->service_rights = request.rights;
+    c->next_request = 1;
+    c->ready = true;
+    c->interface_id = provider->interface_id;
+    c->interface_version = provider->interface_version;
+    client->references = 1;
+    client->connection = c;
+    client->kind = OS1_OBJECT_IPC_CLIENT;
+    client->interfaces = OS1_INTERFACE_IPC;
+    client->allowed_rights =
+        OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | (grant.rights & OS1_RIGHT_DELEGATE);
+    client->destroy = destroy_endpoint;
+    InstanceRef instance(kernel_allocation_allowed() ? open_instance(client) : nullptr);
+    object_release(client);
+    if(!instance.get())
+        return OS1_ERR_NO_MEMORY;
+    return descriptor_install(thread->process->descriptors,
+                              instance.get(),
+                              instance.get()->object->allowed_rights,
+                              OS1_DESCRIPTOR_CLOEXEC);
+}
 void destroy_account(NativeObject* object)
 {
     auto* account = static_cast<Account*>(object);
@@ -730,6 +831,8 @@ enum class Envelope
 long submit(
     PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, Envelope mode)
 {
+    if(endpoint->connection->kernel && mode != Envelope::Bytes)
+        return OS1_ERR_UNSUPPORTED;
     os1_ipc_message_caps envelope{};
     os1_ipc_message_buffers buffers{};
     const bool buffer_mode = mode == Envelope::Buffers;
@@ -792,8 +895,9 @@ long submit(
         else if(request.interface_id != c->interface_id ||
                 request.interface_version != c->interface_version)
             error = OS1_ERR_UNSUPPORTED;
-        else if(c->live_operations >=
-                    (c->account ? OS1_IPC_SESSION_OPERATION_LIMIT : OS1_IPC_OPERATION_LIMIT) ||
+        else if(c->live_operations >= (c->kernel    ? OS1_IPC_KERNEL_OPERATION_LIMIT
+                                       : c->account ? OS1_IPC_SESSION_OPERATION_LIMIT
+                                                    : OS1_IPC_OPERATION_LIMIT) ||
                 !c->next_request)
             error = OS1_ERR_LIMIT;
         else
@@ -828,6 +932,14 @@ long submit(
         else
         {
             op->submitting = false;
+            if(c->kernel)
+            {
+                if(kernel_tail)
+                    kernel_tail->kernel_next = op;
+                else
+                    kernel_head = op;
+                kernel_tail = op;
+            }
             signal_locked();
         }
     }
@@ -1060,6 +1172,8 @@ long sys_ipc(
 {
     if(!thread || !thread->process)
         return OS1_ERR_INVALID;
+    if(operation == OS1_IPC_BIND_KERNEL)
+        return bind_kernel(frames, thread, fd, argument);
     if(operation == OS1_IPC_MEASURE)
     {
         if(fd)
@@ -1214,7 +1328,8 @@ long sys_ipc(
                                     : operation == OS1_IPC_SUBMIT_CAPS  ? Envelope::Caps
                                                                         : Envelope::Bytes);
     if(operation == OS1_IPC_SUBSCRIBE)
-        return e->provider ? OS1_ERR_UNSUPPORTED : subscribe(frames, thread, e, argument);
+        return e->provider || c->kernel ? OS1_ERR_UNSUPPORTED
+                                        : subscribe(frames, thread, e, argument);
     if(!e->provider)
         return OS1_ERR_UNSUPPORTED;
     if(operation == OS1_IPC_EMIT)
@@ -1312,7 +1427,10 @@ void ipc_drain_wakeups()
             t->wait_link = nullptr;
             (void)atomic_fetch_add(&t->io_pins, 1u);
             released = t->wait.ipc;
-            t->frame.rax = static_cast<uint64_t>(t->wait.ipc.result);
+            // Only a user syscall consumes this return register. A kernel worker
+            // can be preempted with any live RAX value while parking.
+            if(t->user_mode)
+                t->frame.rax = static_cast<uint64_t>(t->wait.ipc.result);
             t->wait = {};
         }
         release_wait(released);
@@ -1363,4 +1481,92 @@ bool ipc_matching_endpoints(NativeObject* provider, NativeObject* client)
            client->kind == OS1_OBJECT_IPC_CLIENT &&
            static_cast<Endpoint*>(provider)->connection ==
                static_cast<Endpoint*>(client)->connection;
+}
+
+bool ipc_run_kernel_request()
+{
+    Operation* op;
+    {
+        IrqSpinGuard guard(waiters.lock);
+        op = kernel_head;
+        if(!op)
+            return false;
+        kernel_head = op->kernel_next;
+        if(!kernel_head)
+            kernel_tail = nullptr;
+        op->kernel_next = nullptr;
+        op->delivered = true;
+    }
+    // The pending reference owns this operation through dispatch. Its connection
+    // retains the resource even if all client and result descriptors are closed.
+    auto* c = op->connection;
+    os1_ipc_result response{};
+    c->kernel->invoke(*c->source, c->service_rights, op->request, response);
+    {
+        IrqSpinGuard guard(waiters.lock);
+        detach_locked(op);
+        finish_locked(op, 0);
+        op->result.application_status = response.application_status;
+        if(response.payload_bytes <= OS1_IPC_PAYLOAD_MAX)
+        {
+            op->result.payload_bytes = response.payload_bytes;
+            memcpy(op->result.payload, response.payload, response.payload_bytes);
+        }
+        else
+            op->result.application_status = OS1_ERR_INVALID;
+        signal_locked();
+    }
+    object_release(op);
+    ipc_drain_wakeups();
+    return true;
+}
+bool ipc_wait_kernel_work(Thread* thread)
+{
+    if(!thread || thread->user_mode)
+        return false;
+    IrqSpinGuard process_guard(g_process_table_lock);
+    IrqSpinGuard guard(waiters.lock);
+    if(kernel_head)
+        return false;
+    thread->wait = {};
+    thread->wait.reason = ThreadWaitReason::Ipc;
+    thread->wait.ipc = {};
+    thread->wait.ipc.deadline_ns = UINT64_MAX;
+    thread->state = ThreadState::Blocked;
+    thread->process->state = ProcessState::Ready;
+    wait_queue_enqueue_locked(waiters, thread);
+    return true;
+}
+namespace
+{
+#ifndef OS1_HOST_TEST
+void kernel_provider_worker()
+{
+    for(;;)
+    {
+        if(ipc_run_kernel_request() || !ipc_wait_kernel_work(current_thread()))
+            continue;
+        while(current_thread()->wait.reason == ThreadWaitReason::Ipc)
+        {
+            // Save the worker's frame even on APs without a periodic timer.
+            // Deferred IPC wakeups cannot enqueue it until it leaves this CPU.
+            IrqGuard irq;
+            if(ipi_send_reschedule(cpu_cur()))
+                asm volatile("sti; hlt" ::: "memory");
+            else
+                asm volatile("pause" ::: "memory");
+        }
+    }
+}
+#endif
+}  // namespace
+bool ipc_start_kernel_worker(Process* process, PageFrameContainer& frames)
+{
+#ifdef OS1_HOST_TEST
+    (void)process;
+    (void)frames;
+    return true;
+#else
+    return create_kernel_thread(process, kernel_provider_worker, frames) != nullptr;
+#endif
 }

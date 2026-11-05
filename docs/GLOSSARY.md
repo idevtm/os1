@@ -667,7 +667,7 @@ The implemented ABI profiles define current records and limits.
 | FD / file descriptor | A process-local integer identifying an open resource entry. The integer is a reference used by APIs, not the file's bytes or a kernel pointer. |
 | Descriptor table / handle table | A process-owned mapping from indices to descriptor entries. The implementation stores rights and descriptor flags in each entry, with a reference to shared open-instance state. |
 | Descriptor entry | One process-owned grant to an open instance: rights, descriptor flags, and (for directories) a descendant-grant ceiling. Closing it removes that grant, not every alias. |
-| Handle | An opaque reference through which a caller accesses a resource. The native object model attaches ownership and rights to handles rather than exposing raw kernel addresses. |
+| Handle / object handle | The general native resource reference. Its current encoding is an `fd` in the shared process table; the referenced entry carries authority. It is not a global object identity. |
 | Descriptor — overloaded term | It can mean a resource-table entry, a schema describing an object interface, or a hardware structure; the surrounding subsystem determines which meaning applies. |
 | Open instance / open file description / per-open state | State belonging to one opening, such as position and status flags. Duplicates and explicit child grants share it; independent opens create separate instances. |
 | Standard input / output / error | The conventional input, output, and diagnostic streams, normally exposed as descriptors 0, 1, and 2. |
@@ -681,7 +681,7 @@ The implemented ABI profiles define current records and limits.
 | Request escrow / reply escrow | Kernel-held Buffer authority before request delivery or output claim. Neither endpoint can map escrowed pages. |
 | Mapping reservation | A retained original Buffer mapping address and permissions. Completion restores it unless unmap, exec, or exit removed it. |
 | Process incarnation / address-space generation | Separate lifetime identities for process authority and mapping restoration. They prevent reuse from authorizing stale access. |
-| Native object | A resource exposed through the proposed OS object model rather than solely through a POSIX file-operation projection. |
+| Native object | A resource with identity, supported interfaces, and implementation state. Implemented objects include console, files, IPC endpoints, Operations, and Buffers. |
 | Object image | A loadable description or executable unit from which an object may be instantiated; it is distinct from a live instance. |
 | Object class / class binary | A construction contract and its binary implementation; one binary can export several classes. Class identity is separate from interface identity and live instance identity. |
 | Construction hook / factory | Class code invoked with optional typed arguments that returns a new or existing object reference. A C++ binding exposes it as a result-returning factory, not an instance constructor. |

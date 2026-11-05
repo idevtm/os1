@@ -1,5 +1,6 @@
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "buffer/buffer.hpp"
+#include "console/console_input.hpp"
 #include "handoff/memory_layout.h"
 #include "ipc/channel.hpp"
 #include "mm/kmem.hpp"
@@ -14,10 +15,12 @@
 #undef static_assert
 #endif
 #include <gtest/gtest.h>
+#include <os1/console.h>
 
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <string>
 #include <thread>
 #include <vector>
 extern void (*host_buffer_before_prepare)();
@@ -1628,4 +1631,440 @@ TEST_F(Ipc, MeasurementIsSeparateFromDeadlineClockAndHasExplicitUnavailability)
     EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_MEASURE, 0, 0));
     EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_MEASURE, 0, address + 4096 - 1));
     g_platform.hpet = saved;
+}
+
+void host_console_output_clear();
+const std::string& host_console_output();
+namespace
+{
+class KernelConsole : public Ipc
+{
+protected:
+    void SetUp() override
+    {
+        Ipc::SetUp();
+        ASSERT_EQ(0, descriptor_close(table(), pair.client));
+        ASSERT_EQ(0, descriptor_close(table(), pair.provider));
+        ASSERT_EQ(0, descriptor_bootstrap_console(table()));
+        console_input_initialize();
+        host_console_output_clear();
+    }
+    void TearDown() override
+    {
+        while(ipc_run_kernel_request())
+        {
+        }
+        Ipc::TearDown();
+    }
+    long bind(int source = 1, uint32_t rights = OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT)
+    {
+        os1_ipc_kernel_binding request{1, sizeof(request), OS1_CONSOLE_INTERFACE_ID, 1, rights};
+        return call(OS1_IPC_BIND_KERNEL, source, request);
+    }
+    os1_ipc_message console_request(unsigned member = OS1_CONSOLE_WRITE)
+    {
+        auto m = request();
+        m.interface_id = OS1_CONSOLE_INTERFACE_ID;
+        m.member = member;
+        if(member != OS1_CONSOLE_WRITE)
+        {
+            m.payload_bytes = 0;
+            std::memset(m.payload, 0, sizeof(m.payload));
+        }
+        return m;
+    }
+    os1_ipc_result complete(int operation)
+    {
+        EXPECT_TRUE(ipc_run_kernel_request());
+        os1_ipc_result result{};
+        EXPECT_EQ(0, call(OS1_IPC_RESULT, operation, result));
+        EXPECT_EQ(0, result.transport_status);
+        return result;
+    }
+};
+TEST_F(KernelConsole, BindingShapeRightsAndReadyIdentity)
+{
+    EXPECT_EQ(24u, sizeof(os1_ipc_kernel_binding));
+    EXPECT_EQ(16u, sizeof(os1_console_info));
+    EXPECT_EQ(4u, sizeof(os1_console_read));
+    EXPECT_EQ(4u, sizeof(os1_console_written));
+    EXPECT_EQ(OS1_ERR_BAD_DESCRIPTOR, bind(64));
+    EXPECT_EQ(OS1_ERR_BAD_DESCRIPTOR, bind(63));
+    EXPECT_EQ(OS1_ERR_ACCESS, bind(0, OS1_RIGHT_WRITE));
+    EXPECT_EQ(OS1_ERR_INVALID, bind(1, 0));
+    EXPECT_EQ(OS1_ERR_INVALID, bind(1, OS1_RIGHT_DELEGATE));
+    os1_ipc_kernel_binding b{1, sizeof(b), OS1_CONSOLE_INTERFACE_ID, 1, OS1_RIGHT_WRITE};
+    b.version = 2;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_BIND_KERNEL, 1, b));
+    b.version = 1;
+    b.size--;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_BIND_KERNEL, 1, b));
+    b.size++;
+    b.interface_version = 2;
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_BIND_KERNEL, 1, b));
+    b.interface_version = 1;
+    b.interface_id++;
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_BIND_KERNEL, 1, b));
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_BIND_KERNEL, 1, 0));
+    int client = bind();
+    ASSERT_GE(client, 0);
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, bind(client));
+    os1_ipc_info info{};
+    ASSERT_EQ(0, call(OS1_IPC_INFO, client, info));
+    EXPECT_EQ(OS1_CONSOLE_INTERFACE_ID, info.interface_id);
+    EXPECT_EQ(1u, info.interface_version);
+    EXPECT_EQ(1u, info.ready);
+    EXPECT_EQ(0, sys_ipc(frames, thread, OS1_IPC_WAIT, client, 0));
+    os1_resource_info resource{};
+    ASSERT_EQ(0, descriptor_query(table(), client, resource));
+    EXPECT_EQ(OS1_DESCRIPTOR_CLOEXEC, resource.descriptor_flags);
+}
+TEST_F(KernelConsole, CopiedAsyncRequestRetainedResultAndClosedSource)
+{
+    int client = bind();
+    ASSERT_GE(client, 0);
+    auto m = console_request();
+    int operation = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(operation, 0);
+    EXPECT_TRUE(host_console_output().empty());
+    os1_ipc_result result{};
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, call(OS1_IPC_RESULT, operation, result));
+    std::memset(m.payload, 'z', 3);
+    ASSERT_EQ(0, descriptor_close(table(), 1));
+    ASSERT_EQ(0, descriptor_close(table(), client));
+    result = complete(operation);
+    EXPECT_EQ("ABC", host_console_output());
+    EXPECT_EQ(0, result.application_status);
+    EXPECT_EQ(4u, result.payload_bytes);
+    os1_console_written written{};
+    std::memcpy(&written, result.payload, sizeof(written));
+    EXPECT_EQ(3u, written.bytes);
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RESULT, operation, 0));
+    os1_ipc_result again{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT, operation, again));
+    EXPECT_EQ(0, std::memcmp(&result, &again, sizeof(result)));
+    EXPECT_FALSE(ipc_run_kernel_request());
+}
+TEST_F(KernelConsole, MethodAuthorityDoesNotFollowTransportWrite)
+{
+    int client = bind(1, OS1_RIGHT_INSPECT);
+    ASSERT_GE(client, 0);
+    auto m = console_request();
+    int operation = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(operation, 0);
+    EXPECT_EQ(OS1_ERR_ACCESS, complete(operation).application_status);
+    EXPECT_TRUE(host_console_output().empty());
+    descriptor_close(table(), operation);
+    m = console_request(OS1_CONSOLE_GET_INFO);
+    operation = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(operation, 0);
+    auto result = complete(operation);
+    EXPECT_EQ(0, result.application_status);
+    os1_console_info info{};
+    std::memcpy(&info, result.payload, sizeof(info));
+    EXPECT_EQ(OS1_RIGHT_INSPECT, info.rights);
+    EXPECT_EQ(OS1_CONSOLE_MAX_BYTES, info.max_write_bytes);
+    EXPECT_EQ(0u, info.max_read_bytes);
+    EXPECT_EQ(0u, info.flags);
+    descriptor_close(table(), operation);
+    int no_inspect = bind(1, OS1_RIGHT_WRITE);
+    ASSERT_GE(no_inspect, 0);
+    operation = call(OS1_IPC_SUBMIT, no_inspect, m);
+    ASSERT_GE(operation, 0);
+    EXPECT_EQ(OS1_ERR_ACCESS, complete(operation).application_status);
+}
+TEST_F(KernelConsole, DelegationCannotBeRecoveredByBinding)
+{
+    int source = alias(1, OS1_RIGHT_WRITE);
+    ASSERT_GE(source, 0);
+    int client = bind(source, OS1_RIGHT_WRITE);
+    ASSERT_GE(client, 0);
+    EXPECT_EQ(OS1_ERR_ACCESS, alias(client, OS1_RIGHT_READ | OS1_RIGHT_WRITE));
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, bind(client, OS1_RIGHT_WRITE));
+    int readonly = alias(1, OS1_RIGHT_INSPECT);
+    ASSERT_GE(readonly, 0);
+    EXPECT_EQ(OS1_ERR_ACCESS, bind(readonly, OS1_RIGHT_WRITE));
+}
+TEST_F(KernelConsole, TryReadRetainsConsumedInputAcrossResultFaultAndRetry)
+{
+    int client = bind(0, OS1_RIGHT_READ | OS1_RIGHT_INSPECT);
+    ASSERT_GE(client, 0);
+    auto query = console_request(OS1_CONSOLE_GET_INFO);
+    int query_op = call(OS1_IPC_SUBMIT, client, query);
+    ASSERT_GE(query_op, 0);
+    auto query_result = complete(query_op);
+    os1_console_info info{};
+    ASSERT_EQ(sizeof(info), query_result.payload_bytes);
+    std::memcpy(&info, query_result.payload, sizeof(info));
+    EXPECT_EQ(0u, info.max_write_bytes);
+    EXPECT_EQ(128u, info.max_read_bytes);
+    EXPECT_EQ(OS1_CONSOLE_CANONICAL_INPUT, info.flags);
+    descriptor_close(table(), query_op);
+    auto m = console_request(OS1_CONSOLE_TRY_READ);
+    os1_console_read read{2};
+    m.payload_bytes = sizeof(read);
+    std::memcpy(m.payload, &read, sizeof(read));
+    int op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, complete(op).application_status);
+    descriptor_close(table(), op);
+    console_input_on_keyboard_char('a');
+    console_input_on_keyboard_char('b');
+    console_input_on_keyboard_char('\n');
+    op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    ASSERT_TRUE(ipc_run_kernel_request());
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RESULT, op, address + 4095));
+    os1_ipc_result result{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT, op, result));
+    EXPECT_EQ(0, result.application_status);
+    EXPECT_EQ(2u, result.payload_bytes);
+    EXPECT_EQ(0, std::memcmp(result.payload, "ab", 2));
+    ASSERT_EQ(0, call(OS1_IPC_RESULT, op, result));
+    char remaining[4]{};
+    size_t count = 0;
+    ASSERT_TRUE(console_input_reserve(remaining, sizeof(remaining), count));
+    EXPECT_EQ(1u, count);
+    EXPECT_EQ('\n', remaining[0]);
+    console_input_finish(count);
+    descriptor_close(table(), op);
+    read.capacity = 0;
+    std::memcpy(m.payload, &read, sizeof(read));
+    op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    result = complete(op);
+    EXPECT_EQ(0, result.application_status);
+    EXPECT_EQ(0u, result.payload_bytes);
+}
+TEST_F(KernelConsole, MalformedRequestsAndUnsupportedModesHaveNoSideEffects)
+{
+    int client = bind();
+    ASSERT_GE(client, 0);
+    auto m = console_request();
+    m.payload[255] = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_SUBMIT, client, m));
+    m = console_request();
+    m.interface_version = 2;
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_SUBMIT, client, m));
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, sys_ipc(frames, thread, OS1_IPC_SUBMIT_CAPS, client, 0));
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, sys_ipc(frames, thread, OS1_IPC_SUBMIT_BUFFERS, client, 0));
+    os1_ipc_subscription sub{1, sizeof(sub), 1, 0};
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_SUBSCRIBE, client, sub));
+    for(unsigned member : {0xffffffffu, OS1_CONSOLE_GET_INFO})
+    {
+        m = console_request();
+        m.member = member;
+        int op = call(OS1_IPC_SUBMIT, client, m);
+        ASSERT_GE(op, 0);
+        EXPECT_EQ(member == OS1_CONSOLE_GET_INFO ? OS1_ERR_INVALID : OS1_ERR_UNSUPPORTED,
+                  complete(op).application_status);
+        descriptor_close(table(), op);
+    }
+    client = bind(0, OS1_RIGHT_READ);
+    ASSERT_GE(client, 0);
+    for(unsigned size : {0u, 3u, 5u})
+    {
+        m = console_request(OS1_CONSOLE_TRY_READ);
+        m.payload_bytes = size;
+        int op = call(OS1_IPC_SUBMIT, client, m);
+        ASSERT_GE(op, 0);
+        EXPECT_EQ(OS1_ERR_INVALID, complete(op).application_status);
+        descriptor_close(table(), op);
+    }
+    os1_console_read read{129};
+    m = console_request(OS1_CONSOLE_TRY_READ);
+    m.payload_bytes = sizeof(read);
+    std::memcpy(m.payload, &read, sizeof(read));
+    int op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(op).application_status);
+    EXPECT_TRUE(host_console_output().empty());
+}
+TEST_F(KernelConsole, ZeroAndMaximumWritesAndIndependentFifoClients)
+{
+    int first = bind(), second = bind();
+    ASSERT_GE(first, 0);
+    ASSERT_GE(second, 0);
+    auto m = console_request();
+    m.payload_bytes = 0;
+    std::memset(m.payload, 0, sizeof(m.payload));
+    int op = call(OS1_IPC_SUBMIT, first, m);
+    ASSERT_GE(op, 0);
+    EXPECT_EQ(0, complete(op).application_status);
+    descriptor_close(table(), op);
+    m.payload_bytes = 256;
+    std::memset(m.payload, 'x', sizeof(m.payload));
+    int a = call(OS1_IPC_SUBMIT, first, m);
+    ASSERT_GE(a, 0);
+    m.payload_bytes = 1;
+    std::memset(m.payload, 0, sizeof(m.payload));
+    m.payload[0] = 'y';
+    int b = call(OS1_IPC_SUBMIT, second, m);
+    ASSERT_GE(b, 0);
+    EXPECT_EQ(0, complete(a).application_status);
+    EXPECT_EQ(0, complete(b).application_status);
+    EXPECT_EQ(std::string(256, 'x') + "y", host_console_output());
+}
+TEST_F(KernelConsole, RetainedResultsAndAliasesKeepOperationQuota)
+{
+    int client = bind();
+    ASSERT_GE(client, 0);
+    auto m = console_request();
+    int ops[OS1_IPC_KERNEL_OPERATION_LIMIT];
+    for(auto& op : ops)
+    {
+        op = call(OS1_IPC_SUBMIT, client, m);
+        ASSERT_GE(op, 0);
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SUBMIT, client, m));
+    for(auto op : ops)
+        EXPECT_EQ(0, complete(op).application_status);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SUBMIT, client, m));
+    int copy = alias(ops[0], OS1_RIGHT_READ);
+    ASSERT_GE(copy, 0);
+    descriptor_close(table(), ops[0]);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SUBMIT, client, m));
+    descriptor_close(table(), copy);
+    ops[0] = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(ops[0], 0);
+    complete(ops[0]);
+}
+TEST_F(KernelConsole, BindingQuotaSurvivesClientCloseWhileResultLives)
+{
+    int clients[OS1_IPC_KERNEL_BINDING_LIMIT];
+    for(auto& client : clients)
+    {
+        client = bind();
+        ASSERT_GE(client, 0);
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, bind());
+    auto m = console_request();
+    int op = call(OS1_IPC_SUBMIT, clients[0], m);
+    ASSERT_GE(op, 0);
+    descriptor_close(table(), clients[0]);
+    EXPECT_EQ(OS1_ERR_LIMIT, bind());
+    complete(op);
+    EXPECT_EQ(OS1_ERR_LIMIT, bind());
+    descriptor_close(table(), op);
+    clients[0] = bind();
+    ASSERT_GE(clients[0], 0);
+}
+TEST_F(KernelConsole, FullDescriptorTableRollsBackBindingAndRequest)
+{
+    std::vector<int> copies;
+    for(;;)
+    {
+        int fd = alias(1, OS1_RIGHT_WRITE | OS1_RIGHT_DELEGATE);
+        if(fd < 0)
+            break;
+        copies.push_back(fd);
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, bind());
+    descriptor_close(table(), copies.back());
+    copies.pop_back();
+    int client = bind();
+    ASSERT_GE(client, 0);
+    auto m = console_request();
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SUBMIT, client, m));
+    EXPECT_FALSE(ipc_run_kernel_request());
+    descriptor_close(table(), copies.back());
+    copies.pop_back();
+    int op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    complete(op);
+}
+TEST_F(KernelConsole, ClosedOperationStillExecutesAndReleasesQuota)
+{
+    int client = bind();
+    ASSERT_GE(client, 0);
+    auto m = console_request();
+    int op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    descriptor_close(table(), op);
+    descriptor_close(table(), client);
+    ASSERT_TRUE(ipc_run_kernel_request());
+    EXPECT_EQ("ABC", host_console_output());
+    EXPECT_FALSE(ipc_run_kernel_request());
+    int clients[OS1_IPC_KERNEL_BINDING_LIMIT];
+    for(auto& fd : clients)
+    {
+        fd = bind();
+        ASSERT_GE(fd, 0);
+    }
+}
+TEST_F(KernelConsole, DeadlineDoesNotCancelAcceptedWork)
+{
+    int client = bind();
+    ASSERT_GE(client, 0);
+    auto m = console_request();
+    int op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    os1_ipc_deadline d{1, sizeof(d), 0};
+    EXPECT_EQ(OS1_ERR_TIMED_OUT, call(OS1_IPC_WAIT_UNTIL, op, d));
+    EXPECT_EQ(0, complete(op).application_status);
+    EXPECT_EQ("ABC", host_console_output());
+}
+TEST_F(KernelConsole, KernelWorkerRegistrationRechecksWorkAndDefersCurrentWake)
+{
+    int client = bind();
+    ASSERT_GE(client, 0);
+    thread->user_mode = false;
+    ASSERT_TRUE(ipc_wait_kernel_work(thread));
+    // IRQ entry can save any live kernel register value while this worker parks.
+    constexpr uint64_t saved_rax = 0xfeed000000001234ull;
+    thread->frame.rax = saved_rax;
+    auto m = console_request();
+    int op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    EXPECT_EQ(ThreadWaitReason::Ipc, thread->wait.reason);
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    set_current_thread(thread);
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+    EXPECT_EQ(saved_rax, thread->frame.rax);
+    EXPECT_FALSE(ipc_wait_kernel_work(thread));
+    complete(op);
+    thread->user_mode = true;
+}
+}  // namespace
+
+TEST_F(KernelConsole, EveryBindingAllocationFailureReleasesSourceAndBudget)
+{
+    for(int budget : {0, 1, 2})
+    {
+        const auto source_refs = table().entries[1].instance->references;
+        host_ipc_kernel_allocation_budget = budget;
+        EXPECT_EQ(OS1_ERR_NO_MEMORY, bind());
+        host_ipc_kernel_allocation_budget = -1;
+        EXPECT_EQ(source_refs, table().entries[1].instance->references);
+        int clients[OS1_IPC_KERNEL_BINDING_LIMIT];
+        for(auto& fd : clients)
+        {
+            fd = bind();
+            ASSERT_GE(fd, 0);
+        }
+        for(auto fd : clients)
+            EXPECT_EQ(0, descriptor_close(table(), fd));
+    }
+}
+TEST_F(KernelConsole, WaitManyPinsCompletionAcrossDescriptorClose)
+{
+    int client = bind();
+    ASSERT_GE(client, 0);
+    auto m = console_request();
+    int op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    os1_ipc_wait_many selection{1, sizeof(selection), 1, 0, UINT64_MAX, {}};
+    selection.fds[0] = op;
+    EXPECT_EQ(kIpcBlocked, call(OS1_IPC_WAIT_MANY, 0, selection));
+    EXPECT_EQ(0, descriptor_close(table(), op));
+    EXPECT_EQ(0, descriptor_close(table(), client));
+    ASSERT_TRUE(ipc_run_kernel_request());
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    EXPECT_EQ(ThreadState::Ready, thread->state);
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+    EXPECT_EQ(0u, thread->io_pins);
 }

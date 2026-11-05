@@ -17,6 +17,15 @@ Definitions also appear in the [glossary](../GLOSSARY.md#descriptors-native-obje
 Operation names and symbolic errors are semantic names unless an implemented ABI profile assigns their encoding.
 Reviewed UAPI headers define current syscall numbers, layouts, rights, and error values.
 
+## Public interface names
+
+Methods, properties, and events use `snake_case`, such as `try_read`, `max_bytes`, and `state_changed`.
+Types and interfaces may use `UpperCamelCase`, such as `ConsoleInfo` and `TextProcessor`.
+Public member names start with a lowercase letter and contain lowercase letters, digits, and single separating underscores.
+Leading, trailing, and consecutive underscores are not allowed.
+Numeric UAPI constants keep their existing naming convention; numeric member IDs do not change with this source naming rule.
+The bounded interface metadata validator enforces these public member names.
+
 ## Approved decisions — 2026-11-04
 
 The following six decision groups are approved for the console/initrd milestone.
@@ -38,6 +47,55 @@ VFS/startup encodings, bounds, and delivery rules are specified in the
 future extensions as well. Approval neither implements these facilities nor approves every
 later hosted-service, reflection, or event proposal. Acceptance tests remain
 required before claiming runtime conformance.
+
+## Object handles and interoperability
+
+Approved on 2026-11-05.
+
+One process resource table serves both native objects and descriptor-compatible resources.
+An object handle selects a rights-bearing entry; it is not the object identity or a kernel address.
+
+```text
+Typed reference (proposed SDK)
+  -> process-local object handle (current fd encoding)
+  -> descriptor entry: rights and entry flags
+  -> open instance: shared per-opening state
+  -> native object: resource identity and behavior
+```
+
+Use “object handle” for the general native concept.
+Use “file descriptor” for file/stream compatibility discussions; preserve `fd` in existing ABI fields and signatures.
+This terminology does not change the current nonnegative signed 32-bit encoding or 64-slot process table.
+Files, directories, IPC endpoints, Operations, subscriptions, and Buffers use this table.
+A second native-only table would duplicate authority checks, cleanup, and transfer rules without providing a needed boundary.
+
+| Boundary | Contract |
+| --- | --- |
+| Identity | Different handles can reference the same object or singleton. Equal integers in different processes do not establish shared identity. |
+| Ownership | Close releases one entry. Aliases and accepted Operations can retain the resource independently. |
+| Transfer | Transfer the validated capability through supported grants or attachments. The receiver obtains a local handle; an integer in payload bytes transfers no authority. |
+| Language | Fixed-width handles and versioned records cross the ABI. C++ pointers, object layouts, and vtables do not. |
+| Provider placement | Kernel and userspace providers share the IPC envelope and retained Operation model within their documented profiles. |
+| Compatibility | Adapt supported objects to file/stream operations. Preserve required blocking, progress, error, and lifetime semantics explicitly. |
+
+Typed owning and borrowed references are the accepted C++ SDK direction; their general implementation remains future work.
+An owning wrapper releases its entry and invalidates its local value on close or move.
+A borrowed wrapper cannot outlive its owner; explicit duplication creates another owning reference subject to delegation rights.
+Wrappers must not claim generation protection for the current reusable integer ABI.
+
+A resource handle and a bound service endpoint have different roles.
+Console binding captures selected service rights from the resource and returns a separate client handle.
+Endpoint WRITE authorizes request submission; the captured service policy authorizes individual methods.
+Attenuating endpoint rights does not change that captured policy.
+Create a restricted binding before delegation when service authority must decrease.
+See the [Console binding contract](abi/kernel-console-abi.md#binding-and-authority).
+
+Native IPC and compatibility calls should share resource state and implementation behavior where their contracts agree.
+They need not have identical delivery rules.
+Console descriptor reads preserve input on a delivery fault; IPC reads consume input into a retained result before caller retrieval.
+A result-copy retry does not consume more input.
+A future compatibility adapter must preserve its promised semantics rather than translate operation names alone.
+No complete POSIX compatibility layer is claimed.
 
 ## 1. Scope and design decisions
 
@@ -61,8 +119,9 @@ universal properties, typed values, and `Collection` traversal. Properties,
 methods, and events remain useful interface descriptions in userspace. They
 are not three mandatory kernel operations for every resource.
 
-The first slice excludes writable filesystems, links, mounts, mmap, device
-control, sockets, PTYs, fork, multithreaded user processes, hosted RPC, and a
+The original descriptor slice excluded hosted RPC; subsequent IPC profiles implement bounded hosted calls and events.
+The remaining exclusions include writable filesystems, links, general mounts, mmap, device
+control, sockets, PTYs, fork, multithreaded user processes, and a
 shell language implementation. Bounds and authority still apply in this
 single-user phase. A future credential policy can restrict capability issuance;
 it cannot silently turn an unprivileged descriptor into an administrator.
@@ -78,8 +137,8 @@ it cannot silently turn an unprivileged descriptor into an administrator.
 | Capability | A kernel-enforced reference plus its authority. Knowing a path, PID, interface name, or fd from another process is not a capability. |
 | Runtime reference | A language value owning or borrowing a local value or descriptor. The runtime must distinguish those cases. |
 | Process | An execution and address-space lifetime; holding a process reference does not keep its threads running. |
-| Operation | Later: one accepted asynchronous action with a persistent terminal result. It is not a process group. |
-| Supervisor | Later: an explicit policy owner for starting, stopping, or restarting provider processes. |
+| Operation | One accepted asynchronous action with a retained terminal result. Implemented by the bounded IPC profiles; it is not a process group. |
+| Supervisor | A policy owner for provider lifetime. Restricted private-provider stop is implemented; general restart and recovery remain proposed. |
 
 ```mermaid
 flowchart LR
@@ -119,7 +178,7 @@ Thus close/reuse cannot redirect an already accepted read to a different file.
 It can redirect a **new** call made with a stale integer. Runtime owned-reference
 wrappers invalidate on close and must not promise generation protection that
 the integer ABI does not provide. Borrowed descriptors cannot outlive their
-owner. Internal wait registrations and later request IDs need their own stable
+owner. Internal wait registrations and request IDs need their own stable
 identity; fd numbers are unsuitable for that purpose.
 
 ### Close and teardown
@@ -159,7 +218,9 @@ object, thread, and user-memory accesses before reclaiming their owners. Wait
 registration and wakeup paths must preserve the scheduler's cross-CPU locking
 rules. The implementation must document lock order and the handoff between queue,
 request, and scheduler ownership. General multi-source registration and public
-wait-many are deferred; the first slice uses single-source blocking operations.
+wait-many were deferred by the original descriptor slice.
+The [client-session ABI](abi/client-sessions-abi.md#bounded-wait-many) now defines bounded IPC WAIT_MANY.
+It does not add general file or device polling.
 
 ### Duplication and flags
 
@@ -217,9 +278,9 @@ root; it cannot reopen a more powerful global root. Replacing an image does not
 reset or increase authority. A pathname, UID field, or claimed role sent by a
 caller cannot substitute for a kernel-validated grant.
 
-V1 delegation is duplication or an explicit spawn grant. General IPC handle
-transfer is deferred. A namespace listing or metadata payload carries no
-ambient authority. Closing an issuer's copy does not revoke copies already
+The original descriptor profile delegates through duplication or explicit child grants.
+The [shared activation ABI](abi/shared-activation-abi.md#copied-capability-attachments) adds bounded IPC capability transfer with explicit type and cycle restrictions.
+A namespace listing or metadata payload carries no ambient authority. Closing an issuer's copy does not revoke copies already
 granted. V1 has no general revocation operation; policy requiring revocation
 must not be advertised until a resource-specific contract exists.
 

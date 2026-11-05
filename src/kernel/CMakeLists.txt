@@ -95,6 +95,7 @@ set(KERNEL_PLATFORM_SOURCES
 set(KERNEL_PROC_SOURCES
   buffer/buffer.cpp
   ipc/channel.cpp
+  ipc/kernel_provider.cpp
   vfs/initrd.cpp
   syscall/vfs.cpp
   proc/startup.cpp

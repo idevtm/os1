@@ -73,6 +73,22 @@ inline bool name_valid(const char (&name)[32])
     }
     return false;
 }
+// Public method/property/event names use snake_case. Types and interfaces may
+// use UpperCamelCase; their existing bounded name validator remains unchanged.
+inline bool member_name_valid(const char (&name)[32])
+{
+    if(!name_valid(name) || name[0] < 'a' || name[0] > 'z')
+        return false;
+    for(unsigned i = 1; name[i]; ++i)
+    {
+        const char c = name[i];
+        if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+            return false;
+        if(c == '_' && (name[i - 1] == '_' || !name[i + 1]))
+            return false;
+    }
+    return true;
+}
 inline uint32_t scalar_size(uint32_t kind)
 {
     return kind == U8 ? 1 : kind == U32 ? 4 : kind == U64 ? 8 : 0;
@@ -120,7 +136,7 @@ inline bool validate(const Metadata& m)
     for(unsigned i = 0; i < m.member_count; ++i)
     {
         const auto& a = m.members[i];
-        if(a.id <= last_id || !name_valid(a.name) || a.kind < Method || a.kind > Event ||
+        if(a.id <= last_id || !member_name_valid(a.name) || a.kind < Method || a.kind > Event ||
            a.flags > implemented || a.input > m.type_count || a.output > m.type_count || a.reserved)
             return false;
         if(a.kind == PropertyGet && a.input)

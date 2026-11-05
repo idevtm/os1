@@ -20,4 +20,13 @@ bool ipc_matching_endpoints(NativeObject* provider, NativeObject* client);
 #ifdef OS1_HOST_TEST
 // Test-only scheduling point after request reservation and before descriptor delivery.
 extern void (*host_ipc_before_receive)();
+extern int host_ipc_kernel_allocation_budget;
 #endif
+
+// Start once before publishing user processes. Dispatch runs in thread context.
+bool ipc_start_kernel_worker(Process*, PageFrameContainer&);
+// One nonblocking dispatch step; also used by host contract tests.
+bool ipc_run_kernel_request();
+
+// Atomic check/registration for the single kernel worker; empty IPC selection.
+bool ipc_wait_kernel_work(Thread*);

@@ -4,8 +4,10 @@ Implemented on the console descriptor foundation. This is an experimental ABI,
 not a long-term binary compatibility promise. The exact encodings live in
 [vfs.h](../../../src/uapi/os1/vfs.h) and [startup.h](../../../src/uapi/os1/startup.h).
 The [implementation record](../../archive/native-api/2026-11-04-initrd-vfs-implementation-plan.md)
-records scope, verification, and remaining limits. Hosted services, interface
-metadata, generated bindings, and class-controlled construction remain proposals.
+records scope, verification, and remaining limits.
+[Copied IPC](copied-ipc-abi.md) adds hosted services and offline interface metadata.
+[Scoped activation](shared-activation-abi.md) implements class-controlled Counter construction.
+General generated bindings and runtime reflection remain proposals.
 
 ## Namespace and authority
 
@@ -86,7 +88,8 @@ ignored. Seeking past EOF is allowed and subsequent reads return zero.
 Cursor ownership is reserved atomically across read/seek/enumeration. Contenders
 sleep on a retained request; no spinlock is held during user copies. BSP IRQs
 retry queued operations, so registration after a release cannot lose a wakeup.
-This is a bounded first provider, not the future general wait-many transport.
+This descriptor path is separate from the implemented [IPC wait-many transport](client-sessions-abi.md#bounded-wait-many).
+It does not expose general file readiness polling.
 Close/reuse does not retarget accepted work; completion pins the thread/address
 space, and teardown cancels registrations before reclaiming memory.
 

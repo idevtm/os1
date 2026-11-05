@@ -83,6 +83,7 @@ target_compile_options(os1_acpica PRIVATE -O2 -w)
 add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/buffer/buffer.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/ipc/kernel_provider.cpp"
   support/cpu_stubs.cpp
   support/console_input_stub.cpp
   "${OS1_REPO_ROOT}/src/kernel/vfs/initrd.cpp"

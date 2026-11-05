@@ -53,7 +53,8 @@ Subscription kind is 7, interface bit 64. Subscription entries initially have
 READ|WRITE|INSPECT|DELEGATE. READ-only copies cannot unsubscribe the shared
 subscription; they can close their own entry. Explicit unsubscribe affects all
 aliases. Final release unregisters it. Existing child grants can pass subscription
-references to another process; general IPC attachment transfer remains deferred.
+references to another process. Subscriptions remain excluded from IPC attachments.
+The [capability extension](shared-activation-abi.md#copied-capability-attachments) transfers its explicitly supported resource kinds.
 
 At most eight subscriptions exist per connection, each with eight event slots.
 Each independent subscription sees eligible events emitted after registration;

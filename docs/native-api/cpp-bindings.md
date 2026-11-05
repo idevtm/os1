@@ -30,6 +30,19 @@ syntax adds a fresh/shared creation-policy override. The
 [original session plan](../archive/native-api/2026-11-05-client-sessions-and-parameter-plan.md) separates
 shared object identity from independently authorized/budgeted client sessions.
 
+## Handle ownership and current helpers
+
+The [approved handle model](object-contract.md#object-handles-and-interoperability) keeps one process resource table.
+A typed proxy owns or borrows a local handle; it does not expose a provider address or C++ vtable.
+Owning references release entries; explicit duplication creates another owner under the existing delegation policy.
+Borrowed references cannot outlive their owners.
+General typed ownership wrappers remain proposed, and integer slot reuse remains possible.
+
+The [Console helpers](../../src/user/include/os1/console.hpp) are implemented handwritten wrappers using integer handles and explicit close.
+They provide `console_bind`, `console_request`, `console_write`, and `console_write_async`.
+The [two-process example](../../src/user/programs/kernel_console_check.hpp) exercises retained completion and independent service authority.
+These compiled helpers do not implement the general SDK shown below.
+
 ## 1. Listing a directory
 
 Use an explicitly granted directory, open a separate enumeration instance, and

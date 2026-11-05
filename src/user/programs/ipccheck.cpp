@@ -2,6 +2,7 @@
 #include <os1/vfs.hpp>
 
 #include "interface/textprocessor.hpp"
+#include "kernel_console_check.hpp"
 using namespace os1::user;
 using namespace os1::textprocessor;
 #define CHECK(c, m)                                              \
@@ -52,8 +53,12 @@ bool ok(const os1_ipc_result& r, unsigned size)
 {
     return !r.transport_status && !r.application_status && r.payload_bytes == size;
 }
-int main()
+int main(int argc, char**)
 {
+    if(argc == 2)
+        return os1::kernel_console_check::child();
+    CHECK(os1::kernel_console_check::run(), "kernel console protocol");
+    say("[user/ipccheck] kernel console two clients ok\n");
     os1_ipc_pair pair{};
     CHECK(ipc(OS1_IPC_CREATE, 0, &pair) == 0, "pair");
     long image = open("/bin/textprocessor", OS1_RIGHT_EXECUTE);

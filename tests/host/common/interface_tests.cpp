@@ -954,3 +954,30 @@ TEST(BufferMetadata, RangeBoundsWithoutOverflow)
     EXPECT_FALSE(valid_range({0, 0, 0, 1}, 0, 65536));
 }
 }  // namespace
+
+TEST(InterfaceMetadata, PublicMembersUseSnakeCaseButTypesAllowUpperCamelCase)
+{
+    for(auto kind : {Method, PropertyGet, PropertySet, Event})
+    {
+        auto m = os1::textprocessor::metadata;
+        auto& member = m.members[0];
+        member.kind = kind;
+        member.input = kind == PropertyGet ? 0 : 2;
+        member.output = kind == Event ? 0 : 2;
+        for(const char* name : {"read", "try_read", "state_changed", "read_v2"})
+        {
+            std::memset(member.name, 0, sizeof(member.name));
+            std::strcpy(member.name, name);
+            EXPECT_TRUE(validate(m)) << name;
+        }
+        for(const char* name :
+            {"TryRead", "tryRead", "Info", "state-Changed", "_read", "read_", "read__now", "2read"})
+        {
+            std::memset(member.name, 0, sizeof(member.name));
+            std::strcpy(member.name, name);
+            EXPECT_FALSE(validate(m)) << name;
+        }
+    }
+    EXPECT_TRUE(validate(os1::textprocessor::metadata));
+    EXPECT_TRUE(validate(os1::counter::metadata));
+}
