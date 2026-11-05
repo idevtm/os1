@@ -9,10 +9,15 @@
 #include "debug/event_ring.hpp"
 #include "sync/smp.hpp"
 
+#if defined(OS1_HOST_TEST)
+void (*host_tlb_retirement_wait)(cpu*) = nullptr;
+#endif
 namespace
 {
 constexpr uint32_t kIpiAllButSelf = 0x000C0000u;
 
+volatile uint64_t g_tlb_requested = 0;
+volatile uint64_t g_tlb_acknowledged[256]{};
 uint8_t g_reschedule_vector = 0;
 bool g_reschedule_vector_initialized = false;
 uint8_t g_tlb_shootdown_vector = 0;
@@ -49,19 +54,9 @@ void reload_current_address_space()
 #if defined(OS1_HOST_TEST)
     return;
 #else
-    uint64_t cr3 = g_kernel_root_cr3;
-    cpu* current = cpu_cur();
-    if((nullptr != current) && (nullptr != current->current_thread) &&
-       (0 != current->current_thread->address_space_cr3))
-    {
-        cr3 = current->current_thread->address_space_cr3;
-    }
-    else if((nullptr != current) && (nullptr != current->idle_thread) &&
-            (0 != current->idle_thread->address_space_cr3))
-    {
-        cr3 = current->idle_thread->address_space_cr3;
-    }
-
+    uint64_t cr3;
+    // Read hardware state: scheduler publication can lag a CR3 switch.
+    asm volatile("mov %%cr3, %0" : "=r"(cr3));
     asm volatile("mov %0, %%cr3" : : "r"(cr3) : "memory");
 #endif
 }
@@ -134,6 +129,11 @@ bool ipi_send_reschedule(const cpu* target)
                          g_reschedule_vector,
                          0);
     const bool sent = ipi_send(target->id, g_reschedule_vector);
+#if defined(OS1_HOST_TEST)
+    // Hardware-boundary seam: host tests may model an AP consuming publication.
+    extern void host_reschedule_delivered(const cpu*);
+    if(sent) host_reschedule_delivered(target);
+#endif
     if(!sent)
     {
         kernel_event::record(OS1_KERNEL_EVENT_IPI_RESCHED,
@@ -177,7 +177,49 @@ bool ipi_is_tlb_shootdown_vector(uint8_t vector)
     return g_tlb_shootdown_vector_initialized && (g_tlb_shootdown_vector == vector);
 }
 
+void ipi_poll_tlb_shootdown()
+{
+    if(!g_tlb_shootdown_vector_initialized)
+        return;
+    cpu* current = cpu_cur();
+    if(!current)
+        return;
+    const auto request = __atomic_load_n(&g_tlb_requested, __ATOMIC_ACQUIRE);
+    if(__atomic_load_n(&g_tlb_acknowledged[current->id], __ATOMIC_RELAXED) >= request)
+        return;
+    reload_current_address_space();
+    __atomic_store_n(&g_tlb_acknowledged[current->id], request, __ATOMIC_RELEASE);
+}
 void ipi_handle_tlb_shootdown()
 {
+    // Asynchronous callers also require a flush when no retirement is pending.
     reload_current_address_space();
+    ipi_poll_tlb_shootdown();
+}
+void ipi_retire_tlb()
+{
+    IrqGuard irq;
+    if(!g_tlb_shootdown_vector_initialized)
+    {
+        reload_current_address_space();
+        return;
+    }
+    const auto request = __atomic_add_fetch(&g_tlb_requested, 1ull, __ATOMIC_ACQ_REL);
+    (void)ipi_send_all_but_self(g_tlb_shootdown_vector);
+    for(cpu* target = g_cpu_boot; target; target = target->next)
+    {
+        if(!__atomic_load_n(&target->booted, __ATOMIC_ACQUIRE) && target != cpu_cur())
+            continue;
+        while(__atomic_load_n(&g_tlb_acknowledged[target->id], __ATOMIC_ACQUIRE) < request)
+        {
+#if defined(OS1_HOST_TEST)
+            if(host_tlb_retirement_wait)
+                host_tlb_retirement_wait(target);
+#endif
+            ipi_poll_tlb_shootdown();
+#if !defined(OS1_HOST_TEST)
+            asm volatile("pause" ::: "memory");
+#endif
+        }
+    }
 }

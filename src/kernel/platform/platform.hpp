@@ -37,6 +37,10 @@ const HpetInfo* platform_hpet();
 // Read the current HPET main-counter value when HPET is available.
 bool platform_hpet_read_main_counter(uint64_t& counter_value);
 
+// Sample a validated high-resolution clock; false means unavailable.
+// This clock has a separate epoch from the IPC deadline clock.
+bool platform_measurement_sample(uint64_t& nanoseconds, uint64_t& resolution_ns);
+
 // Return the public virtio-blk summary when a virtio block device is present.
 const VirtioBlkDevice* platform_virtio_blk();
 
@@ -57,6 +61,16 @@ size_t platform_acpi_device_count();
 
 // Return the ACPI device table owned by platform state.
 const AcpiDeviceInfo* platform_acpi_devices();
+
+// Read boot-discovered routes only. A cache miss never evaluates AML.
+const AcpiPciRoute* platform_cached_acpi_pci_route(uint8_t bus,
+                                                   uint8_t slot,
+                                                   uint8_t function,
+                                                   uint8_t pin);
+
+// BSP boot only, after PCI enumeration and before user execution.
+// Resolve missing enumerated-device routes into the bounded observation cache.
+void platform_cache_enumerated_pci_routes();
 
 // Suspend active bound devices in reverse bind order and place ACPI companions in D3.
 bool platform_suspend_devices();

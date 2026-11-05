@@ -1,6 +1,6 @@
 #include <os1/syscall.hpp>
 
-int main(void)
+int main(int, char**)
 {
     static const char kShellPath[] = "/bin/sh";
     static const char kExecFailed[] = "[user/init] exec /bin/sh failed\n";

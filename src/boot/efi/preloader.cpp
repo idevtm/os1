@@ -9,7 +9,7 @@
 //   3. reserves a window (EfiReservedMemoryType) and writes a fresh header;
 //   4. after saving a log, waits for a key so a crash loop cannot run unattended;
 //   5. chain-loads Limine from \EFI\OS1\LIMINE.EFI.
-// See doc/2026-11-02-real-hardware-bootlog.md.
+// See docs/hardware/boot-log.md.
 #include "efi.hpp"
 
 #include "debug/bootlog.hpp"

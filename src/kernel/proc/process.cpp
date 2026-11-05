@@ -3,6 +3,7 @@
 // threads are gone.
 #include "proc/process.hpp"
 
+#include "buffer/buffer.hpp"
 #include "debug/debug.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
@@ -40,6 +41,8 @@ Process* allocate_process_record()
     Process* process = static_cast<Process*>(kmem_cache_alloc(g_process_cache, KmallocFlags::Zero));
     if(nullptr != process)
     {
+        descriptor_table_initialize(process->descriptors);
+        process->root_fd = process->cwd_fd = -1;
         process->child_exit_waiters.lock.reset("process-child-exit");
         process->child_exit_waiters.head = nullptr;
         process->child_exit_waiters.name = "process-child-exit";
@@ -269,6 +272,7 @@ bool reap_process(Process* process, PageFrameContainer& frames)
         unlink_process(process);
     }
 
+    buffer_process_cleanup(frames, process);
     if((0 != cr3_to_destroy) && !keep_kernel_process)
     {
         VirtualMemory vm(frames, cr3_to_destroy);
@@ -276,6 +280,7 @@ bool reap_process(Process* process, PageFrameContainer& frames)
         frames.free(cr3_to_destroy);
     }
 
+    descriptor_close_all(process->descriptors);
     release_process_record(process);
     return true;
 }

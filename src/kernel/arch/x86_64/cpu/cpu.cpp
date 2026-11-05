@@ -2,6 +2,7 @@
 
 #include "arch/x86_64/apic/ioapic.hpp"
 #include "arch/x86_64/apic/lapic.hpp"
+#include "arch/x86_64/cpu/exception_stack.hpp"
 #include "arch/x86_64/cpu/syscall.hpp"
 #include "arch/x86_64/cpu/x86.hpp"
 #include "core/kernel_state.hpp"
@@ -147,10 +148,10 @@ void cpu_init()
     // Dedicated IST1 stack for NMI, double fault, and machine check. The BSP
     // gets it on its second cpu_init, once the page allocator and direct map
     // exist and before the IDT is loaded.
-    uint64_t ist_page = 0;
-    if((0 == c->tss.ist1) && g_kernel_direct_map_ready && page_frames.allocate(ist_page, 1))
+    if(g_kernel_direct_map_ready && !cpu_prepare_exception_stack(*c, page_frames))
     {
-        c->tss.ist1 = reinterpret_cast<uint64_t>(kernel_physical_pointer<uint8_t>(ist_page)) + kPageSize;
+        debug("cpu ")(c->id)(" exception stack allocation failed; halted before IDT load")();
+        cpu_idle_loop();
     }
     set_tss_descriptor(c);
 

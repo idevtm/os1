@@ -2,7 +2,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <os1/parameter_client.hpp>
 #include <os1/syscall.hpp>
+#include <os1/vfs.hpp>
+
+#include "interface/parameter_demo.hpp"
 
 namespace
 {
@@ -436,7 +440,11 @@ bool observe(uint32_t kind, const Record*& records, uint32_t& record_count)
 
 void run_help()
 {
-    write_string("help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit\n");
+    write_string(
+        "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit\n");
+    write_string(
+        "call <image> <method> [field:value | field.case | field:{...}]\nintf <image>: offline "
+        "constructor/method parameter help\n");
 }
 
 void run_echo(size_t argc, char* argv[kShellMaxTokens])
@@ -952,11 +960,13 @@ void write_spawn_outcome(const char* command, long pid, int status)
     write_string("shell prompt resumed\n");
 }
 
-void run_exec(size_t argc, char* argv[kShellMaxTokens])
+const char* raw_tail(const char* raw, unsigned words);
+void parameter_diagnostic(const os1::parameters::Diagnostic& d);
+void run_exec(size_t argc, char* argv[kShellMaxTokens], const char* raw)
 {
-    if(argc != 2)
+    if(argc < 2)
     {
-        write_string("usage: exec <path>\n");
+        write_string("usage: exec <path> [args...]\n");
         return;
     }
 
@@ -972,14 +982,126 @@ void run_exec(size_t argc, char* argv[kShellMaxTokens])
     write_string("shell exec start ");
     write_string(path);
     write_char('\n');
-    const long result = os1::user::exec(path);
+    os1::parameters::Diagnostic diagnostic{};
+    const long result = os1::user::run_program(
+        path, argc - 1, argv + 1, true, 0, nullptr, raw_tail(raw, 2), &diagnostic);
+    if(diagnostic.code != os1::parameters::Error::None)
+        parameter_diagnostic(diagnostic);
     write_string("shell exec returned ");
     write_signed(result);
     write_char('\n');
 }
 
-void run_external(const char* command)
+void parameter_diagnostic(const os1::parameters::Diagnostic& d)
 {
+    write_string("parameter error code=");
+    write_unsigned(static_cast<unsigned>(d.code));
+    write_string(" path=");
+    write_string(d.path);
+    write_string(" bytes=");
+    write_unsigned(d.begin);
+    write_char(':');
+    write_unsigned(d.end);
+    write_string(" expected-type=");
+    write_unsigned(d.expected_type);
+    write_string(" ");
+    write_string(d.explanation);
+    write_char('\n');
+}
+// Only command words are separated here. The remaining bytes stay intact.
+const char* raw_tail(const char* raw, unsigned words)
+{
+    while(words--)
+    {
+        while(is_space(*raw))
+            ++raw;
+        while(*raw && !is_space(*raw))
+            ++raw;
+    }
+    while(is_space(*raw))
+        ++raw;
+    return raw;
+}
+void run_call(size_t argc, char** argv, const char* raw)
+{
+    if(argc < 3)
+    {
+        write_string("usage: call <image> <method> [raw named parameters]\n");
+        return;
+    }
+    char path[OS1_OBSERVE_INITRD_PATH_BYTES];
+    if(!resolve_command_path(argv[1], path, sizeof(path)))
+        return;
+    long image = os1::user::open(
+        path, OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
+    if(image < 0)
+    {
+        write_string("call: cannot open image\n");
+        return;
+    }
+    static os1::parameters::Metadata schema, scratch;
+    os1::parameters::Diagnostic d{};
+    os1_constructor_args args{};
+    if(os1::user::parameter_metadata(image, schema, scratch) != 1)
+    {
+        os1::user::close(image);
+        write_string("call: invalid or absent rich metadata\n");
+        return;
+    }
+    if(!os1::user::parameter_arguments(schema, raw_tail(raw, 3), args, d))
+    {
+        os1::user::close(image);
+        parameter_diagnostic(d);
+        return;
+    }
+    os1::user::ParameterClient client;
+    long status = client.start(image, schema, d);
+    os1::user::close(image);
+    unsigned member = 0;
+    if(status >= 0)
+        for(unsigned i = 0; i < client.interface.member_count; ++i)
+        {
+            const auto& m = client.interface.members[i];
+            if(m.kind == os1::interface::Method && m.flags && strings_equal(m.name, argv[2]))
+                member = m.id;
+        }
+    os1_ipc_result result{};
+    if(status >= 0)
+        status =
+            member ? client.call(member, args.payload, args.size, result) : OS1_ERR_UNSUPPORTED;
+    client.stop();
+    if(status < 0 || result.transport_status || result.application_status)
+    {
+        write_string("call failed status=");
+        write_signed(status < 0                ? status
+                     : result.transport_status ? result.transport_status
+                                               : result.application_status);
+        write_char('\n');
+        return;
+    }
+    if(client.interface.interface_id == os1::parameter_demo::interface_id &&
+       member == os1::parameter_demo::Render && result.payload_bytes >= 8)
+    {
+        write_string("parameter method count=");
+        write_unsigned(os1::constructor::decode(result.payload, 8));
+        write_string(" text=");
+        write_bytes(reinterpret_cast<const char*>(result.payload + 8), result.payload_bytes - 8);
+        write_char('\n');
+    }
+    else
+    {
+        write_string("call result bytes=");
+        write_unsigned(result.payload_bytes);
+        write_string(" hex=");
+        for(unsigned i = 0; i < result.payload_bytes; ++i)
+            write_hex(result.payload[i], 2);
+        write_char('\n');
+    }
+}
+
+void run_external(size_t argc, char** argv, const char* raw)
+{
+    const char* command = argv[0];
     char path[OS1_OBSERVE_INITRD_PATH_BYTES];
     if(!resolve_command_path(command, path, sizeof(path)))
     {
@@ -987,10 +1109,24 @@ void run_external(const char* command)
         return;
     }
 
-    const long pid = os1::user::spawn(path);
+    os1::parameters::Diagnostic diagnostic{};
+    const long pid =
+        os1::user::run_program(path, argc, argv, false, 0, nullptr, raw_tail(raw, 1), &diagnostic);
     if(pid < 0)
     {
-        run_unknown(command);
+        if(diagnostic.code != os1::parameters::Error::None)
+        {
+            parameter_diagnostic(diagnostic);
+            return;
+        }
+        if(pid == OS1_ERR_INVALID)
+        {
+            write_string("invalid arguments or metadata: ");
+            write_string(command);
+            write_char('\n');
+        }
+        else
+            run_unknown(command);
         return;
     }
 
@@ -1008,9 +1144,10 @@ void run_external(const char* command)
 }
 }  // namespace
 
-int main(void)
+int main(int, char**)
 {
     char line[kShellLineBytes];
+    char raw[kShellLineBytes];
     char* tokens[kShellMaxTokens];
 
     write_string("shell prompt ready\n");
@@ -1030,6 +1167,7 @@ int main(void)
             tokens[i] = nullptr;
         }
         normalize_line(line, count);
+        copy_string(raw, sizeof(raw), line);
         const size_t argc = tokenize(line, tokens);
         if(0 == argc)
         {
@@ -1088,9 +1226,13 @@ int main(void)
         {
             run_events();
         }
+        else if(strings_equal(tokens[0], "call"))
+        {
+            run_call(argc, tokens, raw);
+        }
         else if(strings_equal(tokens[0], "exec"))
         {
-            run_exec(argc, tokens);
+            run_exec(argc, tokens, raw);
         }
         else if(strings_equal(tokens[0], "exit"))
         {
@@ -1098,7 +1240,7 @@ int main(void)
         }
         else
         {
-            run_external(tokens[0]);
+            run_external(argc, tokens, raw);
         }
     }
 }

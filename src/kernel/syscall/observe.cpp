@@ -108,87 +108,6 @@ namespace
     return count;
 }
 
-[[nodiscard]] bool acpi_device_is_present(const AcpiDeviceInfo& device)
-{
-    return device.active && (0 != (device.status & 0x1u));
-}
-
-[[nodiscard]] bool acpi_device_has_power_methods(const AcpiDeviceInfo& device)
-{
-    if((0 != (device.flags & kAcpiDeviceHasPs0)) && (0 != (device.flags & kAcpiDeviceHasPs3)))
-    {
-        return true;
-    }
-
-    return acpi_device_supports_power_state(device.path, AcpiPowerState::D0) &&
-           acpi_device_supports_power_state(device.path, AcpiPowerState::D3);
-}
-
-[[nodiscard]] bool acpi_path_is_descendant_of(const char* path, const char* ancestor)
-{
-    if((nullptr == path) || (nullptr == ancestor))
-    {
-        return false;
-    }
-
-    size_t index = 0;
-    for(; ('\0' != ancestor[index]) && ('\0' != path[index]); ++index)
-    {
-        if(path[index] != ancestor[index])
-        {
-            return false;
-        }
-    }
-
-    return ('\0' == ancestor[index]) && ('.' == path[index]);
-}
-
-[[nodiscard]] const AcpiDeviceInfo* find_acpi_companion_for_pci(const PciDevice& pci)
-{
-    const uint64_t adr = (static_cast<uint64_t>(pci.slot) << 16) | pci.function;
-    const AcpiDeviceInfo* devices = platform_acpi_devices();
-    const size_t device_count = platform_acpi_device_count();
-    for(size_t index = 0; index < device_count; ++index)
-    {
-        const AcpiDeviceInfo& device = devices[index];
-        if(acpi_device_is_present(device) && (0 != (device.flags & kAcpiDeviceHasAdr)) &&
-           (device.bus_number == pci.bus) && (device.adr == adr))
-        {
-            return &device;
-        }
-    }
-    return nullptr;
-}
-
-[[nodiscard]] const AcpiDeviceInfo* find_acpi_power_target_for_pci(const PciDevice& pci)
-{
-    const AcpiDeviceInfo* companion = find_acpi_companion_for_pci(pci);
-    if(nullptr == companion)
-    {
-        return nullptr;
-    }
-    if(acpi_device_has_power_methods(*companion))
-    {
-        return companion;
-    }
-
-    const AcpiDeviceInfo* devices = platform_acpi_devices();
-    const size_t device_count = platform_acpi_device_count();
-    for(size_t index = 0; index < device_count; ++index)
-    {
-        const AcpiDeviceInfo& device = devices[index];
-        if(!device.active || !acpi_path_is_descendant_of(device.path, companion->path) ||
-           !acpi_device_has_power_methods(device))
-        {
-            continue;
-        }
-
-        return &device;
-    }
-
-    return nullptr;
-}
-
 [[nodiscard]] uint32_t observe_console_kind(const TextDisplayBackend* text_display)
 {
     if(nullptr == text_display)
@@ -908,16 +827,12 @@ long sys_observe_acpi(const ObserveContext& context,
         }
 
         ++record.route_probe_count;
-        uint32_t irq = 0;
-        uint16_t flags = 0;
-        bool source_is_gsi = false;
-        if(!acpi_resolve_pci_route_details(device.bus,
+        const AcpiPciRoute* route =
+            platform_cached_acpi_pci_route(device.bus,
                                            device.slot,
                                            device.function,
-                                           static_cast<uint8_t>(device.interrupt_pin - 1u),
-                                           irq,
-                                           flags,
-                                           source_is_gsi))
+                                           static_cast<uint8_t>(device.interrupt_pin - 1u));
+        if(nullptr == route)
         {
             continue;
         }
@@ -925,66 +840,18 @@ long sys_observe_acpi(const ObserveContext& context,
         ++record.route_success_count;
         if(!stored_route)
         {
-            record.route_irq = irq;
-            record.route_flags = flags;
+            record.route_irq = route->irq;
+            record.route_flags = route->flags;
             record.route_bus = device.bus;
             record.route_slot = device.slot;
             record.route_function = device.function;
             record.route_pin = static_cast<uint8_t>(device.interrupt_pin - 1u);
-            record.route_source_is_gsi = source_is_gsi ? 1u : 0u;
+            record.route_source_is_gsi = route->source_is_gsi ? 1u : 0u;
             stored_route = true;
         }
     }
 
-    const DeviceBinding* bindings = device_bindings();
-    const size_t binding_count = device_binding_count();
-    bool power_success = false;
-    for(size_t index = 0; index < binding_count; ++index)
-    {
-        const DeviceBinding& binding = bindings[index];
-        if(!binding.active || (DeviceBus::Pci != binding.id.bus) ||
-           (binding.id.index >= pci_device_count))
-        {
-            continue;
-        }
-
-        const AcpiDeviceInfo* companion = find_acpi_power_target_for_pci(pci_devices[binding.id.index]);
-        if(nullptr == companion)
-        {
-            continue;
-        }
-
-        ++record.power_probe_count;
-        if(!power_success && acpi_set_device_power_state(companion->path, AcpiPowerState::D3) &&
-           acpi_set_device_power_state(companion->path, AcpiPowerState::D0))
-        {
-            record.power_success_count = 1;
-            power_success = true;
-        }
-    }
-
-    if(!power_success)
-    {
-        const AcpiDeviceInfo* acpi_devices = platform_acpi_devices();
-        const size_t acpi_device_count = platform_acpi_device_count();
-        for(size_t index = 0; index < acpi_device_count; ++index)
-        {
-            const AcpiDeviceInfo& device = acpi_devices[index];
-            if(!device.active || !acpi_device_has_power_methods(device))
-            {
-                continue;
-            }
-
-            ++record.power_probe_count;
-            if(acpi_set_device_power_state(device.path, AcpiPowerState::D3) &&
-               acpi_set_device_power_state(device.path, AcpiPowerState::D0))
-            {
-                record.power_success_count = 1;
-                break;
-            }
-        }
-    }
-
+    // Legacy power counters stay zero. Observation never executes firmware methods.
     return write_observe_record(context, thread, user_buffer, offset, &record, sizeof(record))
                ? result
                : -1;

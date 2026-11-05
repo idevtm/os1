@@ -14,7 +14,7 @@ static const uint8_t kReadOnlyObserveBuffer[sizeof(struct Os1ObserveHeader) +
         os1::user::exit(1);                                  \
     } while(0)
 
-int main(void)
+int main(int, char**)
 {
     uint8_t observe_buffer[sizeof(struct Os1ObserveHeader) +
                            sizeof(struct Os1ObserveSystemRecord)] = {0};
@@ -37,7 +37,7 @@ int main(void)
         OS1_COPYCHECK_FAIL("[user/copycheck] fail readonly observe pointer\n");
     }
 
-    if(-1 != os1::user::write(1, (const void*)0x1000, 1))
+    if(OS1_ERR_FAULT != os1::user::write(1, (const void*)0x1000, 1))
     {
         OS1_COPYCHECK_FAIL("[user/copycheck] fail kernel write buffer\n");
     }

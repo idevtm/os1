@@ -310,13 +310,15 @@ void scheduler_handle_timer_tick()
 
 Thread* schedule_next(bool keep_current)
 {
+    Thread* current = current_thread();
+    const bool was_blocked = current && (ThreadState::Blocked == current->state);
     if(cpu_on_boot())
     {
         reap_dead_threads(page_frames);
     }
-    Thread* current = current_thread();
     cpu* local_cpu = cpu_cur();
-    if(keep_current && current && (current != idle_thread()) &&
+    // Reaping can complete the current thread's wait before the CPU handoff.
+    if((keep_current || was_blocked) && current && (current != idle_thread()) &&
        (ThreadState::Running == current->state))
     {
         mark_thread_ready(current, local_cpu);

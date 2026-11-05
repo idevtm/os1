@@ -223,8 +223,10 @@ struct Os1ObserveKmemRecord
 
 struct Os1ObserveAcpiRecord
 {
+    // Cached PCI-pin lookup attempts and matches; no firmware methods execute.
     uint32_t route_probe_count;
     uint32_t route_success_count;
+    // Legacy fields, reserved zero. Observation does not control device power.
     uint32_t power_probe_count;
     uint32_t power_success_count;
     uint32_t route_irq;

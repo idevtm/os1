@@ -1,0 +1,43 @@
+# Review archive
+
+These dated records preserve historical findings, decisions, and validation evidence.
+Use the [documentation index](../../README.md) for current guidance.
+
+| Record | Document |
+| --- | --- |
+| 2026-05-10 | [Unified OS API Architecture Review — 2026-05-10](2026-05-10-unified-os-api-architecture-review.md) |
+| 2026-05-10 | [os1 Project Review - 2026-05-10](2026-05-10-review.md) |
+| 2026-05-05 | [SMP Enablement Implementation Review - 2026-05-05](2026-05-05-smp-enablement-review.md) |
+| 2026-05-05 | [os1 Project Review - 2026-05-05](2026-05-05-review.md) |
+| 2026-05-05 | [os1 Project Review - 2026-05-05 (revision 2)](2026-05-05-review-2.md) |
+| 2026-05-04 | [os1 Project Review - 2026-05-04](2026-05-04-review.md) |
+| 2026-05-03 | [os1 Project Review - 2026-05-03](2026-05-03-review.md) |
+| 2026-04-29 | [os1 Project Review - 2026-04-29 (revision 2)](2026-04-29-review-2.md) |
+| 2026-04-29 | [os1 Project Review - 2026-04-29](2026-04-29-review-1.md) |
+| 2026-04-28 | [os1 Project Review - 2026-04-28 (revision 3)](2026-04-28-review-3.md) |
+| 2026-04-28 | [os1 Project Review - 2026-04-28 (revision 2)](2026-04-28-review-2.md) |
+| 2026-04-28 | [os1 Project Review - 2026-04-28](2026-04-28-review-1.md) |
+| 2026-04-28 | [Higher-Half Migration Feature Review - 2026-04-28](2026-04-28-higher-half-migration-review.md) |
+| 2026-04-27 | [os1 Project Review - 2026-04-27](2026-04-27-review.md) |
+| 2026-04-24 | [os1 Project Review - 2026-04-24](2026-04-24-review.md) |
+| 2026-04-23 | [os1 Project Review — 2026-04-23](2026-04-23-review.md) |
+| 2026-04-21 | [os1 — Project Review](2026-04-21-review.md) |
+| 2026-04-19 | [os1 — Project Review](2026-04-19-review.md) |
+
+## Historical review summaries
+
+- [2026-05-10 review](2026-05-10-review.md) — source-first review written after the ACPICA integration landed (`7b0094c Integrate ACPICA (#23)`). ACPI table discovery, namespace load, device enumeration, `_PRT` resolution, and `_PS0`/`_PS3` power transitions all flow through upstream ACPICA pinned at submodule SHA `232ff3f8` (release `20260408`); the previous in-tree AML interpreter at `src/kernel/platform/acpi_aml.cpp` collapsed from ~1500 lines to a 70-line shim. A new `OS1_OBSERVE_ACPI` snapshot kind plus `/bin/acpiprobe` user program expose the ACPI surface from userland. The page-frame allocator now has the named tier-2 `g_page_frames_lock`, and `ipi_send_tlb_shootdown` has real call sites in `mm/virtual_memory.cpp` user-slot teardown paths. Closes the SMP synchronization contract's page-frame-lock entry and the prior review's TLB-shootdown-callers gap. Carries forward the descriptor/handle decision, argv/envp, VFS, first persistent filesystem, credentials, monotonic time, packet pool, error ABI, entropy, PTY/session sequencing, AP-targeted device IRQ steering, static/runtime lock-order assertion, observe-access tier policy, and TLB-shootdown granularity. Raises new follow-ups for ACPICA upgrade-and-footprint policy, ACPICA OSL feature boundary, and a real-hardware bring-up productization plan once the unmerged `real-device` branch lands.
+- [2026-05-05 review (revision 2)](2026-05-05-review-2.md) — source-first review written after phases 0–8 of the SMP enablement plan and the post-implementation fix-up commit `61bbb4f` landed. APs install the global IDT, run per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, hold per-CPU run queues, and accept user threads through round-robin and load-balanced placement. `WaitQueue`/`Completion` are wired through block-I/O, child-exit, and console-read paths. Closes the SMP scheduling, AP-tick evidence, console-read registry-walk, `observe processes` lock-ordering, parallel-CTest QEMU lock-conflict, and console-output interleaving findings. Its immediate-next-step #7 (named tier-2 `g_page_frames_lock`) and the related TLB-shootdown-callers gap are now closed in code and reflected in the 2026-05-10 review.
+- [2026-05-05 review (revision 1)](2026-05-05-review.md) — source-first review focused on the next steps toward [GOALS.md](../../../GOALS.md). Written before the phased SMP enablement landed; its scheduling section ("scheduling remains BSP-only", "expanding SMP now would multiply race bugs") is superseded by the 2026-05-05 revision-2 review. Reassesses the code after `kmem` gained real consumers in process/thread registries, ARP cache, device bindings, BAR claims, DMA records, and IRQ route records; carries forward the descriptor/handle contract, argv/envp, VFS, filesystem-backed exec, credentials, and sequencing prerequisites that revision 2 still finds unresolved.
+- [2026-05-04 review](2026-05-04-review.md) — source-grounded review after the kernel small-object allocator landed and after the native-interface drafts under [Native API documents](../../native-api/README.md) expanded. It carried forward the native-interface decision, argv/envp, and `BootInfo` capacity caps; its allocator-consumer finding is superseded by the 2026-05-05 source review.
+- [2026-05-03 review (revision 1)](2026-05-03-review.md) — source-grounded review after the 2026-04-30 driver/device/platform implementation pass landed (driver registry, IRQ vector allocator, MSI-X/MSI/INTx fallback, DMA buffers, shared virtio transport, BlockDevice v2 with interrupt-driven `virtio-blk` reads + writes, HPET/LAPIC timer migration, `virtio-net`, xHCI with HID boot keyboard, AML/`_PRT`/`_PS0`/`_PS3` power management), after the 2026-05-03 documentation cleanup pass that re-aligned README/GOALS/ARCHITECTURE/REFERENCES with the substrate, and after the 2026-05-03 multi-sector `virtio-blk` pass that lifted the `sector_count == 1` restriction up to a bounded 4 KiB per request and chunked the sync wrappers by `max_sectors_per_request`. Closes the BlockDevice v2, common virtio transport, MSI/MSI-X, timer-migration, AML, graduation-list, `/bin/ascii`-smoke, syscall-numbers.h-drift, and single-sector-`virtio-blk` findings from prior reviews; carries forward the native-interface decision, argv/envp, and the `BootInfo` capacity caps.
+- [2026-04-29 review (revision 2)](2026-04-29-review-2.md) — source-grounded review after the SYSCALL/SYSRET migration, typed wait state, kernel event ring, SMP synchronization contract, host-test harness, and Limine shim restructure landed (PRs #15-#19). Closes the host-test, SMP-vocabulary, event-ring, syscall-fast-path, wait-state, and shim-split findings; carries forward the native-interface decision, BlockDevice v2, common virtio transport, MSI/MSI-X, argv/envp, and `/bin/ascii` smoke gaps.
+- [2026-04-29 review](2026-04-29-review-1.md) — first 2026-04-29 review, written before PRs #15-#19. Surfaced the native-interface decision and listed the near-term items most of which closed the same day.
+- [2026-04-28 review (revision 3)](2026-04-28-review-3.md) — source-grounded review after the boot-envelope and documentation updates. Reassesses earlier findings, marks resolved issues as historical, and refocuses the roadmap on storage contracts, host tests, virtio/MSI, SMP discipline, and documentation drift.
+- [2026-04-28 review (revision 2)](2026-04-28-review-2.md) — independent re-read of the same tree as revision 1. Reinforces the substrate-hardening conclusion; adds structural findings around storage, MSI/MSI-X, event logging, tests, and wait-state representation.
+- [2026-04-28 review (revision 1)](2026-04-28-review-1.md) — first 2026-04-28 review.
+- [2026-04-27 review](2026-04-27-review.md) — first review after the source reorganization.
+- [2026-04-24 review](2026-04-24-review.md) — historical (path-stale after the reorganization).
+- [2026-04-23 review](2026-04-23-review.md) — historical.
+- [2026-04-21 review](2026-04-21-review.md) — historical.
+- [2026-04-19 review](2026-04-19-review.md) — historical.

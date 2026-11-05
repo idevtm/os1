@@ -6,8 +6,8 @@
 
 #include <span>
 
-#include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/apic/ioapic.hpp"
+#include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/apic/lapic.hpp"
 #include "arch/x86_64/apic/pic.hpp"
 #include "arch/x86_64/cpu/control_regs.hpp"
@@ -30,6 +30,7 @@
 #include "fs/initrd.hpp"
 #include "handoff/boot_info.hpp"
 #include "handoff/memory_layout.h"
+#include "ipc/channel.hpp"
 #include "mm/boot_mapping.hpp"
 #include "mm/boot_reserve.hpp"
 #include "mm/kmem.hpp"
@@ -407,6 +408,16 @@ bool prepare_scheduler_timer()
         finish_boot_sequence_thread(1);
     }
 
+    if(!ipc_start_kernel_worker(current_thread()->process, page_frames))
+    {
+        write_console_line("failed to start kernel provider worker");
+        finish_boot_sequence_thread(1);
+    }
+    if(initialize_initrd_namespace() < 0)
+    {
+        write_console_line("invalid initrd namespace");
+        finish_boot_sequence_thread(1);
+    }
     Thread* init_thread =
         load_user_program(page_frames, g_kernel_root_cr3, "/bin/init", nullptr, false);
     if(nullptr == init_thread)

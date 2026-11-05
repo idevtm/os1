@@ -146,6 +146,8 @@ bool platform_discover(const BootInfo& boot_info, VirtualMemory& kernel_vm)
         return false;
     }
 
+    platform_cache_enumerated_pci_routes();
+    debug("acpi: enumerated route cache ready routes=")(g_platform.acpi_pci_route_count)();
     g_platform.initialized = true;
     return true;
 }

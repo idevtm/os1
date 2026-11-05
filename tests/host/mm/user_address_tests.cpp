@@ -1,8 +1,8 @@
-#include "mm/user_address.hpp"
-
 #include <gtest/gtest.h>
 
 #include <limits>
+
+#include "mm/user_address.hpp"
 
 TEST(UserAddressPolicy, CanonicalAddressValidation)
 {
@@ -38,4 +38,11 @@ TEST(UserAddressPolicy, PagePermissionValidation)
     EXPECT_TRUE(user_address::has_required_user_flags(user_write, true));
     EXPECT_FALSE(user_address::has_required_user_flags(kernel_write, false));
     EXPECT_TRUE(user_address::has_required_user_flags(user_nx, false));
+}
+
+TEST(UserAddressPolicy, NonpresentUserLeafCannotAuthorizeCopies)
+{
+    const auto flags = static_cast<uint64_t>(PageFlags::User | PageFlags::Write);
+    EXPECT_FALSE(user_address::has_required_user_flags(flags, false));
+    EXPECT_FALSE(user_address::has_required_user_flags(flags, true));
 }

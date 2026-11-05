@@ -82,7 +82,7 @@ void write_ascii_table(void)
 
 }  // namespace
 
-int main(void)
+int main(int, char**)
 {
     write_string("ASCII table (00..7F), 8 columns\n");
     write_ascii_table();

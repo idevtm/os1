@@ -8,14 +8,12 @@
 
 #include "mm/page_frame.hpp"
 
-using ConsoleWriteBytes = void (*)(const char* data, size_t length);
 using Cr3Write = void (*)(uint64_t cr3);
 
 struct ProcessSyscallContext
 {
     PageFrameContainer* frames = nullptr;
     uint64_t kernel_root_cr3 = 0;
-    ConsoleWriteBytes write_console_bytes = nullptr;
     Cr3Write write_cr3 = nullptr;
 };
 

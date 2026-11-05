@@ -20,3 +20,10 @@ bool for_each_initrd_file(InitrdFileVisitor visitor, void* context);
 bool find_initrd_file(const char* path, const uint8_t*& data, uint64_t& size);
 // Normalize a cpio archive name into the kernel's absolute initrd path form.
 void copy_initrd_path(char* destination, size_t destination_size, const char* archive_name);
+
+struct NativeObject;
+long initialize_initrd_namespace();
+NativeObject* initrd_namespace_root();  // trusted bootstrap only, borrowed
+#if defined(OS1_HOST_TEST)
+void reset_initrd_namespace_for_test();
+#endif

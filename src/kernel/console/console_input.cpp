@@ -4,7 +4,9 @@
 
 #include <stdlib.h>
 
+#if !defined(OS1_HOST_TEST)
 #include "arch/x86_64/cpu/io_port.hpp"
+#endif
 #include "console/terminal.hpp"
 #include "debug/debug.hpp"
 #include "sync/wait_queue.hpp"
@@ -32,6 +34,8 @@ OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_lengths[kConsoleInputComp
 OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_head = 0;
 OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_tail = 0;
 OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_count = 0;
+OS1_LOCKED_BY(g_console_input_lock) bool g_read_reserved = false;
+OS1_LOCKED_BY(g_console_input_lock) size_t g_reserved_bytes = 0;
 WaitQueue g_console_read_waiters{"console-read"};
 
 void echo_byte(char c)
@@ -123,6 +127,8 @@ void console_input_initialize()
     memset(g_completed_lines, 0, sizeof(g_completed_lines));
     memset(g_completed_lengths, 0, sizeof(g_completed_lengths));
     g_pending_length = 0;
+    g_read_reserved = false;
+    g_reserved_bytes = 0;
     g_completed_head = 0;
     g_completed_tail = 0;
     g_completed_count = 0;
@@ -141,6 +147,7 @@ void console_input_on_keyboard_char(char ascii)
 void console_input_poll_serial()
 {
     KASSERT_ON_BSP();
+#if !defined(OS1_HOST_TEST)
     // Runs from the timer tick with interrupts off. Without a UART the status
     // port reads 0xFF ("data ready" forever), which hung the ASUS G74SX at its
     // first tick; skip absent ports and bound the drain either way.
@@ -154,39 +161,46 @@ void console_input_poll_serial()
     {
         handle_input_char((char)inb(kSerialPortBase));
     }
+#endif
 }
 
 bool console_input_has_line()
 {
     IrqSpinGuard guard(g_console_input_lock);
-    return g_completed_count > 0;
-}
-
-bool console_input_pop_line(char* buffer, size_t buffer_size, size_t& line_length)
-{
-    IrqSpinGuard guard(g_console_input_lock);
-    line_length = 0;
-    if((nullptr == buffer) || (0 == buffer_size) || (0 == g_completed_count))
-    {
-        return false;
-    }
-
-    const size_t next_length = g_completed_lengths[g_completed_head];
-    if(next_length > buffer_size)
-    {
-        return false;
-    }
-
-    memcpy(buffer, g_completed_lines[g_completed_head], next_length);
-    memset(g_completed_lines[g_completed_head], 0, sizeof(g_completed_lines[g_completed_head]));
-    g_completed_lengths[g_completed_head] = 0;
-    g_completed_head = (g_completed_head + 1) % kConsoleInputCompletedLineCapacity;
-    --g_completed_count;
-    line_length = next_length;
-    return true;
+    return g_completed_count > 0 && !g_read_reserved;
 }
 
 WaitQueue& console_input_read_wait_queue()
 {
     return g_console_read_waiters;
+}
+
+bool console_input_reserve(char* buffer, size_t capacity, size_t& count)
+{
+    IrqSpinGuard guard(g_console_input_lock);
+    count = 0;
+    if(!buffer || !capacity || !g_completed_count || g_read_reserved) return false;
+    count = g_completed_lengths[g_completed_head];
+    if(count > capacity) count = capacity;
+    memcpy(buffer, g_completed_lines[g_completed_head], count);
+    g_read_reserved = true;
+    g_reserved_bytes = count;
+    return true;
+}
+
+void console_input_finish(size_t delivered)
+{
+    IrqSpinGuard guard(g_console_input_lock);
+    if(!g_read_reserved) return;
+    if(delivered > g_reserved_bytes) delivered = 0;
+    const size_t remaining = g_completed_lengths[g_completed_head] - delivered;
+    for(size_t i = 0; i < remaining; ++i)
+        g_completed_lines[g_completed_head][i] = g_completed_lines[g_completed_head][i + delivered];
+    g_completed_lengths[g_completed_head] = remaining;
+    if(remaining == 0) {
+        g_completed_head = (g_completed_head + 1) % kConsoleInputCompletedLineCapacity;
+        --g_completed_count;
+    }
+    g_read_reserved = false;
+    g_reserved_bytes = 0;
 }

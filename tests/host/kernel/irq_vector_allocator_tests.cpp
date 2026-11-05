@@ -6,10 +6,17 @@
 
 namespace
 {
-void reset_allocator()
+struct AllocatorScope
 {
-    irq_vector_allocator_reset();
-}
+    AllocatorScope()
+    {
+        irq_vector_allocator_reset();
+    }
+    ~AllocatorScope()
+    {
+        irq_vector_allocator_reset();
+    }
+};
 }  // namespace
 
 TEST(IrqVectorAllocator, ReportsDynamicRangeAndSyscallHole)
@@ -23,7 +30,7 @@ TEST(IrqVectorAllocator, ReportsDynamicRangeAndSyscallHole)
 
 TEST(IrqVectorAllocator, AllocatesLowestFreeVectorFirst)
 {
-    reset_allocator();
+    AllocatorScope allocator;
 
     uint8_t first = 0;
     uint8_t second = 0;
@@ -38,7 +45,7 @@ TEST(IrqVectorAllocator, AllocatesLowestFreeVectorFirst)
 
 TEST(IrqVectorAllocator, SkipsSyscallVectorWhenAllocating)
 {
-    reset_allocator();
+    AllocatorScope allocator;
 
     uint8_t vector = 0;
     uint8_t last_before_hole = 0;
@@ -59,7 +66,7 @@ TEST(IrqVectorAllocator, SkipsSyscallVectorWhenAllocating)
 
 TEST(IrqVectorAllocator, ReserveAndFreeControlReuse)
 {
-    reset_allocator();
+    AllocatorScope allocator;
 
     const uint8_t reserved = static_cast<uint8_t>(kDynamicIrqVectorBase + 3u);
     ASSERT_TRUE(irq_reserve_vector(reserved));
@@ -83,7 +90,7 @@ TEST(IrqVectorAllocator, ReserveAndFreeControlReuse)
 
 TEST(IrqVectorAllocator, ExhaustionReturnsFalse)
 {
-    reset_allocator();
+    AllocatorScope allocator;
 
     uint8_t vector = 0;
     size_t allocated = 0;

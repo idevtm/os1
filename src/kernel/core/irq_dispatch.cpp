@@ -1,6 +1,8 @@
 // Generic IRQ flow around the current legacy PIC/APIC hybrid routing.
 #include "core/irq_dispatch.hpp"
 
+#include "syscall/vfs.hpp"
+#include "ipc/channel.hpp"
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/apic/lapic.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
@@ -60,6 +62,13 @@ void account_scheduler_tick()
 Thread* handle_irq(TrapFrame* frame)
 {
     const uint8_t vector = static_cast<uint8_t>(frame->vector);
+    if(ipi_is_tlb_shootdown_vector(vector))
+    {
+        ipi_handle_tlb_shootdown();
+        acknowledge_irq_vector(vector);
+        return current_thread();
+    }
+    ipc_drain_wakeups();
     const int irq = legacy_irq_from_vector(vector);
     const bool scheduler_tick = timer_vector_is_scheduler_tick(vector);
     const bool reschedule_ipi = ipi_is_reschedule_vector(vector);
@@ -76,6 +85,12 @@ Thread* handle_irq(TrapFrame* frame)
     if(scheduler_tick)
     {
         account_scheduler_tick();
+        if(cpu_on_boot())
+        {
+            const auto calibration = timer_source_lapic_calibration();
+            const uint32_t hz = calibration.frequency_hz ? calibration.frequency_hz : 1000;
+            ipc_timer_tick(1000000000ull / hz);
+        }
         scheduler_handle_timer_tick();
         if(cpu_on_boot())
         {
@@ -102,6 +117,7 @@ Thread* handle_irq(TrapFrame* frame)
     if(cpu_on_boot())
     {
         wake_console_readers(page_frames);
+        wake_vfs_waiters(page_frames);
     }
 
     if(nullptr == current_thread())
@@ -109,6 +125,11 @@ Thread* handle_irq(TrapFrame* frame)
         return nullptr;
     }
 
+    if(trap_frame_is_user(*frame) && ipc_stop_requested(current_thread()))
+    {
+        mark_current_thread_dying(OS1_PROVIDER_STOP_STATUS);
+        return schedule_next(false);
+    }
     if(scheduler_tick || reschedule_ipi)
     {
         if(!trap_frame_is_user(*frame) && current_thread()->user_mode)

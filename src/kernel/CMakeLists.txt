@@ -93,6 +93,14 @@ set(KERNEL_PLATFORM_SOURCES
 )
 
 set(KERNEL_PROC_SOURCES
+  buffer/buffer.cpp
+  ipc/channel.cpp
+  ipc/kernel_provider.cpp
+  vfs/initrd.cpp
+  syscall/vfs.cpp
+  proc/startup.cpp
+  resource/descriptor.cpp
+  syscall/resource.cpp
   proc/process.cpp
   proc/reaper.cpp
   proc/thread.cpp
@@ -223,13 +231,15 @@ set_target_properties(
 target_compile_options(
   kernel_core_objects
   PRIVATE
+    # Size optimization keeps the BIOS kernel and bundled rich-parameter tools
+    # in their bounded low-memory staging windows without loader changes.
     # Kernel code runs with asynchronous IRQs on the current stack, so the
     # SysV red zone is unsafe and must stay disabled across both boot paths.
     # The kernel does not enable or context-switch SIMD/FPU state yet. Force
     # integer-register-only codegen so newer cross-compilers cannot introduce
     # XMM/AVX instructions that trap as #UD on the CI runner's virtual CPU.
     $<$<COMPILE_LANGUAGE:C>:-ffreestanding -mno-red-zone -march=x86-64 -mtune=generic -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -O1 -Wall -Wextra -fno-asynchronous-unwind-tables -fno-unwind-tables>
-    $<$<COMPILE_LANGUAGE:CXX>:-ffreestanding -mno-red-zone -march=x86-64 -mtune=generic -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -O0 -Wall -Wextra -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-exceptions -fno-rtti>
+    $<$<COMPILE_LANGUAGE:CXX>:-ffreestanding -mno-red-zone -march=x86-64 -mtune=generic -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -Os -Wall -Wextra -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-exceptions -fno-rtti>
 )
 if(OS1_KMEM_DEBUG)
   target_compile_definitions(kernel_core_objects PRIVATE OS1_KMEM_DEBUG=1)

@@ -1,13 +1,12 @@
-#include "mm/virtual_memory.hpp"
-
-#include "arch/x86_64/apic/ipi.hpp"
-#include "handoff/memory_layout.h"
-#include "support/lapic_stub.hpp"
-#include "support/physical_memory.hpp"
-
 #include <gtest/gtest.h>
 
 #include <array>
+
+#include "arch/x86_64/apic/ipi.hpp"
+#include "handoff/memory_layout.h"
+#include "mm/virtual_memory.hpp"
+#include "support/lapic_stub.hpp"
+#include "support/physical_memory.hpp"
 
 namespace
 {
@@ -128,4 +127,56 @@ TEST(VirtualMemory, ClonesKernelAndDirectMapSlots)
     EXPECT_EQ(0x100000ull, physical);
     EXPECT_TRUE(target.translate(phys_to_virt(0x700000), physical, flags));
     EXPECT_EQ(0x700000ull, physical);
+}
+
+TEST(VirtualMemory, FailedMappingReturnsUnlinkedDataFrame)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = make_frames(arena);
+    // Leave exactly one frame: data allocation succeeds, page-table allocation fails.
+    std::array<uint64_t, kArenaBytes / kPageSize> held{};
+    size_t count = 0;
+    while(frames.free_page_count() > 1)
+        ASSERT_TRUE(frames.allocate(held[count++]));
+    VirtualMemory vm(frames);
+    ASSERT_EQ(1u, frames.free_page_count());
+    EXPECT_FALSE(vm.allocate_and_map(kUserImageBase, 1, PageFlags::User | PageFlags::Write));
+    EXPECT_EQ(1u, frames.free_page_count());
+    while(count) EXPECT_TRUE(frames.free(held[--count]));
+}
+
+TEST(VirtualMemory, TeardownNeverInterpretsUserBytesAsPageTableEntries)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = make_frames(arena);
+    const uint64_t before = frames.free_page_count();
+    VirtualMemory vm(frames);
+    uint64_t data = 0;
+    ASSERT_TRUE(vm.allocate_and_map(kUserImageBase, 1, PageFlags::User | PageFlags::Write, &data));
+    // Ordinary user bytes happen to look like a PTE naming a reserved boot page.
+    *kernel_physical_pointer<uint64_t>(data) = 0x1003;
+    ASSERT_TRUE(vm.destroy_user_slot(kUserPml4Index));
+    ASSERT_TRUE(frames.free(vm.root()));
+    EXPECT_EQ(before, frames.free_page_count());
+    uint64_t next = 0;
+    ASSERT_TRUE(frames.allocate(next));
+    EXPECT_GE(next, kEarlyReservedPhysicalEnd);
+}
+
+TEST(VirtualMemory, SharedBackingSurvivesAddressSpaceDestruction)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = make_frames(arena);
+    uint64_t backing = 0;
+    ASSERT_TRUE(frames.allocate(backing));
+    const auto baseline = frames.free_page_count();
+    VirtualMemory vm(frames);
+    ASSERT_TRUE(
+        vm.map_physical(kUserImageBase, backing, 1, PageFlags::User | PageFlags::SharedBacking));
+    const auto root = vm.root();
+    ASSERT_TRUE(vm.destroy_user_slot(kUserPml4Index));
+    ASSERT_TRUE(frames.free(root));
+    EXPECT_EQ(baseline, frames.free_page_count());
+    ASSERT_TRUE(frames.free(backing));
+    EXPECT_EQ(baseline + 1, frames.free_page_count());
 }

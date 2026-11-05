@@ -10,6 +10,20 @@ if(NOT DEFINED CPIO_EXECUTABLE)
   message(FATAL_ERROR "CPIO_EXECUTABLE must be set")
 endif()
 
+# Keep full ELF artifacts for debugging, but omit symbol tables from the fixed
+# BIOS initrd slot. Allocated interface metadata and section headers survive.
+if(NOT DEFINED STRIP_EXECUTABLE)
+  message(FATAL_ERROR "STRIP_EXECUTABLE must be set")
+endif()
+file(GLOB initrd_programs "${STAGE_DIR}/bin/*")
+foreach(program IN LISTS initrd_programs)
+  execute_process(COMMAND "${STRIP_EXECUTABLE}" --strip-all "${program}"
+    RESULT_VARIABLE strip_result)
+  if(NOT strip_result EQUAL 0)
+    message(FATAL_ERROR "Failed to strip initrd program ${program}")
+  endif()
+endforeach()
+
 execute_process(
   COMMAND /bin/sh -c "find . -print | \"${CPIO_EXECUTABLE}\" -o -H newc > \"${OUTPUT_FILE}\""
   WORKING_DIRECTORY "${STAGE_DIR}"

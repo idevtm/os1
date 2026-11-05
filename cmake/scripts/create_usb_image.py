@@ -3,7 +3,7 @@
 
 Do not use this fresh-filesystem path for the ASUS G74SX: the round-7 rebuild
 was absent from its firmware menu. Use the g74sx CMake preset and pinned-image
-updater instead; see doc/2026-11-02-g74sx-bringup-debug-plan.md.
+updater instead; see docs/archive/boot/2026-11-02-g74sx-bringup-debug-plan.md.
 
 Layout:
   LBA 0            MBR from the BIOS raw image (boot code + active legacy partition)

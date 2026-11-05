@@ -7,7 +7,7 @@ Usage:
     python3 -I tools/bootlog_extract.py stick.img --out-dir logs/    # write logs to files
 
 The layout constants mirror CMakeLists.txt (OS1_BOOTLOG_*) and the formats in
-src/boot/bios/bootlog16.asm; see doc/2026-11-02-real-hardware-bootlog.md.
+src/boot/bios/bootlog16.asm; see docs/hardware/boot-log.md.
 """
 
 import argparse

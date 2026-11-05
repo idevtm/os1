@@ -24,7 +24,7 @@ option(OS1_QEMU_DEBUGCON "Mirror kernel output to QEMU port 0xE9 for no-UART tes
 set(OS1_USB_BASE_IMAGE "" CACHE FILEPATH "Verified base image for kernel-only USB updates")
 # Reject stale profile caches rather than silently switching their image recipe.
 if(DEFINED OS1_USB_PROFILE OR DEFINED OS1_G74SX_BASE_IMAGE)
-  message(FATAL_ERROR "USB profiles were replaced by the os1_usb_kernel_update target. Remove OS1_USB_PROFILE and OS1_G74SX_BASE_IMAGE from the cache (cmake -UOS1_USB_PROFILE -UOS1_G74SX_BASE_IMAGE ...), set OS1_USB_BASE_IMAGE, and build os1_usb_kernel_update. See doc/2026-11-02-real-hardware-bootlog.md.")
+  message(FATAL_ERROR "USB profiles were replaced by the os1_usb_kernel_update target. Remove OS1_USB_PROFILE and OS1_G74SX_BASE_IMAGE from the cache (cmake -UOS1_USB_PROFILE -UOS1_G74SX_BASE_IMAGE ...), set OS1_USB_BASE_IMAGE, and build os1_usb_kernel_update. See docs/hardware/boot-log.md.")
 endif()
 set(OS1_BOOT_DIAGNOSTICS_ENABLED 0)
 if(OS1_BOOT_DIAGNOSTICS)
@@ -170,7 +170,9 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-set(OS1_INITRD_LOAD_ADDRESS 0x90000)
+# Share the existing low-memory staging span: 356 KiB kernel, 196 KiB initrd.
+# Keep the firmware ceiling and all file/overlap checks unchanged.
+set(OS1_INITRD_LOAD_ADDRESS 0x69000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -193,11 +195,17 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 128)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 392)
+# Keep the enlarged initrd below conventional-memory firmware/video space.
+set(OS1_INITRD_LOAD_LIMIT 0x9A000)
+math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
+if(OS1_INITRD_LOAD_END GREATER OS1_INITRD_LOAD_LIMIT)
+  message(FATAL_ERROR "BIOS initrd exceeds its low-memory load window")
+endif()
 # Real-hardware boot log area on the BIOS raw image. The loader saves the
 # previous boot's RAM log here before booting again. Everything stays below LBA
 # 2880 so the area remains reachable even when firmware emulates a USB stick as
-# a 1.44 MB floppy. See doc/2026-11-02-real-hardware-bootlog.md.
+# a 1.44 MB floppy. See docs/hardware/boot-log.md.
 set(OS1_BOOTLOG_JOURNAL_LBA 1280)
 set(OS1_BOOTLOG_SLOT_BASE_LBA 1288)
 set(OS1_BOOTLOG_SLOT_SECTORS 392)
@@ -576,6 +584,14 @@ add_custom_command(
 )
 add_custom_target(os1_usb_image ALL DEPENDS "${OS1_USB_IMAGE}")
 
+# os1.sh handles this menu action so CMake never launches an elevated build.
+add_custom_target(usb
+  COMMAND "${CMAKE_COMMAND}" -E echo "Use ./os1.sh usb for interactive image build and USB writing."
+  VERBATIM)
+os1_register_menu_target(usb
+  "Build and write USB stick"
+  "Choose preserved UEFI or fresh hybrid layout, select a USB disk, verify and eject. macOS only.")
+
 function(os1_add_unavailable_target target_name reason)
   add_custom_target(
     "${target_name}"
@@ -591,7 +607,7 @@ endfunction()
 set(OS1_USB_KERNEL_UPDATE_IMAGE "${OS1_ARTIFACT_DIR}/os1-usb-kernel-update.img")
 if(NOT OS1_USB_BASE_IMAGE OR NOT EXISTS "${OS1_USB_BASE_IMAGE}" OR IS_DIRECTORY "${OS1_USB_BASE_IMAGE}")
   os1_add_unavailable_target(os1_usb_kernel_update
-    "os1_usb_kernel_update requires OS1_USB_BASE_IMAGE pointing to the verified base image. No fresh-image fallback. See doc/2026-11-02-real-hardware-bootlog.md.")
+    "os1_usb_kernel_update requires OS1_USB_BASE_IMAGE pointing to the verified base image. No fresh-image fallback. See docs/hardware/boot-log.md.")
 elseif(OS1_QEMU_DEBUGCON OR OS1_BOOT_DIAGNOSTICS)
   os1_add_unavailable_target(os1_usb_kernel_update
     "os1_usb_kernel_update requires OS1_QEMU_DEBUGCON=OFF and OS1_BOOT_DIAGNOSTICS=OFF to retain the qualified normal-kernel configuration.")
@@ -613,9 +629,7 @@ else()
   )
   add_custom_target(os1_usb_kernel_update DEPENDS "${OS1_USB_KERNEL_UPDATE_IMAGE}")
 endif()
-os1_register_menu_target(os1_usb_kernel_update
-  "Update USB kernel in verified base image"
-  "Preserve all other bytes; requires OS1_USB_BASE_IMAGE. Produces os1-usb-kernel-update.img.")
+# Keep the kernel-only target available for scripted use; interactive USB work uses usb.
 
 if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(
@@ -789,6 +803,10 @@ os1_register_menu_target(
 
 include(CTest)
 if(BUILD_TESTING)
+  add_test(NAME os1_usb_menu_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_usb_menu.py")
+  add_test(NAME os1_smoke_settle_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_smoke_settle.py")
   add_test(NAME os1_smoke_monitor_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
       -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_smoke_monitor.py
@@ -812,9 +830,18 @@ set(OS1_SMOKE_SEND_DELAY_SECONDS 0.2)
 set(OS1_SMOKE_REJECT_MARKERS
   "#GP general protection"
   "#UD invalid opcode"
+  "[user/buffercheck] fail"
   "[user/balancecheck] fail"
   "[user/smpcheck] fail"
   "[user/acpiprobe] fail"
+  "[user/fdcheck] fail"
+  "[user/vfscheck] fail"
+  "[user/ipccheck] fail"
+  "[user/countercheck] fail"
+  "[user/activationcheck] fail"
+  "[user/paramcheck] fail"
+  "intf: invalid"
+  "[user/copycheck] fail"
 )
 
 # The shell prompt does not terminate with a newline, so the line-buffered
@@ -845,6 +872,25 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "shell spawn yield ok pid=::fault\\n"
   "shell spawn fault ok pid=::nope\\n"
   "unknown command: nope::copycheck\\n"
+  "shell spawn copycheck ok pid=::fdcheck\\n"
+  "shell spawn fdcheck ok pid=::ls /bin\\n"
+  "shell spawn ls ok pid=::cat /etc/motd\\n"
+  "shell spawn cat ok pid=::vfscheck\\n"
+  "shell spawn vfscheck ok pid=::ipccheck\\n"
+  "shell spawn ipccheck ok pid=::buffercheck\\n"
+  "shell spawn buffercheck ok pid=::intf /bin/textprocessor\\n"
+  "shell spawn intf ok pid=::countercheck\\n"
+  "shell spawn countercheck ok pid=::activationcheck\\n"
+  "shell spawn activationcheck ok pid=::counter --initial 10 --ceiling 100\\n"
+  "shell spawn counter ok pid=::intf /bin/counter\\n"
+  "initial: u64 offset=0 default=0 cli=--initial::paramdemo initial:4 source.text:'Hi there' options.suffix:null\\n"
+  "parameter constructor count=12 text=Hi there::call paramdemo render mode.thorough source.text:\"hello world\" options:{limit:5,suffix:null}\\n"
+  "parameter method count=5 text=HELLO::call paramdemo render source.text:'a\"b' options.suffix:null\\n"
+  "parameter method count=3 text=a\"b::call paramdemo render label:null source.none\\n"
+  "parameter method count=1 text=!::paramdemo mode:bogus\\n"
+  "unknown enum name::call paramdemo render source.bogus\\n"
+  "unknown field, enumerator or case::paramcheck\\n"
+  "shell spawn paramcheck ok pid=::intf /bin/paramdemo\\n"
 )
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
@@ -1036,7 +1082,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "kmem cache kmalloc-16 obj=16"
     "kmem complete"
     "[user/acpiprobe] route ok"
-    "[user/acpiprobe] power "
+    "[user/acpiprobe] passive snapshot power control disabled"
     "[user/smpcheck] observed pids "
     "event type seq tick cpu pid tid flags arg0 arg1 arg2 arg3"
     "event net-rx seq="
@@ -1140,6 +1186,51 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "unknown command: nope"
     "[user/copycheck] ok"
     "shell spawn copycheck ok pid="
+    "[user/fdcheck] duplicate output"
+    "[user/fdcheck] ok"
+    "shell spawn fdcheck ok pid="
+    "shell spawn ls ok pid="
+    "os1: native initrd file reads work."
+    "shell spawn cat ok pid="
+    "[user/vfscheck] restricted child ok"
+    "[user/vfscheck] ok"
+    "shell spawn vfscheck ok pid="
+    "[user/buffercheck] clock hpet resolution_ns="
+    "[user/buffercheck] timing bytes=65536 repeats=8 sample=2"
+    "[user/buffercheck] sync same identity restored address ok"
+    "[user/buffercheck] async distinct output one claim ok"
+    "[user/buffercheck] revoked read write and execute faults recovered"
+    "[user/buffercheck] timeout aliases provider failure recovery ok"
+    "[user/buffercheck] ok"
+    "shell spawn buffercheck ok pid="
+    "[user/ipccheck] kernel console two clients ok"
+    "[user/ipccheck] ok"
+    "shell spawn ipccheck ok pid="
+    "interface TextProcessor id="
+    "method lowercase id=1 input=2 output=2 implemented"
+    "property set enabled id=4 input=3 output=3 implemented"
+    "event progress id=6 input=4 output=0 implemented"
+    "shell spawn intf ok pid="
+    "[user/countercheck] second client ok"
+    "[user/countercheck] ok"
+    "[user/activationcheck] second client ok"
+    "[user/activationcheck] ok"
+    "counter initial=10 ceiling=100"
+    "event changed id=5 input=2 output=0 implemented"
+    "initial: u64 offset=0 default=0 cli=--initial"
+    "parameter constructor count=12 text=Hi there"
+    "parameter method count=5 text=HELLO"
+    "parameter method count=3 text=a\"b"
+    "parameter method count=1 text=!"
+    "parameter error code="
+    "unknown enum name"
+    "unknown field, enumerator or case"
+    "[user/paramcheck] malformed enum variant optional wire rejected"
+    "[user/paramcheck] ok"
+    "constructor input=Parameters"
+    "method render input=Parameters"
+    "A file path is data; parsing it does not open a file."
+    "field suffix id=5: OptionalText default=\"!\" nullable"
     "idle thread online"
   )
 
@@ -1340,7 +1431,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "kmem cache kmalloc-16 obj=16"
     "kmem complete"
     "[user/acpiprobe] route ok"
-    "[user/acpiprobe] power "
+    "[user/acpiprobe] passive snapshot power control disabled"
     "[user/smpcheck] observed pids "
     "event type seq tick cpu pid tid flags arg0 arg1 arg2 arg3"
     "event net-rx seq="
@@ -1439,6 +1530,50 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "unknown command: nope"
     "[user/copycheck] ok"
     "shell spawn copycheck ok pid="
+    "[user/fdcheck] duplicate output"
+    "[user/fdcheck] ok"
+    "shell spawn fdcheck ok pid="
+    "shell spawn ls ok pid="
+    "os1: native initrd file reads work."
+    "shell spawn cat ok pid="
+    "[user/vfscheck] restricted child ok"
+    "[user/vfscheck] ok"
+    "shell spawn vfscheck ok pid="
+    "[user/buffercheck] timing unavailable high-resolution clock"
+    "[user/buffercheck] sync same identity restored address ok"
+    "[user/buffercheck] async distinct output one claim ok"
+    "[user/buffercheck] revoked read write and execute faults recovered"
+    "[user/buffercheck] timeout aliases provider failure recovery ok"
+    "[user/buffercheck] ok"
+    "shell spawn buffercheck ok pid="
+    "[user/ipccheck] kernel console two clients ok"
+    "[user/ipccheck] ok"
+    "shell spawn ipccheck ok pid="
+    "interface TextProcessor id="
+    "method lowercase id=1 input=2 output=2 implemented"
+    "property set enabled id=4 input=3 output=3 implemented"
+    "event progress id=6 input=4 output=0 implemented"
+    "shell spawn intf ok pid="
+    "[user/countercheck] second client ok"
+    "[user/countercheck] ok"
+    "[user/activationcheck] second client ok"
+    "[user/activationcheck] ok"
+    "counter initial=10 ceiling=100"
+    "event changed id=5 input=2 output=0 implemented"
+    "initial: u64 offset=0 default=0 cli=--initial"
+    "parameter constructor count=12 text=Hi there"
+    "parameter method count=5 text=HELLO"
+    "parameter method count=3 text=a\"b"
+    "parameter method count=1 text=!"
+    "parameter error code="
+    "unknown enum name"
+    "unknown field, enumerator or case"
+    "[user/paramcheck] malformed enum variant optional wire rejected"
+    "[user/paramcheck] ok"
+    "constructor input=Parameters"
+    "method render input=Parameters"
+    "A file path is data; parsing it does not open a file."
+    "field suffix id=5: OptionalText default=\"!\" nullable"
     "idle thread online"
   )
 

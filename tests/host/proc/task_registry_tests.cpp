@@ -2,10 +2,12 @@
 
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
+#include "core/kernel_state.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "mm/virtual_memory.hpp"
 #include "proc/thread.hpp"
+#include "sched/scheduler.hpp"
 #include "support/lapic_stub.hpp"
 #include "support/physical_memory.hpp"
 #include "syscall/wait.hpp"
@@ -293,6 +295,54 @@ TEST(TaskRegistry, ReaperSkipsDyingThreadStillCurrentOnAnotherCpu)
     parent->state = ProcessState::Dying;
     reap_dead_threads(frames);
     EXPECT_EQ(nullptr, first_process());
+}
+
+TEST(TaskRegistry, WaitpidWakeDuringScheduleKeepsCurrentParentRunnable)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    page_frames = initialized_frames();
+    kmem_init(page_frames);
+    ASSERT_TRUE(init_tasks(page_frames));
+
+    Process* kernel_process = create_kernel_process(0);
+    ASSERT_NE(nullptr, kernel_process);
+    Thread* idle = create_kernel_thread(kernel_process, noop_thread_entry, page_frames);
+    ASSERT_NE(nullptr, idle);
+    Process* parent = create_user_process("parent", 0);
+    ASSERT_NE(nullptr, parent);
+    Process* child = create_user_process("child", 0);
+    ASSERT_NE(nullptr, child);
+    child->parent = parent;
+    const uint64_t child_pid = child->pid;
+    Thread* parent_thread = create_user_thread(parent, 0x1000, 0x2000, page_frames, false);
+    ASSERT_NE(nullptr, parent_thread);
+    Thread* child_thread = create_user_thread(child, 0x1000, 0x3000, page_frames, false);
+    ASSERT_NE(nullptr, child_thread);
+
+    set_current_thread(child_thread);
+    mark_current_thread_dying(7);
+    set_current_thread(parent_thread);
+    long result = -1;
+    ASSERT_FALSE(try_complete_or_block_wait_pid(page_frames, parent_thread, child_pid, 0, result));
+    ASSERT_EQ(ThreadState::Blocked, parent_thread->state);
+    ASSERT_EQ(1u, wait_queue_count(parent->child_exit_waiters));
+
+    // Scheduling reaps the child and wakes the parent before the CPU handoff.
+    Thread* selected = schedule_next(false);
+    EXPECT_EQ(parent_thread, selected);
+    EXPECT_EQ(child_pid, parent_thread->frame.rax);
+    EXPECT_EQ(ThreadWaitReason::None, parent_thread->wait.reason);
+    EXPECT_EQ(0u, wait_queue_count(parent->child_exit_waiters));
+    EXPECT_EQ(ThreadState::Running, parent_thread->state);
+
+    set_current_thread(nullptr);
+    parent_thread->state = ThreadState::Dying;
+    parent->state = ProcessState::Dying;
+    idle->state = ThreadState::Dying;
+    reap_dead_threads(page_frames);
+    EXPECT_EQ(nullptr, first_thread());
+    EXPECT_EQ(nullptr, first_process());
+    page_frames = {};
 }
 
 TEST(TaskRegistry, ReapingUserProcessTriggersTlbShootdown)

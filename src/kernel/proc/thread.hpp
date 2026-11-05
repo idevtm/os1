@@ -3,6 +3,7 @@
 // state, and the assembly-visible offsets used by context-switch code.
 #pragma once
 
+#include <os1/ipc.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -36,10 +37,29 @@ enum class ThreadWaitReason : uint32_t
     ConsoleRead = 1,
     ChildExit = 2,
     BlockIo = 3,
+    VfsIo = 4,
+    Ipc = 5,
+};
+
+struct IpcWaitState
+{
+    OpenInstance* instances[OS1_IPC_WAIT_LIMIT]{};
+    uint32_t count = 0;
+    uint64_t deadline_ns = UINT64_MAX;
+    long result = 0;
+};
+
+struct VfsIoWaitState
+{
+    OpenInstance* instance = nullptr;
+    uint64_t buffer = 0, length = 0, required = 0;
+    int64_t offset = 0;
+    uint32_t operation = 0, origin = 0;
 };
 
 struct ConsoleReadWaitState
 {
+    OpenInstance* instance = nullptr;
     uint64_t user_buffer = 0;
     uint64_t length = 0;
 };
@@ -62,6 +82,8 @@ struct ThreadWaitState
     union
     {
         ConsoleReadWaitState console_read;
+        VfsIoWaitState vfs;
+        IpcWaitState ipc;
         ChildExitWaitState child_exit;
         BlockIoWaitState block_io;
     };
@@ -84,6 +106,9 @@ struct Thread
     ThreadWaitState wait{};
     Thread* registry_next = nullptr;
     Thread* wait_link = nullptr;
+    volatile uint32_t io_pins = 0;
+    bool console_cancelled = false;
+    volatile bool stop_requested = false;
     cpu* scheduler_cpu = nullptr;
     cpu* run_queue_cpu = nullptr;
     uint64_t affinity_mask = ~0ull;
@@ -130,8 +155,6 @@ void relink_runnable_threads();
 void set_current_thread(Thread* thread);
 // Mark a thread ready and update its owning process state if needed.
 void mark_thread_ready(Thread* thread, cpu* target = nullptr);
-// Block the current thread until console input can complete a read.
-void block_current_thread_on_console_read(uint64_t user_buffer, uint64_t length);
 // Block the current thread until a block-I/O completion flag is signaled.
 void block_current_thread_on_block_io(Completion* completion);
 // clear a thread's wait metadata after the wait has completed.

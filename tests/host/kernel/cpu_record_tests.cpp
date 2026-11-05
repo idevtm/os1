@@ -4,13 +4,14 @@
 #undef assert
 #endif
 
+#include <array>
+
 #include "arch/x86_64/cpu/cpu.hpp"
+#include "arch/x86_64/cpu/exception_stack.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "proc/thread.hpp"
 #include "support/physical_memory.hpp"
-
-#include <array>
 
 #ifdef static_assert
 #undef static_assert
@@ -134,4 +135,31 @@ TEST(CpuRecord, BspSchedulerIgnoresIdleThreadsOwnedByOtherCpus)
 
     EXPECT_EQ(worker, next_runnable_thread(nullptr));
     EXPECT_EQ(2u, runnable_thread_count());
+}
+
+TEST(CpuRecord, ExceptionStackExhaustionRejectsBspAndAp)
+{
+    PageFrameContainer exhausted;
+    cpu bsp{}, ap{};
+    EXPECT_FALSE(cpu_prepare_exception_stack(bsp, exhausted));
+    EXPECT_FALSE(cpu_prepare_exception_stack(ap, exhausted));
+    EXPECT_EQ(0u, bsp.tss.ist1);
+    EXPECT_EQ(0u, ap.tss.ist1);
+    EXPECT_EQ(0, ap.booted);
+}
+
+TEST(CpuRecord, ExceptionStacksAreDistinctAndRepeatedPreparationDoesNotAllocate)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = initialized_frames();
+    cpu bsp{}, ap{};
+    const auto before = frames.free_page_count();
+    ASSERT_TRUE(cpu_prepare_exception_stack(bsp, frames));
+    ASSERT_TRUE(cpu_prepare_exception_stack(ap, frames));
+    EXPECT_NE(0u, bsp.tss.ist1);
+    EXPECT_NE(bsp.tss.ist1, ap.tss.ist1);
+    EXPECT_EQ(before - 2, frames.free_page_count());
+    PageFrameContainer exhausted;
+    EXPECT_TRUE(cpu_prepare_exception_stack(bsp, exhausted));
+    EXPECT_EQ(before - 2, frames.free_page_count());
 }

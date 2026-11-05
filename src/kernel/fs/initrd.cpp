@@ -3,6 +3,7 @@
 #include "fs/initrd.hpp"
 
 #include "handoff/memory_layout.h"
+#include "vfs/initrd.hpp"
 
 namespace
 {
@@ -69,3 +70,30 @@ void copy_initrd_path(char* destination, size_t destination_size, const char* ar
 
     copy_cpio_newc_path(destination, destination_size, archive_name);
 }
+
+namespace
+{
+NativeObject* g_initrd_root = nullptr;
+}
+long initialize_initrd_namespace()
+{
+    if(g_initrd_root)
+        return OS1_ERR_INVALID;
+    if(!g_boot_info || !g_boot_info->module_count)
+        return OS1_ERR_BAD_IMAGE;
+    const auto& module = g_boot_info->modules[0];
+    return vfs_import_initrd(kernel_physical_pointer<const uint8_t>(module.physical_start),
+                             module.length,
+                             g_initrd_root);
+}
+NativeObject* initrd_namespace_root()
+{
+    return g_initrd_root;
+}
+#if defined(OS1_HOST_TEST)
+void reset_initrd_namespace_for_test()
+{
+    object_release(g_initrd_root);
+    g_initrd_root = nullptr;
+}
+#endif

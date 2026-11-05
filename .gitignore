@@ -3,3 +3,4 @@
 /.act-cache
 /.claude
 /local-evidence/
+/.agent-state/

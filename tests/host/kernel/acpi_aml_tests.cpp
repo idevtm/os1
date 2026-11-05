@@ -1,21 +1,26 @@
-#include "drivers/bus/device.hpp"
-#include "drivers/bus/driver_registry.hpp"
-#include "handoff/boot_info.hpp"
-#include "handoff/memory_layout.h"
-#include "mm/kmem.hpp"
-#include "mm/virtual_memory.hpp"
-#include "platform/acpi_aml.hpp"
-#include "platform/acpica_integration.hpp"
-#include "platform/platform.hpp"
-#include "platform/state.hpp"
-#include "support/physical_memory.hpp"
-
 #include <gtest/gtest.h>
+#include <os1/observe.h>
 
 #include <array>
 #include <cstring>
 #include <string_view>
 #include <vector>
+
+#include "arch/x86_64/cpu/cpu.hpp"
+#include "drivers/bus/device.hpp"
+#include "drivers/bus/driver_registry.hpp"
+#include "handoff/boot_info.hpp"
+#include "handoff/memory_layout.h"
+#include "mm/kmem.hpp"
+#include "mm/user_copy.hpp"
+#include "mm/virtual_memory.hpp"
+#include "platform/acpi_aml.hpp"
+#include "platform/acpica_integration.hpp"
+#include "platform/platform.hpp"
+#include "platform/state.hpp"
+#include "proc/thread.hpp"
+#include "support/physical_memory.hpp"
+#include "syscall/observe.hpp"
 
 namespace
 {
@@ -938,4 +943,191 @@ TEST_F(AcpiAml, RunsDeviceIniBeforeSelectedMethodEvaluation)
     const AcpiDeviceInfo* device = find_device(devices, device_count, "\\_SB_.DEV0");
     ASSERT_NE(nullptr, device);
     EXPECT_EQ(0x0Fu, device->status);
+}
+namespace
+{
+class AcpiObservation : public ::testing::Test
+{
+protected:
+    os1::host_test::PhysicalMemoryArena arena{32ull * 1024 * 1024};
+    PageFrameContainer frames;
+    Thread* thread = nullptr;
+    static constexpr uint64_t buffer = kUserImageBase;
+    static constexpr size_t bytes = sizeof(Os1ObserveHeader) + sizeof(Os1ObserveAcpiRecord);
+
+    void SetUp() override
+    {
+        acpica_reset_for_tests();
+        std::array<BootMemoryRegion, 1> regions{{{0, arena.size(), BootMemoryType::Usable, 0}}};
+        ASSERT_TRUE(frames.initialize(regions, 0x300000, kPageFrameBitmapQwordLimit));
+        kmem_init(frames);
+        platform_reset_state();
+        ASSERT_TRUE(init_tasks(frames));
+        std::array<AcpiDefinitionBlock, kPlatformMaxAcpiDefinitionBlocks> blocks{};
+        size_t block_count = 0;
+        build_aml_tables(arena, blocks, block_count);
+        build_acpica_firmware_tables(arena, true);
+        VirtualMemory vm(frames);
+        ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info()));
+        ASSERT_TRUE(acpi_namespace_load(vm, blocks.data(), block_count));
+        g_platform.acpi_devices =
+            static_cast<AcpiDeviceInfo*>(kcalloc(kAcpiMaxDevices, sizeof(AcpiDeviceInfo)));
+        ASSERT_NE(nullptr, g_platform.acpi_devices);
+        g_platform.acpi_device_capacity = kAcpiMaxDevices;
+        ASSERT_TRUE(acpi_build_device_info(g_platform.acpi_devices,
+                                           g_platform.acpi_device_count,
+                                           g_platform.acpi_pci_routes,
+                                           g_platform.acpi_pci_route_count));
+        g_platform.device_count = 1;
+        g_platform.devices[0].slot = 1;
+        g_platform.devices[0].interrupt_pin = 1;
+        ASSERT_TRUE(vm.allocate_and_map(buffer, 1, PageFlags::User | PageFlags::Write));
+        Process* process = create_user_process("acpi-observe", vm.root());
+        ASSERT_NE(nullptr, process);
+        thread = create_user_thread(process, buffer, buffer + 4096, frames, false);
+        ASSERT_NE(nullptr, thread);
+        set_current_thread(thread);
+    }
+
+    void TearDown() override
+    {
+        set_current_thread(nullptr);
+        platform_reset_state();
+        acpica_reset_for_tests();
+    }
+
+    long observe(uint64_t address = buffer, size_t length = bytes)
+    {
+        return sys_observe(ObserveContext{.frames = &frames}, OS1_OBSERVE_ACPI, address, length);
+    }
+
+    Os1ObserveAcpiRecord snapshot()
+    {
+        Os1ObserveAcpiRecord record{};
+        EXPECT_TRUE(copy_from_user(
+            frames, thread, buffer + sizeof(Os1ObserveHeader), &record, sizeof(record)));
+        return record;
+    }
+
+    void expect_unchanged_power()
+    {
+        uint64_t value = 99;
+        ASSERT_TRUE(acpi_read_named_integer("\\_SB_.PCI0.DEV0.PWST", value));
+        EXPECT_EQ(0u, value);
+        ASSERT_TRUE(acpi_read_named_integer("\\_SB_.PCI0.DEV1.PWST", value));
+        EXPECT_EQ(0u, value);
+    }
+};
+}  // namespace
+
+TEST_F(AcpiObservation, BoundDeviceSnapshotsNeverInvokePowerMethods)
+{
+    ASSERT_TRUE(device_binding_publish(DeviceId{DeviceBus::Pci, 0}, 0, "active-device", nullptr));
+    for(unsigned i = 0; i < 3; ++i)
+    {
+        ASSERT_EQ(static_cast<long>(bytes), observe());
+        auto record = snapshot();
+        EXPECT_EQ(1u, record.route_probe_count);
+        EXPECT_EQ(1u, record.route_success_count);
+        EXPECT_EQ(10u, record.route_irq);
+        EXPECT_EQ(0u, record.power_probe_count);
+        EXPECT_EQ(0u, record.power_success_count);
+        expect_unchanged_power();
+    }
+}
+
+TEST_F(AcpiObservation, UnboundDevicesNeverTriggerFallbackPowerMethods)
+{
+    ASSERT_EQ(static_cast<long>(bytes), observe());
+    EXPECT_EQ(0u, snapshot().power_success_count);
+    expect_unchanged_power();
+}
+
+TEST_F(AcpiObservation, CacheMissDoesNotUseLiveFirmwareResolver)
+{
+    g_platform.acpi_pci_route_count = 0;
+    ASSERT_EQ(static_cast<long>(bytes), observe());
+    const auto record = snapshot();
+    EXPECT_EQ(1u, record.route_probe_count);
+    EXPECT_EQ(0u, record.route_success_count);
+    EXPECT_EQ(0u, record.route_irq);
+    expect_unchanged_power();
+}
+
+TEST_F(AcpiObservation, InvalidBuffersCannotInvokePowerMethods)
+{
+    EXPECT_EQ(-1, observe(0));
+    EXPECT_EQ(-1, observe(buffer, bytes - 1));
+    EXPECT_EQ(-1, observe(buffer + 4096));
+    // The header fits, but copying the record crosses into an unmapped page.
+    EXPECT_EQ(-1, observe(buffer + 4096 - sizeof(Os1ObserveHeader)));
+    expect_unchanged_power();
+}
+
+TEST_F(AcpiObservation, EmptyInventoryIsAValidZeroedSnapshot)
+{
+    g_platform.device_count = 0;
+    ASSERT_EQ(static_cast<long>(bytes), observe());
+    Os1ObserveHeader header{};
+    ASSERT_TRUE(copy_from_user(frames, thread, buffer, &header, sizeof(header)));
+    EXPECT_EQ(OS1_OBSERVE_ABI_VERSION, header.abi_version);
+    EXPECT_EQ(OS1_OBSERVE_ACPI, header.kind);
+    EXPECT_EQ(sizeof(Os1ObserveAcpiRecord), header.record_size);
+    EXPECT_EQ(1u, header.record_count);
+    const auto record = snapshot();
+    const Os1ObserveAcpiRecord empty{};
+    EXPECT_EQ(0, std::memcmp(&empty, &record, sizeof(record)));
+    expect_unchanged_power();
+}
+
+TEST_F(AcpiObservation, CachedRoutesMatchBusSlotPinAndFunction)
+{
+    ASSERT_GE(g_platform.acpi_pci_route_count, 1u);
+    auto& route = g_platform.acpi_pci_routes[0];
+    EXPECT_EQ(&route, platform_cached_acpi_pci_route(0, 1, 0, 0));
+    EXPECT_EQ(&route, platform_cached_acpi_pci_route(0, 1, 7, 0));
+    EXPECT_EQ(nullptr, platform_cached_acpi_pci_route(1, 1, 0, 0));
+    EXPECT_EQ(nullptr, platform_cached_acpi_pci_route(0, 3, 0, 0));
+    EXPECT_EQ(nullptr, platform_cached_acpi_pci_route(0, 1, 0, 1));
+    route.function = 2;
+    EXPECT_EQ(nullptr, platform_cached_acpi_pci_route(0, 1, 0, 0));
+    EXPECT_EQ(&route, platform_cached_acpi_pci_route(0, 1, 2, 0));
+    route.active = false;
+    EXPECT_EQ(nullptr, platform_cached_acpi_pci_route(0, 1, 2, 0));
+    expect_unchanged_power();
+}
+
+TEST_F(AcpiObservation, BootCachesEnumeratedRoutesOnceWithoutPowerChanges)
+{
+    g_platform.acpi_pci_route_count = 0;
+    platform_cache_enumerated_pci_routes();
+    ASSERT_EQ(1u, g_platform.acpi_pci_route_count);
+    EXPECT_EQ(10u, g_platform.acpi_pci_routes[0].irq);
+    platform_cache_enumerated_pci_routes();
+    EXPECT_EQ(1u, g_platform.acpi_pci_route_count);
+    ASSERT_EQ(static_cast<long>(bytes), observe());
+    EXPECT_EQ(1u, snapshot().route_success_count);
+    expect_unchanged_power();
+}
+
+TEST_F(AcpiObservation, BootCacheBoundsAndMissingRoutesRemainPassiveAtObservation)
+{
+    g_platform.acpi_pci_route_count = 0;
+    g_platform.devices[0].interrupt_pin = 0;
+    platform_cache_enumerated_pci_routes();
+    EXPECT_EQ(0u, g_platform.acpi_pci_route_count);
+    g_platform.devices[0].interrupt_pin = 5;
+    platform_cache_enumerated_pci_routes();
+    EXPECT_EQ(0u, g_platform.acpi_pci_route_count);
+    g_platform.devices[0].interrupt_pin = 4;
+    platform_cache_enumerated_pci_routes();
+    EXPECT_EQ(0u, g_platform.acpi_pci_route_count);
+    // A full cache cannot overwrite any route, even when the device lacks a match.
+    g_platform.devices[0].interrupt_pin = 1;
+    g_platform.acpi_pci_route_count = kAcpiMaxPciRoutes;
+    g_platform.acpi_pci_routes[kAcpiMaxPciRoutes - 1].irq = 123;
+    platform_cache_enumerated_pci_routes();
+    EXPECT_EQ(kAcpiMaxPciRoutes, g_platform.acpi_pci_route_count);
+    EXPECT_EQ(123u, g_platform.acpi_pci_routes[kAcpiMaxPciRoutes - 1].irq);
+    expect_unchanged_power();
 }

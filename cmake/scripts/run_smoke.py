@@ -193,6 +193,7 @@ def main():
     done = threading.Event()
     deadline = time.monotonic() + args.timeout
     settle_deadline = None
+    reader_finished_at = None
 
     with open(args.log, "w", encoding="utf-8", errors="replace") as log_file:
         proc = subprocess.Popen(
@@ -209,7 +210,7 @@ def main():
         )
 
         def reader():
-            nonlocal match_buffer
+            nonlocal match_buffer, reader_finished_at
             try:
                 assert proc.stdout is not None
                 for line in proc.stdout:
@@ -278,6 +279,7 @@ def main():
                         done.set()
                         return
             finally:
+                reader_finished_at = time.monotonic()
                 done.set()
 
         nonlocal_rejected = [None]
@@ -293,6 +295,13 @@ def main():
                 break
             done.wait(timeout=min(0.2, remaining))
 
+        # Capture evidence before our own termination closes the output pipe.
+        observation_end = reader_finished_at if reader_finished_at is not None else time.monotonic()
+        settle_completed = (
+            settle_deadline_ref[0] is not None
+            and observation_end >= settle_deadline_ref[0]
+            and (reader_finished_at is not None or proc.poll() is None)
+        )
         terminate(proc)
         # Best-effort: also kill anything left in the child's process group.
         try:
@@ -306,8 +315,6 @@ def main():
     monitor_error = nonlocal_monitor_error[0]
     settle_deadline = settle_deadline_ref[0]
     elapsed = args.timeout - max(0.0, deadline - time.monotonic())
-    if settle_deadline is not None and len(seen) == len(markers):
-        elapsed = max(elapsed, settle_deadline - (deadline - args.timeout))
     missing = [marker for marker in markers if marker not in seen]
 
     if rejected is not None:
@@ -340,6 +347,11 @@ def main():
         if not output_lines or not output_lines[-1].endswith("\n"):
             sys.stderr.write("\n")
         sys.stderr.write(f"--- end log ({args.log}) ---\n")
+        sys.exit(1)
+
+    if args.settle_after_markers > 0 and not settle_completed:
+        sys.stderr.write("Smoke run ended before the required settle interval completed.\n")
+        sys.stderr.writelines(output_lines)
         sys.exit(1)
 
     if settle_deadline is not None:

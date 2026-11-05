@@ -1,6 +1,6 @@
 #include <os1/syscall.hpp>
 
-int main(void)
+int main(int, char**)
 {
     for(unsigned i = 0; i < 16384; ++i)
     {

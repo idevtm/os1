@@ -8,6 +8,7 @@
 
 #include "sync/wait_queue.hpp"
 #include "sync/smp.hpp"
+#include "resource/descriptor.hpp"
 
 class PageFrameContainer;
 
@@ -41,6 +42,9 @@ struct Process
     char name[32]{};
     WaitQueue child_exit_waiters;
     Process* registry_next = nullptr;
+    DescriptorTable descriptors;
+    int root_fd = -1, cwd_fd = -1;
+    bool private_provider = false;
 };
 
 // Initialize the kmem-backed process registry.

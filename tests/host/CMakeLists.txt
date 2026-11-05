@@ -27,15 +27,15 @@ set(OS1_HOST_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 include("${OS1_REPO_ROOT}/cmake/acpica_sources.cmake")
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-set(OS1_INITRD_LOAD_ADDRESS 0x90000)
+set(OS1_INITRD_LOAD_ADDRESS 0x69000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
-set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x180000)
+set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
 set(OS1_KERNEL_SHIM_VIRTUAL_BASE 0xFFFFFFFF90000000)
 set(OS1_DIRECT_MAP_BASE 0xFFFF800000000000)
 math(EXPR OS1_KERNEL_RESERVED_PHYSICAL_BYTES
   "${OS1_KERNEL_RESERVED_PHYSICAL_END} - ${OS1_KERNEL_RESERVED_PHYSICAL_START}")
-set(OS1_KERNEL_POST_IMAGE_RESERVE_BYTES 0x3000)
+set(OS1_KERNEL_POST_IMAGE_RESERVE_BYTES 0x4000)
 
 file(MAKE_DIRECTORY "${OS1_HOST_GENERATED_DIR}")
 configure_file(
@@ -81,8 +81,22 @@ set_target_properties(
 target_compile_options(os1_acpica PRIVATE -O2 -w)
 
 add_library(os1_host_support
+  "${OS1_REPO_ROOT}/src/kernel/buffer/buffer.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/ipc/kernel_provider.cpp"
   support/cpu_stubs.cpp
   support/console_input_stub.cpp
+  "${OS1_REPO_ROOT}/src/kernel/vfs/initrd.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/vfs.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/observe.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/proc/startup.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/console/console_input.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/resource/descriptor.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/resource.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/console_read.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/process.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/proc/user_program.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/fs/initrd.cpp"
   support/debug_stub.cpp
   support/kernel_state_stub.cpp
   support/lapic_stub.cpp
@@ -144,6 +158,8 @@ target_include_directories(os1_host_support SYSTEM PUBLIC
 )
 
 add_executable(os1_host_tests
+  common/interface_tests.cpp
+  common/parameter_runtime_tests.cpp
   common/elf64_tests.cpp
   common/freestanding_string_tests.cpp
   fs/cpio_newc_tests.cpp
@@ -160,6 +176,7 @@ add_executable(os1_host_tests
   kernel/load_balancer_tests.cpp
   kernel/runqueue_tests.cpp
   kernel/timer_source_tests.cpp
+  kernel/measurement_clock_tests.cpp
   kernel/pci_bus_tests.cpp
   kernel/pci_capability_tests.cpp
   kernel/pci_msi_tests.cpp
@@ -171,10 +188,15 @@ add_executable(os1_host_tests
   mm/kmem_tests.cpp
   mm/page_frame_tests.cpp
   mm/dma_tests.cpp
+  mm/tlb_retirement_tests.cpp
+  mm/buffer_tests.cpp
   mm/user_address_tests.cpp
   mm/virtual_memory_tests.cpp
   proc/task_registry_tests.cpp
   proc/user_elf_tests.cpp
+  syscall/ipc_tests.cpp
+  syscall/vfs_tests.cpp
+  syscall/resource_tests.cpp
   syscall/observe_abi_tests.cpp
 )
 target_link_libraries(os1_host_tests PRIVATE os1_host_support os1_acpica GTest::gtest_main)

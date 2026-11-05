@@ -91,7 +91,7 @@ bool observe_acpi_probe(Os1ObserveAcpiRecord& record)
 }
 }  // namespace
 
-int main(void)
+int main(int, char**)
 {
     Os1ObserveAcpiRecord record{};
     if(!observe_acpi_probe(record))
@@ -100,45 +100,27 @@ int main(void)
         return 1;
     }
 
-    if(0u == record.route_success_count)
-    {
-        write_failure("route", record.route_probe_count, record.route_success_count);
-        return 1;
-    }
-
     write_string(kPrefix);
-    write_string("route ok probes=");
+    write_string(record.route_success_count ? "route ok cached probes="
+                                            : "route unavailable cached probes=");
     write_unsigned(record.route_probe_count);
     write_string(" resolved=");
     write_unsigned(record.route_success_count);
-    write_string(" irq=");
-    write_unsigned(record.route_irq);
-    write_string(" gsi=");
-    write_yes_no(0u != record.route_source_is_gsi);
+    if(record.route_success_count)
+    {
+        write_string(" irq=");
+        write_unsigned(record.route_irq);
+        write_string(" gsi=");
+        write_yes_no(0u != record.route_source_is_gsi);
+    }
     write_string("\n");
 
-    if(0u == record.power_success_count)
+    if(record.power_probe_count || record.power_success_count)
     {
-        if(0u == record.power_probe_count)
-        {
-            write_string(kPrefix);
-            write_string("power unavailable probes=");
-            write_unsigned(record.power_probe_count);
-            write_string(" success=");
-            write_unsigned(record.power_success_count);
-            write_string("\n");
-            return 0;
-        }
-
-        write_failure("power", record.power_probe_count, record.power_success_count);
+        write_failure("passive contract", record.power_probe_count, record.power_success_count);
         return 1;
     }
-
     write_string(kPrefix);
-    write_string("power ok probes=");
-    write_unsigned(record.power_probe_count);
-    write_string(" toggled=");
-    write_unsigned(record.power_success_count);
-    write_string("\n");
+    write_string("passive snapshot power control disabled\n");
     return 0;
 }

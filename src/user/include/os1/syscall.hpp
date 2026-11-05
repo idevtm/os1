@@ -7,6 +7,15 @@
 namespace os1::user
 {
 
+inline long close(int fd) { return os1_close(fd); }
+// Native defaults; compatibility callers can explicitly clear CLOEXEC.
+inline long duplicate(int fd, uint32_t rights,
+                      uint32_t flags = OS1_DESCRIPTOR_CLOEXEC, int target = -1)
+{
+    return os1_duplicate(fd, rights, flags, target);
+}
+inline long query(int fd, os1_resource_info* info) { return os1_resource_query(fd, info); }
+
 /// @brief Writes bytes to a user-visible file descriptor.
 inline long write(int fd, const void* buffer, size_t length)
 {

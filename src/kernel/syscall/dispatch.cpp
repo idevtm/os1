@@ -1,18 +1,23 @@
 // Register-level syscall switch extracted from the kernel trap file.
 #include "syscall/dispatch.hpp"
 
+#include <os1/buffer.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "arch/x86_64/cpu/control_regs.hpp"
 #include "console/console.hpp"
 #include "core/kernel_state.hpp"
+#include "proc/startup.hpp"
+#include "ipc/channel.hpp"
 #include "proc/thread.hpp"
 #include "sched/scheduler.hpp"
 #include "syscall/abi.hpp"
 #include "syscall/console_read.hpp"
 #include "syscall/observe.hpp"
 #include "syscall/process.hpp"
+#include "syscall/resource.hpp"
+#include "syscall/vfs.hpp"
 #include "syscall/wait.hpp"
 
 Thread* handle_syscall(TrapFrame* frame)
@@ -23,14 +28,29 @@ Thread* handle_syscall(TrapFrame* frame)
         return nullptr;
     }
 
+    if(ipc_stop_requested(thread))
+    {
+        mark_current_thread_dying(OS1_PROVIDER_STOP_STATUS);
+        return schedule_next(false);
+    }
+    if(thread->process && thread->process->private_provider && frame->rax != os1_sys_ipc &&
+       frame->rax != os1_sys_exit && frame->rax != os1_sys_yield && frame->rax != os1_sys_getpid &&
+       !(frame->rax == os1_sys_resource &&
+         (frame->rsi <= OS1_RESOURCE_SET_STATUS_FLAGS ||
+          (frame->rsi >= OS1_RESOURCE_BUFFER_CREATE && frame->rsi <= OS1_RESOURCE_BUFFER_UNMAP))))
+    {
+        frame->rax = OS1_ERR_ACCESS;
+        return thread;
+    }
+    ipc_drain_wakeups();
     switch(frame->rax)
     {
         case os1_sys_write:
+            if(frame->rdi >= OS1_DESCRIPTOR_LIMIT) { frame->rax = OS1_ERR_BAD_DESCRIPTOR; return thread; }
             frame->rax = (uint64_t)sys_write(
                 ProcessSyscallContext{
                     .frames = &page_frames,
                     .kernel_root_cr3 = g_kernel_root_cr3,
-                    .write_console_bytes = write_console_bytes,
                     .write_cr3 = write_cr3,
                 },
                 (int)frame->rdi,
@@ -38,22 +58,31 @@ Thread* handle_syscall(TrapFrame* frame)
                 (size_t)frame->rdx);
             return thread;
         case os1_sys_read: {
-            long read_result = -1;
-            if((int)frame->rdi != 0)
-            {
-                frame->rax = (uint64_t)-1;
+            long read_result = OS1_ERR_INVALID;
+            if(read_or_block(page_frames, thread, frame->rdi, frame->rsi, frame->rdx, read_result)) {
+                frame->rax = static_cast<uint64_t>(read_result);
                 return thread;
             }
-            if(try_complete_console_read(
-                   page_frames, thread, frame->rsi, (size_t)frame->rdx, read_result))
-            {
-                frame->rax = (uint64_t)read_result;
-                return thread;
-            }
-
-            block_current_thread_on_console_read(frame->rsi, frame->rdx);
             return schedule_next(false);
         }
+        case os1_sys_resource:
+            frame->rax = static_cast<uint64_t>(sys_resource(page_frames, thread,
+                frame->rdi, frame->rsi, frame->rdx));
+            if(static_cast<long>(frame->rax) == kVfsBlocked)
+                return schedule_next(false);
+            return thread;
+        case os1_sys_ipc:
+            frame->rax = static_cast<uint64_t>(sys_ipc(page_frames, thread, frame->rdi, frame->rsi, frame->rdx));
+            if(static_cast<long>(frame->rax) == kIpcBlocked) return schedule_next(false);
+            return thread;
+        case os1_sys_launch:
+            frame->rax = static_cast<uint64_t>(sys_launch({.frames = &page_frames,
+                                                           .kernel_root_cr3 = g_kernel_root_cr3,
+                                                           .write_cr3 = write_cr3},
+                                                          frame->rdi,
+                                                          frame->rsi,
+                                                          frame->rdx));
+            return thread;
         case os1_sys_exit:
             mark_current_thread_dying((int)frame->rdi);
             return schedule_next(false);
@@ -79,7 +108,6 @@ Thread* handle_syscall(TrapFrame* frame)
                 ProcessSyscallContext{
                     .frames = &page_frames,
                     .kernel_root_cr3 = g_kernel_root_cr3,
-                    .write_console_bytes = write_console_bytes,
                     .write_cr3 = write_cr3,
                 },
                 frame->rdi));
@@ -100,7 +128,6 @@ Thread* handle_syscall(TrapFrame* frame)
                 ProcessSyscallContext{
                     .frames = &page_frames,
                     .kernel_root_cr3 = g_kernel_root_cr3,
-                    .write_console_bytes = write_console_bytes,
                     .write_cr3 = write_cr3,
                 },
                 frame->rdi));

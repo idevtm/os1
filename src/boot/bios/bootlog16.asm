@@ -8,7 +8,7 @@
 ; reserved slots on the boot disk, records the outcome in the journal sector,
 ; and re-arms a fresh header for the boot that follows.
 ;
-; On-disk and in-RAM formats are described in doc/2026-11-02-real-hardware-bootlog.md
+; On-disk and in-RAM formats are described in docs/hardware/boot-log.md
 ; and decoded by tools/bootlog_extract.py.
 
 bootlog_journal_buffer		equ load_range_bounce_buffer + 512
