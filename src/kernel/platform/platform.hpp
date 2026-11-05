@@ -58,6 +58,16 @@ size_t platform_acpi_device_count();
 // Return the ACPI device table owned by platform state.
 const AcpiDeviceInfo* platform_acpi_devices();
 
+// Read boot-discovered routes only. A cache miss never evaluates AML.
+const AcpiPciRoute* platform_cached_acpi_pci_route(uint8_t bus,
+                                                   uint8_t slot,
+                                                   uint8_t function,
+                                                   uint8_t pin);
+
+// BSP boot only, after PCI enumeration and before user execution.
+// Resolve missing enumerated-device routes into the bounded observation cache.
+void platform_cache_enumerated_pci_routes();
+
 // Suspend active bound devices in reverse bind order and place ACPI companions in D3.
 bool platform_suspend_devices();
 

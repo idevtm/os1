@@ -87,6 +87,7 @@ add_library(os1_host_support
   support/console_input_stub.cpp
   "${OS1_REPO_ROOT}/src/kernel/vfs/initrd.cpp"
   "${OS1_REPO_ROOT}/src/kernel/syscall/vfs.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/syscall/observe.cpp"
   "${OS1_REPO_ROOT}/src/kernel/proc/startup.cpp"
   "${OS1_REPO_ROOT}/src/kernel/console/console_input.cpp"
   "${OS1_REPO_ROOT}/src/kernel/resource/descriptor.cpp"

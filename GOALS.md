@@ -327,7 +327,7 @@ Goals:
 - least-privilege design where practical
 - secure enough architecture to justify SSH and remote administration
 
-Ordinary observation should be passive now, before a full multiuser model exists. The current ACPI observation path can change device power state; separate that into explicitly authorized diagnostics with driver quiescence and failure recovery. Broader object-control APIs need defined rights and access policy before exposure.
+Ordinary observation should be passive now, before a full multiuser model exists. ACPI observation now reads cached routes without executing firmware methods. Future power diagnostics require explicit authorization, driver quiescence, and failure recovery. Broader object-control APIs need defined rights and access policy before exposure.
 
 Non-goal:
 
@@ -437,7 +437,7 @@ The project is not trying to:
 
 The [2026-11-03 review](doc/2026-11-03-review.md) sets the immediate sequence:
 
-1. Close process-publication and failure-path defects, investigate the intermittent BIOS fault, and make ordinary observation passive with constrained power diagnostics.
+1. Close process-publication and failure-path defects, investigate the intermittent BIOS fault, and define constrained power diagnostics. Ordinary ACPI observation is now passive.
 2. Correct smoke success handling, integrate the reviewed verification harness, and qualify the exact kernel on the preserved G74SX image.
 3. Completed first slice: console entries 0/1/2 with rights, duplication, close, inheritance, and teardown coverage.
 4. Completed next slice: bounded argv/environment handoff, explicit grants, a read-only initrd VFS, and executable-reference loading. Hosted-service channel and supervision contracts follow.

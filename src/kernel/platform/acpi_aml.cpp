@@ -3,6 +3,8 @@
 #include "platform/acpi_aml.hpp"
 
 #include "platform/acpica_integration.hpp"
+#include "platform/platform.hpp"
+#include "platform/state.hpp"
 
 bool acpi_namespace_load(VirtualMemory& kernel_vm,
                          const AcpiDefinitionBlock* definition_blocks,
@@ -67,4 +69,43 @@ bool acpi_set_device_power_state(const char* path, AcpiPowerState state)
 bool acpi_read_named_integer(const char* path, uint64_t& value)
 {
     return acpica_read_named_integer(path, value);
+}
+
+void platform_cache_enumerated_pci_routes()
+{
+    for(size_t index = 0; index < g_platform.device_count; ++index)
+    {
+        if(g_platform.acpi_pci_route_count >= kAcpiMaxPciRoutes)
+        {
+            break;
+        }
+        const PciDevice& device = g_platform.devices[index];
+        if((device.interrupt_pin == 0) || (device.interrupt_pin > 4))
+        {
+            continue;
+        }
+        const uint8_t pin = device.interrupt_pin - 1u;
+        if(platform_cached_acpi_pci_route(device.bus, device.slot, device.function, pin))
+        {
+            continue;
+        }
+        AcpiPciRoute route{};
+        if(!acpi_resolve_pci_route_details(device.bus,
+                                           device.slot,
+                                           device.function,
+                                           pin,
+                                           route.irq,
+                                           route.flags,
+                                           route.source_is_gsi))
+        {
+            continue;
+        }
+        route.active = true;
+        route.bus_number = device.bus;
+        route.slot = device.slot;
+        route.function = device.function;
+        route.pin = pin;
+        route.source_device_index = kAcpiDeviceIndexNone;
+        g_platform.acpi_pci_routes[g_platform.acpi_pci_route_count++] = route;
+    }
 }

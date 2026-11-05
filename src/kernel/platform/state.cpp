@@ -2,6 +2,7 @@
 #include "platform/state.hpp"
 
 #include "mm/kmem.hpp"
+#include "platform/platform.hpp"
 #include "storage/block_device.hpp"
 #include "util/memory.h"
 
@@ -63,4 +64,21 @@ size_t platform_acpi_device_count()
 const AcpiDeviceInfo* platform_acpi_devices()
 {
     return g_platform.acpi_devices;
+}
+
+const AcpiPciRoute* platform_cached_acpi_pci_route(uint8_t bus,
+                                                   uint8_t slot,
+                                                   uint8_t function,
+                                                   uint8_t pin)
+{
+    for(size_t index = 0; index < g_platform.acpi_pci_route_count; ++index)
+    {
+        const AcpiPciRoute& route = g_platform.acpi_pci_routes[index];
+        if(route.active && (route.bus_number == bus) && (route.slot == slot) &&
+           (route.pin == pin) && ((route.function == 0xFFu) || (route.function == function)))
+        {
+            return &route;
+        }
+    }
+    return nullptr;
 }

@@ -31,7 +31,7 @@ The [2026-11-03 review](2026-11-03-review.md) records current correctness findin
 - a source tree split by major responsibility: `arch/x86_64`, `core`, `handoff`, `mm`, `proc`, `sched`, `syscall`, `console`, `drivers`, `platform`, `storage`, `fs`, `vfs`, `security`, `debug`, `util`, and `linker`
 - protected ring-3 user programs loaded from an initrd
 - a terminal-first operator environment that boots directly into a ring-3 shell
-- structured observability snapshots and kernel event records exposed through a shared UAPI; the ACPI probe also performs power transitions
+- structured observability snapshots and kernel event records exposed through a shared UAPI; ACPI observation reads cached routes without firmware execution
 - initrd-backed `spawn` / `waitpid` / `exec` process control for user commands
 - a terminal model that can render either through VGA text mode or a framebuffer text backend
 - serial-driven smoke coverage and interactive serial run targets for both the UEFI and BIOS paths, including dedicated SMP observe / balance smokes
@@ -869,9 +869,21 @@ Current observe kinds include:
 - claimed resources (PCI BAR claims and DMA buffer ownership)
 - IRQ routes (vector, kind, owner, source)
 - kernel small-object allocator snapshot
-- ACPICA route/power probe snapshot (`OS1_OBSERVE_ACPI`)
+- cached ACPICA route snapshot (`OS1_OBSERVE_ACPI`)
 
-`OS1_OBSERVE_ACPI` is not passive: it attempts D3 followed by D0 on an active power-capable device. The syscall has no credential/diagnostic-mode gate or driver-quiescence protocol, and a failed D0 does not establish recovery after D3. Separating snapshots from explicit power diagnostics remains open in [review R2](2026-11-03-review.md#r2--p1-acpi-observation-performs-ungated-power-transitions).
+`OS1_OBSERVE_ACPI` reads only boot-discovered PCI and route records.
+Boot discovery resolves missing enumerated-device routes into the bounded cache before user execution.
+
+```text
+Boot discovery -> published route cache -> observe -> acpiprobe
+```
+
+Cache misses remain unresolved; observation never calls the live AML resolver or device power methods.
+The two legacy power counters remain reserved zero with unchanged layout and ABI version.
+`acpiprobe` reports unavailable routes as valid inventory and explicitly reports disabled power control.
+Both QEMU smokes still require a resolved route on their known firmware configuration.
+The [implementation record](2026-11-05-passive-acpi-observation.md) closes the snapshot side effect from review R2.
+A separate authorized power diagnostic interface remains deferred pending driver coordination and failure recovery.
 
 The event ring currently stores 256 overwrite-on-full records with monotonic sequence numbers and direct `pid` / `tid` fields. Current event types cover traps, scheduler transitions, IRQs, block I/O, PCI binds, user-copy failures, smoke markers used by the observe smokes, the chosen scheduler timer source (PIT vs LAPIC), `kmem` corruption, NIC RX completions, AP-online / AP-tick events, reschedule / TLB-shootdown IPIs, kernel-thread ping markers, thread migration, and run-queue depth changes.
 
@@ -1161,7 +1173,7 @@ The dedicated observe, balance, spawn, exec, and xHCI smokes then exercise the o
 
 - structured `sys` / `ps` / `cpu` / `pci` / `initrd` / `events` / `devices` / `resources` / `irqs` output
 - the kernel event ring's smoke-marker, scheduler-timer-source, and device-binding records
-- ACPICA route/power probe output on both boot frontends; the power marker also accepts an unavailable result and does not prove successful power management
+- cached ACPI route and passive-snapshot output on both boot frontends; these checks do not exercise power management
 - observable AP-online / AP-tick / migration behavior and user-visible run-queue deltas
 - child-process launch, user-fault containment, and prompt recovery
 - in-place `exec` replacement without the old shell prompt returning
@@ -1188,7 +1200,7 @@ This branch runs build/test commands directly. The unified verification entrypoi
 
 ## Current Constraints And Next Step
 
-The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](2026-11-03-review.md#7-recommended-next-milestones) identified publication and mapping leaks now addressed by the console milestone. Passive ACPI observation, IST allocation failure, smoke-runner settling, and qualification of the exact current kernel on the preserved G74SX image remain follow-ups. The VFS exec tests reproduced and fixed a page-table teardown defect that freed reserved frames; see the [VFS validation record](2026-11-04-initrd-vfs-implementation-plan.md). This does not retrospectively prove the cause of every earlier intermittent BIOS failure or qualify physical media.
+The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](2026-11-03-review.md#7-recommended-next-milestones) identified publication and mapping leaks now addressed by the console milestone. IST allocation failure, smoke-runner settling, and qualification of the exact current kernel on the preserved G74SX image remain follow-ups. The VFS exec tests reproduced and fixed a page-table teardown defect that freed reserved frames; see the [VFS validation record](2026-11-04-initrd-vfs-implementation-plan.md). This does not retrospectively prove the cause of every earlier intermittent BIOS failure or qualify physical media.
 
 Major constraints that remain:
 

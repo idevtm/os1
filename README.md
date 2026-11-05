@@ -6,7 +6,11 @@ For computer architecture and OS terminology, see the categorized
 [Glossary](doc/GLOSSARY.md), including TLB, IST, FADT, PCI, and the other terms
 used throughout the project documents.
 
-Today `os1` uses a shared-kernel, dual-entry boot architecture. The default path is a Limine-based UEFI ISO that enters a thin higher-half shim, normalizes bootloader state into `BootInfo`, then transfers control to the shared higher-half kernel core. The legacy BIOS raw image is still built and tested as a compatibility path, loading the same kernel physically before entering it at its higher-half virtual address. The kernel itself is freestanding `C++20`, runs protected user programs loaded from an initrd `cpio` archive, starts a small `/bin/init` that `exec`s `/bin/sh`, exposes `write`/`read`/`observe`/`spawn`/`waitpid`/`exec` through the x86_64 `SYSCALL`/`SYSRET` path, and can present the terminal either through VGA text mode or a minimal framebuffer text renderer. Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives. The 2026-05-10 ACPICA integration replaced the hand-rolled AML interpreter path with upstream ACPICA for ACPI table discovery, namespace load, device enumeration, `_PRT` routing, resource parsing, and `_PS0`/`_PS3` power transitions; `/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose that surface from userland.
+Today `os1` uses a shared-kernel, dual-entry boot architecture. The default path is a Limine-based UEFI ISO that enters a thin higher-half shim, normalizes bootloader state into `BootInfo`, then transfers control to the shared higher-half kernel core. The legacy BIOS raw image is still built and tested as a compatibility path, loading the same kernel physically before entering it at its higher-half virtual address. The kernel itself is freestanding `C++20`, runs protected user programs loaded from an initrd `cpio` archive, starts a small `/bin/init` that `exec`s `/bin/sh`, exposes `write`/`read`/`observe`/`spawn`/`waitpid`/`exec` through the x86_64 `SYSCALL`/`SYSRET` path, and can present the terminal either through VGA text mode or a minimal framebuffer text renderer. Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives.
+
+The 2026-05-10 integration replaced the previous AML interpreter with upstream ACPICA.
+ACPICA supports table discovery, namespace loading, device enumeration, `_PRT` routing, resource parsing, and device power transitions.
+`/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose cached route information through passive userland observation.
 
 In the source tree, the two boot frontends are explicit peers under `src/boot/`: the legacy raw-image BIOS path lives in `src/boot/bios/`, and the modern UEFI shim lives in `src/boot/limine/`. The kernel tree is now split by ownership rather than by bring-up history: `src/kernel/core/` owns orchestration and trap flow, `handoff/` owns the boot contract, `mm/` owns physical/virtual memory, `proc/`, `sched/`, and `sync/` split process/thread lifecycle, scheduling policy, and blocking primitives, `console/` owns terminal streams, `drivers/` owns hardware drivers, `platform/` owns machine discovery, `vfs/` owns the immutable initrd namespace, and `storage/` and `security/` mark broader growth seams. The detailed source-structure contract now lives in [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md).
 
@@ -15,9 +19,9 @@ PIT-calibrated TSC firmware delays, per-CPU exception stacks, PCI probe failure
 isolation, and a kernel-only update path for the preserved G74SX USB layout.
 The [2026-11-03 review](doc/2026-11-03-review.md) records the validation and its
 limits, including an unresolved intermittent BIOS child-launch fault and
-source-confirmed lifecycle and allocation defects. ACPI observation currently
-attempts device power transitions; `/bin/acpiprobe` is not a passive inventory
-command. The [console descriptor milestone](doc/console-descriptor-abi.md) now provides real
+source-confirmed lifecycle and allocation defects. ACPI observation now reads cached routes without executing firmware methods.
+`/bin/acpiprobe` reports passive inventory and disabled power control.
+The [passive observation record](doc/2026-11-05-passive-acpi-observation.md) documents this correction. The [console descriptor milestone](doc/console-descriptor-abi.md) now provides real
 process entries, rights, duplication, close, flags, and retained I/O references.
 The [dated implementation plan](doc/2026-11-04-console-descriptor-implementation-plan.md)
 records validation. The [initrd VFS and native startup milestone](doc/initrd-vfs-abi.md)
@@ -259,9 +263,8 @@ smokes. Missing QEMU/OVMF reduces registration; CI sets
 `OS1_REQUIRE_UEFI_SMOKE=ON` to reject a missing UEFI smoke environment.
 
 After `cmake --build build`, the registered smokes have their required images.
-They check boot, shell, observability (including ACPI route/power output), SMP
-balance, child-launch, and exec markers through serial logs, with debugcon used
-for no-UART. Monitor-driven tests also exercise keyboard input. The runner's
+They check boot, shell, passive ACPI observation, SMP balance, child-launch, and exec markers through serial logs.
+No-UART tests use debugcon. Monitor-driven tests also exercise keyboard input. The runner's
 early-EOF settle-window defect and the unresolved BIOS fault are documented in
 the [current review](doc/2026-11-03-review.md); a green run is not evidence that
 those issues have been fixed.

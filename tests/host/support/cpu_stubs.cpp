@@ -1,4 +1,7 @@
 #include "arch/x86_64/cpu/cpu.hpp"
+#include "platform/topology.hpp"
+
+int ncpu = 1;
 
 namespace
 {
@@ -22,6 +25,4 @@ void cpu_set_kernel_stack(uint64_t stack_top)
     }
 }
 
-extern "C" void kernel_thread_start()
-{
-}
+extern "C" void kernel_thread_start() {}

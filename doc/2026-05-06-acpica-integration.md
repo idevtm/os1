@@ -20,13 +20,11 @@ Sleep is still a busy wait, not a scheduler sleep. Calibration fallback gives
 approximate progress, not a public monotonic deadline contract. Host-test waits
 remain no-ops and therefore do not validate real firmware timing.
 
-Both observability smokes launch `/bin/acpiprobe` and assert route/power output;
-the power marker permits an unavailable result. `OS1_OBSERVE_ACPI` currently
-attempts D3/D0 transitions on active devices without driver quiescence or a
-credential/diagnostic-mode gate. Separating passive observation from explicit
-power diagnostics is an immediate correctness follow-up. See
-[the current review](2026-11-03-review.md) for that finding, the independent
-unresolved BIOS child-launch fault, and the limits of physical-hardware evidence.
+The November 3 implementation performed D3/D0 transitions during observation.
+The [November 5 correction](2026-11-05-passive-acpi-observation.md) removes those calls and the live route-resolution fallback.
+Both observability smokes now require cached-route and passive-snapshot output.
+Power diagnostics remain deferred until authority, driver quiescence, and failure recovery have explicit contracts.
+The [historical review](2026-11-03-review.md) retains the original findings and hardware-evidence limits.
 
 ## Source Inputs Reviewed
 

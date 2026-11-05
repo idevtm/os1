@@ -15,6 +15,10 @@ The [exclusive Buffer record](2026-11-05-exclusive-buffer-implementation.md) add
 Its [next steps](2026-11-05-exclusive-buffer-implementation.md#next-steps) retain correctness priorities and add high-resolution IPC measurement.
 Its physical-device results cover three user-reported command runs, not complete hardware qualification.
 
+The [passive ACPI observation record](2026-11-05-passive-acpi-observation.md) addresses review R2.
+Observation no longer evaluates firmware or changes device power state.
+Separate power diagnostics remain deferred.
+
 ## Previous
 
 - [2026-05-10 review](2026-05-10-review.md) — source-first review written after the ACPICA integration landed (`7b0094c Integrate ACPICA (#23)`). ACPI table discovery, namespace load, device enumeration, `_PRT` resolution, and `_PS0`/`_PS3` power transitions all flow through upstream ACPICA pinned at submodule SHA `232ff3f8` (release `20260408`); the previous in-tree AML interpreter at `src/kernel/platform/acpi_aml.cpp` collapsed from ~1500 lines to a 70-line shim. A new `OS1_OBSERVE_ACPI` snapshot kind plus `/bin/acpiprobe` user program expose the ACPI surface from userland. The page-frame allocator now has the named tier-2 `g_page_frames_lock`, and `ipi_send_tlb_shootdown` has real call sites in `mm/virtual_memory.cpp` user-slot teardown paths. Closes the SMP synchronization contract's page-frame-lock entry and the prior review's TLB-shootdown-callers gap. Carries forward the descriptor/handle decision, argv/envp, VFS, first persistent filesystem, credentials, monotonic time, packet pool, error ABI, entropy, PTY/session sequencing, AP-targeted device IRQ steering, static/runtime lock-order assertion, observe-access tier policy, and TLB-shootdown granularity. Raises new follow-ups for ACPICA upgrade-and-footprint policy, ACPICA OSL feature boundary, and a real-hardware bring-up productization plan once the unmerged `real-device` branch lands.
