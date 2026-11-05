@@ -18,7 +18,9 @@ records. The [Counter/events implementation](../counter-events-abi.md) adds
 volatile runtime events, typed constructor records/CLI conversion, and deadlines.
 See [counter.cpp](../../src/user/programs/counter.cpp) and
 [countercheck.cpp](../../src/user/programs/countercheck.cpp). The general SDK below
-remains illustrative.
+remains illustrative. The [shared activation example](../shared-activation-abi.md#c-flow)
+now compiles a handwritten acquire helper and two independent Counter clients;
+the class construction hook alone selects singleton reuse.
 
 ## 1. Listing a directory
 

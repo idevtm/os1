@@ -2,6 +2,8 @@
 
 Implemented 2026-11-05, extending the [copied IPC ABI](copied-ipc-abi.md).
 [Plan and validation](2026-11-05-counter-events-implementation-plan.md).
+The later [shared activation extension](shared-activation-abi.md) adds attachments,
+Counter construct, and an optional matching client grant for supervised providers.
 This is an experimental ABI; rebuild user binaries for startup version 2.
 
 ## Commands and Counter
@@ -98,8 +100,11 @@ observation. Timeout ends only the wait. It never cancels an accepted request,
 consumes its result, or establishes whether the method executed. Late results
 remain available through retained Operations.
 
-Launch mode PRIVATE_PROVIDER=2 accepts exactly one grant: a provider endpoint at
-fd 3 with READ|WRITE, no descriptor flags/descendant rights, and absent root/cwd.
+Launch mode PRIVATE_PROVIDER=2 requires a provider endpoint at fd 3 with
+READ|WRITE, no descriptor flags/descendant rights, and absent root/cwd. The
+[shared activation extension](shared-activation-abi.md#class-controlled-construction)
+allows an optional matching client endpoint at fd 4 for class self-export;
+otherwise this is the original one-grant mode.
 The process may use IPC, exit, yield, getpid, and the five basic resource-control
 operations. Filesystem access, console I/O, process creation/exec/wait, and
 observation syscalls return ACCESS. This bounds the first stop implementation to
@@ -160,9 +165,10 @@ view, not protected storage. The convenience run_program wrapper now needs
 READ|SEEK|INSPECT as well as EXECUTE on the image to inspect constructor metadata.
 Raw launch still needs only EXECUTE when the caller already has encoded arguments.
 
-## Following phase
+## Shared activation extension and following work
 
-Shared singleton activation needs an authorized registry/activation service and
+The [implemented scoped activation](shared-activation-abi.md) now demonstrates the
+following construction model with Counter. Generalizing shared singleton activation needs an authorized registry/activation service and
 capability attachments. A class construction hook runs on each accepted request
 and alone chooses new versus existing objects. The provider process entry runs
 once per activation. The manager coordinates provider lifetime and concurrent
@@ -170,8 +176,8 @@ activation, not a caller-selected fresh/shared policy. Each returned reference
 is separately authorized; ordinary clients cannot kill a shared provider.
 Constructor conflict and idle/persistence policy belong to class/service code.
 
-Attachments transfer checked object references, assigning receiver-local
-handles, rather than interpreting descriptor integers in payloads. Shared bulk
+The implemented bounded attachments transfer checked object references, assigning
+receiver-local handles, rather than interpreting descriptor integers in payloads. Shared bulk
 buffers follow attachment rights and mapping/lifetime rules. Generated bindings,
 dynamic linking, one-way messages, and shared-memory rings remain later work.
 Console I/O already uses native kernel objects; richer console properties and

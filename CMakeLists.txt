@@ -825,6 +825,7 @@ set(OS1_SMOKE_REJECT_MARKERS
   "[user/vfscheck] fail"
   "[user/ipccheck] fail"
   "[user/countercheck] fail"
+  "[user/activationcheck] fail"
   "intf: invalid"
   "[user/copycheck] fail"
 )
@@ -864,7 +865,8 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "shell spawn vfscheck ok pid=::ipccheck\\n"
   "shell spawn ipccheck ok pid=::intf /bin/textprocessor\\n"
   "shell spawn intf ok pid=::countercheck\\n"
-  "shell spawn countercheck ok pid=::counter --initial 10 --ceiling 100\\n"
+  "shell spawn countercheck ok pid=::activationcheck\\n"
+  "shell spawn activationcheck ok pid=::counter --initial 10 --ceiling 100\\n"
   "shell spawn counter ok pid=::intf /bin/counter\\n"
 )
 
@@ -1179,6 +1181,8 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "shell spawn intf ok pid="
     "[user/countercheck] second client ok"
     "[user/countercheck] ok"
+    "[user/activationcheck] second client ok"
+    "[user/activationcheck] ok"
     "counter initial=10 ceiling=100"
     "event changed id=5 input=2 output=0 implemented"
     "initial: u64 offset=0 default=0 cli=--initial"
@@ -1499,6 +1503,8 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "shell spawn intf ok pid="
     "[user/countercheck] second client ok"
     "[user/countercheck] ok"
+    "[user/activationcheck] second client ok"
+    "[user/activationcheck] ok"
     "counter initial=10 ceiling=100"
     "event changed id=5 input=2 output=0 implemented"
     "initial: u64 offset=0 default=0 cli=--initial"

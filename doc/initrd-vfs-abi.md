@@ -152,7 +152,7 @@ selected grants without that convenience requirement.
 The first slice retains one user thread per process, no user unmap or external
 kill, no mutable mounts, links, credentials, block-backed files, dynamic linker,
 or general reflection. [Copied IPC and restricted private supervision](counter-events-abi.md)
-are implemented; shared service activation remains later work. `observe` remains a separate privileged
+are implemented; [scoped shared Counter activation](shared-activation-abi.md) adds an optional matching client grant at fd 4 for supervised self-export. General service discovery remains later work. `observe` remains a separate privileged
 prototype surface; in particular ACPI power effects must be gated before exposing
 the system to less-trusted or network-facing applications. These are not closed
 by restricting VFS descriptors.

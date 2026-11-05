@@ -108,6 +108,10 @@ TEST(IpcAbi, FixedLayouts)
     EXPECT_EQ(32u, sizeof(os1_ipc_info));
     EXPECT_EQ(304u, sizeof(os1_ipc_message));
     EXPECT_EQ(296u, sizeof(os1_ipc_result));
+    EXPECT_EQ(16u, sizeof(os1_ipc_capability));
+    EXPECT_EQ(72u, sizeof(os1_ipc_capabilities));
+    EXPECT_EQ(376u, sizeof(os1_ipc_message_caps));
+    EXPECT_EQ(368u, sizeof(os1_ipc_result_caps));
 }
 TEST_F(Ipc, CopiedRequestsRetainedResultsAndOneUseReceipts)
 {
@@ -555,5 +559,192 @@ TEST_F(Ipc, ParentExitRequestsStopOnlyForItsPrivateChildren)
     ipc_stop_children(thread->process);
     EXPECT_TRUE(ipc_stop_requested(private_child));
     EXPECT_FALSE(ipc_stop_requested(ordinary_child));
+}
+
+TEST_F(Ipc, CapabilityRequestsAttenuateAndSurviveSenderClose)
+{
+    ASSERT_EQ(0, ready());
+    os1_ipc_pair newer{};
+    ASSERT_EQ(0, call(OS1_IPC_CREATE, 0, newer));
+    os1_ipc_message_caps sent{};
+    sent.message = request();
+    sent.capabilities.count = 1;
+    sent.capabilities.entries[0] = {newer.client, OS1_RIGHT_READ | OS1_RIGHT_INSPECT, 0, 0};
+    long op = call(OS1_IPC_SUBMIT_CAPS, pair.client, sent);
+    ASSERT_GE(op, 0);
+    ASSERT_EQ(0, descriptor_close(table(), newer.client));
+    os1_ipc_message plain{};
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_RECEIVE, pair.provider, plain));
+    os1_ipc_message_caps received{};
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RECEIVE_CAPS, pair.provider, 0x1000));
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE_CAPS, pair.provider, received));
+    ASSERT_EQ(1u, received.capabilities.count);
+    int fd = received.capabilities.entries[0].fd;
+    os1_resource_info info{};
+    ASSERT_EQ(0, descriptor_query(table(), fd, info));
+    EXPECT_EQ(OS1_RIGHT_READ | OS1_RIGHT_INSPECT, info.rights);
+    EXPECT_EQ(OS1_DESCRIPTOR_CLOEXEC, info.descriptor_flags);
+    EXPECT_EQ(OS1_ERR_ACCESS, alias(fd, OS1_RIGHT_READ));
+    os1_ipc_info ready_info{1, sizeof(ready_info), 0, 77, 1, 1};
+    ASSERT_EQ(0, call(OS1_IPC_READY, newer.provider, ready_info));
+    ASSERT_EQ(0, call(OS1_IPC_INFO, fd, ready_info));
+    EXPECT_EQ(77u, ready_info.interface_id);
+    auto r = response(received.message);
+    EXPECT_EQ(0, call(OS1_IPC_REPLY, pair.provider, r));
+}
+TEST_F(Ipc, CapabilityValidationRejectsAmplificationAndCycles)
+{
+    ASSERT_EQ(0, ready());
+    os1_ipc_pair newer{};
+    ASSERT_EQ(0, call(OS1_IPC_CREATE, 0, newer));
+    os1_ipc_message_caps m{};
+    m.message = request();
+    m.capabilities.count = 1;
+    m.capabilities.entries[0] = {pair.client, OS1_RIGHT_READ, 0, 0};
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    m.capabilities.entries[0].fd = newer.provider;
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    m.capabilities.entries[0].fd = newer.client;
+    m.capabilities.entries[0].rights = OS1_RIGHT_EXECUTE;
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    m.capabilities.entries[0].rights = OS1_RIGHT_READ;
+    m.capabilities.entries[0].descendant_rights = OS1_RIGHT_READ;
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    m.capabilities.entries[0].descendant_rights = 0;
+    long restricted = alias(newer.client, OS1_RIGHT_READ);
+    ASSERT_GE(restricted, 0);
+    m.capabilities.entries[0].fd = restricted;
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    m.capabilities.entries[0].fd = newer.client;
+    m.capabilities.count = 5;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    m.capabilities.count = 1;
+    m.capabilities.entries[3].rights = OS1_RIGHT_READ;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    m.capabilities.entries[3] = {};
+    m.capabilities.entries[0].reserved = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    m.capabilities.entries[0].reserved = 0;
+    m.capabilities.reserved = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    m.capabilities.reserved = 0;
+    m.capabilities.entries[0].fd = 64;
+    EXPECT_EQ(OS1_ERR_BAD_DESCRIPTOR, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+}
+TEST_F(Ipc, CapabilityDeliveryQuotaRollbackAndSingleClaimAcrossAliases)
+{
+    ASSERT_EQ(0, ready());
+    long op = submit();
+    ASSERT_GE(op, 0);
+    os1_ipc_message m{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE, pair.provider, m));
+    os1_ipc_result_caps reply{};
+    reply.result = response(m);
+    reply.capabilities.count = 2;
+    for(auto i : {0, 1})
+        reply.capabilities.entries[i] = {pair.client, OS1_RIGHT_READ, 0, 0};
+    ASSERT_EQ(0, call(OS1_IPC_REPLY_CAPS, pair.provider, reply));
+    EXPECT_EQ(OS1_ERR_STALE_REPLY, call(OS1_IPC_REPLY_CAPS, pair.provider, reply));
+    long duplicate = alias(op, OS1_RIGHT_READ);
+    ASSERT_GE(duplicate, 0);
+    std::vector<int> fillers;
+    for(;;)
+    {
+        long fd = alias(pair.client, OS1_RIGHT_READ);
+        if(fd < 0)
+        {
+            EXPECT_EQ(OS1_ERR_LIMIT, fd);
+            break;
+        }
+        fillers.push_back(fd);
+    }
+    ASSERT_GE(fillers.size(), 2u);
+    descriptor_close(table(), fillers.back());
+    fillers.pop_back();
+    os1_ipc_result_caps out{};
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_RESULT_CAPS, op, out));
+    // The one free slot was rolled back, so it can still be allocated.
+    long spare = alias(pair.client, OS1_RIGHT_READ);
+    ASSERT_GE(spare, 0);
+    descriptor_close(table(), spare);
+    descriptor_close(table(), fillers.back());
+    fillers.pop_back();
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RESULT_CAPS, op, 0x1000));
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_CAPS, duplicate, out));
+    ASSERT_EQ(2u, out.capabilities.count);
+    EXPECT_NE(out.capabilities.entries[0].fd, out.capabilities.entries[1].fd);
+    EXPECT_EQ(0, call(OS1_IPC_RESULT_CAPS, op, out));
+    EXPECT_EQ(0u, out.capabilities.count);
+    EXPECT_EQ(0, std::memcmp(out.result.payload, "abc", 3));
+}
+TEST_F(Ipc, DroppingUnclaimedReplyReleasesAttachedClient)
+{
+    ASSERT_EQ(0, ready());
+    os1_ipc_pair returned{};
+    ASSERT_EQ(0, call(OS1_IPC_CREATE, 0, returned));
+    long op = submit();
+    ASSERT_GE(op, 0);
+    os1_ipc_message m{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE, pair.provider, m));
+    os1_ipc_result_caps r{};
+    r.result = response(m);
+    r.capabilities.count = 1;
+    r.capabilities.entries[0] = {returned.client, OS1_RIGHT_READ, 0, 0};
+    ASSERT_EQ(0, call(OS1_IPC_REPLY_CAPS, pair.provider, r));
+    descriptor_close(table(), returned.client);
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, call(OS1_IPC_RECEIVE, returned.provider, m));
+    descriptor_close(table(), op);
+    EXPECT_EQ(OS1_ERR_PEER_CLOSED, call(OS1_IPC_RECEIVE, returned.provider, m));
+}
+TEST_F(Ipc, ProviderShutdownReleasesUnreadRequestAttachments)
+{
+    ASSERT_EQ(0, ready());
+    os1_ipc_pair attached{};
+    ASSERT_EQ(0, call(OS1_IPC_CREATE, 0, attached));
+    os1_ipc_message_caps r{};
+    r.message = request();
+    r.capabilities.count = 1;
+    r.capabilities.entries[0] = {attached.client, OS1_RIGHT_READ, 0, 0};
+    long op = call(OS1_IPC_SUBMIT_CAPS, pair.client, r);
+    ASSERT_GE(op, 0);
+    descriptor_close(table(), attached.client);
+    descriptor_close(table(), pair.provider);
+    os1_ipc_message m{};
+    EXPECT_EQ(OS1_ERR_PEER_CLOSED, call(OS1_IPC_RECEIVE, attached.provider, m));
+    os1_ipc_result_caps out{};
+    EXPECT_EQ(0, call(OS1_IPC_RESULT_CAPS, op, out));
+    EXPECT_EQ(OS1_ERR_PEER_CLOSED, out.result.transport_status);
+    EXPECT_EQ(0u, out.capabilities.count);
+}
+
+TEST_F(Ipc, PartialCapabilityCaptureRollsBackAndFourAttachmentsAreSupported)
+{
+    ASSERT_EQ(0, ready());
+    os1_ipc_pair newer{};
+    ASSERT_EQ(0, call(OS1_IPC_CREATE, 0, newer));
+    os1_ipc_message_caps m{};
+    m.message = request();
+    m.capabilities.count = 2;
+    m.capabilities.entries[0] = {newer.client, OS1_RIGHT_READ, 0, 0};
+    m.capabilities.entries[1] = {newer.provider, OS1_RIGHT_READ, 0, 0};
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_SUBMIT_CAPS, pair.client, m));
+    descriptor_close(table(), newer.client);
+    os1_ipc_message unused{};
+    EXPECT_EQ(OS1_ERR_PEER_CLOSED, call(OS1_IPC_RECEIVE, newer.provider, unused));
+    long op = submit();
+    ASSERT_GE(op, 0);
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE, pair.provider, unused));
+    os1_ipc_result_caps r{};
+    r.result = response(unused);
+    r.capabilities.count = OS1_IPC_CAP_LIMIT;
+    for(auto& entry : r.capabilities.entries)
+        entry = {pair.client, OS1_RIGHT_READ, 0, 0};
+    ASSERT_EQ(0, call(OS1_IPC_REPLY_CAPS, pair.provider, r));
+    os1_ipc_result_caps out{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_CAPS, op, out));
+    EXPECT_EQ(OS1_IPC_CAP_LIMIT, out.capabilities.count);
+    for(unsigned i = 0; i < out.capabilities.count; ++i)
+        for(unsigned j = 0; j < i; ++j)
+            EXPECT_NE(out.capabilities.entries[i].fd, out.capabilities.entries[j].fd);
 }
 }  // namespace

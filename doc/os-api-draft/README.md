@@ -1,6 +1,6 @@
 # OS API Drafts
 
-Revised 2026-11-04. These documents contain approved first-slice semantic
+Revised 2026-11-05. These documents contain approved first-slice semantic
 decisions and later design proposals. The [console descriptor subset](../console-descriptor-abi.md)
 and [initrd VFS/startup subset](../initrd-vfs-abi.md) are implemented; the full proposals are **not implemented contracts or a frozen
 binary ABI**. The selected first implementation
@@ -74,8 +74,11 @@ Operations, synchronous/asynchronous calls, TextProcessor methods/properties,
 and offline `intf /bin/textprocessor` inspection. The [Counter/events extension](../counter-events-abi.md) adds runtime volatile
 events, a second protocol, typed construction/CLI conversion, monotonic deadlines,
 and restricted private supervision.
-Shared hosted services, runtime reflection, dynamic binding, general
-class construction, sockets/PTYs, and credential policy remain unimplemented. The [2026-11-03 project review](../2026-11-03-review.md)
+The [shared activation extension](../shared-activation-abi.md) adds copy-only
+capability attachments, a scoped activation service, and class-owned Counter
+singleton construction with independent clients. General registry discovery,
+runtime reflection, dynamic binding, sockets/PTYs, and credential policy remain
+unimplemented. The [2026-11-03 project review](../2026-11-03-review.md)
 remains the latest whole-project review; the [VFS implementation record](../2026-11-04-initrd-vfs-implementation-plan.md)
 updates this milestone without claiming a new whole-project audit. Passive
 observation, exception-stack allocation failure, and hardware qualification still

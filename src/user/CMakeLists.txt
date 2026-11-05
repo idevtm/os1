@@ -29,7 +29,8 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       -mtune=generic
       -mgeneral-regs-only
       -mcmodel=large
-      -O1
+      # Keep bundled programs within the bounded BIOS initrd load window.
+      -Os
       -Wall
       -Wextra
       "-I${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -60,6 +61,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${PROJECT_SOURCE_DIR}/src/common/interface/constructor.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/interface/counter.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/startup.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/activation.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/interface/textprocessor.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/elf/elf64.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/ipc.hpp"
@@ -98,6 +100,9 @@ os1_add_user_cxx_program(intf "${CMAKE_CURRENT_SOURCE_DIR}/programs/intf.cpp" OS
 os1_add_user_cxx_program(counter "${CMAKE_CURRENT_SOURCE_DIR}/programs/counter.cpp" OS1_USER_COUNTER_ELF)
 os1_add_user_cxx_program(countercheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/countercheck.cpp" OS1_USER_COUNTERCHECK_ELF)
 
+os1_add_user_cxx_program(activation "${CMAKE_CURRENT_SOURCE_DIR}/programs/activation.cpp" OS1_USER_ACTIVATION_ELF)
+os1_add_user_cxx_program(activationcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/activationcheck.cpp" OS1_USER_ACTIVATIONCHECK_ELF)
+
 add_custom_command(
   OUTPUT "${OS1_INITRD_CPIO}"
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${USER_STAGE_DIR}"
@@ -109,6 +114,8 @@ add_custom_command(
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_VFSCHECK_ELF}" "${USER_STAGE_DIR}/bin/vfscheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_TEXTPROCESSOR_ELF}" "${USER_STAGE_DIR}/bin/textprocessor"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_IPCCHECK_ELF}" "${USER_STAGE_DIR}/bin/ipccheck"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_ACTIVATION_ELF}" "${USER_STAGE_DIR}/bin/activation"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_ACTIVATIONCHECK_ELF}" "${USER_STAGE_DIR}/bin/activationcheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_COUNTER_ELF}" "${USER_STAGE_DIR}/bin/counter"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_COUNTERCHECK_ELF}" "${USER_STAGE_DIR}/bin/countercheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INTF_ELF}" "${USER_STAGE_DIR}/bin/intf"
@@ -140,6 +147,8 @@ add_custom_command(
     "${OS1_USER_LS_ELF}"
     "${OS1_USER_TEXTPROCESSOR_ELF}"
     "${OS1_USER_IPCCHECK_ELF}"
+    "${OS1_USER_ACTIVATION_ELF}"
+    "${OS1_USER_ACTIVATIONCHECK_ELF}"
     "${OS1_USER_COUNTER_ELF}"
     "${OS1_USER_COUNTERCHECK_ELF}"
     "${OS1_USER_INTF_ELF}"
@@ -160,6 +169,8 @@ add_custom_command(
 )
 
 add_custom_target(user_programs DEPENDS
+  "${OS1_USER_ACTIVATION_ELF}"
+  "${OS1_USER_ACTIVATIONCHECK_ELF}"
   "${OS1_USER_COUNTER_ELF}"
   "${OS1_USER_COUNTERCHECK_ELF}"
   "${OS1_USER_TEXTPROCESSOR_ELF}"

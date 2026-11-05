@@ -6,7 +6,9 @@ is implemented; the broader design remains unfrozen. The concrete
 quotas, locking, private TextProcessor, and offline `intf` inspection. The
 [Counter/events extension](../counter-events-abi.md) adds a second protocol, typed
 construction, deadlines, volatile subscriptions, and restricted private supervision.
-Shared activation, attachments, and shared memory remain future work. This profile owns the sequence under the
+The [shared activation extension](../shared-activation-abi.md) implements bounded
+copy-only attachments and scoped Counter activation. General discovery, restart
+policy, and shared memory remain future work. This profile owns the sequence under the
 [native object contract](native_object_kernel_contract.md#8-later-hosted-service-contract).
 The [ELF/service profile](elf_interface_spec.md) owns later metadata/activation;
 [C++ examples](cpp-bindings-and-object-creation.md#8-synchronous-and-asynchronous-ipc)
@@ -157,14 +159,18 @@ Event capacity remains separate from retained Operation completion storage.
 
 Absolute monotonic deadlines end waits, not accepted work. Private provider stop
 is parent-authorized and completes at safe execution boundaries, including APs
-without periodic timer ticks. Shared service supervision, snapshot/watch protocols,
-cancellation, attachments, and shared mappings have separate later gates.
+without periodic timer ticks. The scoped activation manager now supervises its shared Counter provider. General
+service supervision, snapshot/watch protocols, cancellation, and shared mappings
+have separate later gates.
 
 ## 7. Capability attachments and shared memory
 
-Before attachments, pin sender rights, copy-versus-move semantics, destination
-slot reservation, atomic delivery, and cleanup for rejected/unread/discarded
-messages and peer death. Initial launch grants bootstrap the private connection;
+The [implemented attachment contract](../shared-activation-abi.md#copied-capability-attachments)
+uses at most four copied references, DELEGATE plus rights/ceiling attenuation,
+receiver-local CLOEXEC handles, rollback on delivery failure, and one-time result
+claims. A connection-generation ordering rule prevents pending-request cycles.
+Move transfer, unrestricted endpoint graphs, and multi-threaded destination-slot
+reservation remain future gates. Initial launch grants bootstrap the private connection;
 ordinary descriptor integers never replace attachment transfer.
 
 Shared bulk buffers follow attachments. A shared-buffer object owns physical
@@ -203,13 +209,13 @@ validation without claiming all later acceptance gates.
 | 1. Copied IPC core | Endpoint pair, bounded requests, retained Operations, reply authority; private static TextProcessor provider. | Atomic admission/rollback, queue/descriptor/memory exhaustion, receive/result copy faults, reply authorization, request lifetime, provider death and READY rejection. |
 | 2. Sync and async APIs | Typed handwritten codec; submit/wait/result and synchronous wrapper on the same protocol. | Both styles reach the same handler; reply-before-wait cannot lose a wakeup; results survive copy faults; alias close, abandoned operations, duplicate/late replies, unknown outcomes, and generation reuse. |
 | 3. Properties, subscriptions, timed waits | Configuration getter/setter, progress queue, monotonic deadlines, explicit dispatch, and owned-provider cleanup. | Serialized updates, future-only broadcast, overflow reporting, explicit unsubscribe, event/completion capacity separation, deadline/completion races, startup hang and private-provider cleanup. Snapshot/watch and cancellation remain deferred. |
-| 4. Capability attachments | Bounded authorized references in messages. | Rights attenuation, destination exhaustion, atomic acceptance, copy/move semantics, cleanup after decode rejection, peer death, and unread-message shutdown. |
+| 4. Capability attachments and scoped activation (implemented) | Four copied references per message; explicit Counter registry and class-owned singleton hook. | Rights/ceiling attenuation, quota/copy-fault rollback, cycle rejection, one-time claims, peer-death cleanup, queued construction, conflict rejection, shared state/events, and invalid-provider shutdown. Move transfer and general registry discovery remain deferred. |
 | 5. Shared bulk buffers | Channel control messages plus explicitly shared immutable inputs and published outputs. | Bounds/rights, writable-alias rejection or snapshot isolation, mapping/backing lifetime, TLB retirement, cancellation and crash cleanup. |
 | 6. Optional shared-memory rings | Alternate bulk message transport if measurements justify it. | Memory ordering, wraparound, full/empty and lost-wakeup races, hostile-peer input, producer/consumer death, and measured improvement over copied IPC. |
 
 A second fixed protocol (for example, counter read/add/reset) must challenge the
 first abstraction before canonical-schema generation and dynamic discovery.
 That tooling can proceed independently of bulk/ring transport once its own
-compatibility and metadata-validation gates pass. Shared class activation needs
-attachments plus registry, authorization, supervision, concurrency, and crash
-contracts; it is not a prerequisite for the private TextProcessor example.
+compatibility and metadata-validation gates pass. The scoped Counter implementation now covers attachments and a fixed authorized
+registry with class-owned construction and supervision. General shared activation
+still needs independent sessions/quotas, discovery, and restart contracts; it is not a prerequisite for the private TextProcessor example.

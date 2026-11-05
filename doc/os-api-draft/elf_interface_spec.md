@@ -7,7 +7,9 @@ implements versioned flat records in `/bin/textprocessor` and offline `intf`
 inspection. The [Counter extension](../counter-events-abi.md) also implements
 bounded scalar constructor metadata, caller-side CLI conversion, typed startup,
 and runtime events. These do not implement the general schema, binding generator,
-or shared activation protocol proposed here.
+or general shared activation protocol proposed here. The
+[scoped Counter activation implementation](../shared-activation-abi.md) does
+exercise class-owned singleton selection and returned client capabilities.
 
 The [native contract](native_object_kernel_contract.md) owns descriptor,
 authority, process, and hosted-service semantics. Descriptors, console I/O,

@@ -7,6 +7,9 @@ timed waits, private supervision, runtime events, and typed construction. This
 page records the original transport; the extension supersedes its deferred-event
 and untimed-only limits. [Implementation plan and validation](2026-11-04-copied-ipc-implementation-plan.md).
 
+The [shared activation extension](shared-activation-abi.md) adds bounded copied
+capability attachments and scoped Counter singleton activation.
+
 ## Endpoints, Operations, and calls
 
 `ipc(operation, fd, argument)` is syscall 12. Public records and numeric constants

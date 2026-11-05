@@ -467,9 +467,11 @@ new generation and implies neither exactly-once initialization nor persistence.
 Upgrade/coexistence policy must be explicit; changing a binary or registry entry
 cannot redirect existing endpoints.
 
-Start with the private one-object service and typed arguments. Add class-controlled
-shared activation after capability attachment, registry concurrency, supervision,
-authorization, argument/reuse, and crash tests exist. The
+The private service and typed-argument stages are implemented. The
+[scoped Counter activation](../shared-activation-abi.md) now exercises copied
+capabilities, queued construction, class-owned singleton reuse/conflict rejection,
+explicit endpoint authorization, and supervised failure. General registry
+concurrency, caller identity, and restart still need broader contracts and tests. The
 [C++ examples](cpp-bindings-and-object-creation.md) illustrate this model; they do
 not add it to the first descriptor/VFS milestone.
 
@@ -499,7 +501,9 @@ acceptance gates. The narrower [copied IPC ABI](../copied-ipc-abi.md) now
 implements private endpoints, retained Operations, TextProcessor methods and
 properties, and offline metadata inspection. The [Counter/events extension](../counter-events-abi.md) implements volatile
 broadcast events, deadlines, restricted private supervision, and typed startup.
-Shared activation and attachments remain later gates. Class-controlled object selection is unchanged.
+[Scoped Counter activation and copied attachments](../shared-activation-abi.md)
+are now implemented, including class-controlled object selection. General
+registry discovery, independent client sessions/quotas, and restart remain later gates.
 
 ### Calls, values, and authority
 

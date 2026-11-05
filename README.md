@@ -28,8 +28,11 @@ explicit child grants, and executable-reference launch. The
 `intf /bin/textprocessor` prints interface records from the binary without running it.
 The [Counter/events phase](doc/counter-events-abi.md) adds `/bin/counter`, typed
 constructor arguments and CLI conversion, volatile subscriptions, timed waits,
-and parent-owned private-provider supervision. Credentials, shared services,
-persistent filesystems, and a general network stack remain future work.
+and parent-owned private-provider supervision. The [shared activation phase](doc/shared-activation-abi.md) adds
+bounded capability attachments and a scoped activation service whose Counter
+class selects singleton reuse; `activationcheck` demonstrates independent clients.
+Credentials, general service discovery, persistent filesystems, and a general
+network stack remain future work.
 
 ## Prerequisites
 

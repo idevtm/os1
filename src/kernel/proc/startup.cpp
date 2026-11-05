@@ -1,9 +1,8 @@
 #include "proc/startup.hpp"
 
-#include <os1/ipc.h>
-
 #include "fs/initrd.hpp"
 #include "handoff/memory_layout.h"
+#include "ipc/channel.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "proc/user_program.hpp"
@@ -307,11 +306,21 @@ long sys_launch(const ProcessSyscallContext& context,
             return OS1_ERR_INVALID;
     }
     if(mode == OS1_LAUNCH_PRIVATE_PROVIDER &&
-       (request->grant_count != 1 || request->grants[0].target != 3 ||
+       ((request->grant_count != 1 && request->grant_count != 2) ||
+        request->grants[0].target != 3 ||
         request->grants[0].rights != (OS1_RIGHT_READ | OS1_RIGHT_WRITE) ||
         request->grants[0].descriptor_flags || request->grants[0].descendant_rights ||
         request->startup.root_fd != -1 || request->startup.cwd_fd != -1))
         return OS1_ERR_INVALID;
+    if(mode == OS1_LAUNCH_PRIVATE_PROVIDER && request->grant_count == 2)
+    {
+        const auto& g = request->grants[1];
+        if(g.target != 4 ||
+           g.rights !=
+               (OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE) ||
+           g.descriptor_flags || g.descendant_rights)
+            return OS1_ERR_INVALID;
+    }
     long result = validate_startup(request->startup);
     if(result < 0)
         return result;
@@ -337,7 +346,10 @@ long sys_launch(const ProcessSyscallContext& context,
     }
     if(mode == OS1_LAUNCH_PRIVATE_PROVIDER)
     {
-        if(child->descriptors.entries[3].instance->object->kind != OS1_OBJECT_IPC_PROVIDER)
+        if(child->descriptors.entries[3].instance->object->kind != OS1_OBJECT_IPC_PROVIDER ||
+           (request->grant_count == 2 &&
+            !ipc_matching_endpoints(child->descriptors.entries[3].instance->object,
+                                    child->descriptors.entries[4].instance->object)))
         {
             reap_process(child, *context.frames);
             return OS1_ERR_UNSUPPORTED;

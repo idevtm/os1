@@ -651,4 +651,86 @@ TEST_F(Vfs, PrivateProviderLaunchRestrictsGrantsAndCopiesConstructorData)
     EXPECT_EQ(nullptr, child->process->descriptors.entries[1].instance);
     descriptor_close_all(child->process->descriptors);
 }
+
+TEST_F(Vfs, SupervisedSelfExportRequiresTheMatchingClient)
+{
+    auto ipc = [&](unsigned op, int fd, auto& value) {
+        EXPECT_TRUE(copy_to_user(frames, thread, kBuffer, &value, sizeof(value)));
+        long result = sys_ipc(frames, thread, op, fd, kBuffer);
+        EXPECT_TRUE(copy_from_user(frames, thread, kBuffer, &value, sizeof(value)));
+        return result;
+    };
+    os1_ipc_pair pair{}, other{};
+    ASSERT_EQ(0, ipc(OS1_IPC_CREATE, 0, pair));
+    ASSERT_EQ(0, ipc(OS1_IPC_CREATE, 0, other));
+    auto request = launch_request();
+    request.grant_count = 2;
+    request.grants[0] = {pair.provider, 3, OS1_RIGHT_READ | OS1_RIGHT_WRITE, 0, 0, 0};
+    request.grants[1] = {other.client,
+                         4,
+                         OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE,
+                         0,
+                         0,
+                         0};
+    long image = open("bin/tool", OS1_RIGHT_EXECUTE);
+    ASSERT_GE(image, 0);
+    ProcessSyscallContext context{.frames = &frames, .kernel_root_cr3 = thread->address_space_cr3};
+    auto spawn = [&]() {
+        EXPECT_TRUE(copy_to_user(frames, thread, kRequest, &request, sizeof(request)));
+        return sys_launch(context, image, OS1_LAUNCH_PRIVATE_PROVIDER, kRequest);
+    };
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, spawn());
+    request.grants[1].source = pair.client;
+    request.grants[1].target = 5;
+    EXPECT_EQ(OS1_ERR_INVALID, spawn());
+    request.grants[1].target = 4;
+    long pid = spawn();
+    ASSERT_GT(pid, 0);
+    Thread* child = nullptr;
+    for(auto* t = first_thread(); t; t = next_thread(t))
+        if(t->process->pid == static_cast<uint64_t>(pid))
+            child = t;
+    ASSERT_NE(nullptr, child);
+    EXPECT_TRUE(child->process->private_provider);
+    EXPECT_TRUE(ipc_matching_endpoints(child->process->descriptors.entries[3].instance->object,
+                                       child->process->descriptors.entries[4].instance->object));
+    descriptor_close_all(child->process->descriptors);
+}
+TEST_F(Vfs, CapabilityDirectoryCeilingsAndSharedFileCursor)
+{
+    auto ipc = [&](unsigned op, int fd, auto& value) {
+        EXPECT_TRUE(copy_to_user(frames, thread, kBuffer, &value, sizeof(value)));
+        long result = sys_ipc(frames, thread, op, fd, kBuffer);
+        EXPECT_TRUE(copy_from_user(frames, thread, kBuffer, &value, sizeof(value)));
+        return result;
+    };
+    os1_ipc_pair pair{};
+    ASSERT_EQ(0, ipc(OS1_IPC_CREATE, 0, pair));
+    os1_ipc_info info{1, sizeof(info), 0, 42, 1, 1};
+    ASSERT_EQ(0, ipc(OS1_IPC_READY, pair.provider, info));
+    long file = open("etc/motd", OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_DELEGATE);
+    ASSERT_GE(file, 0);
+    ASSERT_EQ(2, read(file, 2));
+    os1_ipc_message_caps m{};
+    m.message = {1, sizeof(m.message), 0, 0, 42, 1, 1, 0, 0, {}};
+    m.capabilities.count = 2;
+    m.capabilities.entries[0] = {62, OS1_RIGHT_LOOKUP, OS1_RIGHT_READ, 0};
+    m.capabilities.entries[1] = {static_cast<int32_t>(file), OS1_RIGHT_READ, 0, 0};
+    long op = ipc(OS1_IPC_SUBMIT_CAPS, pair.client, m);
+    ASSERT_GE(op, 0);
+    os1_ipc_message_caps got{};
+    ASSERT_EQ(0, ipc(OS1_IPC_RECEIVE_CAPS, pair.provider, got));
+    ASSERT_EQ(2u, got.capabilities.count);
+    auto dir = got.capabilities.entries[0].fd;
+    EXPECT_EQ(OS1_RIGHT_READ, got.capabilities.entries[0].descendant_rights);
+    EXPECT_EQ(OS1_ERR_ACCESS, open("bin/tool", OS1_RIGHT_EXECUTE, 0, dir));
+    EXPECT_GE(open("etc/motd", OS1_RIGHT_READ, 0, dir), 0);
+    EXPECT_EQ(3, read(got.capabilities.entries[1].fd, 3));
+    EXPECT_EQ("llo", bytes(3));
+    EXPECT_EQ(1, read(file, 1));
+    EXPECT_EQ(" ", bytes(1));
+    os1_ipc_result reply{
+        1, sizeof(reply), got.message.generation, got.message.request_id, 0, 0, 0, 0, {}};
+    EXPECT_EQ(0, ipc(OS1_IPC_REPLY, pair.provider, reply));
+}
 }  // namespace

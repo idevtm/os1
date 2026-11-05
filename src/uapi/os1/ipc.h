@@ -83,3 +83,33 @@ struct os1_ipc_event
 };
 // EMIT requires sequence=dropped=0. EVENT_READ returns sequence and lost events
 // since the previous successful read. Unsubscribe clears queued notifications.
+
+// Extended operations preserve the original byte-only record ABI.
+#define OS1_IPC_SUBMIT_CAPS 16u
+#define OS1_IPC_RECEIVE_CAPS 17u
+#define OS1_IPC_REPLY_CAPS 18u
+#define OS1_IPC_RESULT_CAPS 19u
+#define OS1_IPC_CAP_LIMIT 4u
+struct os1_ipc_capability
+{
+    int32_t fd;
+    uint32_t rights, descendant_rights, reserved;
+};
+struct os1_ipc_capabilities
+{
+    uint32_t count, reserved;
+    os1_ipc_capability entries[OS1_IPC_CAP_LIMIT];
+};
+struct os1_ipc_message_caps
+{
+    os1_ipc_message message;
+    os1_ipc_capabilities capabilities;
+};
+struct os1_ipc_result_caps
+{
+    os1_ipc_result result;
+    os1_ipc_capabilities capabilities;
+};
+// Input fds are sender-local and require DELEGATE. Output fds are receiver-local,
+// CLOEXEC, and copied (never moved). Unused entries and reserved fields are zero.
+// RESULT_CAPS claims attachments once; subsequent reads return count=0.

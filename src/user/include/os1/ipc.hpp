@@ -46,11 +46,41 @@ inline long ipc_result_until(int operation, os1_ipc_result& result, uint64_t dea
             return r;
     }
 }
+inline long ipc_result_caps_until(int operation, os1_ipc_result_caps& result, uint64_t deadline)
+{
+    for(;;)
+    {
+        long r = ipc(OS1_IPC_RESULT_CAPS, operation, &result);
+        if(r != OS1_ERR_WOULD_BLOCK)
+            return r;
+        r = ipc_wait_until(operation, deadline);
+        if(r < 0)
+            return r;
+    }
+}
+inline void ipc_close_caps(os1_ipc_capabilities& caps)
+{
+    for(unsigned i = 0; i < caps.count; ++i)
+        close(caps.entries[i].fd);
+    caps = {};
+}
 inline long ipc_receive(int fd, os1_ipc_message& message)
 {
     for(;;)
     {
         long r = ipc(OS1_IPC_RECEIVE, fd, &message);
+        if(r != OS1_ERR_WOULD_BLOCK)
+            return r;
+        r = ipc_wait(fd);
+        if(r < 0)
+            return r;
+    }
+}
+inline long ipc_receive_caps(int fd, os1_ipc_message_caps& message)
+{
+    for(;;)
+    {
+        long r = ipc(OS1_IPC_RECEIVE_CAPS, fd, &message);
         if(r != OS1_ERR_WOULD_BLOCK)
             return r;
         r = ipc_wait(fd);

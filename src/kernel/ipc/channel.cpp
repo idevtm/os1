@@ -26,10 +26,22 @@ struct Endpoint : NativeObject
     Connection* connection;
     bool provider;
 };
+struct Capabilities
+{
+    uint32_t count;
+    DescriptorEntry entries[OS1_IPC_CAP_LIMIT];
+};
+void release_caps(Capabilities& caps)
+{
+    for(unsigned i = 0; i < caps.count; ++i)
+        instance_release(caps.entries[i].instance);
+    caps = {};
+}
 struct Operation : NativeObject
 {
     Connection* connection;
-    bool counted, delivered, receiving, complete;
+    bool counted, delivered, receiving, complete, claiming;
+    Capabilities request_caps, result_caps;
     os1_ipc_message request;
     os1_ipc_result result;
 };
@@ -115,6 +127,8 @@ void destroy_operation(NativeObject* object)
         if(op->counted)
             --c->live_operations;
     }
+    release_caps(op->request_caps);
+    release_caps(op->result_caps);
     kfree(op);
     release(c);
 }
@@ -123,6 +137,7 @@ void destroy_endpoint(NativeObject* object)
     auto* e = static_cast<Endpoint*>(object);
     auto* c = e->connection;
     Operation* dropped[OS1_IPC_OPERATION_LIMIT]{};
+    Capabilities discarded[OS1_IPC_OPERATION_LIMIT]{};
     {
         IrqSpinGuard guard(waiters.lock);
         if(e->provider)
@@ -134,6 +149,8 @@ void destroy_endpoint(NativeObject* object)
                 if(!op)
                     continue;
                 finish_locked(op, op->delivered ? OS1_ERR_OUTCOME_UNKNOWN : OS1_ERR_PEER_CLOSED);
+                discarded[i] = op->request_caps;
+                op->request_caps = {};
                 dropped[i] = op;
                 c->pending[i] = nullptr;
             }
@@ -142,8 +159,11 @@ void destroy_endpoint(NativeObject* object)
             c->client_closed = true;
         signal_locked();
     }
-    for(auto* op : dropped)
-        object_release(op);
+    for(unsigned i = 0; i < OS1_IPC_OPERATION_LIMIT; ++i)
+    {
+        release_caps(discarded[i]);
+        object_release(dropped[i]);
+    }
     kfree(e);
     release(c);
     ipc_drain_wakeups();
@@ -409,16 +429,102 @@ long create_pair(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
     }
     return 0;
 }
-long submit(PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer)
+// The pending-request graph is acyclic: requests may only reference newer
+// client connections. Completed replies are no longer owned by a connection.
+long capture_caps(DescriptorTable& table,
+                  const os1_ipc_capabilities& input,
+                  Capabilities& out,
+                  uint64_t request_generation)
 {
-    os1_ipc_message request{};
-    if(!copy_from_user(frames, thread, pointer, &request, sizeof(request)))
+    if(input.count > OS1_IPC_CAP_LIMIT || input.reserved)
+        return OS1_ERR_INVALID;
+    for(unsigned i = 0; i < OS1_IPC_CAP_LIMIT; ++i)
+    {
+        const auto& cap = input.entries[i];
+        if(cap.reserved || ((cap.rights | cap.descendant_rights) & ~OS1_RIGHT_ALL) ||
+           (i >= input.count && (cap.fd || cap.rights || cap.descendant_rights)))
+            return OS1_ERR_INVALID;
+    }
+    for(unsigned i = 0; i < input.count; ++i)
+    {
+        const auto& cap = input.entries[i];
+        DescriptorEntry source{};
+        long status = descriptor_acquire_entry(table, cap.fd, OS1_RIGHT_DELEGATE, source);
+        if(status < 0)
+            return status;
+        InstanceRef pin(source.instance);
+        if((cap.rights & ~source.rights) || (cap.descendant_rights & ~source.descendant_rights))
+            return OS1_ERR_ACCESS;
+        auto* object = source.instance->object;
+        if(object->kind == OS1_OBJECT_IPC_CLIENT)
+        {
+            if(request_generation &&
+               static_cast<Endpoint*>(object)->connection->generation <= request_generation)
+                return OS1_ERR_ACCESS;
+        }
+        else if(object->kind != OS1_OBJECT_CONSOLE && object->kind != OS1_OBJECT_FILE &&
+                object->kind != OS1_OBJECT_DIRECTORY)
+            return OS1_ERR_UNSUPPORTED;
+        out.entries[out.count++] = {
+            pin.take(), cap.rights, OS1_DESCRIPTOR_CLOEXEC, cap.descendant_rights};
+    }
+    return 0;
+}
+struct CapGuard
+{
+    Capabilities value{};
+    ~CapGuard()
+    {
+        release_caps(value);
+    }
+};
+// Current public execution has one user thread per process. Roll back every
+// installed entry on table exhaustion or output fault; never consume on failure.
+long install_caps(DescriptorTable& table, const Capabilities& caps, os1_ipc_capabilities& output)
+{
+    output = {};
+    for(unsigned i = 0; i < caps.count; ++i)
+    {
+        const auto& cap = caps.entries[i];
+        long fd = descriptor_install(
+            table, cap.instance, cap.rights, OS1_DESCRIPTOR_CLOEXEC, -1, cap.descendant_rights);
+        if(fd < 0)
+        {
+            for(unsigned j = 0; j < output.count; ++j)
+                descriptor_close(table, output.entries[j].fd);
+            output = {};
+            return fd;
+        }
+        output.entries[output.count++] = {
+            static_cast<int32_t>(fd), cap.rights, cap.descendant_rights, 0};
+    }
+    return 0;
+}
+void rollback_caps(DescriptorTable& table, const os1_ipc_capabilities& output)
+{
+    for(unsigned i = 0; i < output.count; ++i)
+        descriptor_close(table, output.entries[i].fd);
+}
+long submit(
+    PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, bool extended)
+{
+    os1_ipc_message_caps envelope{};
+    auto& request = envelope.message;
+    if(!copy_from_user(
+           frames, thread, pointer, &envelope, extended ? sizeof(envelope) : sizeof(request)))
         return OS1_ERR_FAULT;
     if(request.version != OS1_IPC_VERSION || request.size != sizeof(request) ||
        request.generation || request.request_id || request.reserved || !request.interface_id ||
        !request.interface_version || !request.member ||
        !zero_tail(request.payload, request.payload_bytes))
         return OS1_ERR_INVALID;
+    CapGuard attached;
+    long captured = capture_caps(thread->process->descriptors,
+                                 envelope.capabilities,
+                                 attached.value,
+                                 endpoint->connection->generation);
+    if(captured < 0)
+        return captured;
     auto* op = static_cast<Operation*>(kmalloc(sizeof(Operation), KmallocFlags::Zero));
     if(!op)
         return OS1_ERR_NO_MEMORY;
@@ -431,6 +537,8 @@ long submit(PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint
     op->connection = c;
     retain(c);
     op->request = request;
+    op->request_caps = attached.value;
+    attached.value = {};
     InstanceRef instance(open_instance(op));
     object_release(op);
     if(!instance.get())
@@ -475,7 +583,8 @@ long submit(PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint
     ipc_drain_wakeups();
     return fd;
 }
-long receive(PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer)
+long receive(
+    PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, bool extended)
 {
     auto* c = endpoint->connection;
     Operation* chosen = nullptr;
@@ -487,30 +596,58 @@ long receive(PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uin
                 chosen = op;
         if(!chosen)
             return c->client_closed ? OS1_ERR_PEER_CLOSED : OS1_ERR_WOULD_BLOCK;
+        if(!extended && chosen->request_caps.count)
+            return OS1_ERR_UNSUPPORTED;
         chosen->receiving = true;
         object_retain(chosen);
     }
-    const bool copied =
-        copy_to_user(frames, thread, pointer, &chosen->request, sizeof(chosen->request));
+    os1_ipc_message_caps envelope{};
+    envelope.message = chosen->request;
+    auto& table = thread->process->descriptors;
+    long status = install_caps(table, chosen->request_caps, envelope.capabilities);
+    if(status == 0 && !copy_to_user(frames,
+                                    thread,
+                                    pointer,
+                                    &envelope,
+                                    extended ? sizeof(envelope) : sizeof(envelope.message)))
+    {
+        rollback_caps(table, envelope.capabilities);
+        status = OS1_ERR_FAULT;
+    }
+    CapGuard consumed;
     {
         IrqSpinGuard guard(waiters.lock);
         chosen->receiving = false;
-        chosen->delivered = copied;
+        chosen->delivered = status == 0;
+        if(status == 0)
+        {
+            consumed.value = chosen->request_caps;
+            chosen->request_caps = {};
+        }
         signal_locked();
     }
     object_release(chosen);
     ipc_drain_wakeups();
-    return copied ? 0 : OS1_ERR_FAULT;
+    return status;
 }
-long reply(PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer)
+
+long reply(
+    PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint64_t pointer, bool extended)
 {
-    os1_ipc_result result{};
-    if(!copy_from_user(frames, thread, pointer, &result, sizeof(result)))
+    os1_ipc_result_caps envelope{};
+    auto& result = envelope.result;
+    if(!copy_from_user(
+           frames, thread, pointer, &envelope, extended ? sizeof(envelope) : sizeof(result)))
         return OS1_ERR_FAULT;
     if(result.version != OS1_IPC_VERSION || result.size != sizeof(result) ||
        result.transport_status || result.reserved ||
        !zero_tail(result.payload, result.payload_bytes))
         return OS1_ERR_INVALID;
+    CapGuard attached;
+    long captured =
+        capture_caps(thread->process->descriptors, envelope.capabilities, attached.value, 0);
+    if(captured < 0)
+        return captured;
     auto* c = endpoint->connection;
     Operation* completed = nullptr;
     {
@@ -524,6 +661,8 @@ long reply(PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint6
                 completed->result = result;
                 completed->complete = true;
                 slot = nullptr;
+                completed->result_caps = attached.value;
+                attached.value = {};
                 break;
             }
         if(!completed)
@@ -533,6 +672,35 @@ long reply(PageFrameContainer& frames, Thread* thread, Endpoint* endpoint, uint6
     object_release(completed);
     ipc_drain_wakeups();
     return 0;
+}
+long claim_result(PageFrameContainer& frames, Thread* thread, Operation* op, uint64_t pointer)
+{
+    os1_ipc_result_caps envelope{};
+    {
+        IrqSpinGuard guard(waiters.lock);
+        if(!op->complete || op->claiming)
+            return OS1_ERR_WOULD_BLOCK;
+        op->claiming = true;
+        envelope.result = op->result;
+    }
+    auto& table = thread->process->descriptors;
+    long status = install_caps(table, op->result_caps, envelope.capabilities);
+    if(status == 0 && !copy_to_user(frames, thread, pointer, &envelope, sizeof(envelope)))
+    {
+        rollback_caps(table, envelope.capabilities);
+        status = OS1_ERR_FAULT;
+    }
+    CapGuard consumed;
+    {
+        IrqSpinGuard guard(waiters.lock);
+        if(status == 0)
+        {
+            consumed.value = op->result_caps;
+            op->result_caps = {};
+        }
+        op->claiming = false;
+    }
+    return status;
 }
 }  // namespace
 long sys_ipc(
@@ -551,13 +719,14 @@ long sys_ipc(
         return fd ? OS1_ERR_INVALID : stop_child(thread, argument);
     if(operation == OS1_IPC_CREATE)
         return fd ? OS1_ERR_INVALID : create_pair(frames, thread, argument);
-    if(operation < OS1_IPC_READY || operation > OS1_IPC_UNSUBSCRIBE)
+    if(operation < OS1_IPC_READY || operation > OS1_IPC_RESULT_CAPS)
         return OS1_ERR_UNSUPPORTED;
     if(fd >= OS1_DESCRIPTOR_LIMIT)
         return OS1_ERR_BAD_DESCRIPTOR;
     uint32_t right =
         (operation == OS1_IPC_READY || operation == OS1_IPC_SUBMIT || operation == OS1_IPC_REPLY ||
-         operation == OS1_IPC_EMIT || operation == OS1_IPC_UNSUBSCRIBE)
+         operation == OS1_IPC_EMIT || operation == OS1_IPC_UNSUBSCRIBE ||
+         operation == OS1_IPC_SUBMIT_CAPS || operation == OS1_IPC_REPLY_CAPS)
             ? OS1_RIGHT_WRITE
             : OS1_RIGHT_READ;
     OpenInstance* raw = nullptr;
@@ -619,6 +788,10 @@ long sys_ipc(
     }
     if(operation == OS1_IPC_EVENT_READ || operation == OS1_IPC_UNSUBSCRIBE)
         return OS1_ERR_UNSUPPORTED;
+    if(operation == OS1_IPC_RESULT_CAPS)
+        return kind == OS1_OBJECT_OPERATION
+                   ? claim_result(frames, thread, static_cast<Operation*>(object), argument)
+                   : OS1_ERR_UNSUPPORTED;
     if(operation == OS1_IPC_RESULT)
     {
         if(kind != OS1_OBJECT_OPERATION)
@@ -653,18 +826,21 @@ long sys_ipc(
         }
         return copy_to_user(frames, thread, argument, &info, sizeof(info)) ? 0 : OS1_ERR_FAULT;
     }
-    if(operation == OS1_IPC_SUBMIT)
-        return e->provider ? OS1_ERR_UNSUPPORTED : submit(frames, thread, e, argument);
+    if(operation == OS1_IPC_SUBMIT || operation == OS1_IPC_SUBMIT_CAPS)
+        return e->provider ? OS1_ERR_UNSUPPORTED
+                           : submit(frames, thread, e, argument, operation == OS1_IPC_SUBMIT_CAPS);
     if(operation == OS1_IPC_SUBSCRIBE)
         return e->provider ? OS1_ERR_UNSUPPORTED : subscribe(frames, thread, e, argument);
     if(!e->provider)
         return OS1_ERR_UNSUPPORTED;
     if(operation == OS1_IPC_EMIT)
         return emit(frames, thread, e, argument);
-    if(operation == OS1_IPC_RECEIVE)
-        return receive(frames, thread, e, argument);
-    if(operation == OS1_IPC_REPLY)
-        return reply(frames, thread, e, argument);
+    if(operation == OS1_IPC_RECEIVE || operation == OS1_IPC_RECEIVE_CAPS)
+        return receive(frames, thread, e, argument, operation == OS1_IPC_RECEIVE_CAPS);
+    if(operation == OS1_IPC_REPLY || operation == OS1_IPC_REPLY_CAPS)
+        return reply(frames, thread, e, argument, operation == OS1_IPC_REPLY_CAPS);
+    if(operation != OS1_IPC_READY)
+        return OS1_ERR_UNSUPPORTED;
     os1_ipc_info info{};
     if(!copy_from_user(frames, thread, argument, &info, sizeof(info)))
         return OS1_ERR_FAULT;
@@ -781,4 +957,12 @@ void ipc_stop_children(Process* parent)
     }
     ipc_drain_wakeups();
     kick_stopping_providers();
+}
+
+bool ipc_matching_endpoints(NativeObject* provider, NativeObject* client)
+{
+    return provider && client && provider->kind == OS1_OBJECT_IPC_PROVIDER &&
+           client->kind == OS1_OBJECT_IPC_CLIENT &&
+           static_cast<Endpoint*>(provider)->connection ==
+               static_cast<Endpoint*>(client)->connection;
 }
