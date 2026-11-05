@@ -170,7 +170,9 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-set(OS1_INITRD_LOAD_ADDRESS 0x82000)
+# Share the existing low-memory staging span: 360 KiB kernel, 192 KiB initrd.
+# Keep the firmware ceiling and all file/overlap checks unchanged.
+set(OS1_INITRD_LOAD_ADDRESS 0x6A000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -193,7 +195,7 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 192)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 384)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
 set(OS1_INITRD_LOAD_LIMIT 0x9A000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
@@ -826,6 +828,7 @@ set(OS1_SMOKE_REJECT_MARKERS
   "[user/ipccheck] fail"
   "[user/countercheck] fail"
   "[user/activationcheck] fail"
+  "[user/paramcheck] fail"
   "intf: invalid"
   "[user/copycheck] fail"
 )
@@ -868,6 +871,14 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "shell spawn countercheck ok pid=::activationcheck\\n"
   "shell spawn activationcheck ok pid=::counter --initial 10 --ceiling 100\\n"
   "shell spawn counter ok pid=::intf /bin/counter\\n"
+  "initial: u64 offset=0 default=0 cli=--initial::paramdemo initial:4 source.text:'Hi there' options.suffix:null\\n"
+  "parameter constructor count=12 text=Hi there::call paramdemo render mode.thorough source.text:\"hello world\" options:{limit:5,suffix:null}\\n"
+  "parameter method count=5 text=HELLO::call paramdemo render source.text:'a\"b' options.suffix:null\\n"
+  "parameter method count=3 text=a\"b::call paramdemo render label:null source.none\\n"
+  "parameter method count=1 text=!::paramdemo mode:bogus\\n"
+  "unknown enum name::call paramdemo render source.bogus\\n"
+  "unknown field, enumerator or case::paramcheck\\n"
+  "shell spawn paramcheck ok pid=::intf /bin/paramdemo\\n"
 )
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
@@ -1186,6 +1197,19 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "counter initial=10 ceiling=100"
     "event changed id=5 input=2 output=0 implemented"
     "initial: u64 offset=0 default=0 cli=--initial"
+    "parameter constructor count=12 text=Hi there"
+    "parameter method count=5 text=HELLO"
+    "parameter method count=3 text=a\"b"
+    "parameter method count=1 text=!"
+    "parameter error code="
+    "unknown enum name"
+    "unknown field, enumerator or case"
+    "[user/paramcheck] malformed enum variant optional wire rejected"
+    "[user/paramcheck] ok"
+    "constructor input=Parameters"
+    "method render input=Parameters"
+    "A file path is data; parsing it does not open a file."
+    "field suffix id=5: OptionalText default=\"!\" nullable"
     "idle thread online"
   )
 
@@ -1508,6 +1532,19 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "counter initial=10 ceiling=100"
     "event changed id=5 input=2 output=0 implemented"
     "initial: u64 offset=0 default=0 cli=--initial"
+    "parameter constructor count=12 text=Hi there"
+    "parameter method count=5 text=HELLO"
+    "parameter method count=3 text=a\"b"
+    "parameter method count=1 text=!"
+    "parameter error code="
+    "unknown enum name"
+    "unknown field, enumerator or case"
+    "[user/paramcheck] malformed enum variant optional wire rejected"
+    "[user/paramcheck] ok"
+    "constructor input=Parameters"
+    "method render input=Parameters"
+    "A file path is data; parsing it does not open a file."
+    "field suffix id=5: OptionalText default=\"!\" nullable"
     "idle thread online"
   )
 

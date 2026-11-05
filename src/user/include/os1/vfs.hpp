@@ -5,6 +5,8 @@
 #include <os1/syscall.hpp>
 
 #include "interface/constructor.hpp"
+#include "interface/parameter_binding.hpp"
+#include "interface/parameters.hpp"
 namespace os1::user
 {
 extern const os1_startup_record* startup_record;
@@ -130,6 +132,89 @@ inline int constructor_metadata(int fd, constructor::Metadata& metadata)
             return constructor::validate(m);
         });
 }
+// Distinct rich metadata; caller owns the buffers, so no 5 KiB stack copies.
+inline int parameter_metadata(int fd, parameters::Metadata& out, parameters::Metadata& scratch)
+{
+    os1_file_info info{};
+    if(file_info(fd, &info) < 0)
+        return -1;
+    auto reader = [&](uint64_t offset, void* data, size_t size) {
+        if(offset > INT64_MAX || seek(fd, offset) < 0)
+            return false;
+        auto* p = static_cast<uint8_t*>(data);
+        while(size)
+        {
+            long n = read(fd, p, size);
+            if(n <= 0)
+                return false;
+            p += n;
+            size -= n;
+        }
+        return true;
+    };
+    if(&out == &scratch)
+        return -1;
+    int found = interface::read_section(
+        reader,
+        info.byte_size,
+        parameters::section_name,
+        scratch,
+        [](const parameters::Metadata& m) { return parameters::validate(m); });
+    if(found == 1)
+        out = scratch;
+    return found;
+}
+inline bool parameter_binding(int fd,
+                              const parameters::Metadata& schema,
+                              parameters::Binding& binding)
+{
+    os1_file_info info{};
+    if(file_info(fd, &info) < 0)
+        return false;
+    auto reader = [&](uint64_t offset, void* out, size_t count) {
+        if(offset > INT64_MAX || seek(fd, offset) < 0)
+            return false;
+        auto* p = static_cast<uint8_t*>(out);
+        while(count)
+        {
+            long n = read(fd, p, count);
+            if(n <= 0)
+                return false;
+            p += n;
+            count -= n;
+        }
+        return true;
+    };
+    return interface::read_section(reader,
+                                   info.byte_size,
+                                   ".os.parameter-bindings",
+                                   binding,
+                                   [&](const parameters::Binding& b) {
+                                       return parameters::validate_binding(b, schema);
+                                   }) == 1;
+}
+inline bool parameter_arguments(const parameters::Metadata& schema,
+                                const char* raw,
+                                os1_constructor_args& out,
+                                parameters::Diagnostic& diagnostic)
+{
+    size_t length = 0;
+    if(raw)
+        while(raw[length])
+            ++length;
+    static parameters::Value value;
+    parameters::Wire wire{};
+    if(!parameters::parse(schema, raw ? raw : "", length, value, diagnostic) ||
+       !parameters::encode(schema, value, wire, diagnostic))
+        return false;
+    out = {};
+    out.schema_id = schema.schema_id;
+    out.version = schema.schema_version;
+    out.size = wire.size;
+    for(unsigned i = 0; i < wire.size; ++i)
+        out.payload[i] = wire.data[i];
+    return true;
+}
 // Shell convenience: build an explicit map of present standard streams/root/cwd.
 // Applications needing other grants or rights use launch() directly.
 inline long run_program(const char* path,
@@ -137,7 +222,9 @@ inline long run_program(const char* path,
                         const char* const* argv,
                         bool replace = false,
                         size_t envc = 0,
-                        const char* const* envp = nullptr)
+                        const char* const* envp = nullptr,
+                        const char* raw_parameters = nullptr,
+                        parameters::Diagnostic* diagnostic = nullptr)
 {
     if(argc > OS1_ARGUMENT_LIMIT || envc > OS1_ENVIRONMENT_LIMIT)
         return OS1_ERR_INVALID;
@@ -208,12 +295,28 @@ inline long run_program(const char* path,
         open(path, OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
     if(executable < 0)
         return executable;
-    constructor::Metadata schema{};
-    int found = constructor_metadata(executable, schema);
-    if(found < 0 ||
-       (found &&
-        !constructor::parse(
-            schema, argc ? argc - 1 : 0, argc ? argv + 1 : nullptr, request.startup.constructor)))
+    static parameters::Metadata rich, scratch;
+    parameters::Diagnostic local_diagnostic{};
+    auto& d = diagnostic ? *diagnostic : local_diagnostic;
+    int rich_found = parameter_metadata(executable, rich, scratch);
+    bool valid = rich_found >= 0;
+    if(rich_found == 1)
+    {
+        parameters::Binding binding{};
+        valid = parameter_binding(executable, rich, binding) && binding.constructor &&
+                (raw_parameters || argc <= 1) &&
+                parameter_arguments(rich, raw_parameters, request.startup.constructor, d);
+    }
+    else if(valid)
+    {
+        constructor::Metadata schema{};
+        int found = constructor_metadata(executable, schema);
+        valid = found >= 0 && (!found || constructor::parse(schema,
+                                                            argc ? argc - 1 : 0,
+                                                            argc ? argv + 1 : nullptr,
+                                                            request.startup.constructor));
+    }
+    if(!valid)
     {
         close(executable);
         return OS1_ERR_INVALID;

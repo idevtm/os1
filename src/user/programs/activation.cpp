@@ -2,12 +2,12 @@
 using namespace os1::user;
 namespace counter = os1::counter;
 namespace constructor = os1::constructor;
-// Explicit bootstrap: manager endpoint fd 3, registered Counter executable fd 4.
+// Bootstrap: mutable grant fd 3, Counter executable fd 4, observer grant fd 5.
 // No root/cwd or console grants; possession of a client endpoint is authorization.
 int main(int, char**)
 {
     os1_ipc_info info{1, sizeof(info), 0, activation::interface_id, 1, 1};
-    if(ipc(OS1_IPC_READY, 3, &info) < 0)
+    if(ipc(OS1_IPC_READY, 3, &info) < 0 || ipc(OS1_IPC_READY, 5, &info) < 0)
         return 1;
     long provider_pid = -1;
     int client = -1;
@@ -26,23 +26,45 @@ int main(int, char**)
             client = -1;
         }
     };
+    int grants[2] = {3, 5};
+    unsigned cursor = 0;
     for(;;)
     {
-        os1_ipc_message_caps input{};
-        long status = ipc(OS1_IPC_RECEIVE_CAPS, 3, &input);
-        if(status == OS1_ERR_WOULD_BLOCK)
+        int candidates[2];
+        unsigned owners[2];
+        unsigned count = 0;
+        for(unsigned n = 0; n < 2; ++n)
         {
-            if(ipc_wait(3) < 0)
+            unsigned owner = (cursor + n) % 2;
+            if(grants[owner] >= 0)
             {
-                stop();
-                return 2;
+                candidates[count] = grants[owner];
+                owners[count++] = owner;
             }
-            continue;
         }
-        if(status == OS1_ERR_PEER_CLOSED)
+        if(!count)
         {
             stop();
             return 0;
+        }
+        long selected = ipc_wait_many(candidates, count);
+        if(selected < 0)
+        {
+            stop();
+            return 2;
+        }
+        unsigned owner = owners[selected];
+        int endpoint = grants[owner];
+        cursor = (owner + 1) % 2;
+        os1_ipc_message_caps input{};
+        long status = ipc(OS1_IPC_RECEIVE_CAPS, endpoint, &input);
+        if(status == OS1_ERR_WOULD_BLOCK)
+            continue;
+        if(status == OS1_ERR_PEER_CLOSED)
+        {
+            close(endpoint);
+            grants[owner] = -1;
+            continue;
         }
         if(status < 0)
         {
@@ -71,10 +93,9 @@ int main(int, char**)
             {
                 os1_launch_request launch_args{};
                 activation::launch_record(launch_args);
-                launch_args.grant_count = 2;
+                launch_args.grant_count = 1;
                 launch_args.grants[0] = {
                     pair.provider, 3, OS1_RIGHT_READ | OS1_RIGHT_WRITE, 0, 0, 0};
-                launch_args.grants[1] = {pair.client, 4, activation::client_rights, 0, 0, 0};
                 constexpr char environment[] = "OS1_ACTIVATION=counter";
                 launch_args.startup.envc = 1;
                 launch_args.startup.string_bytes = sizeof(environment);
@@ -90,7 +111,7 @@ int main(int, char**)
                     os1_ipc_info ready{};
                     status = ipc(OS1_IPC_INFO, client, &ready);
                     if(status == 0 &&
-                       (!ready.ready || ready.interface_id != counter::interface_id ||
+                       (!ready.ready || ready.interface_id != activation::counter_control_id ||
                         ready.interface_version != counter::interface_version))
                         status = OS1_ERR_UNSUPPORTED;
                 }
@@ -106,16 +127,21 @@ int main(int, char**)
             os1_ipc_message construct{};
             construct.version = 1;
             construct.size = sizeof(construct);
-            construct.interface_id = counter::interface_id;
+            construct.interface_id = activation::counter_control_id;
             construct.interface_version = 1;
             construct.member = counter::Construct;
-            construct.payload_bytes = 16;
+            construct.payload_bytes = 24;
             for(unsigned i = 0; i < 16; ++i)
                 construct.payload[i] = m.payload[16 + i];
+            constructor::encode(construct.payload + 16,
+                                4,
+                                owner == 0 ? activation::mutable_access : activation::observer);
             os1_ipc_result_caps constructed{};
             status = activation::call(client, construct, constructed);
             if(status == 0)
                 status = constructed.result.transport_status;
+            if(status > 0)
+                status = OS1_ERR_INVALID;
             if(status < 0)
             {
                 ipc_close_caps(constructed.capabilities);
@@ -144,8 +170,8 @@ int main(int, char**)
                 }
                 if(!r.application_status)
                 {
-                    r.payload_bytes = 16;
-                    for(unsigned i = 0; i < 16; ++i)
+                    r.payload_bytes = activation::reference_bytes;
+                    for(unsigned i = 0; i < activation::reference_bytes; ++i)
                         r.payload[i] = constructed.result.payload[i];
                     reply.capabilities = constructed.capabilities;
                 }
@@ -155,9 +181,9 @@ int main(int, char**)
         }
         if(valid && failed)
             r.application_status = failed;
-        status = ipc(OS1_IPC_REPLY_CAPS, 3, &reply);
+        status = ipc(OS1_IPC_REPLY_CAPS, endpoint, &reply);
         ipc_close_caps(reply.capabilities);
-        if(status < 0)
+        if(status < 0 && status != OS1_ERR_PEER_CLOSED)
         {
             stop();
             return 4;

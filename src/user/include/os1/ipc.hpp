@@ -21,6 +21,24 @@ inline long ipc_wait_until(int fd, uint64_t deadline)
     os1_ipc_deadline record{1, sizeof(record), deadline};
     return ipc(OS1_IPC_WAIT_UNTIL, fd, &record);
 }
+inline long ipc_wait_many(const int* fds, unsigned count, uint64_t deadline = UINT64_MAX)
+{
+    if(!fds || !count || count > OS1_IPC_WAIT_LIMIT)
+        return OS1_ERR_INVALID;
+    os1_ipc_wait_many record{1, sizeof(record), count, 0, deadline, {}};
+    for(unsigned i = 0; i < count; ++i)
+        record.fds[i] = fds[i];
+    return ipc(OS1_IPC_WAIT_MANY, 0, &record);
+}
+inline long ipc_account_create(int provider_or_root, unsigned sessions)
+{
+    os1_ipc_account record{1, sizeof(record), sessions, 0};
+    return ipc(OS1_IPC_ACCOUNT_CREATE, provider_or_root, &record);
+}
+inline long ipc_session_create(int account, os1_ipc_pair& pair)
+{
+    return ipc(OS1_IPC_SESSION_CREATE, account, &pair);
+}
 inline long ipc_stop_child(uint64_t pid)
 {
     return os1_syscall3(os1_sys_ipc, OS1_IPC_STOP_CHILD, 0, pid);

@@ -3,6 +3,7 @@
 // state, and the assembly-visible offsets used by context-switch code.
 #pragma once
 
+#include <os1/ipc.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -42,7 +43,8 @@ enum class ThreadWaitReason : uint32_t
 
 struct IpcWaitState
 {
-    OpenInstance* instance = nullptr;
+    OpenInstance* instances[OS1_IPC_WAIT_LIMIT]{};
+    uint32_t count = 0;
     uint64_t deadline_ns = UINT64_MAX;
     long result = 0;
 };

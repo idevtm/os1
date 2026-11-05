@@ -22,6 +22,14 @@ remains illustrative. The [shared activation example](../shared-activation-abi.m
 now compiles a handwritten acquire helper and two independent Counter clients;
 the class construction hook alone selects singleton reuse.
 
+The [implemented bounded parameter profile](parameter-schema-and-cli.md) extends the design to
+optional, compound, enum and variant values, typed defaults, and standard descriptions
+for both methods and constructors. A generated C++ binding should use the same
+normalization/codec as the dot-based CLI; it bypasses only text parsing. No caller
+syntax adds a fresh/shared creation-policy override. The
+[original session plan](../2026-11-05-client-sessions-and-parameter-plan.md) separates
+shared object identity from independently authorized/budgeted client sessions.
+
 ## 1. Listing a directory
 
 Use an explicitly granted directory, open a separate enumeration instance, and
@@ -333,3 +341,7 @@ instead of copying large payloads. The buffer profile must specify immutable
 publication, mappings, and backing lifetime; passing a pointer or an ordinary
 integer fd is not a substitute. Channel replies and retained Operation semantics
 remain the same. Shared-memory rings are a separate later optimization.
+
+The [2026-11-05 implementation record](../2026-11-05-client-sessions-and-parameters.md)
+records working independent sessions and rich constructor/method inputs. The
+general generated SDK and broader reflection designs above remain proposals.

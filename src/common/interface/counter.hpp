@@ -11,7 +11,8 @@ enum : uint32_t
     Reset = 3,
     GetValue = 4,
     Changed = 5,
-    Construct = 6
+    Construct = 6,
+    Identity = 7
 };
 struct Args
 {
@@ -54,5 +55,5 @@ constexpr interface::Metadata metadata{interface::magic,
                                         {Reset, interface::Method, 1, 0, 2, 0, "reset"},
                                         {GetValue, interface::PropertyGet, 1, 0, 1, 0, "value"},
                                         {Changed, interface::Event, 1, 2, 0, 0, "changed"},
-                                        {Construct, interface::Method, 1, 3, 2, 0, "construct"}}};
+                                        {Identity, interface::Method, 1, 0, 1, 0, "identity"}}};
 }  // namespace os1::counter

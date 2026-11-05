@@ -9,10 +9,20 @@ namespace
 {
 struct Operation;
 struct Subscription;
+// Accounts own only parents, never connections; attachment edges cannot cycle.
+// Child reservations partition the root capacity and survive every alias.
+struct Account : NativeObject
+{
+    Account* parent;
+    uint32_t limit, live, reserved;
+    bool charged;
+};
 struct Connection
 {
     volatile uint32_t references;
-    uint32_t live_operations;
+    uint32_t live_operations, live_subscriptions;
+    Account* account;
+    bool account_created;
     uint64_t generation, next_request;
     bool client_closed, provider_closed, ready;
     uint64_t interface_id;
@@ -50,7 +60,7 @@ struct Subscription : NativeObject
     Connection* connection;
     uint32_t member, head, count;
     uint64_t dropped;
-    bool active, receiving;
+    bool active, receiving, counted;
     os1_ipc_event events[OS1_IPC_EVENT_LIMIT];
 };
 // This lock protects all IPC state, registrations, and the deferred wake list.
@@ -65,8 +75,16 @@ void retain(Connection* c)
 }
 void release(Connection* c)
 {
-    if(__atomic_fetch_sub(&c->references, 1u, __ATOMIC_ACQ_REL) == 1u)
-        kfree(c);
+    if(__atomic_fetch_sub(&c->references, 1u, __ATOMIC_ACQ_REL) != 1u)
+        return;
+    auto* account = c->account;
+    if(account)
+    {
+        IrqSpinGuard guard(waiters.lock);
+        --account->live;
+    }
+    kfree(c);
+    object_release(account);
 }
 bool ready_locked(NativeObject* object)
 {
@@ -86,6 +104,19 @@ bool ready_locked(NativeObject* object)
             return true;
     return c->client_closed;
 }
+long ready_selection_locked(const IpcWaitState& wait)
+{
+    for(unsigned i = 0; i < wait.count; ++i)
+        if(ready_locked(wait.instances[i]->object))
+            return i;
+    return OS1_ERR_WOULD_BLOCK;
+}
+void release_wait(IpcWaitState& wait)
+{
+    for(unsigned i = 0; i < wait.count; ++i)
+        instance_release(wait.instances[i]);
+    wait = {};
+}
 void signal_locked()
 {
     Thread** link = &waiters.head;
@@ -94,8 +125,8 @@ void signal_locked()
         Thread* t = *link;
         if(ipc_stop_requested(t))
             t->wait.ipc.result = OS1_ERR_CANCELLED;
-        else if(ready_locked(t->wait.ipc.instance->object))
-            t->wait.ipc.result = 0;
+        else if(ready_selection_locked(t->wait.ipc) >= 0)
+            t->wait.ipc.result = ready_selection_locked(t->wait.ipc);
         else if(t->wait.ipc.deadline_ns <= monotonic_ns)
             t->wait.ipc.result = OS1_ERR_TIMED_OUT;
         else
@@ -194,6 +225,8 @@ void destroy_subscription(NativeObject* object)
     {
         IrqSpinGuard guard(waiters.lock);
         unsubscribe_locked(sub);
+        if(sub->counted)
+            --c->live_subscriptions;
     }
     kfree(sub);
     release(c);
@@ -234,12 +267,16 @@ long subscribe(PageFrameContainer& frames, Thread* thread, Endpoint* e, uint64_t
             result = OS1_ERR_PEER_CLOSED;
         else if(!c->ready)
             result = OS1_ERR_WOULD_BLOCK;
+        else if(c->account && c->live_subscriptions >= OS1_IPC_SESSION_SUBSCRIPTION_LIMIT)
+            result = OS1_ERR_LIMIT;
         else
             for(auto& slot : c->subscriptions)
                 if(!slot)
                 {
                     slot = sub;
                     sub->active = true;
+                    sub->counted = true;
+                    ++c->live_subscriptions;
                     result = fd;
                     break;
                 }
@@ -363,7 +400,10 @@ long stop_child(Thread* parent, uint64_t pid)
     (void)__atomic_fetch_sub(&child->io_pins, 1u, __ATOMIC_RELEASE);
     return 0;
 }
-long create_pair(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
+long create_pair(PageFrameContainer& frames,
+                 Thread* thread,
+                 uint64_t pointer,
+                 Account* account = nullptr)
 {
     auto* c = static_cast<Connection*>(kmalloc(sizeof(Connection), KmallocFlags::Zero));
     if(!c)
@@ -379,7 +419,7 @@ long create_pair(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
     }
     {
         IrqSpinGuard guard(waiters.lock);
-        if(!next_generation)
+        if(!next_generation || (account && account->live + account->reserved >= account->limit))
         {
             guard.unlock();
             kfree(client);
@@ -388,6 +428,12 @@ long create_pair(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
             return OS1_ERR_LIMIT;
         }
         c->generation = next_generation++;
+        c->account = account;
+        if(account)
+        {
+            ++account->live;
+            object_retain(account);
+        }
     }
     c->references = 2;
     c->next_request = 1;
@@ -429,6 +475,145 @@ long create_pair(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
     }
     return 0;
 }
+void destroy_account(NativeObject* object)
+{
+    auto* account = static_cast<Account*>(object);
+    auto* parent = account->parent;
+    if(parent && account->charged)
+    {
+        IrqSpinGuard guard(waiters.lock);
+        parent->reserved -= account->limit;
+    }
+    kfree(account);
+    object_release(parent);
+}
+long create_account(PageFrameContainer& frames,
+                    Thread* thread,
+                    NativeObject* source,
+                    uint64_t pointer)
+{
+    os1_ipc_account request{};
+    if(!copy_from_user(frames, thread, pointer, &request, sizeof(request)))
+        return OS1_ERR_FAULT;
+    if(request.version != 1 || request.size != sizeof(request) || request.reserved ||
+       !request.sessions || request.sessions > OS1_IPC_SESSION_LIMIT)
+        return OS1_ERR_INVALID;
+    Account* parent = nullptr;
+    Connection* control = nullptr;
+    if(source->kind == OS1_OBJECT_IPC_ACCOUNT)
+    {
+        parent = static_cast<Account*>(source);
+        if(parent->parent)
+            return OS1_ERR_ACCESS;
+    }
+    else if(source->kind == OS1_OBJECT_IPC_PROVIDER)
+    {
+        control = static_cast<Endpoint*>(source)->connection;
+        if(control->account)
+            return OS1_ERR_ACCESS;
+    }
+    else
+        return OS1_ERR_UNSUPPORTED;
+    auto* account = static_cast<Account*>(kmalloc(sizeof(Account), KmallocFlags::Zero));
+    if(!account)
+        return OS1_ERR_NO_MEMORY;
+    account->references = 1;
+    account->kind = OS1_OBJECT_IPC_ACCOUNT;
+    account->interfaces = OS1_INTERFACE_IPC_ACCOUNT;
+    account->allowed_rights =
+        OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE;
+    account->destroy = destroy_account;
+    account->parent = parent;
+    if(parent)
+        object_retain(parent);
+    account->limit = request.sessions;
+    InstanceRef pin(open_instance(account));
+    object_release(account);
+    if(!pin.get())
+        return OS1_ERR_NO_MEMORY;
+    long fd = descriptor_install(
+        thread->process->descriptors, pin.get(), account->allowed_rights, OS1_DESCRIPTOR_CLOEXEC);
+    if(fd < 0)
+        return fd;
+    long status = 0;
+    {
+        IrqSpinGuard guard(waiters.lock);
+        if(control && control->client_closed)
+            status = OS1_ERR_PEER_CLOSED;
+        else if((control && control->account_created) ||
+                (parent && request.sessions > parent->limit - parent->live - parent->reserved))
+            status = OS1_ERR_LIMIT;
+        else if(parent)
+        {
+            parent->reserved += request.sessions;
+            account->charged = true;
+        }
+        else
+            control->account_created = true;
+    }
+    if(status < 0)
+    {
+        descriptor_close(thread->process->descriptors, fd);
+        return status;
+    }
+    return fd;
+}
+long wait_many(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
+{
+    os1_ipc_wait_many request{};
+    if(!copy_from_user(frames, thread, pointer, &request, sizeof(request)))
+        return OS1_ERR_FAULT;
+    if(request.version != 1 || request.size != sizeof(request) || request.reserved ||
+       !request.count || request.count > OS1_IPC_WAIT_LIMIT ||
+       (request.nanoseconds != UINT64_MAX && request.nanoseconds > INT64_MAX))
+        return OS1_ERR_INVALID;
+    struct Pins
+    {
+        IpcWaitState value{};
+        ~Pins()
+        {
+            release_wait(value);
+        }
+    } pins;
+    pins.value.deadline_ns = request.nanoseconds;
+    for(unsigned i = 0; i < OS1_IPC_WAIT_LIMIT; ++i)
+    {
+        if(i >= request.count)
+        {
+            if(request.fds[i])
+                return OS1_ERR_INVALID;
+            continue;
+        }
+        OpenInstance* raw = nullptr;
+        long status =
+            descriptor_acquire(thread->process->descriptors, request.fds[i], OS1_RIGHT_READ, raw);
+        if(status < 0)
+            return status;
+        pins.value.instances[pins.value.count++] = raw;
+        if(raw->object->kind < OS1_OBJECT_IPC_CLIENT || raw->object->kind > OS1_OBJECT_SUBSCRIPTION)
+            return OS1_ERR_UNSUPPORTED;
+        for(unsigned j = 0; j < i; ++j)
+            if(pins.value.instances[j]->object == raw->object)
+                return OS1_ERR_INVALID;
+    }
+    IrqSpinGuard process_guard(g_process_table_lock);
+    IrqSpinGuard guard(waiters.lock);
+    if(ipc_stop_requested(thread))
+        return OS1_ERR_CANCELLED;
+    long selected = ready_selection_locked(pins.value);
+    if(selected >= 0)
+        return selected;
+    if(request.nanoseconds <= monotonic_ns)
+        return OS1_ERR_TIMED_OUT;
+    thread->wait = {};
+    thread->wait.reason = ThreadWaitReason::Ipc;
+    thread->wait.ipc = pins.value;
+    pins.value = {};
+    thread->state = ThreadState::Blocked;
+    thread->process->state = ProcessState::Ready;
+    wait_queue_enqueue_locked(waiters, thread);
+    return kIpcBlocked;
+}
 // The pending-request graph is acyclic: requests may only reference newer
 // client connections. Completed replies are no longer owned by a connection.
 long capture_caps(DescriptorTable& table,
@@ -463,7 +648,7 @@ long capture_caps(DescriptorTable& table,
                 return OS1_ERR_ACCESS;
         }
         else if(object->kind != OS1_OBJECT_CONSOLE && object->kind != OS1_OBJECT_FILE &&
-                object->kind != OS1_OBJECT_DIRECTORY)
+                object->kind != OS1_OBJECT_DIRECTORY && object->kind != OS1_OBJECT_IPC_ACCOUNT)
             return OS1_ERR_UNSUPPORTED;
         out.entries[out.count++] = {
             pin.take(), cap.rights, OS1_DESCRIPTOR_CLOEXEC, cap.descendant_rights};
@@ -557,7 +742,9 @@ long submit(
         else if(request.interface_id != c->interface_id ||
                 request.interface_version != c->interface_version)
             error = OS1_ERR_UNSUPPORTED;
-        else if(c->live_operations == OS1_IPC_OPERATION_LIMIT || !c->next_request)
+        else if(c->live_operations >=
+                    (c->account ? OS1_IPC_SESSION_OPERATION_LIMIT : OS1_IPC_OPERATION_LIMIT) ||
+                !c->next_request)
             error = OS1_ERR_LIMIT;
         else
         {
@@ -719,14 +906,17 @@ long sys_ipc(
         return fd ? OS1_ERR_INVALID : stop_child(thread, argument);
     if(operation == OS1_IPC_CREATE)
         return fd ? OS1_ERR_INVALID : create_pair(frames, thread, argument);
-    if(operation < OS1_IPC_READY || operation > OS1_IPC_RESULT_CAPS)
+    if(operation == OS1_IPC_WAIT_MANY)
+        return fd ? OS1_ERR_INVALID : wait_many(frames, thread, argument);
+    if(operation < OS1_IPC_READY || operation > OS1_IPC_SESSION_CREATE)
         return OS1_ERR_UNSUPPORTED;
     if(fd >= OS1_DESCRIPTOR_LIMIT)
         return OS1_ERR_BAD_DESCRIPTOR;
     uint32_t right =
         (operation == OS1_IPC_READY || operation == OS1_IPC_SUBMIT || operation == OS1_IPC_REPLY ||
          operation == OS1_IPC_EMIT || operation == OS1_IPC_UNSUBSCRIBE ||
-         operation == OS1_IPC_SUBMIT_CAPS || operation == OS1_IPC_REPLY_CAPS)
+         operation == OS1_IPC_SUBMIT_CAPS || operation == OS1_IPC_REPLY_CAPS ||
+         operation == OS1_IPC_ACCOUNT_CREATE || operation == OS1_IPC_SESSION_CREATE)
             ? OS1_RIGHT_WRITE
             : OS1_RIGHT_READ;
     OpenInstance* raw = nullptr;
@@ -736,6 +926,12 @@ long sys_ipc(
     InstanceRef pin(raw);
     auto* object = raw->object;
     const auto kind = object->kind;
+    if(operation == OS1_IPC_ACCOUNT_CREATE)
+        return create_account(frames, thread, object, argument);
+    if(operation == OS1_IPC_SESSION_CREATE)
+        return kind == OS1_OBJECT_IPC_ACCOUNT
+                   ? create_pair(frames, thread, argument, static_cast<Account*>(object))
+                   : OS1_ERR_UNSUPPORTED;
     if(kind < OS1_OBJECT_IPC_CLIENT || kind > OS1_OBJECT_SUBSCRIPTION)
         return OS1_ERR_UNSUPPORTED;
     if(operation == OS1_IPC_WAIT || operation == OS1_IPC_WAIT_UNTIL)
@@ -763,7 +959,8 @@ long sys_ipc(
             return OS1_ERR_TIMED_OUT;
         thread->wait = {};
         thread->wait.reason = ThreadWaitReason::Ipc;
-        thread->wait.ipc.instance = pin.take();
+        thread->wait.ipc.instances[0] = pin.take();
+        thread->wait.ipc.count = 1;
         thread->wait.ipc.deadline_ns = deadline;
         thread->state = ThreadState::Blocked;
         thread->process->state = ProcessState::Ready;
@@ -865,7 +1062,7 @@ void cancel_ipc_wait(Thread* thread)
 {
     if(!thread)
         return;
-    OpenInstance* released = nullptr;
+    IpcWaitState released{};
     {
         IrqSpinGuard guard(waiters.lock);
         if(thread->wait.reason != ThreadWaitReason::Ipc)
@@ -883,17 +1080,17 @@ void cancel_ipc_wait(Thread* thread)
                 break;
             }
         }
-        released = thread->wait.ipc.instance;
+        released = thread->wait.ipc;
         thread->wait = {};
     }
-    instance_release(released);
+    release_wait(released);
 }
 void ipc_drain_wakeups()
 {
     for(;;)
     {
         Thread* t = nullptr;
-        OpenInstance* released = nullptr;
+        IpcWaitState released{};
         {
             IrqSpinGuard guard(waiters.lock);
             Thread** link = &signalled.head;
@@ -913,11 +1110,11 @@ void ipc_drain_wakeups()
             *link = t->wait_link;
             t->wait_link = nullptr;
             (void)atomic_fetch_add(&t->io_pins, 1u);
-            released = t->wait.ipc.instance;
+            released = t->wait.ipc;
             t->frame.rax = static_cast<uint64_t>(t->wait.ipc.result);
             t->wait = {};
         }
-        instance_release(released);
+        release_wait(released);
         wake_blocked_thread(t);
         (void)__atomic_fetch_sub(&t->io_pins, 1u, __ATOMIC_RELEASE);
     }

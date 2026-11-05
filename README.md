@@ -34,6 +34,12 @@ class selects singleton reuse; `activationcheck` demonstrates independent client
 Credentials, general service discovery, persistent filesystems, and a general
 network stack remain future work.
 
+The [session and rich-parameter implementation](doc/2026-11-05-client-sessions-and-parameters.md)
+adds independent budgeted Counter sessions, observer/mutable activation grants,
+and shared constructor/method codecs with typed defaults, descriptions and dot-based
+CLI conversion. Try `intf /bin/paramdemo`, `paramcheck`, and `activationcheck`.
+Shared-buffer transport is the next phase; inline payloads remain bounded to 256 bytes.
+
 ## Prerequisites
 
 Required build tools:

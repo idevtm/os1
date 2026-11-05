@@ -747,4 +747,384 @@ TEST_F(Ipc, PartialCapabilityCaptureRollsBackAndFourAttachmentsAreSupported)
         for(unsigned j = 0; j < i; ++j)
             EXPECT_NE(out.capabilities.entries[i].fd, out.capabilities.entries[j].fd);
 }
+
+TEST_F(Ipc, WaitManyValidatesWholeSelectionBeforeReportingReady)
+{
+    EXPECT_EQ(56u, sizeof(os1_ipc_wait_many));
+    EXPECT_EQ(16u, sizeof(os1_ipc_account));
+    os1_ipc_wait_many w{1, sizeof(w), 2, 0, UINT64_MAX, {pair.client, pair.provider}};
+    ASSERT_EQ(0, ready());
+    EXPECT_EQ(0, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.fds[1] = pair.client;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.fds[1] = alias(pair.client, OS1_RIGHT_READ);
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.fds[1] = 64;
+    EXPECT_EQ(OS1_ERR_BAD_DESCRIPTOR, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.fds[1] = -1;
+    EXPECT_EQ(OS1_ERR_BAD_DESCRIPTOR, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.fds[1] = alias(pair.provider, OS1_RIGHT_WRITE);
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.fds[1] = pair.provider;
+    w.fds[7] = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.fds[7] = 0;
+    for(unsigned count : {0u, OS1_IPC_WAIT_LIMIT + 1})
+    {
+        w.count = count;
+        EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_MANY, 0, w));
+    }
+    w.count = 2;
+    w.reserved = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.reserved = 0;
+    w.version = 2;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.version = 1;
+    w.size--;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_MANY, 0, w));
+    w.size++;
+    w.nanoseconds = UINT64_MAX - 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_MANY, 0, w));
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_WAIT_MANY, 1, w));
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_WAIT_MANY, 0, 0x1000));
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+}
+TEST_F(Ipc, WaitManyPinsExactInstancesAcrossCloseReuseAndCancellation)
+{
+    os1_ipc_pair other{};
+    ASSERT_EQ(0, call(OS1_IPC_CREATE, 0, other));
+    os1_ipc_wait_many w{1, sizeof(w), 2, 0, UINT64_MAX, {pair.client, other.client}};
+    ASSERT_EQ(kIpcBlocked, call(OS1_IPC_WAIT_MANY, 0, w));
+    auto* retained = thread->wait.ipc.instances[1];
+    ASSERT_EQ(2u, thread->wait.ipc.count);
+    EXPECT_EQ(0, descriptor_close(table(), other.client));
+    long reused = alias(pair.provider, OS1_RIGHT_READ);
+    EXPECT_EQ(other.client, reused);
+    EXPECT_EQ(1u, retained->references);
+    os1_ipc_info info{1, sizeof(info), 0, 42, 1, 1};
+    ASSERT_EQ(0, call(OS1_IPC_READY, other.provider, info));
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    // Corrupting the original record cannot affect the kernel-owned registration.
+    w.fds[1] = 64;
+    EXPECT_TRUE(copy_to_user(frames, thread, address, &w, sizeof(w)));
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    EXPECT_EQ(1, static_cast<long>(thread->frame.rax));
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+    os1_ipc_message m{};
+    EXPECT_EQ(OS1_ERR_PEER_CLOSED, call(OS1_IPC_RECEIVE, other.provider, m));
+    w = {1, sizeof(w), 1, 0, UINT64_MAX, {pair.client}};
+    ASSERT_EQ(kIpcBlocked, call(OS1_IPC_WAIT_MANY, 0, w));
+    retained = thread->wait.ipc.instances[0];
+    EXPECT_EQ(2u, retained->references);
+    cancel_ipc_wait(thread);
+    EXPECT_EQ(1u, retained->references);
+}
+TEST_F(Ipc, WaitManyDeadlineStopClosureAndUnsubscribeSemantics)
+{
+    ASSERT_EQ(0, ready());
+    long op = submit();
+    ASSERT_GE(op, 0);
+    os1_ipc_subscription req{1, sizeof(req), 9, 0};
+    long sub = call(OS1_IPC_SUBSCRIBE, pair.client, req);
+    ASSERT_GE(sub, 0);
+    const auto now = sys_ipc(frames, thread, OS1_IPC_CLOCK, 0, 0);
+    os1_ipc_wait_many w{1,
+                        sizeof(w),
+                        2,
+                        0,
+                        static_cast<uint64_t>(now) + 10,
+                        {static_cast<int>(op), static_cast<int>(sub)}};
+    ASSERT_EQ(kIpcBlocked, call(OS1_IPC_WAIT_MANY, 0, w));
+    ipc_timer_tick(10);
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    EXPECT_EQ(OS1_ERR_TIMED_OUT, static_cast<long>(thread->frame.rax));
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+    EXPECT_EQ(OS1_ERR_TIMED_OUT, call(OS1_IPC_WAIT_MANY, 0, w));
+    ASSERT_EQ(0, sys_ipc(frames, thread, OS1_IPC_UNSUBSCRIBE, sub, 0));
+    EXPECT_EQ(1, call(OS1_IPC_WAIT_MANY, 0, w));
+    thread->stop_requested = true;
+    EXPECT_EQ(OS1_ERR_CANCELLED, call(OS1_IPC_WAIT_MANY, 0, w));
+    thread->stop_requested = false;
+    descriptor_close(table(), pair.provider);
+    EXPECT_EQ(0, call(OS1_IPC_WAIT_MANY, 0, w));
+}
+TEST_F(Ipc, AccountReservationsAreBoundedSharedAndCannotBeReminted)
+{
+    os1_ipc_account request{1, sizeof(request), 4, 0};
+    long root = call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request);
+    ASSERT_GE(root, 0);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request));
+    long duplicate = alias(root, OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_DELEGATE);
+    ASSERT_GE(duplicate, 0);
+    request.sessions = 2;
+    long a = call(OS1_IPC_ACCOUNT_CREATE, duplicate, request);
+    long b = call(OS1_IPC_ACCOUNT_CREATE, root, request);
+    ASSERT_GE(a, 0);
+    ASSERT_GE(b, 0);
+    request.sessions = 1;
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_ACCOUNT_CREATE, root, request));
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_ACCOUNT_CREATE, a, request));
+    os1_ipc_pair session{};
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, root, session));
+    os1_ipc_pair sessions[4]{};
+    for(unsigned i = 0; i < 4; ++i)
+        ASSERT_EQ(0, call(OS1_IPC_SESSION_CREATE, i < 2 ? a : b, sessions[i]));
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, a, session));
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, b, session));
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_ACCOUNT_CREATE, sessions[0].provider, request));
+    // Child capacity remains reserved after all account descriptors close.
+    descriptor_close(table(), a);
+    descriptor_close(table(), b);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, duplicate, session));
+    for(auto p : sessions)
+    {
+        descriptor_close(table(), p.client);
+        descriptor_close(table(), p.provider);
+    }
+    EXPECT_EQ(0, call(OS1_IPC_SESSION_CREATE, duplicate, session));
+    descriptor_close(table(), duplicate);
+    descriptor_close(table(), root);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request));
+}
+TEST_F(Ipc, SessionRetainedResultsAndInactiveSubscriptionsKeepAdmissionCharged)
+{
+    os1_ipc_account request{1, sizeof(request), 2, 0};
+    long root = call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request);
+    ASSERT_GE(root, 0);
+    request.sessions = 1;
+    long grant = call(OS1_IPC_ACCOUNT_CREATE, root, request);
+    ASSERT_GE(grant, 0);
+    const auto control = pair;
+    ASSERT_EQ(0, call(OS1_IPC_SESSION_CREATE, grant, pair));
+    ASSERT_EQ(0, ready());
+    long ops[OS1_IPC_SESSION_OPERATION_LIMIT];
+    for(auto& op : ops)
+    {
+        op = submit();
+        ASSERT_GE(op, 0);
+        os1_ipc_message m{};
+        ASSERT_EQ(0, call(OS1_IPC_RECEIVE, pair.provider, m));
+        auto r = response(m);
+        ASSERT_EQ(0, call(OS1_IPC_REPLY, pair.provider, r));
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, submit());
+    os1_ipc_subscription req{1, sizeof(req), 9, 0};
+    long subs[OS1_IPC_SESSION_SUBSCRIPTION_LIMIT];
+    for(auto& sub : subs)
+    {
+        sub = call(OS1_IPC_SUBSCRIBE, pair.client, req);
+        ASSERT_GE(sub, 0);
+        EXPECT_EQ(0, sys_ipc(frames, thread, OS1_IPC_UNSUBSCRIBE, sub, 0));
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SUBSCRIBE, pair.client, req));
+    os1_ipc_pair spare{};
+    EXPECT_EQ(0, call(OS1_IPC_SESSION_CREATE, root, spare));
+    const auto saturated = pair;
+    pair = spare;
+    ASSERT_EQ(0, ready());
+    EXPECT_GE(submit(), 0);  // Independent budget despite retained completions elsewhere.
+    pair = control;
+    ASSERT_EQ(0, ready());
+    EXPECT_GE(submit(), 0);  // Control also has independent capacity.
+    descriptor_close(table(), saturated.client);
+    descriptor_close(table(), saturated.provider);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, grant, pair));
+    for(auto op : ops)
+        descriptor_close(table(), op);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, grant, pair));
+    descriptor_close(table(), subs[0]);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, grant, pair));
+    descriptor_close(table(), subs[1]);
+    EXPECT_EQ(0, call(OS1_IPC_SESSION_CREATE, grant, pair));
+}
+TEST_F(Ipc, AccountValidationRightsFaultsAndTransferPreserveCapacity)
+{
+    os1_ipc_account request{1, sizeof(request), 1, 0};
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_ACCOUNT_CREATE, pair.client, request));
+    for(unsigned size : {0u, 5u})
+    {
+        request.sessions = size;
+        EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request));
+    }
+    request.sessions = 1;
+    request.version = 2;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request));
+    request.version = 1;
+    request.size--;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request));
+    request.size++;
+    request.reserved = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request));
+    request.reserved = 0;
+    EXPECT_EQ(OS1_ERR_FAULT,
+              sys_ipc(frames, thread, OS1_IPC_ACCOUNT_CREATE, pair.provider, 0x1000));
+    long root = call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request);
+    ASSERT_GE(root, 0);
+    long readonly = alias(root, OS1_RIGHT_READ);
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_ACCOUNT_CREATE, readonly, request));
+    os1_ipc_pair session{};
+    EXPECT_EQ(OS1_ERR_ACCESS, call(OS1_IPC_SESSION_CREATE, readonly, session));
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_SESSION_CREATE, pair.provider, session));
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_SESSION_CREATE, root, 0x1000));
+    ASSERT_EQ(0, ready());
+    os1_ipc_message_caps sent{};
+    sent.message = this->request();
+    sent.capabilities.count = 1;
+    sent.capabilities.entries[0] = {static_cast<int>(root), OS1_RIGHT_READ | OS1_RIGHT_WRITE, 0, 0};
+    ASSERT_GE(call(OS1_IPC_SUBMIT_CAPS, pair.client, sent), 0);
+    descriptor_close(table(), root);
+    os1_ipc_message_caps received{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE_CAPS, pair.provider, received));
+    ASSERT_EQ(1u, received.capabilities.count);
+    long transferred = received.capabilities.entries[0].fd;
+    ASSERT_EQ(0, call(OS1_IPC_SESSION_CREATE, transferred, session));
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, transferred, session));
+    os1_ipc_wait_many w{1, sizeof(w), 1, 0, 0, {static_cast<int>(transferred)}};
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_WAIT_MANY, 0, w));
+}
+
+TEST_F(Ipc, WaitManyMaximumRegistrationCancelsEveryPinAndDoesNotLoseRacingWake)
+{
+    os1_ipc_pair pairs[OS1_IPC_WAIT_LIMIT]{};
+    os1_ipc_wait_many w{1, sizeof(w), OS1_IPC_WAIT_LIMIT, 0, UINT64_MAX, {}};
+    for(unsigned i = 0; i < OS1_IPC_WAIT_LIMIT; ++i)
+    {
+        ASSERT_EQ(0, call(OS1_IPC_CREATE, 0, pairs[i]));
+        w.fds[i] = pairs[i].client;
+    }
+    ASSERT_EQ(kIpcBlocked, call(OS1_IPC_WAIT_MANY, 0, w));
+    OpenInstance* pins[OS1_IPC_WAIT_LIMIT]{};
+    for(unsigned i = 0; i < OS1_IPC_WAIT_LIMIT; ++i)
+    {
+        pins[i] = thread->wait.ipc.instances[i];
+        EXPECT_EQ(2u, pins[i]->references);
+    }
+    cancel_ipc_wait(thread);
+    for(auto* pin : pins)
+        EXPECT_EQ(1u, pin->references);
+    os1_ipc_info info{1, sizeof(info), 0, 42, 1, 1};
+    ASSERT_TRUE(copy_to_user(frames, thread, address + 1024, &info, sizeof(info)));
+    std::atomic<bool> go{false};
+    long status = OS1_ERR_INVALID;
+    std::thread producer([&] {
+        while(!go.load())
+            std::this_thread::yield();
+        status = sys_ipc(frames, thread, OS1_IPC_READY, pairs[7].provider, address + 1024);
+    });
+    go = true;
+    long waited = call(OS1_IPC_WAIT_MANY, 0, w);
+    producer.join();
+    ASSERT_EQ(0, status);
+    EXPECT_TRUE(waited == 7 || waited == kIpcBlocked);
+    if(waited == kIpcBlocked)
+    {
+        set_current_thread(nullptr);
+        ipc_drain_wakeups();
+        EXPECT_EQ(ThreadState::Ready, thread->state);
+        EXPECT_EQ(7, static_cast<long>(thread->frame.rax));
+    }
+    for(auto* pin : pins)
+        EXPECT_EQ(1u, pin->references);
+}
+TEST_F(Ipc, RetainedSessionAttachmentKeepsGrantChargedUntilClaimAndFinalClose)
+{
+    os1_ipc_account request{1, sizeof(request), 1, 0};
+    long root = call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request);
+    ASSERT_GE(root, 0);
+    os1_ipc_pair returned{};
+    ASSERT_EQ(0, call(OS1_IPC_SESSION_CREATE, root, returned));
+    ASSERT_EQ(0, ready());
+    long operation = submit();
+    ASSERT_GE(operation, 0);
+    os1_ipc_message m{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE, pair.provider, m));
+    os1_ipc_result_caps r{};
+    r.result = response(m);
+    r.capabilities.count = 1;
+    r.capabilities.entries[0] = {returned.client, OS1_RIGHT_READ, 0, 0};
+    ASSERT_EQ(0, call(OS1_IPC_REPLY_CAPS, pair.provider, r));
+    descriptor_close(table(), returned.client);
+    descriptor_close(table(), returned.provider);
+    os1_ipc_pair another{};
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, root, another));
+    os1_ipc_result_caps out{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_CAPS, operation, out));
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, root, another));
+    descriptor_close(table(), operation);
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, root, another));
+    descriptor_close(table(), out.capabilities.entries[0].fd);
+    EXPECT_EQ(0, call(OS1_IPC_SESSION_CREATE, root, another));
+}
+TEST_F(Ipc, AccountAndSessionDescriptorFailuresRollBackAdmission)
+{
+    os1_ipc_account request{1, sizeof(request), 1, 0};
+    std::vector<int> fillers;
+    for(;;)
+    {
+        long fd = alias(pair.client, OS1_RIGHT_READ);
+        if(fd < 0)
+            break;
+        fillers.push_back(fd);
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request));
+    descriptor_close(table(), fillers.back());
+    fillers.pop_back();
+    long root = call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request);
+    ASSERT_GE(root, 0);  // Failed root installation did not burn the one creation.
+    descriptor_close(table(), fillers.back());
+    fillers.pop_back();
+    os1_ipc_pair result{};
+    EXPECT_EQ(OS1_ERR_LIMIT, call(OS1_IPC_SESSION_CREATE, root, result));
+    descriptor_close(table(), fillers.back());
+    fillers.pop_back();
+    EXPECT_EQ(0, call(OS1_IPC_SESSION_CREATE, root, result));
+}
+
+TEST_F(Ipc, ConcurrentSessionAcquisitionCannotOverdrawAnAliasedAccount)
+{
+    os1_ipc_account request{1, sizeof(request), 1, 0};
+    long root = call(OS1_IPC_ACCOUNT_CREATE, pair.provider, request);
+    ASSERT_GE(root, 0);
+    long duplicate = alias(root, OS1_RIGHT_READ | OS1_RIGHT_WRITE);
+    ASSERT_GE(duplicate, 0);
+    std::atomic<bool> go{false};
+    long peer_status = OS1_ERR_INVALID;
+    std::thread peer([&] {
+        while(!go.load())
+            std::this_thread::yield();
+        peer_status = sys_ipc(frames, thread, OS1_IPC_SESSION_CREATE, duplicate, address + 512);
+    });
+    go = true;
+    long own_status = sys_ipc(frames, thread, OS1_IPC_SESSION_CREATE, root, address);
+    peer.join();
+    EXPECT_TRUE((own_status == 0 && peer_status == OS1_ERR_LIMIT) ||
+                (peer_status == 0 && own_status == OS1_ERR_LIMIT));
+    os1_ipc_pair made{};
+    ASSERT_TRUE(copy_from_user(
+        frames, thread, own_status == 0 ? address : address + 512, &made, sizeof(made)));
+    descriptor_close(table(), made.client);
+    descriptor_close(table(), made.provider);
+    EXPECT_EQ(0, call(OS1_IPC_SESSION_CREATE, root, made));
+}
+TEST_F(Ipc, WaitManyStopAndSignalledCancellationReleaseEveryPin)
+{
+    os1_ipc_wait_many w{1, sizeof(w), 2, 0, UINT64_MAX, {pair.client, pair.provider}};
+    ASSERT_EQ(kIpcBlocked, call(OS1_IPC_WAIT_MANY, 0, w));
+    OpenInstance* first = thread->wait.ipc.instances[0];
+    OpenInstance* second = thread->wait.ipc.instances[1];
+    thread->stop_requested = true;
+    ipc_timer_tick(1);
+    EXPECT_EQ(ThreadState::Blocked, thread->state);  // Already selected, still on CPU.
+    EXPECT_EQ(OS1_ERR_CANCELLED, thread->wait.ipc.result);
+    cancel_ipc_wait(thread);  // Must unlink deferred signal as well as release both pins.
+    EXPECT_EQ(1u, first->references);
+    EXPECT_EQ(1u, second->references);
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    thread->stop_requested = false;
+}
 }  // namespace

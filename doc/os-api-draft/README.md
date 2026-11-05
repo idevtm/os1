@@ -27,6 +27,13 @@ is descriptors, console, and a read-only initrd VFS; hosted services follow.
 7. [IPC transport design](ipc-transport-design.md) records the approved sync/async
    request/reply direction, retained Operations, properties/events, and staged
    implementation through later shared buffers and optional rings.
+8. [Parameter schemas and CLI values](parameter-schema-and-cli.md) records the implemented bounded
+   common method/constructor value model, optional/compound/enum/variant parameters,
+   constant defaults, standard descriptions, and schema-resolved dot paths.
+9. [Client sessions and parameter plan](../2026-11-05-client-sessions-and-parameter-plan.md)
+   records the original gates, now implemented through sessions, admission budgets,
+   per-session method authority and rich codecs/CLI tooling. Shared buffers remain next.
+   See the [implementation record](../2026-11-05-client-sessions-and-parameters.md).
 
 The kernel contract takes precedence for shared semantics; profiles own their
 specific rules. Preserve that distinction when changing a draft. The
@@ -83,3 +90,12 @@ remains the latest whole-project review; the [VFS implementation record](../2026
 updates this milestone without claiming a new whole-project audit. Passive
 observation, exception-stack allocation failure, and hardware qualification still
 need follow-up before broader trust boundaries are introduced.
+
+## Latest design direction — 2026-11-05
+
+The user selected dot as the main CLI resolution operator, including variant
+cases: `source.text:"hello"`, `source.file:{path:"/etc/motd"}`, and nested fields
+such as `options.limit:10`. The [parameter profile](parameter-schema-and-cli.md)
+records alternatives and implemented quoting, conflict, optional/default, description,
+and canonical encoding rules. The [bounded ABI](../rich-parameters-abi.md) adds
+rich constructor/method inputs while preserving the existing scalar ABI.

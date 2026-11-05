@@ -503,7 +503,15 @@ properties, and offline metadata inspection. The [Counter/events extension](../c
 broadcast events, deadlines, restricted private supervision, and typed startup.
 [Scoped Counter activation and copied attachments](../shared-activation-abi.md)
 are now implemented, including class-controlled object selection. General
-registry discovery, independent client sessions/quotas, and restart remain later gates.
+registry discovery and restart remain later gates. Independent sessions/quotas are
+[implemented](../client-sessions-abi.md).
+
+The [next-phase session plan](../2026-11-05-client-sessions-and-parameter-plan.md)
+records implemented separate session identity, quotas and method policy while preserving
+class-owned object selection. A read-only object policy is not equivalent to
+removing transport WRITE. The [parameter profile](parameter-schema-and-cli.md)
+implements one bounded value/description model for method and constructor inputs; schema defaults
+and descriptive text do not introduce ambient authority or creation-policy flags.
 
 ### Calls, values, and authority
 

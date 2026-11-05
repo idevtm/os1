@@ -1,6 +1,6 @@
 # os1 Shell Language and Runtime Profile
 
-Status: revised later-stage proposal, 2026-11-04. **Illustrative language and API
+Status: revised later-stage proposal, 2026-11-05. **Illustrative language and API
 syntax; no shell runtime, hosted-service API, or frozen language ABI is claimed.**
 
 The [native contract](native_object_kernel_contract.md) owns resource, authority,
@@ -135,6 +135,30 @@ standard streams and the desired root/cwd. Building it is an authorization
 operation, not shorthand for ambient inheritance. `process.wait()` waits for
 process termination; it is unrelated to service readiness or one method's
 completion. No POSIX fork, signal, or full terminal model is implied.
+
+### Schema-directed CLI values
+
+The [parameter profile](parameter-schema-and-cli.md) owns the implemented bounded value
+syntax and conversion rules for methods and constructors. Dot resolves fields
+and variant cases from the schema; colon supplies the selected value:
+
+```text
+counter initial:10 ceiling:100
+process source.text:"hello world" options.limit:10
+process source.file:{path:"/etc/motd", offset:0}
+process source.file.path:"/etc/motd" source.file.offset:0
+process source.stdin
+```
+
+The last form selects a declared payload-free variant case. The generic names above
+remain illustrative; runnable `paramdemo` constructor and `call paramdemo render`
+examples are in the [rich ABI](../rich-parameters-abi.md). Counter retains its scalar
+`--name value` converter. Rich tails preserve single/double quoting, braces and dot
+paths before whitespace tokenization loses structure. Resolution itself executes no
+object code. Optional values, typed defaults, conflicts and diagnostics must
+match the shared schema/codec rules, including explicit None versus an empty
+string or defaulted value. Parameter and constructor descriptions feed help and
+future automated discovery through the same metadata, not a second parser.
 
 ### Hosted startup and failure
 

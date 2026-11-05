@@ -31,6 +31,8 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       -mcmodel=large
       # Keep bundled programs within the bounded BIOS initrd load window.
       -Os
+      -ffunction-sections
+      -fdata-sections
       -Wall
       -Wextra
       "-I${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -42,6 +44,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "-Wl,-T,${USER_LINKER_SCRIPT}"
       -Wl,-static
       -Wl,-n
+      -Wl,--gc-sections
       -Wl,--build-id=none
       -o "${output_path}"
       ${USER_COMMON_CXX_SOURCES}
@@ -63,6 +66,11 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/startup.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/activation.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/interface/textprocessor.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/interface/parameters.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/interface/parameter_fixture.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/interface/parameter_binding.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/interface/parameter_demo.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/parameter_client.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/elf/elf64.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/ipc.hpp"
       "${USER_LINKER_SCRIPT}"
@@ -95,6 +103,8 @@ os1_add_user_cxx_program(vfscheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/vfscheck
 
 os1_add_user_cxx_program(textprocessor "${CMAKE_CURRENT_SOURCE_DIR}/programs/textprocessor.cpp" OS1_USER_TEXTPROCESSOR_ELF)
 os1_add_user_cxx_program(ipccheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/ipccheck.cpp" OS1_USER_IPCCHECK_ELF)
+os1_add_user_cxx_program(paramdemo "${CMAKE_CURRENT_SOURCE_DIR}/programs/paramdemo.cpp" OS1_USER_PARAMDEMO_ELF)
+os1_add_user_cxx_program(paramcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/paramcheck.cpp" OS1_USER_PARAMCHECK_ELF)
 os1_add_user_cxx_program(intf "${CMAKE_CURRENT_SOURCE_DIR}/programs/intf.cpp" OS1_USER_INTF_ELF)
 
 os1_add_user_cxx_program(counter "${CMAKE_CURRENT_SOURCE_DIR}/programs/counter.cpp" OS1_USER_COUNTER_ELF)
@@ -118,6 +128,8 @@ add_custom_command(
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_ACTIVATIONCHECK_ELF}" "${USER_STAGE_DIR}/bin/activationcheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_COUNTER_ELF}" "${USER_STAGE_DIR}/bin/counter"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_COUNTERCHECK_ELF}" "${USER_STAGE_DIR}/bin/countercheck"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_PARAMDEMO_ELF}" "${USER_STAGE_DIR}/bin/paramdemo"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_PARAMCHECK_ELF}" "${USER_STAGE_DIR}/bin/paramcheck"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INTF_ELF}" "${USER_STAGE_DIR}/bin/intf"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_CAT_ELF}" "${USER_STAGE_DIR}/bin/cat"
   COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INIT_ELF}" "${USER_STAGE_DIR}/bin/init"
@@ -151,6 +163,8 @@ add_custom_command(
     "${OS1_USER_ACTIVATIONCHECK_ELF}"
     "${OS1_USER_COUNTER_ELF}"
     "${OS1_USER_COUNTERCHECK_ELF}"
+    "${OS1_USER_PARAMDEMO_ELF}"
+    "${OS1_USER_PARAMCHECK_ELF}"
     "${OS1_USER_INTF_ELF}"
     "${OS1_USER_CAT_ELF}"
     "${OS1_USER_VFSCHECK_ELF}"
@@ -175,6 +189,8 @@ add_custom_target(user_programs DEPENDS
   "${OS1_USER_COUNTERCHECK_ELF}"
   "${OS1_USER_TEXTPROCESSOR_ELF}"
   "${OS1_USER_IPCCHECK_ELF}"
+  "${OS1_USER_PARAMDEMO_ELF}"
+  "${OS1_USER_PARAMCHECK_ELF}"
   "${OS1_USER_INTF_ELF}"
   "${OS1_USER_VFSCHECK_ELF}"
   "${OS1_USER_CAT_ELF}"

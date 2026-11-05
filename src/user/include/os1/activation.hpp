@@ -7,6 +7,11 @@ namespace os1::user::activation
 {
 constexpr uint64_t interface_id = 0x4143544956415431ull;
 constexpr uint32_t acquire = 1;
+// Control is only granted to the activation manager, never to object clients.
+constexpr uint64_t counter_control_id = 0x434e545243544c31ull;
+constexpr uint32_t observer = 1, mutable_access = 2;
+constexpr unsigned session_limit = 4, grant_session_limit = 2;
+constexpr unsigned reference_bytes = 24;  // Snapshot followed by opaque object identity.
 constexpr uint32_t client_rights =
     OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE;
 inline uint64_t deadline()
@@ -51,9 +56,10 @@ inline long call(int client, os1_ipc_message& m, os1_ipc_result_caps& result)
 // a class-provided reference. A different object kind/interface is not a Counter.
 inline long validate_counter_reference(const os1_ipc_result_caps& result)
 {
-    if(result.capabilities.count != 1 || result.result.payload_bytes != 16 ||
+    if(result.capabilities.count != 1 || result.result.payload_bytes != reference_bytes ||
        result.capabilities.entries[0].rights != client_rights ||
-       result.capabilities.entries[0].descendant_rights)
+       result.capabilities.entries[0].descendant_rights ||
+       !constructor::decode(result.result.payload + 16, 8))
         return OS1_ERR_INVALID;
     os1_ipc_info info{};
     long status = ipc(OS1_IPC_INFO, result.capabilities.entries[0].fd, &info);
@@ -64,7 +70,10 @@ inline long validate_counter_reference(const os1_ipc_result_caps& result)
                ? 0
                : OS1_ERR_UNSUPPORTED;
 }
-inline long acquire_counter(int manager, uint64_t initial, uint64_t ceiling)
+inline long acquire_counter(int manager,
+                            uint64_t initial,
+                            uint64_t ceiling,
+                            uint64_t* object_identity = nullptr)
 {
     auto m = request(initial, ceiling);
     os1_ipc_result_caps result{};
@@ -78,7 +87,11 @@ inline long acquire_counter(int manager, uint64_t initial, uint64_t ceiling)
     if(status == 0)
         status = validate_counter_reference(result);
     if(status == 0)
+    {
+        if(object_identity)
+            *object_identity = constructor::decode(result.result.payload + 16, 8);
         return result.capabilities.entries[0].fd;
+    }
     ipc_close_caps(result.capabilities);
     return status ? status : OS1_ERR_INVALID;
 }

@@ -113,3 +113,33 @@ struct os1_ipc_result_caps
 // Input fds are sender-local and require DELEGATE. Output fds are receiver-local,
 // CLOEXEC, and copied (never moved). Unused entries and reserved fields are zero.
 // RESULT_CAPS claims attachments once; subsequent reads return count=0.
+
+// Bounded readiness selection. fd=0; result is a zero-based ready member index.
+// Lowest ready index wins; stop precedes readiness, readiness precedes deadline.
+// Closing an fd does not cancel a retained wait. Aliases of one object are duplicates.
+#define OS1_IPC_WAIT_MANY 20u
+#define OS1_IPC_ACCOUNT_CREATE 21u
+#define OS1_IPC_SESSION_CREATE 22u
+#define OS1_OBJECT_IPC_ACCOUNT 8u
+#define OS1_INTERFACE_IPC_ACCOUNT 128u
+#define OS1_IPC_WAIT_LIMIT 8u
+#define OS1_IPC_SESSION_LIMIT 4u
+#define OS1_IPC_SESSION_OPERATION_LIMIT 4u
+#define OS1_IPC_SESSION_SUBSCRIPTION_LIMIT 2u
+struct os1_ipc_wait_many
+{
+    uint32_t version, size, count, reserved;
+    uint64_t nanoseconds;             // Absolute CLOCK deadline, or UINT64_MAX for no deadline.
+    int32_t fds[OS1_IPC_WAIT_LIMIT];  // Unused entries must be zero.
+};
+// ACCOUNT_CREATE: fd is an unbudgeted provider (one root ever), or a root account
+// (bounded child reservation). Returns a CLOEXEC account fd. WRITE is required.
+// Children reserve capacity from the parent; aliases/transfers share reservations.
+struct os1_ipc_account
+{
+    uint32_t version, size, sessions, reserved;
+};
+// SESSION_CREATE: fd is an account with WRITE; argument is os1_ipc_pair output.
+// Charge persists through all retained endpoints, Operations and subscriptions.
+// Each session reserves four Operations and two retained subscriptions, with the
+// existing payload, attachment and event bounds. Control CREATE stays independent.

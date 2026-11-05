@@ -163,6 +163,19 @@ without periodic timer ticks. The scoped activation manager now supervises its s
 service supervision, snapshot/watch protocols, cancellation, and shared mappings
 have separate later gates.
 
+### Implemented gate: independent client sessions
+
+The [implemented session ABI](../client-sessions-abi.md) adds distinct endpoint pairs per client, a bounded wait set and fair provider
+dispatch, retained-resource quota accounts, and trusted activation grant budgets.
+Counter can keep one class-selected object/revision while each session has its
+own connection generation and method policy. Transport WRITE is required for
+queries as well as mutations; observer policy must be enforced by the provider.
+Object sessions must not expose the manager's construction/control endpoint.
+
+The [parameter profile](parameter-schema-and-cli.md) is implemented bounded schema/codec
+work, not permission to enlarge copied envelopes or introduce shared memory.
+It applies descriptions/defaults/compound/variant arguments to constructors too.
+
 ## 7. Capability attachments and shared memory
 
 The [implemented attachment contract](../shared-activation-abi.md#copied-capability-attachments)
@@ -217,5 +230,7 @@ A second fixed protocol (for example, counter read/add/reset) must challenge the
 first abstraction before canonical-schema generation and dynamic discovery.
 That tooling can proceed independently of bulk/ring transport once its own
 compatibility and metadata-validation gates pass. The scoped Counter implementation now covers attachments and a fixed authorized
-registry with class-owned construction and supervision. General shared activation
-still needs independent sessions/quotas, discovery, and restart contracts; it is not a prerequisite for the private TextProcessor example.
+registry with class-owned construction and supervision. Independent sessions,
+authority grants and retained-resource quotas are now implemented in the
+[session ABI](../client-sessions-abi.md). General discovery and restart contracts
+remain future work; they are not prerequisites for the private TextProcessor example.

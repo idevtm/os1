@@ -471,12 +471,12 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-1088`: `kernel.elf`
-- LBA `1089-1216`: `initrd.cpio`
+- LBA `65-784`: `kernel_bios.elf`
+- LBA `785-1168`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](2026-11-02-real-hardware-bootlog.md))
 
-The slot sizes come from `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [../CMakeLists.txt](../CMakeLists.txt). The kernel BIOS slot now matches the reserved low-physical kernel window published through the shared memory-layout contract. The build runs an ELF-aware boot-envelope assertion before writing `os1.raw` and fails if `kernel.elf` no longer fits its disk slot, low-memory staging buffer, or reserved execution window; `initrd.cpio` is checked against its configured 96 KiB slot and low-memory window. Bundled user programs use `-Os` to keep the shared-activation examples in that slot. The Counter/events phase moves its load address to `0x82000`, leaving a 456 KiB kernel staging area and bounding the initrd below `0x9A000`. To expand BIOS storage space, increase the corresponding sector-count or reserved-window value in [../CMakeLists.txt](../CMakeLists.txt) and rebuild; the generated BIOS image layout updates automatically while `os1.raw` stays padded to 2880 sectors so the boot log area is zeroed in the image.
+The slot sizes come from `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [../CMakeLists.txt](../CMakeLists.txt). The BIOS loader stages the stripped kernel in `[0x10000,0x6A000)` (360 KiB) and the plain initrd in `[0x6A000,0x9A000)` (192 KiB). Kernel C++ and bundled userspace use `-Os`; userspace also discards unreferenced sections while retaining metadata. These changes accommodate sessions and rich-parameter tools without modifying the loader, the 2880-sector raw image, or boot-log placement. ELF-aware checks separately enforce kernel file/staging size, PT_LOAD execution extent plus the 16 KiB reserve, initrd capacity, firmware ceiling, and disk overlap. The reserved execution window and page bitmap remain unchanged. See the [implementation record](2026-11-05-client-sessions-and-parameters.md).
 
 ## The Shared Kernel Contract: `BootInfo`
 
@@ -531,7 +531,7 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x0A000` | temporary page-table scratch used by the BIOS long-mode transition |
 | `0x10000` | BIOS kernel-image load buffer |
-| `0x82000` | BIOS initrd load buffer (96 KiB slot, ending at `0x9A000`) |
+| `0x6A000` | BIOS initrd load buffer (192 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x20000-0x5FFFF` | page-frame bitmap |
 
@@ -1162,7 +1162,7 @@ Major constraints that remain:
 
 The [initrd VFS milestone](2026-11-04-initrd-vfs-implementation-plan.md) now implements read-only namespace access and bounded argument/environment handoff. Hosted-service design follows this foundation. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
 
-- extend the [implemented copied IPC prototype](copied-ipc-abi.md) beyond the [implemented Counter/events phase](counter-events-abi.md) through the [implemented scoped shared activation](shared-activation-abi.md), then add independent client sessions/quotas and shared-buffer lifetime rules before the broader reflective object model (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md))
+- extend the [implemented copied IPC prototype](copied-ipc-abi.md) beyond the [implemented Counter/events phase](counter-events-abi.md) through the [implemented scoped shared activation](shared-activation-abi.md), through [independent client sessions and rich parameters](2026-11-05-client-sessions-and-parameters.md), then add shared-buffer lifetime rules before the broader reflective object model (see the [native API review](os-api-draft/2026-05-10-unified-os-api-architecture-review.md))
 - evolve `init` into an explicit supervisor using the implemented startup record and child grants
 - extend the existing allocated VFS node lifetime model to persistent filesystem state and packet buffers as those providers land
 - per-page user-buffer scatter-gather and DMA pinning, once the user-process side of the storage path needs them; bounded multi-sector requests already work today through a single contiguous data descriptor

@@ -171,5 +171,5 @@ rejects duplicate member IDs, unknown formats, malformed names/types, missing
 metadata, duplicate metadata sections, truncation, and arithmetic-overflow ranges.
 
 The initrd packager strips symbol tables from staged executables to keep both
-boot paths within the BIOS initrd slot (expanded to 96 KiB in the Counter/events phase). Full ELF build artifacts
+boot paths within the BIOS initrd slot (192 KiB after the [sessions/parameters phase](2026-11-05-client-sessions-and-parameters.md)). Full ELF build artifacts
 are retained; allocated metadata and section headers remain in packaged images.

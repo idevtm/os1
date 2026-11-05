@@ -98,7 +98,14 @@ The conceptual content is deliberately small:
 | Method | Stable operation ID, input/output record identities, application result codes, and explicit side-effect/authorization semantics. |
 | Property | Getter operation and, if supported, a distinct setter operation; no direct remote memory offset. |
 | Event | Subscription protocol, payload record, ordering/loss policy, and overflow/resnapshot behavior. |
-| Record type | Fixed scalar fields and bounded arrays/strings with an explicit wire representation. |
+| Record type | Scalars and bounded strings/compound values with an explicit versioned wire representation; the richer optional/variant model is specified in the parameter proposal. |
+
+The [parameter schema profile](parameter-schema-and-cli.md) implements bounded shared
+parameter descriptors for constructors and methods: stable field/type/case IDs,
+optional and record/enum/variant values, typed constant defaults, constraints, and
+standard summary/description text. Canonical extraction must preserve these
+semantics and documentation without treating text as authority. Dot-based CLI
+conversion is a caller-side binding over the same schema, not another wire format.
 
 Names help people; numeric protocol identities route messages. A package version,
 a metadata-format version, an interface compatibility major, and an operation ID
@@ -166,9 +173,10 @@ steps. An emitted metadata object still needs a linker rule such as
 `KEEP(*(.os.interface))` when section garbage collection is enabled, plus a
 strip/package policy that preserves the chosen artifact. GNU ld documents
 [`KEEP`](https://sourceware.org/binutils/docs/ld/Input-Section-Keep.html) for
-this purpose. The current [user linker script](../../src/user/linker.ld) has no
-explicit interface-metadata placement contract. Adding a compiler `used`
-attribute alone would not establish one.
+this purpose. The current [user linker script](../../src/user/linker.ld) explicitly retains
+`.os.interface` and `.os.constructor` in the read-only load segment. A richer
+metadata format must preserve that packaging contract; a compiler `used`
+attribute alone would not establish it.
 
 A future local-library loader must separately define supported ELF types,
 relocations, symbol visibility, dependencies, TLS, calling conventions, and
@@ -317,3 +325,7 @@ Metadata format, numeric protocol IDs, exact wire layouts, and full supervision
 policy remain implementation decisions requiring review. Those decisions should
 be driven by the first working services, not by preserving the older universal
 reflection and raw-symbol invocation sketches.
+
+The [2026-11-05 implementation record](../2026-11-05-client-sessions-and-parameters.md)
+records working independent sessions and rich constructor/method inputs. The
+general generated SDK and broader reflection designs above remain proposals.
