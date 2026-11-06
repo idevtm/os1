@@ -1,11 +1,11 @@
 # os1 Architecture
 
-> generated-by: GitHub Copilot; updated-by: Codex - last-reviewed: 2026-11-03 - source revision: 63e328d
+> generated-by: GitHub Copilot; updated-by: Codex - status-refreshed: 2026-11-06 - source revision: 535ee54
 
 This document is the current-state source of truth for `os1`. It describes what is implemented in the repository today. For build, run, and smoke workflows, see [README](../README.md). For the longer-term direction, see [GOALS](../GOALS.md). For the external specifications, firmware manuals, ABI references, and protocol standards that inform the project, see [REFERENCES](REFERENCES.md). For the shell/operator milestone that produced the current user-facing environment, see [Milestone 5 Design: Interactive Shell And Observability](archive/kernel/2026-04-23-milestone-5-interactive-shell-and-observability.md). For a full code-grounded review of the project, see [Latest Review](latest-review.md). The review documents under `docs/` are historical context, not the live system contract.
 
-The [2026-11-03 review](reviews/2026-11-03-review.md) records historical correctness findings and validation limits.
-Dated follow-ups in [latest review](latest-review.md) identify completed corrections.
+The [2026-11-03 review](archive/reviews/2026-11-03-review.md) records historical correctness findings and validation limits.
+The [2026-11-06 review](reviews/2026-11-06-review.md) records completed corrections, current capabilities, and remaining priorities.
 The [Native API index](native-api/README.md) separates implemented ABI profiles from accepted direction and future proposals.
 The [service roadmap](native-api/roadmap.md) defines the next integration milestones.
 
@@ -53,13 +53,14 @@ The [documentation index](README.md) groups current contracts by topic and separ
 ## Native objects and OS services
 
 The Native API has implemented descriptor authority and bounded IPC between user programs.
-Console and writable `/tmp` use a bounded kernel provider adapter with the same retained Operation transport.
+Console, writable `/tmp`, and persistent ext2 use a bounded kernel provider adapter with the same retained Operation transport.
 
 | Current path | Implemented behavior | Planned integration |
 | --- | --- | --- |
 | Console | Descriptor I/O plus copied IPC `write`, `try_read`, and `info` | Input events and scoped service discovery |
 | Initrd | Immutable descriptor/resource syscalls | Native bindings for immutable resources |
 | `/tmp` | Native Directory/File methods and descriptor I/O, mutation rights, quotas, retained unlinked files | Kernel Buffer transfers and additional mount semantics |
+| `/disk` | Native File/Directory methods, synchronization, and immutable executable snapshots over virtio/USB ext2 | Larger filesystem profiles, kernel Buffer I/O, and public mount lifecycle |
 | User providers | Copied calls, Operations, capabilities, sessions, volatile events, and exclusive Buffer loans | Reusable scoped service bootstrap and discovery |
 | Hardware drivers | Kernel-resident C++ interfaces and request/completion mechanisms | Kernel-hosted BlockDevice and input service objects |
 
@@ -849,7 +850,7 @@ Supported operations include:
 - cloning the required supervisor mappings into a process address space
 - destroying the user slot during process teardown
 
-`allocate_and_map()` now frees a data frame when page-table allocation fails before linking it; a forced-exhaustion regression covers the leak from [review R5](reviews/2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame). Earlier successfully linked pages remain owned by the address space and are reclaimed by failed-image teardown.
+`allocate_and_map()` now frees a data frame when page-table allocation fails before linking it; a forced-exhaustion regression covers the leak from [review R5](archive/reviews/2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame). Earlier successfully linked pages remain owned by the address space and are reclaimed by failed-image teardown.
 
 Generic `VirtualMemory::free` and `destroy_user_slot` still free frames before an asynchronous TLB shootdown.
 The Buffer retirement barrier does not correct those general VM paths.
@@ -998,7 +999,7 @@ Scheduling is intentionally simple in policy but no longer single-CPU in shape: 
 
 There is still no priority or nice model, no user-visible affinity control, and no AP-targeted device IRQ steering yet.
 
-Child image, standard-stream grants, and entry frame now precede scheduler publication; spawn captures the PID before making the child runnable. The post-publication frame rewrite identified in [review R1](reviews/2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication) is removed. Context switching leaves the outgoing stack and CR3 before publishing the next current thread. The [implementation record](archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) distinguishes regression coverage from the earlier unexplained BIOS failure.
+Child image, standard-stream grants, and entry frame now precede scheduler publication; spawn captures the PID before making the child runnable. The post-publication frame rewrite identified in [review R1](archive/reviews/2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication) is removed. Context switching leaves the outgoing stack and CR3 before publishing the next current thread. The [implementation record](archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) distinguishes regression coverage from the earlier unexplained BIOS failure.
 
 Reaping can complete the current thread's child-exit wait before a CPU handoff.
 The scheduler keeps that awakened thread runnable.
@@ -1017,7 +1018,7 @@ The kernel validates user pointers through `mm/user_copy.cpp` before copying sys
 
 Buffer ownership changes use acknowledged TLB retirement and serialize kernel user copies.
 The [Buffer ABI](native-api/abi/buffer-loans-abi.md#retirement-and-kernel-copies) defines these rules and their validation limits.
-The earlier [SMP assessment](reviews/2026-11-03-review.md#smp-memory-and-lifetime) remains relevant to generic VM teardown.
+The earlier [SMP assessment](archive/reviews/2026-11-03-review.md#smp-memory-and-lifetime) remains relevant to generic VM teardown.
 The Buffer barrier does not change the generic asynchronous frame-release paths.
 General shared address spaces, copy-on-write, and user DMA pinning remain outside the Buffer contract.
 
@@ -1159,7 +1160,7 @@ This deferred teardown is important. The kernel does not free the current thread
 
 Milestone 4 completed the move to ACPI-derived platform discovery and removed the legacy MP-table path. The 2026-05-10 ACPICA integration made upstream ACPICA the active ACPI implementation for table discovery, namespace load, device enumeration, resource parsing, `_PRT` resolution, and `_PS0`/`_PS3` power transitions. ACPICA is vendored under `third_party/acpica` at submodule SHA `232ff3f8` (release `20260408`); OS-specific policy and glue stay behind `src/kernel/platform/acpica_*` and the public platform facade.
 
-The freestanding OSL now implements firmware waits and timer queries using a PIT-channel-2-calibrated TSC helper. Its calibration-failure timer advances by query count, and it has no demonstrated cross-CPU monotonicity contract or public clock/deadline API. OSL locks remain dummy operations, semaphores do not block, the thread ID is constant, and asynchronous execution and interrupt-handler operations are unsupported. These boundaries constrain concurrent AML and SCI/GPE/power management; calls from multiple runnable processes require an explicit serialization model. See the [current review](reviews/2026-11-03-review.md#acpica-and-timing) and [ACPICA integration notes](kernel/acpica-integration.md).
+The freestanding OSL now implements firmware waits and timer queries using a PIT-channel-2-calibrated TSC helper. Its calibration-failure timer advances by query count, and it has no demonstrated cross-CPU monotonicity contract or public clock/deadline API. OSL locks remain dummy operations, semaphores do not block, the thread ID is constant, and asynchronous execution and interrupt-handler operations are unsupported. These boundaries constrain concurrent AML and SCI/GPE/power management; calls from multiple runnable processes require an explicit serialization model. See the [historical review](archive/reviews/2026-11-03-review.md#acpica-and-timing) and [ACPICA integration notes](kernel/acpica-integration.md).
 
 The kernel now:
 
@@ -1363,8 +1364,10 @@ This branch runs build/test commands directly. The unified verification entrypoi
 
 ## Current Constraints And Next Step
 
-The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](reviews/2026-11-03-review.md#7-recommended-next-milestones) identified publication and mapping leaks now addressed by the console milestone. The reliability phase addresses IST allocation failure and smoke-runner settling.
-Exact-image physical qualification remains pending. The VFS exec tests reproduced and fixed a page-table teardown defect that freed reserved frames; see the [VFS validation record](archive/native-api/2026-11-04-initrd-vfs-implementation-plan.md). This does not retrospectively prove the cause of every earlier intermittent BIOS failure or qualify physical media.
+The current architecture has working subsystem paths and open correctness boundaries. The [2026-11-03 review](archive/reviews/2026-11-03-review.md#7-recommended-next-milestones) identified publication and mapping leaks now addressed by the console milestone. The reliability phase addresses IST allocation failure and smoke-runner settling.
+The [interrupt-return record](archive/kernel/2026-11-06-interrupt-return.md) documents the later reproduced scheduler fault and its correction.
+One physical USB persistence path is confirmed; update preservation and scheduler retesting remain pending.
+The VFS exec tests reproduced and fixed a page-table teardown defect that freed reserved frames; see the [VFS validation record](archive/native-api/2026-11-04-initrd-vfs-implementation-plan.md). This does not retrospectively prove the cause of every earlier intermittent BIOS failure or qualify physical media.
 
 Major constraints that remain:
 
@@ -1388,9 +1391,9 @@ Major constraints that remain:
 
 The [initrd VFS milestone](archive/native-api/2026-11-04-initrd-vfs-implementation-plan.md) now implements read-only namespace access and bounded argument/environment handoff. Bounded hosted IPC is also implemented; general kernel-service integration remains planned. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
 
-- integrate the [implemented Native API](native-api/README.md) with kernel services, extending bounded writable `/tmp` with bulk transfers, input devices, and persistent USB data; see the [service roadmap](native-api/roadmap.md)
+- extend the [implemented Native API](native-api/README.md) with native input, scoped discovery, and kernel Buffer transfers; see the [service roadmap](native-api/roadmap.md#remaining-priorities)
 - evolve `init` into an explicit supervisor using the implemented startup record and child grants
-- extend the existing allocated VFS node lifetime model to persistent filesystem state and packet buffers as those providers land
+- retain the implemented VFS lifetime rules when adding filesystem operations and packet buffers
 - per-page user-buffer scatter-gather and DMA pinning, once the user-process side of the storage path needs them; bounded multi-sector requests already work today through a single contiguous data descriptor
 - additional filesystem providers once their block and persistence contracts are defined
 - a small multiuser/permissions foundation (uid/gid, file ownership, credentials field on `Process`) so Milestone F can meaningfully run SSH

@@ -259,7 +259,7 @@ This sequence records proposed work; it does not change the current ABI or imple
 | 4 | Complete exact-image hardware qualification. | Record image hashes, CPU observations, sustained operation, and recovery results on the physical device. |
 | 5 | Select the next native-object or storage slice. | Specify live-reader publication before implementation, or define a read-only block-backed filesystem contract. |
 
-The [project review](../../reviews/2026-11-03-review.md#7-recommended-next-milestones) retains the original correctness and platform priorities.
+The [project review](../reviews/2026-11-03-review.md#7-recommended-next-milestones) retains the original correctness and platform priorities.
 Descriptors, console, startup arguments, initrd VFS, hosted IPC, sessions, rich parameters, and exclusive Buffer loans now have implementation records.
 Follow-up: the [passive ACPI correction](../kernel/2026-11-05-passive-acpi-observation.md) completes priority 1 by removing runtime firmware calls.
 The Buffer scheduler correction does not explain every historical BIOS or baseline timeout.

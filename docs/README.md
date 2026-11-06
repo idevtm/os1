@@ -6,7 +6,7 @@ Completed plans and older reviews are preserved in the archive.
 | Read first | Purpose |
 | --- | --- |
 | [Architecture](ARCHITECTURE.md) | Current system structure, responsibilities, and data flow |
-| [Native API roadmap](native-api/roadmap.md) | Implemented services and next milestones: bulk buffers, input, and persistent USB data |
+| [Native API roadmap](native-api/roadmap.md) | Implemented services and remaining priorities: input, scoped discovery, bulk I/O, and storage qualification |
 | [Native API index](native-api/README.md) | Implemented ABI profiles, accepted design, and explicitly marked proposals |
 | [Latest review](latest-review.md) | Latest whole-project review and subsequent implementation evidence |
 | [USB image workflow](hardware/usb-image-workflow.md) | Build, write, verify, and eject a boot image |

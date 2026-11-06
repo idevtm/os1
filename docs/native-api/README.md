@@ -40,7 +40,7 @@ Documents can contain proposals after promotion, provided their scope and status
 | Capability | Current contract |
 | --- | --- |
 | Kernel-hosted Console methods, information property, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |
-| Persistent QEMU ext2, disk executables, File/Directory `sync` | [Ext2 storage profile](../filesystems/ext2.md) |
+| Persistent ext2 over virtio/USB, disk executables, File/Directory `sync` | [Ext2 storage profile](../filesystems/ext2.md) |
 | Kernel-hosted writable `/tmp`, mutation rights, resource results, quotas | [Temporary filesystem ABI](abi/tmpfs-abi.md) |
 | Descriptors, rights, lifetime, console | [Console descriptor ABI](abi/console-descriptor-abi.md) |
 | Immutable files/directories, launch grants, argv/environment | [Initrd VFS and startup ABI](abi/initrd-vfs-abi.md) |
@@ -57,16 +57,19 @@ The current encoding remains `fd`; general typed owning/borrowed C++ wrappers re
 
 ## Latest implementation
 
+The [project review](../reviews/2026-11-06-review.md) assesses the merged service and storage baseline.
+The [USB hardware record](../archive/filesystems/2026-11-06-usb-hardware-validation.md) records one physical persistence result.
 The [temporary filesystem plan](../archive/filesystems/2026-11-06-tmpfs-implementation.md) records Directory/File integration, checks, measurements, and review.
 The [kernel console plan](kernel-console-plan.md) records the preceding adapter slice.
 
 ## What remains
 
-Console and `/tmp` now support descriptor I/O and native copied IPC through the kernel provider adapter.
+Console, `/tmp`, and ext2 support descriptor I/O and native copied IPC through the kernel provider adapter.
 Initrd objects still use descriptor syscalls; hardware drivers use internal kernel interfaces.
 The [roadmap](roadmap.md#shared-service-foundation) connects these paths through native service contracts.
 
-General service discovery, kernel Buffer borrowing, physical USB storage, and input recovery still need concrete protocols.
+Scoped service discovery, kernel Buffer borrowing, native device interfaces, and input recovery still need concrete protocols.
+USB persistence is implemented; physical preserving updates and broader failure qualification remain pending.
 Console bindings capture method-specific authority; each additional service needs its own policy.
 Generated SDKs, `.so` bindings, a reflective shell, userspace drivers, and shared-memory rings are not prerequisites for those milestones.
 Class code continues to select new or existing object instances; ordinary callers receive no creation-policy override.

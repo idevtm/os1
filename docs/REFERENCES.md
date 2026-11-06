@@ -4,7 +4,7 @@ This document consolidates the external standards, manuals, specifications, RFCs
 
 The list is curated rather than exhaustive. It favors primary sources first: official standards bodies, vendor manuals, protocol specifications, and normative registries. Where a foundational specification is membership-gated or historically difficult to obtain publicly, this guide points to the nearest official public landing page or the most authoritative open reference that is practical for project work.
 
-Implementation evidence as of 2026-11-03 is recorded in the [project review](reviews/2026-11-03-review.md), with [latest-review](latest-review.md) tracking the newest review. The [G74SX handoff](archive/boot/2026-11-02-g74sx-bringup-debug-plan.md) and [boot-log capture guide](hardware/boot-log.md) distinguish physical boot reports from QEMU validation and later source changes. A specification listed here is a design reference, not evidence that its subsystem or full contract is implemented.
+Implementation evidence as of 2026-11-03 is recorded in the [project review](archive/reviews/2026-11-03-review.md), with [latest-review](latest-review.md) tracking the newest review. The [G74SX handoff](archive/boot/2026-11-02-g74sx-bringup-debug-plan.md) and [boot-log capture guide](hardware/boot-log.md) distinguish physical boot reports from QEMU validation and later source changes. A specification listed here is a design reference, not evidence that its subsystem or full contract is implemented.
 
 ## Start Here
 

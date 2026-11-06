@@ -1,7 +1,9 @@
 # Native API service roadmap
 
 This roadmap connects the implemented Native API to writable storage and device services.
-Source baseline: `5da388a67355a614014bf04f7c7c3197a77b715a`, reviewed on 2026-11-05.
+Current status baseline: `535ee54951b68c9858bf32b7577d4f121a64ab57`, reviewed on 2026-11-06.
+The [project review](../reviews/2026-11-06-review.md) records evidence and remaining risks.
+Milestone numbers below retain their original design order; they do not imply unfinished storage implementation.
 The user selected an in-memory filesystem at `/tmp` and kernel-resident hardware drivers for these milestones.
 Console v1 and [Directory/File v1](abi/tmpfs-abi.md) now have implemented ABI records.
 Other service interfaces below remain proposed contracts.
@@ -32,8 +34,8 @@ flowchart TD
 | Shared state | Independent sessions and bounded admission; class-controlled Counter singleton | Reusable service bootstrap and lifecycle beyond the scoped Counter example |
 | Typed metadata | Offline interfaces; bounded rich constructor/method inputs and CLI conversion | Stable service schemas; broader output/event descriptions and generated bindings later |
 | Bulk data | Exclusive zero-copy Buffer loans, returned input identity, distinct output objects | Kernel-service integration; separate DMA ownership and quiescence rules for devices |
-| Files | Immutable initrd, writable `/tmp`, native mutation, quotas, per-open cursors, capability-relative lookup | Kernel Buffer transfers, public mounts, and physical USB qualification |
-| Devices | Internal block requests; xHCI boot-keyboard input | Native device endpoints, usable mouse events, broader USB hardware qualification |
+| Files | Immutable initrd, writable `/tmp`, persistent ext2, disk execution, native mutation, and capability-relative lookup | Kernel Buffer transfers, public mounts, larger ext2 profiles, and broader physical qualification |
+| Devices | Internal block requests; xHCI keyboard/storage; EHCI storage and bounded high-speed hubs | Native device endpoints, usable mouse events, keyboard diagnosis, and broader hardware qualification |
 
 The descriptor decision no longer blocks VFS, sockets, PTYs, or redirection at the foundational level.
 Each subsystem still needs its own semantic contract and implementation.
@@ -138,6 +140,9 @@ The same demo must run through UEFI and BIOS smokes.
 
 Qualify the existing USB keyboard path and expose usable input objects.
 [Issue #27](https://github.com/idevtm/os1/issues/27) remains the physical keyboard investigation.
+The user reconfirms the failure on 2026-11-06: a desktop, USB keyboard, and USB 2.0 port.
+Controller, keyboard identity, topology, and exact image revision remain unrecorded.
+A USB 2.0 port alone does not identify the host controller.
 Firmware input success does not establish kernel controller support.
 Record the controller, USB topology, keyboard identity, and image revision before choosing a controller-specific fix.
 
@@ -188,7 +193,8 @@ flowchart LR
 
 ### Block contract and reference driver
 
-Expose geometry, limits, Read, Write, and Flush through a native BlockDevice interface.
+Propose a native `BlockDevice` interface with `info`, `read`, `write`, and `flush`.
+These names define design scope; no public BlockDevice ABI is implemented yet.
 Define alignment, bounds, partial progress, queue limits, write ordering, and durable completion.
 The internal [block facade](../../src/kernel/storage/block_device.hpp) supports bounded reads, writes, and Flush.
 The virtio reference driver implements Flush; native filesystem `sync` establishes durability.
@@ -254,7 +260,7 @@ Qualify the workflow on physical devices before treating QEMU evidence as hardwa
 
 | GOALS area | Native API dependency | Independent work still required |
 | --- | --- | --- |
-| Writable VFS and persistence | Kernel provider adapter, file/directory mutation, Buffer I/O, block failure contract | Filesystem implementation, USB storage, partition parsing, durable writes |
+| Writable VFS and persistence | Console/File/Directory adapter and copied mutations implemented; kernel Buffer I/O and public BlockDevice remain | Bounded ext2 and USB storage implemented; larger layouts, public mounts, and physical update/failure qualification remain |
 | Shell and pipelines | File redirection, append, console EOF, and a line editor are [implemented](../shell/interactive-files.md). Pipes still need endpoint semantics and readiness. | Pipeline syntax and process orchestration; generated bindings are unnecessary |
 | Networking and sockets | Endpoint interfaces, packet ownership, backpressure, deadlines and cancellation semantics | IP/UDP/TCP, addressing, DNS, driver buffering |
 | PTYs and SSH | Terminal/session objects, streams, process control, credential-aware grants | Authentication, cryptography, entropy, permissions, network stack |
@@ -279,15 +285,39 @@ Assign numeric layouts in its ABI document only when implementation and checks e
 Promote individual proposal sections to implemented status with links to source and validation.
 This document promotion does not imply ABI stability or approval of every illustrative object in the older catalog.
 
+## Remaining priorities
+
+The selected storage and Console slices are implemented. Input services are the next functional implementation milestone.
+This table records priority, acceptance, and dependencies without assigning new ABI numbers.
+
+| Order | Work | Acceptance | Dependency |
+| --- | --- | --- | --- |
+| 1 | Physical update preservation | An existing user file survives boot-only and program-only updates, synchronization, and reboot; updated code also runs | Existing managed USB tooling; record image hash, disk identity, commands, and results |
+| 2 | Keyboard issue #27 | Record controller/topology and reproduce the failure; verify shell input after correction | Access to the affected computer; firmware input alone proves no kernel support |
+| 3 | Native keyboard/mouse objects | Two clients receive future events; unsubscribe, overflow recovery, removal, and console typing work | Input protocol and kernel adapter event support; controller additions follow observed hardware needs |
+| 4 | Service discovery and lifecycle | Startup grants a scoped service directory; lookup attenuates authority; shutdown/restart outcomes remain explicit | Existing capabilities and sessions; prove supported connection topology |
+| 5 | Kernel bulk I/O and BlockDevice | A real file/block client uses retained Buffer ranges; failure ends access before ownership returns | Internal kernel borrower lifetime; DMA pinning/quiescence only where device access requires it |
+| 6 | Storage growth | A larger validated filesystem preserves files and executables through updates and reboot | Multi-group ext2, directory growth, and deployment-validator changes before using full-stick capacity |
+| 7 | Streams and local security | Pipes define readiness/backpressure; credentials and permissions reject unauthorized access | Existing handles and grants; credentials precede multiuser or remote exposure |
+| 8 | Networking and remote sessions | IP/UDP/TCP, addressing, DNS, sockets, then PTYs and authenticated SSH sessions | Packet ownership, operation-specific cancellation, entropy/cryptography, and security policy |
+
+Hardware checks can run alongside design and implementation.
+Retest the scheduler correction on a fresh physical image and retain its image identity.
+Physical unplug, interrupted updates, and broader USB topology need separate qualification records.
+The current ext2 profile has no journal; successful ordinary writes alone do not establish power-loss durability.
+
+Keep drivers in the kernel for these milestones.
+Use `snake_case` for methods, properties, and events; types and interfaces may use `UpperCamelCase`.
+Class code retains creation policy; clients receive no fresh/shared-instance override.
+Input events remain volatile broadcast with explicit unsubscribe and state recovery after loss.
+
 ## Immediate implementation slice
 
-The [kernel console slice](kernel-console-plan.md) establishes dispatch, independent authority, retained completion, and bounded admission.
-The [temporary filesystem slice](abi/tmpfs-abi.md) now uses that boundary with mutation rights and resource-capability results.
-Next, qualify keyboard hardware and define input-service events and recovery snapshots.
-Add kernel Buffer borrowing when a concrete bulk-data method requires it.
-Keyboard diagnosis can proceed independently; input-service integration reuses the same adapter.
-USB ext2 reboot persistence now has one physical-machine result.
-Next, verify physical program deployment and boot updates preserve an existing user file.
+Complete physical update acceptance when hardware is available, and diagnose issue #27 on its original machine.
+In parallel, define native input records and the snapshot/event synchronization boundary described in [Milestone 2](#milestone-2-keyboard-and-mouse-services).
+Implement an event-monitor client before compositor work.
+General reflection and generated C++ bindings do not gate this slice.
+Add kernel Buffer borrowing for a concrete bulk-data method after the input milestone, unless that method becomes an earlier requirement.
 
 ## Original roadmap impact assessment and evidence
 

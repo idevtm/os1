@@ -93,7 +93,7 @@ The third failure was one BIOS xHCI storage boot with a general-protection fault
 Its address resolves to `restore_frame_ptr.resume_kernel`, at `iretq`.
 That test passed an immediate repeat and ten further repetitions in 16.42 seconds.
 The boot fault remains unexplained. Passing repetitions do not establish its cause or close it.
-Earlier [BIOS faults](../../reviews/2026-11-03-review.md) exist, but this run does not establish a common cause.
+Earlier [BIOS faults](../reviews/2026-11-03-review.md) exist, but this run does not establish a common cause.
 No scheduler code or forbidden-fault assertions were changed.
 All six EHCI tests passed, including BIOS and UEFI storage, combined-image updates, and failure handling.
 Independent review found stale BIOS sector ranges in the architecture document.
