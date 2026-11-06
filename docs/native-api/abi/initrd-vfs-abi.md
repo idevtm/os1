@@ -106,6 +106,7 @@ request/grant/thread allocation failures also preserve the parent image/table.
 Syscall 11 is `launch(executable_fd, mode, request_pointer)`, with SPAWN=0 and
 EXEC=1 and restricted PRIVATE_PROVIDER=2 (see [the supervision contract](counter-events-abi.md)). It retains a regular-file instance with EXECUTE; READ alone is insufficient.
 Loading uses that immutable object's bytes, independent of its shared cursor.
+Disk-backed executable files use a stable snapshot; see the [ext2 profile](../../filesystems/ext2.md).
 There is no secondary privileged pathname lookup.
 
 Startup ABI version 2 uses a 2880-byte launch request containing a 16-byte envelope, a 2480-byte startup
@@ -155,7 +156,7 @@ the retained image with READ|SEEK|INSPECT|EXECUTE. Raw `launch` supports
 selected grants without that convenience requirement.
 
 The first slice retains one user thread per process, no user unmap or external
-kill, no mutable mounts, links, credentials, block-backed files, dynamic linker,
+kill, public mount control, links, credentials, dynamic linker,
 or general reflection. [Copied IPC and restricted private supervision](counter-events-abi.md)
 are implemented; [scoped shared Counter activation](shared-activation-abi.md) adds an optional matching client grant at fd 4 for supervised self-export. General service discovery remains later work. `observe` remains a separate privileged
 prototype surface; in particular ACPI power effects must be gated before exposing

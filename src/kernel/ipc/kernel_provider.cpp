@@ -5,7 +5,7 @@
 #include "console/console_input.hpp"
 #include "sync/atomic.hpp"
 #include "util/memory.h"
-#include "vfs/tmpfs.hpp"
+#include "vfs/filesystem.hpp"
 
 namespace
 {
@@ -164,6 +164,9 @@ void invoke_directory(OpenInstance& source,
         case OS1_DIRECTORY_REWIND:
             required = OS1_RIGHT_ENUMERATE;
             break;
+        case OS1_DIRECTORY_SYNC:
+            required = OS1_RIGHT_CREATE;
+            break;
         case OS1_DIRECTORY_INFO:
             required = OS1_RIGHT_INSPECT;
             break;
@@ -205,14 +208,15 @@ void invoke_directory(OpenInstance& source,
                     ~(args.kind == OS1_OBJECT_FILE ? kTmpFileRights : kTmpDirectoryRights))
                 status = OS1_ERR_ACCESS;
             else
-                status = tmpfs_create(node, args.name, args.name_bytes, args.kind, opened);
+                status =
+                    node->operations->create(node, args.name, args.name_bytes, args.kind, opened);
         }
         else if(args.kind)
             status = OS1_ERR_INVALID;
         else
         {
             NativeObject* child = nullptr;
-            status = tmpfs_lookup(node, args.name, args.name_bytes, child);
+            status = node->operations->lookup(node, args.name, args.name_bytes, child);
             if(status == 0)
             {
                 if(args.rights & ~child->allowed_rights)
@@ -231,21 +235,23 @@ void invoke_directory(OpenInstance& source,
     {
         os1_directory_name args{};
         if(decode(request, args) && !args.reserved && name_record(args.name, args.name_bytes))
-            status = tmpfs_remove(node, args.name, args.name_bytes);
+            status = node->operations->remove(node, args.name, args.name_bytes);
     }
     else if(request.member == OS1_DIRECTORY_RENAME)
     {
         os1_directory_rename args{};
         if(decode(request, args) && name_record(args.source, args.source_bytes) &&
            name_record(args.destination, args.destination_bytes))
-            status = tmpfs_rename(
+            status = node->operations->rename(
                 node, args.source, args.source_bytes, args.destination, args.destination_bytes);
     }
     else if(!request.payload_bytes)
     {
-        if(request.member == OS1_DIRECTORY_INFO)
+        if(request.member == OS1_DIRECTORY_SYNC)
+            status = node->operations->sync(node);
+        else if(request.member == OS1_DIRECTORY_INFO)
         {
-            encode(result, tmpfs_info(node));
+            encode(result, node->operations->info(node));
             status = 0;
         }
         else
@@ -262,7 +268,7 @@ void invoke_directory(OpenInstance& source,
             {
                 os1_directory_entry entry{};
                 uint64_t next = 0;
-                status = tmpfs_next(node, source.cursor, entry, next);
+                status = node->operations->next(node, source.cursor, entry, next);
                 if(status > 0)
                 {
                     encode(result, entry);
@@ -287,6 +293,7 @@ void invoke_file(OpenInstance& source,
         case OS1_FILE_READ:
             required = OS1_RIGHT_READ;
             break;
+        case OS1_FILE_SYNC:
         case OS1_FILE_APPEND:
         case OS1_FILE_WRITE:
         case OS1_FILE_TRUNCATE:
@@ -313,7 +320,7 @@ void invoke_file(OpenInstance& source,
         if(request.payload_bytes)
             result.application_status = OS1_ERR_INVALID;
         else
-            encode(result, tmpfs_info(node));
+            encode(result, node->operations->info(node));
         return;
     }
     CursorGuard cursor(source);
@@ -328,22 +335,26 @@ void invoke_file(OpenInstance& source,
         os1_file_read args{};
         if(decode(request, args) && !args.reserved && args.capacity <= OS1_IPC_PAYLOAD_MAX)
         {
-            status = tmpfs_read(node, source.cursor, result.payload, args.capacity);
-            result.payload_bytes = status;
-            source.cursor += status;
-            status = 0;
+            status = node->operations->read(node, source.cursor, result.payload, args.capacity);
+            if(status >= 0)
+            {
+                result.payload_bytes = status;
+                source.cursor += status;
+                status = 0;
+            }
         }
     }
     else if(request.member == OS1_FILE_WRITE || request.member == OS1_FILE_APPEND)
     {
         uint64_t end = source.cursor;
-        status = tmpfs_write(node,
-                             source.cursor,
-                             request.payload,
-                             request.payload_bytes,
-                             request.member == OS1_FILE_APPEND ||
-                                 (atomic_load_acquire(&source.status_flags) & OS1_STATUS_APPEND),
-                             &end);
+        status = node->operations->write(
+            node,
+            source.cursor,
+            request.payload,
+            request.payload_bytes,
+            request.member == OS1_FILE_APPEND ||
+                (atomic_load_acquire(&source.status_flags) & OS1_STATUS_APPEND),
+            &end);
         if(status >= 0)
         {
             source.cursor = end;
@@ -357,7 +368,7 @@ void invoke_file(OpenInstance& source,
         if(decode(request, args) && args.version == OS1_VFS_ABI_VERSION &&
            args.size == sizeof(args) && !args.reserved)
         {
-            status = tmpfs_seek(node, source.cursor, args.offset, args.origin);
+            status = node->operations->seek(node, source.cursor, args.offset, args.origin);
             if(status >= 0)
             {
                 source.cursor = status;
@@ -366,11 +377,16 @@ void invoke_file(OpenInstance& source,
             }
         }
     }
+    else if(request.member == OS1_FILE_SYNC)
+    {
+        if(!request.payload_bytes)
+            status = node->operations->sync(node);
+    }
     else
     {
         os1_file_truncate args{};
         if(decode(request, args))
-            status = tmpfs_truncate(node, args.byte_size);
+            status = node->operations->truncate(node, args.byte_size);
     }
     result.application_status = status;
 }
@@ -378,10 +394,10 @@ const KernelProvider directory{OS1_DIRECTORY_INTERFACE_ID,
                                1,
                                OS1_OBJECT_DIRECTORY,
                                kTmpDirectoryRights,
-                               tmpfs_node,
+                               vfs_backed,
                                invoke_directory};
 const KernelProvider file{
-    OS1_FILE_INTERFACE_ID, 1, OS1_OBJECT_FILE, kTmpFileRights, tmpfs_node, invoke_file};
+    OS1_FILE_INTERFACE_ID, 1, OS1_OBJECT_FILE, kTmpFileRights, vfs_backed, invoke_file};
 const KernelProvider console{OS1_CONSOLE_INTERFACE_ID,
                              OS1_CONSOLE_INTERFACE_VERSION,
                              OS1_OBJECT_CONSOLE,

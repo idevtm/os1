@@ -357,14 +357,15 @@ Selected progression:
 
 1. Completed for Console: native kernel service dispatch preserves descriptor authority and retained-operation lifetime.
 2. Completed for bounded copied transfers: [writable `/tmp`](docs/native-api/abi/tmpfs-abi.md), with an immutable initrd. Kernel Buffer transfers remain deferred.
-3. Define block geometry, bounds, write ordering, Flush, failure, and device-removal behavior.
-4. Add USB mass storage and a bounded data-partition view.
-5. Select a filesystem, validate read-only access, then implement writable persistence and recovery.
+3. Completed for QEMU: block bounds, Flush, a partition view, and bounded ext2 persistence.
+4. Completed for QEMU: execute a disk-only utility and verify files after reboot.
+5. Add USB mass storage, physical device-removal behavior, and broader filesystem recovery.
 6. Preserve the data partition across routine kernel/initrd image updates.
 
-The filesystem choice remains open.
-Bounded block reads and writes are implemented, but `virtio-blk` still rejects Flush.
-Successful Write completion is not yet a durability contract.
+Ext2 is selected and implemented for the first QEMU persistence profile.
+Bounded virtio block reads, writes, and Flush support native filesystem synchronization.
+A disk-only utility and files surviving reboot validate the first vertical slice.
+USB mass storage and partition-preserving physical deployment remain planned.
 The [storage roadmap](docs/native-api/roadmap.md#milestone-3-persistent-usb-data) defines the acceptance gates.
 
 ### Driver model
@@ -461,7 +462,7 @@ The [Native API service roadmap](docs/native-api/roadmap.md) sets the next funct
 1. Completed for Console: connect native IPC to a kernel service with explicit authority, bounded admission, and retained lifetime.
 2. Completed for bounded copied transfers: [writable `/tmp`](docs/native-api/abi/tmpfs-abi.md). Kernel Buffer transfers remain deferred.
 3. Qualify USB keyboard input and deliver mouse events through native input objects.
-4. Implement block durability, USB mass storage, partition access, and a persistent writable data filesystem.
+4. Extend the completed QEMU ext2 persistence slice to USB mass storage and partition-preserving physical updates.
 5. Preserve stored data during boot-image updates.
 
 Keyboard hardware diagnosis can proceed independently of writable filesystem work.
@@ -514,7 +515,7 @@ The [VFS/startup extension](docs/native-api/abi/initrd-vfs-abi.md) now provides 
 
 Console descriptors, startup grants, immutable initrd VFS, bounded writable `/tmp`, and bounded object IPC are implemented.
 The shell also supports [interactive file creation, redirection, here-documents, and a line editor](docs/shell/interactive-files.md).
-Pipelines, full terminal editing, and persistent storage remain separate work.
+Pipelines and full terminal editing remain separate work. QEMU persistence uses the ext2 profile.
 The [service roadmap](docs/native-api/roadmap.md) gives the detailed sequence and acceptance tests.
 
 | Next slice | Required outcome |
@@ -571,7 +572,7 @@ Some earlier open questions have since been resolved in source or in the milesto
 The following are not fully decided yet and should be revisited explicitly:
 
 - kernel-service protocols beyond Console and temporary files, scoped discovery, and each additional service's authority and lifetime rules
-- first persistent filesystem choice; the temporary filesystem is an in-memory `/tmp`
+- extend the bounded ext2 persistence profile; retain in-memory `/tmp` for temporary files
 - process and address-space reclamation guarantees, followed by AP-targeted device IRQ steering, lock-order assertions, and scheduler-policy refinement
 - cancellation, durable completion, and timeout outcomes for device I/O and networking; basic IPC deadlines already exist
 - later GPU / accelerator target model after discovery-only phase: compute queues, minimal kernel offload primitives, or richer user-facing submission model

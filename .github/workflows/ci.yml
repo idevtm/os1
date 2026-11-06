@@ -35,7 +35,7 @@ jobs:
             command -v qemu-system-x86_64
           else
             sudo apt-get update
-            sudo apt-get install -y nasm cpio xorriso ovmf qemu-system-x86 cmake ninja-build
+            sudo apt-get install -y e2fsprogs nasm cpio xorriso ovmf qemu-system-x86 cmake ninja-build
           fi
 
       - name: Configure host unit tests

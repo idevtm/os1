@@ -10,6 +10,7 @@
 #include "syscall/process.hpp"
 #include "syscall/resource.hpp"
 #include "syscall/vfs.hpp"
+#include "vfs/filesystem.hpp"
 #include "vfs/initrd.hpp"
 #include "vfs/tmpfs.hpp"
 #ifdef assert
@@ -1438,3 +1439,41 @@ TEST_F(TmpfsContract, ConcurrentAppendRecordsDoNotOverlapOrInterleave)
     EXPECT_EQ(OS1_TMPFS_FILE_MAX, tmpfs_info(file).byte_size);
 }
 }  // namespace
+
+TEST_F(TmpfsContract, BackendReadFailurePreservesCursorAndReturnsNoPayload)
+{
+    int fd = create("failure");
+    ASSERT_GE(fd, 0);
+    auto* instance = table().entries[fd].instance;
+    auto* file = static_cast<VfsNode*>(instance->object);
+    VfsOperations failing = *file->operations;
+    const auto* original = file->operations;
+    failing.read = [](VfsNode*, uint64_t, void*, size_t) -> long { return OS1_ERR_IO; };
+    file->operations = &failing;
+    int endpoint = bind(fd, OS1_FILE_INTERFACE_ID, OS1_RIGHT_READ);
+    ASSERT_GE(endpoint, 0);
+    os1_file_read request{4, 0};
+    auto response =
+        invoke(endpoint, OS1_FILE_INTERFACE_ID, OS1_FILE_READ, &request, sizeof(request));
+    EXPECT_EQ(response.application_status, OS1_ERR_IO);
+    EXPECT_EQ(response.payload_bytes, 0u);
+    EXPECT_EQ(instance->cursor, 0u);
+    long value = 0;
+    EXPECT_TRUE(read_or_block(frames, thread, fd, kBuffer, 4, value));
+    EXPECT_EQ(value, OS1_ERR_IO);
+    EXPECT_EQ(instance->cursor, 0u);
+    file->operations = original;
+}
+TEST_F(TmpfsContract, SyncValidatesCapturedAuthorityAndEmptyPayload)
+{
+    int fd = create("sync");
+    ASSERT_GE(fd, 0);
+    int write = bind(fd, OS1_FILE_INTERFACE_ID, OS1_RIGHT_WRITE);
+    int read = bind(fd, OS1_FILE_INTERFACE_ID, OS1_RIGHT_READ);
+    ASSERT_GE(write, 0);
+    ASSERT_GE(read, 0);
+    EXPECT_EQ(file_call(write, OS1_FILE_SYNC), 0);
+    EXPECT_EQ(file_call(read, OS1_FILE_SYNC), OS1_ERR_ACCESS);
+    EXPECT_EQ(file_call(write, OS1_FILE_SYNC, "x", 1), OS1_ERR_INVALID);
+    EXPECT_EQ(invoke(client, OS1_DIRECTORY_INTERFACE_ID, OS1_DIRECTORY_SYNC).application_status, 0);
+}

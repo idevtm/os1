@@ -51,7 +51,7 @@ constructor arguments and CLI conversion, volatile subscriptions, timed waits,
 and parent-owned private-provider supervision. The [shared activation phase](docs/native-api/abi/shared-activation-abi.md) adds
 bounded capability attachments and a scoped activation service whose Counter
 class selects singleton reuse; `activationcheck` demonstrates independent clients.
-Credentials, general service discovery, persistent filesystems, and a general
+Credentials, general service discovery, physical USB storage, and a general
 network stack remain future work.
 
 The [session and rich-parameter implementation](docs/archive/native-api/2026-11-05-client-sessions-and-parameters.md)
@@ -64,7 +64,8 @@ Inline control payloads remain bounded to 256 bytes. Live readers and shared rea
 
 The [temporary filesystem ABI](docs/native-api/abi/tmpfs-abi.md) adds native Directory/File methods, mutation rights, and bounded writable `/tmp`.
 Run `vfscheck` to check native clients, descriptor access, sparse files, and unlink lifetime.
-Kernel Buffer transfers and persistent storage remain deferred.
+Kernel Buffer transfers and physical USB storage remain deferred.
+[Persistent ext2 in QEMU](docs/filesystems/ext2.md) mounts `/disk`, runs a disk-only utility, and preserves synchronized files across reboot.
 
 The [kernel Console adapter](docs/native-api/abi/kernel-console-abi.md) adds copied IPC `write`, `try_read`, and the `info` property.
 `ipccheck` exercises two processes with independent service authority and retained asynchronous results.
@@ -465,3 +466,18 @@ Current guides and contracts are grouped by topic; completed plans and older rev
 - [Latest review](docs/latest-review.md) — latest whole-project snapshot and implementation follow-ups
 - [Glossary](docs/GLOSSARY.md) and [references](docs/REFERENCES.md) — terminology and external specifications
 - [Archive](docs/archive/README.md) — dated reviews, completed plans, and validation evidence
+
+### Persistent QEMU disk
+
+Select `storage_create`, `run_persistent`, or `run_persistent_bios` in `./os1.sh`.
+The default data image persists across ordinary builds and launches.
+Use `storage_reset` only to replace its contents explicitly.
+
+```sh
+cmake --build build --target run_persistent
+```
+
+Inside the guest, run `/disk/diskutil seed`, then `/disk/diskutil verify`.
+Run `/disk/diskutil sync` after shell writes and before stopping QEMU.
+See the [ext2 guide](docs/filesystems/ext2.md) for limits and recovery behavior.
+The two-boot smoke tests also use `e2fsck` when available (`brew install e2fsprogs` on macOS).

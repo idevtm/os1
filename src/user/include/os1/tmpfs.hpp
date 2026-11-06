@@ -153,7 +153,12 @@ inline long seek(int client, int64_t offset, unsigned origin = OS1_SEEK_SET)
         return OS1_ERR_INVALID;
     for(unsigned i = 0; i < sizeof(position); ++i)
         reinterpret_cast<uint8_t*>(&position)[i] = result.payload[i];
-    return position <= OS1_TMPFS_FILE_MAX ? position : OS1_ERR_INVALID;
+    return position <= INT64_MAX ? position : OS1_ERR_INVALID;
+}
+inline long sync(int client)
+{
+    os1_ipc_result result{};
+    return call(client, false, OS1_FILE_SYNC, nullptr, 0, result);
 }
 inline long truncate(int client, uint64_t bytes)
 {

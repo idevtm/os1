@@ -516,15 +516,16 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-768`: `kernel_bios.elf`
-- LBA `769-1168`: `initrd.cpio`
+- LBA `65-792`: `kernel_bios.elf`
+- LBA `793-1168`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
-The BIOS loader stages the stripped kernel in `[0x10000,0x68000)` (352 KiB).
-It stages the plain initrd in `[0x68000,0x9A000)` (200 KiB).
-The temporary filesystem slice moved the boundary by 4 KiB to fit the expanded regression program.
+The BIOS loader stages the stripped kernel in `[0x10000,0x6b000)` (364 KiB).
+It stages the plain initrd in `[0x6b000,0x9A000)` (188 KiB).
+The ext2 slice moves 12 KiB of staging capacity from initrd to the kernel.
+Compact non-reflective executables keep the initrd within its new bound.
 The 2880-sector raw image, firmware ceiling, and boot-log placement remain unchanged.
 Kernel C++ and bundled userspace use `-Os`; userspace discards unreferenced sections while retaining metadata.
 
@@ -586,7 +587,7 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x0A000` | temporary page-table scratch used by the BIOS long-mode transition |
 | `0x10000` | BIOS kernel-image load buffer |
-| `0x68000` | BIOS initrd load buffer (200 KiB slot, ending at `0x9A000`) |
+| `0x6b000` | BIOS initrd load buffer (188 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x20000-0x5FFFF` | page-frame bitmap |
 
@@ -833,7 +834,8 @@ The user layout remains:
 - `kUserImageBase = 0x0000008000400000`
 - `kUserStackTop = 0x0000008040000000`
 
-User CR3s clone only the supervisor mappings the kernel actually needs during traps and syscalls: the shared higher-half kernel window and the direct-map slot. They no longer clone PML4 slot `0`.
+User CR3s share the supervisor half, including higher-half kernel mappings and every occupied direct-map slot.
+This includes high PCI BAR addresses selected by UEFI firmware. The user half, including slot `0`, remains private.
 
 Supported operations include:
 
@@ -1081,6 +1083,29 @@ User programs use small-model position-relative code, a static GOT, size optimiz
 They remain fixed-address static `ET_EXEC` images; no dynamic linker or runtime relocation step is added.
 Disabling PLT calls and linker relaxation preserves high-address references and optional weak startup symbols.
 Packaging removes symbols and the nonallocated compiler `.comment` section; allocated interface metadata remains available to `intf`.
+Non-reflective staged programs omit unused section tables; class binaries retain metadata sections and their tables.
+
+### Persistent QEMU storage
+
+```text
+File/Directory IPC or descriptor I/O -> VfsOperations -> tmpfs or ext2
+ext2 -> MBR partition bounds -> virtio read/write/flush -> persistent raw image
+Executable -> immutable disk snapshot -> ELF validation -> protected process
+```
+
+The [ext2 profile](filesystems/ext2.md) defines exact limits, sync authority, failure behavior, and deployment targets.
+The namespace mounts `/disk` before publication when a supported partition exists.
+File contents remain on disk until read; the mount imports only bounded namespace and allocation metadata.
+Executable files are immutable in this profile. ELF loading owns and releases a stable image snapshot.
+
+Filesystem admission uses an atomic guard; concurrent callers receive WOULD_BLOCK.
+The virtio queue has a separate IRQ-safe lock for publication and completion.
+Bounded polling operates without that lock and supports syscall continuations with interrupts disabled.
+Device timeout quarantines DMA buffers, rejects new requests, and leaves the filesystem failed.
+
+User address spaces inherit all supervisor-half top-level mappings, including high PCI BARs selected by UEFI firmware.
+They retain a private user half. Supervisor access remains enforced at the top level.
+The high-address mapping regression and both persistence smokes cover this requirement.
 
 ### Interactive file tools
 
@@ -1245,7 +1270,7 @@ The host support layer under `tests/host/support/` provides serial-debug stubs, 
 
 ### Smoke Tests
 
-With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers thirteen QEMU shell smokes:
+With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers fifteen QEMU shell smokes:
 
 - `os1_smoke`
 - `os1_smoke_observe`
@@ -1260,11 +1285,13 @@ With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers thirtee
 - `os1_smoke_exec_bios`
 - `os1_smoke_files_bios`
 - `os1_smoke_files_uefi`
+- `os1_smoke_ext2_bios`
+- `os1_smoke_ext2_uefi`
 
 `OS1_QEMU_DEBUGCON=ON` adds `os1_smoke_no_uart`, which tests debugcon output and PS/2 input without COM1.
-`BUILD_TESTING=ON` registers four script contracts: monitor exchange, smoke settling, USB kernel update, and USB menu.
-The complete CI configuration has 14 QEMU smokes and four contracts, for 18 root CTest cases.
-Without debugcon, the complete-tool configuration has 13 QEMU smokes and four contracts, for 17 root CTest cases.
+`BUILD_TESTING=ON` registers five script contracts: monitor exchange, smoke settling, USB kernel update, USB menu, and storage image handling.
+The complete CI configuration has 16 QEMU smokes and five contracts, for 21 root CTest cases.
+Without debugcon, the complete-tool configuration has 15 QEMU smokes and five contracts, for 20 root CTest cases.
 Missing emulator or firmware prerequisites can reduce registration.
 The separate host suite is not part of these totals.
 
@@ -1306,7 +1333,7 @@ GitHub Actions runs on `ubuntu-24.04` for pushes to `main` and pull requests tar
 - configure with `OS1_REQUIRE_UEFI_SMOKE=ON`, `OS1_KMEM_DEBUG=ON`, and `OS1_QEMU_DEBUGCON=ON`
 - build the default modern artifact
 - explicitly build the BIOS compatibility artifact
-- run the 12 QEMU smokes and four script contracts through root `ctest`
+- run the 16 QEMU smokes and five script contracts through root `ctest`
 
 The same single CI job name is kept for local `act` compatibility.
 
@@ -1321,15 +1348,15 @@ Major constraints that remain:
 
 - the broad final-kernel identity map is gone, but boot still retains narrow low bootstrap identity exceptions for the live handoff stack and AP startup state until early stack handoff and AP startup are redesigned
 - the framebuffer path is a text presenter, not a graphics stack
-- userland uses an immutable initrd and bounded writable `/tmp`; block-backed filesystems and multiuser policy remain unimplemented
+- userland uses immutable initrd files, volatile `/tmp`, and optional persistent ext2 at `/disk`; multiuser policy remains unimplemented
 - console/file/directory descriptors and native `launch` are implemented; legacy pathname spawn/exec resolve through existing namespace grants, while native launch accepts argv/environment data and explicit child maps
-- block I/O is request-shaped, interrupt-completed, and supports bounded multi-sector requests up to `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request) through a single contiguous data descriptor; the synchronous wrappers chunk by `BlockDevice::max_sectors_per_request`; Flush is rejected, so successful write completion is not a durability contract; there is still no block scheduler, request merging, filesystem-facing buffer cache, or per-page user-buffer scatter-gather (which awaits user-DMA pinning)
+- block I/O is request-shaped, interrupt-completed, and supports bounded multi-sector requests up to `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request) through a single contiguous data descriptor; the synchronous wrappers chunk by `BlockDevice::max_sectors_per_request`; Flush is implemented; filesystem `sync` establishes durability; there is still no block scheduler, request merging, filesystem-facing buffer cache, or per-page user-buffer scatter-gather (which awaits user-DMA pinning)
 - PCI INTx fallback now resolves through ACPICA `_PRT` data when firmware
   provides it, with firmware-populated `interrupt_line` retained as the
   secondary fallback
 - DMA is coherent direct-map only; there is no low-address allocator, pinned
   user-buffer mapping, cacheability policy, or IOMMU
-- the kernel small-object allocator at [src/kernel/mm/kmem.cpp](../src/kernel/mm/kmem.cpp) is active infrastructure (builtin caches at 16/32/64/128/256/512/1024 bytes, named caches via `kmem_cache_create`, large-allocation page-run path, debug-build poisoning + redzones + leak dump, `OS1_OBSERVE_KMEM` snapshot kind, `kmem` shell built-in, smoke marker `kmem complete`). Current consumers include the process/thread registries, descriptor/open-instance storage, ARP cache, device-binding registry, PCI BAR claim registry, DMA allocation registry, and IRQ route registry. The VFS now also owns allocated tree nodes; further allocator growth includes block-backed file and network resource lifetime
+- the kernel small-object allocator at [src/kernel/mm/kmem.cpp](../src/kernel/mm/kmem.cpp) is active infrastructure (builtin caches at 16/32/64/128/256/512/1024 bytes, named caches via `kmem_cache_create`, large-allocation page-run path, debug-build poisoning + redzones + leak dump, `OS1_OBSERVE_KMEM` snapshot kind, `kmem` shell built-in, smoke marker `kmem complete`). Current consumers include the process/thread registries, descriptor/open-instance storage, ARP cache, device-binding registry, PCI BAR claim registry, DMA allocation registry, and IRQ route registry. The VFS now also owns allocated tree nodes; ext2 adds bounded filesystem state and executable snapshots; network resource lifetime remains later work
 - hot-remove exists as a driver/resource lifecycle path, but there are no PCIe
   or ACPI hotplug event sources yet
 - APs come up through ACPI-derived bring-up, install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, and participate in per-CPU scheduling; device IRQ steering is still BSP-first

@@ -61,11 +61,10 @@ void block_request_complete(BlockRequest& request,
                             BlockRequestStatus status,
                             uint32_t bytes_transferred = 0);
 bool block_request_wait(BlockRequest& request);
-bool block_read_sync(BlockDevice& device,
-                     uint64_t sector,
-                     void* buffer,
-                     uint32_t sector_count);
+bool block_read_sync(BlockDevice& device, uint64_t sector, void* buffer, uint32_t sector_count);
 bool block_write_sync(BlockDevice& device,
                       uint64_t sector,
                       const void* buffer,
                       uint32_t sector_count);
+
+bool block_flush_sync(BlockDevice& device);

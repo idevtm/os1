@@ -981,3 +981,23 @@ TEST(InterfaceMetadata, PublicMembersUseSnakeCaseButTypesAllowUpperCamelCase)
     EXPECT_TRUE(validate(os1::textprocessor::metadata));
     EXPECT_TRUE(validate(os1::counter::metadata));
 }
+
+TEST(InterfaceMetadata, SectionlessExecutableHasNoMetadata)
+{
+    auto bytes = image();
+    auto* h = reinterpret_cast<elf::Elf64Header*>(bytes.data());
+    h->shoff = 0;
+    h->shnum = 0;
+    h->shentsize = 0;
+    h->shstrndx = 0;
+    auto reader = [&](uint64_t offset, void* out, size_t count) {
+        if(offset > bytes.size() || count > bytes.size() - offset)
+            return false;
+        std::memcpy(out, bytes.data() + offset, count);
+        return true;
+    };
+    Metadata output{};
+    EXPECT_EQ(read_section(reader, bytes.size(), ".os.interface", output, validate), 0);
+    h->shoff = 64;
+    EXPECT_EQ(read_section(reader, bytes.size(), ".os.interface", output, validate), -1);
+}

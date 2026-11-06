@@ -27,7 +27,7 @@ set(OS1_HOST_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 include("${OS1_REPO_ROOT}/cmake/acpica_sources.cmake")
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-set(OS1_INITRD_LOAD_ADDRESS 0x69000)
+set(OS1_INITRD_LOAD_ADDRESS 0x6b000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -88,6 +88,10 @@ add_library(os1_host_support
   support/console_input_stub.cpp
   "${OS1_REPO_ROOT}/src/kernel/vfs/initrd.cpp"
   "${OS1_REPO_ROOT}/src/kernel/vfs/tmpfs.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/vfs/ext2.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/fs/ext2.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/storage/block_device.cpp"
+  support/block_device_stub.cpp
   "${OS1_REPO_ROOT}/src/kernel/syscall/vfs.cpp"
   "${OS1_REPO_ROOT}/src/kernel/syscall/observe.cpp"
   "${OS1_REPO_ROOT}/src/kernel/proc/startup.cpp"
@@ -186,6 +190,7 @@ add_executable(os1_host_tests
   kernel/wait_queue_tests.cpp
   kernel/arp_cache_tests.cpp
   kernel/hid_keyboard_tests.cpp
+  kernel/ext2_tests.cpp
   kernel/xhci_controller_tests.cpp
   mm/kmem_tests.cpp
   mm/page_frame_tests.cpp
@@ -202,6 +207,13 @@ add_executable(os1_host_tests
   syscall/observe_abi_tests.cpp
 )
 target_link_libraries(os1_host_tests PRIVATE os1_host_support os1_acpica GTest::gtest_main)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(OS1_EXT2_FIXTURE "${CMAKE_BINARY_DIR}/ext2-fixture.raw")
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${OS1_REPO_ROOT}/cmake/scripts/create_ext2_image.py"
+  --output "${OS1_EXT2_FIXTURE}" --utility "${CMAKE_CURRENT_SOURCE_DIR}/support/block_device_stub.cpp"
+  --size-mib 4 --reset COMMAND_ERROR_IS_FATAL ANY)
+target_compile_definitions(os1_host_tests PRIVATE OS1_EXT2_FIXTURE="${OS1_EXT2_FIXTURE}")
 
 include(GoogleTest)
 gtest_add_tests(TARGET os1_host_tests TEST_LIST os1_host_tests_TESTS)

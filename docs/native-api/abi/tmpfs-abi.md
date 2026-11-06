@@ -58,6 +58,7 @@ Reserved fields and unused name bytes must be zero.
 | `read_directory` | 5 | ENUMERATE | Empty | One `os1_directory_entry`, or empty at end |
 | `rewind` | 6 | ENUMERATE | Empty | Empty; reset cursor |
 | Read-only property `info` | 7 | INSPECT | Empty | `os1_filesystem_info` |
+| `sync` | 8 | CREATE | Empty | Empty |
 
 | File member | ID | Required service right | Input | Successful output |
 | --- | ---: | --- | --- | --- |
@@ -67,6 +68,7 @@ Reserved fields and unused name bytes must be zero.
 | `truncate` | 4 | WRITE | `os1_file_truncate` | Empty |
 | Read-only property `info` | 5 | INSPECT | Empty | `os1_filesystem_info` |
 | `append` | 6 | WRITE | 0–256 raw bytes | `os1_file_written` |
+| `sync` | 7 | WRITE | Empty | Empty |
 
 | Record | Bytes | Fields in order |
 | --- | ---: | --- |
@@ -199,3 +201,10 @@ return written == 5 ? 0 : 5;
 ```
 
 See the [plan and validation record](../../archive/filesystems/2026-11-06-tmpfs-implementation.md) for impact, tests, measurements, and review findings.
+
+## Persistent backend
+
+The [ext2 profile](../../filesystems/ext2.md) uses the same File and Directory interface IDs.
+Its limits, executable policy, removal behavior, and durability rules differ from tmpfs.
+The new `sync` members complete without disk I/O on tmpfs.
+Ext2 reports IO (-23) for device failures and refuses further disk operations after failure.

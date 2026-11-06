@@ -98,6 +98,8 @@ set(KERNEL_PROC_SOURCES
   ipc/kernel_provider.cpp
   vfs/initrd.cpp
   vfs/tmpfs.cpp
+  vfs/ext2.cpp
+  fs/ext2.cpp
   syscall/vfs.cpp
   proc/startup.cpp
   resource/descriptor.cpp

@@ -32,7 +32,7 @@ flowchart TD
 | Shared state | Independent sessions and bounded admission; class-controlled Counter singleton | Reusable service bootstrap and lifecycle beyond the scoped Counter example |
 | Typed metadata | Offline interfaces; bounded rich constructor/method inputs and CLI conversion | Stable service schemas; broader output/event descriptions and generated bindings later |
 | Bulk data | Exclusive zero-copy Buffer loans, returned input identity, distinct output objects | Kernel-service integration; separate DMA ownership and quiescence rules for devices |
-| Files | Immutable initrd, writable `/tmp`, native mutation, quotas, per-open cursors, capability-relative lookup | Kernel Buffer transfers, additional mount semantics, and persistent storage |
+| Files | Immutable initrd, writable `/tmp`, native mutation, quotas, per-open cursors, capability-relative lookup | Kernel Buffer transfers, public mounts, and physical USB storage |
 | Devices | Internal block requests; xHCI boot-keyboard input | Native device endpoints, usable mouse events, USB storage, broader hardware qualification |
 
 The descriptor decision no longer blocks VFS, sockets, PTYs, or redirection at the foundational level.
@@ -55,7 +55,7 @@ The [capability rules](abi/shared-activation-abi.md#copied-capability-attachment
 The first service examples must prove their actual connection topology within these rules.
 A combined attachment envelope is needed only when a concrete operation requires both kinds simultaneously.
 General graph transfer must not become an implicit requirement for simple file operations.
-The temporary filesystem providers run in the kernel; future persistent providers can share that boundary.
+The tmpfs and ext2 providers run in the kernel through the same native adapter.
 Internal filesystem-to-driver work can retain one top-level loan until all accesses end, without a second cross-process loan.
 Do not add hidden payload copies to work around unsupported forwarding.
 Use dedicated Buffers when a smaller authorized data range must remain isolated from unrelated bytes.
@@ -127,7 +127,7 @@ Keep the initrd immutable.
 
 Implemented sparse writes zero-fill gaps; final release refunds unlinked-node and data charges.
 Unlinked files remain valid while retained references exist.
-Execution from `/tmp` is disabled. Writable executable loading requires a separate immutable-image or snapshot contract.
+Execution from `/tmp` is disabled. The ext2 profile uses immutable executable files and stable snapshots; mutable executable loading remains outside this profile.
 
 Acceptance: create, write, read, list, rename, truncate, and remove through native service clients.
 Test two clients, access denial, quota exhaustion, allocation failure, unlink with open handles, and teardown during accepted I/O.
@@ -169,7 +169,8 @@ Controller and hub expansion depend on the identified hardware, not assumptions 
 ## Milestone 3: persistent USB data
 
 A persistent writable data partition needs more than writable file methods.
-Keep the filesystem choice open until interoperability, metadata, recovery, and implementation-cost requirements are agreed.
+Ext2 is selected for the first persistence slice. The [QEMU profile](../filesystems/ext2.md) is implemented.
+USB transport and partition-preserving physical deployment remain planned.
 Choose a dedicated data partition; do not mount the boot filesystem writable by default.
 
 ```mermaid
@@ -186,9 +187,9 @@ flowchart LR
 
 Expose geometry, limits, Read, Write, and Flush through a native BlockDevice interface.
 Define alignment, bounds, partial progress, queue limits, write ordering, and durable completion.
-Current [block requests](../../src/kernel/storage/block_device.hpp) include Flush, but
-[virtio-blk](../../src/kernel/drivers/block/virtio_blk.cpp) rejects it.
-Successful current Write completion therefore does not promise durable storage.
+The internal [block facade](../../src/kernel/storage/block_device.hpp) supports bounded reads, writes, and Flush.
+The virtio reference driver implements Flush; native filesystem `sync` establishes durability.
+A public native BlockDevice interface and device-removal contract remain planned.
 
 Use virtio-blk to validate the contract before physical USB tests.
 Keep raw write and partition-management authority separate from ordinary file access.
@@ -217,10 +218,10 @@ Reject malformed, overlapping, overflowing, or boot-overlapping data ranges.
 
 ### Filesystem and durable behavior
 
-Select the filesystem before implementing its disk format.
-Decision criteria include host interoperability, size limits, permissions, crash recovery, and repair tooling.
-First validate read-only mounting and malformed-media rejection.
-Then add writes with explicit ordering, Flush behavior, and recovery expectations.
+The implemented ext2 profile validates its supported format before mounting.
+It supports writable files, disk-backed executables, explicit synchronization, and clean reboot persistence.
+Its tests cover malformed media, allocation limits, I/O errors, and firmware-specific mappings.
+General ext2 layouts, journal recovery, and physical device removal remain outside this profile.
 Do not equate a successful filesystem call with durable storage unless the contract promises it.
 Do not format media automatically after a mount failure.
 

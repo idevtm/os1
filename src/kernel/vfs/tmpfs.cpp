@@ -1,8 +1,7 @@
-#include "vfs/tmpfs.hpp"
-
 #include "mm/kmem.hpp"
 #include "sync/atomic.hpp"
 #include "util/memory.h"
+#include "vfs/filesystem.hpp"
 
 struct Tmpfs
 {
@@ -119,6 +118,7 @@ long allocate_node(Tmpfs* fs, uint32_t kind, TmpNode*& node)
     }
     (void)atomic_fetch_add(&fs->references, 1u);
     node->filesystem = fs;
+    node->operations = &tmpfs_operations;
     node->references = 1;
     node->kind = kind;
     node->interfaces =
@@ -397,4 +397,22 @@ os1_filesystem_info tmpfs_info(VfsNode* node)
     auto* fs = node->filesystem;
     IrqSpinGuard guard(fs->lock);
     return {node->byte_size, node->kind, fs->nodes, fs->opens, fs->pages, OS1_TMPFS_PAGE_LIMIT, 0};
+}
+
+const VfsOperations tmpfs_operations{tmpfs_lookup,
+                                     tmpfs_create,
+                                     tmpfs_remove,
+                                     tmpfs_rename,
+                                     tmpfs_read,
+                                     tmpfs_write,
+                                     tmpfs_truncate,
+                                     tmpfs_seek,
+                                     tmpfs_next,
+                                     tmpfs_info,
+                                     [](VfsNode*) -> long { return 0; },
+                                     nullptr};
+bool vfs_backed(const NativeObject* object)
+{
+    return object && (object->kind == OS1_OBJECT_FILE || object->kind == OS1_OBJECT_DIRECTORY) &&
+           static_cast<const VfsNode*>(object)->operations;
 }

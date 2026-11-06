@@ -4,8 +4,8 @@
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "util/memory.h"
+#include "vfs/filesystem.hpp"
 #include "vfs/initrd.hpp"
-#include "vfs/tmpfs.hpp"
 
 namespace
 {
@@ -27,11 +27,12 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
         return kCursorBusy;
     CursorReservation guard{instance};
     auto* node = static_cast<VfsNode*>(instance->object);
-    if(node->filesystem)
+    if(node->operations)
     {
         if(request.operation == OS1_RESOURCE_SEEK)
         {
-            long result = tmpfs_seek(node, instance->cursor, request.offset, request.origin);
+            long result =
+                node->operations->seek(node, instance->cursor, request.offset, request.origin);
             if(result >= 0)
                 instance->cursor = result;
             return result;
@@ -46,7 +47,10 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
             uint64_t next = instance->cursor;
             if(request.operation == kVfsRead)
             {
-                count = tmpfs_read(node, instance->cursor, bytes, count);
+                long result = node->operations->read(node, instance->cursor, bytes, count);
+                if(result < 0)
+                    return delivered ? static_cast<long>(delivered) : result;
+                count = result;
                 if(!count)
                     break;
                 next += count;
@@ -57,13 +61,13 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
                    !copy_from_user(frames, thread, request.buffer + delivered, bytes, count))
                     return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
                 uint64_t end = instance->cursor;
-                long result =
-                    tmpfs_write(node,
-                                instance->cursor,
-                                bytes,
-                                count,
-                                atomic_load_acquire(&instance->status_flags) & OS1_STATUS_APPEND,
-                                &end);
+                long result = node->operations->write(
+                    node,
+                    instance->cursor,
+                    bytes,
+                    count,
+                    atomic_load_acquire(&instance->status_flags) & OS1_STATUS_APPEND,
+                    &end);
                 if(result < 0)
                     return delivered ? static_cast<long>(delivered) : result;
                 instance->cursor = end;
@@ -73,7 +77,10 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
             else
             {
                 os1_directory_entry entry{};
-                if(!tmpfs_next(node, instance->cursor, entry, next))
+                long result = node->operations->next(node, instance->cursor, entry, next);
+                if(result < 0)
+                    return delivered ? static_cast<long>(delivered) : result;
+                if(!result)
                     break;
                 uint32_t required = (sizeof(os1_directory_record) + entry.name_bytes + 7) & ~7u;
                 if(required > request.length - delivered)
@@ -213,7 +220,7 @@ long vfs_write_or_block(PageFrameContainer& frames,
 {
     if(length > OS1_IO_MAX_BYTES)
         return OS1_ERR_INVALID;
-    if(!tmpfs_node(instance->object) || instance->object->kind != OS1_OBJECT_FILE)
+    if(!vfs_backed(instance->object) || instance->object->kind != OS1_OBJECT_FILE)
         return OS1_ERR_UNSUPPORTED;
     return perform_or_block(frames, thread, {instance, buffer, length, 0, 0, kVfsWrite, 0});
 }
@@ -265,14 +272,15 @@ long sys_vfs(
         if(kind != OS1_OBJECT_FILE && kind != OS1_OBJECT_DIRECTORY)
             return OS1_ERR_UNSUPPORTED;
         const auto* node = static_cast<VfsNode*>(entry.instance->object);
-        os1_file_info info{
-            OS1_VFS_ABI_VERSION,
-            sizeof(info),
-            kind,
-            entry.descendant_rights,
-            node->filesystem ? tmpfs_info(const_cast<VfsNode*>(node)).byte_size : node->byte_size,
-            OS1_DIRECTORY_RECORD_MAX,
-            0};
+        os1_file_info info{OS1_VFS_ABI_VERSION,
+                           sizeof(info),
+                           kind,
+                           entry.descendant_rights,
+                           node->operations
+                               ? node->operations->info(const_cast<VfsNode*>(node)).byte_size
+                               : node->byte_size,
+                           OS1_DIRECTORY_RECORD_MAX,
+                           0};
         return copy_to_user(frames, thread, argument, &info, sizeof(info)) ? 0 : OS1_ERR_FAULT;
     }
     if(operation == OS1_RESOURCE_READ_DIRECTORY)

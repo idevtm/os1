@@ -40,6 +40,7 @@ Documents can contain proposals after promotion, provided their scope and status
 | Capability | Current contract |
 | --- | --- |
 | Kernel-hosted Console methods, information property, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |
+| Persistent QEMU ext2, disk executables, File/Directory `sync` | [Ext2 storage profile](../filesystems/ext2.md) |
 | Kernel-hosted writable `/tmp`, mutation rights, resource results, quotas | [Temporary filesystem ABI](abi/tmpfs-abi.md) |
 | Descriptors, rights, lifetime, console | [Console descriptor ABI](abi/console-descriptor-abi.md) |
 | Immutable files/directories, launch grants, argv/environment | [Initrd VFS and startup ABI](abi/initrd-vfs-abi.md) |
@@ -65,7 +66,7 @@ Console and `/tmp` now support descriptor I/O and native copied IPC through the 
 Initrd objects still use descriptor syscalls; hardware drivers use internal kernel interfaces.
 The [roadmap](roadmap.md#shared-service-foundation) connects these paths through native service contracts.
 
-General service discovery, kernel Buffer borrowing, durable storage, and input recovery still need concrete protocols.
+General service discovery, kernel Buffer borrowing, physical USB storage, and input recovery still need concrete protocols.
 Console bindings capture method-specific authority; each additional service needs its own policy.
 Generated SDKs, `.so` bindings, a reflective shell, userspace drivers, and shared-memory rings are not prerequisites for those milestones.
 Class code continues to select new or existing object instances; ordinary callers receive no creation-policy override.
