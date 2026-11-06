@@ -218,7 +218,7 @@ int main(int argc, char** argv)
 {
     if(argc != 2)
     {
-        print("usage: intf /bin/textprocessor\n");
+        print("usage: intf /disk/bin/textprocessor\n");
         return 1;
     }
     long fd = open(argv[1], OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);

@@ -6,7 +6,7 @@
 
 namespace
 {
-constexpr char kBusyYieldPath[] = "/bin/busyyield";
+constexpr char kBusyYieldPath[] = "/disk/bin/busyyield";
 constexpr uint32_t kMaxCpuRecords = 8;
 constexpr uint32_t kObserveAttempts = 2048;
 

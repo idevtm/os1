@@ -116,6 +116,14 @@ if(DEFINED VIRTIO_TEST_DISK)
   )
 endif()
 
+# Private QEMU overlay: verification programs never modify the shared fixture.
+if(DEFINED PROGRAM_DISK)
+  list(APPEND qemu_command
+    -drive "if=none,id=program_data,format=raw,file=${PROGRAM_DISK},snapshot=on"
+    -device "usb-ehci,id=program_ehci"
+    -device "usb-storage,bus=program_ehci.0,drive=program_data")
+endif()
+
 if(DEFINED EXTRA_QEMU_ARGS)
   list(APPEND qemu_command ${EXTRA_QEMU_ARGS})
 endif()

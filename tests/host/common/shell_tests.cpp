@@ -5,6 +5,7 @@
 
 #include "input/ps2_modifiers.hpp"
 #include "shell/command.hpp"
+#include "shell/program_path.hpp"
 #include "shell/text_buffer.hpp"
 using namespace os1::shell;
 TEST(ShellCommand, QuotesOperatorsAndRawTypedArguments)
@@ -128,4 +129,60 @@ TEST(Ps2Modifiers, ExtendedKeypadEnterAndSlashRemainPrintable)
     EXPECT_FALSE(m.press(0x48, key));
     EXPECT_TRUE(m.press(0x20, key));
     EXPECT_FALSE(m.keypad);
+}
+
+TEST(ProgramPath, RecoveryPrecedesDiskAndOnlyMissingContinues)
+{
+    char path[64]{};
+    int calls = 0;
+    auto recovery = [&](const char* candidate) {
+        ++calls;
+        EXPECT_STREQ(candidate, "/bin/ls");
+        return 0L;
+    };
+    EXPECT_EQ(os1::shell::resolve_program("ls", path, sizeof(path), recovery), 0);
+    EXPECT_STREQ(path, "/bin/ls");
+    EXPECT_EQ(calls, 1);
+    calls = 0;
+    auto disk = [&](const char* candidate) {
+        ++calls;
+        EXPECT_STREQ(candidate, calls == 1 ? "/bin/counter" : "/disk/bin/counter");
+        return calls == 1 ? long(OS1_ERR_NOT_FOUND) : 0L;
+    };
+    EXPECT_EQ(os1::shell::resolve_program("counter", path, sizeof(path), disk), 0);
+    EXPECT_EQ(calls, 2);
+    for(long error : {long(OS1_ERR_ACCESS), long(OS1_ERR_BAD_IMAGE), long(OS1_ERR_WOULD_BLOCK)})
+    {
+        calls = 0;
+        EXPECT_EQ(os1::shell::resolve_program("counter",
+                                              path,
+                                              sizeof(path),
+                                              [&](const char*) {
+                                                  ++calls;
+                                                  return error;
+                                              }),
+                  error);
+        EXPECT_EQ(calls, 1);
+    }
+}
+
+TEST(ProgramPath, ExplicitPathsNeverSearchAndBoundsRejectTruncation)
+{
+    char path[64]{};
+    int calls = 0;
+    auto probe = [&](const char*) {
+        ++calls;
+        return long(OS1_ERR_NOT_FOUND);
+    };
+    for(const char* explicit_path : {"/disk/bin/counter", "disk/bin/counter", "./counter"})
+    {
+        EXPECT_EQ(os1::shell::resolve_program(explicit_path, path, sizeof(path), probe), 0);
+        EXPECT_STREQ(path, explicit_path);
+    }
+    EXPECT_EQ(calls, 0);
+    EXPECT_EQ(os1::shell::resolve_program("unknown", path, sizeof(path), probe), OS1_ERR_NOT_FOUND);
+    EXPECT_EQ(calls, 2);
+    EXPECT_EQ(os1::shell::resolve_program("counter", path, 8, probe), OS1_ERR_RANGE);
+    EXPECT_EQ(os1::shell::resolve_program("", path, sizeof(path), probe), OS1_ERR_INVALID);
+    EXPECT_EQ(os1::shell::resolve_program(nullptr, path, sizeof(path), probe), OS1_ERR_INVALID);
 }

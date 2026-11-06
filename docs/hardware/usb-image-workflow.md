@@ -42,6 +42,15 @@ It recreates that output image explicitly; it does not modify the interactive QE
 The host requires e2fsprogs for validation and program deployment.
 On macOS, install it with `brew install e2fsprogs`.
 
+## Upgrade from the full initrd
+
+The initrd now keeps only `init`, `sh`, `ls`, `cat`, and `/etc/motd`.
+Other programs live under `/disk/bin`; the shell finds them by name.
+Select **Update boot and programs (preserve data)** when upgrading an existing managed boot-plus-ext2 stick.
+A boot-only update preserves data but does not install the moved programs.
+Boot-only and diagnostic images retain the recovery tools, editor, and built-in observers.
+They do not contain the optional verification programs.
+
 ## Keyboard-independent diagnostics
 
 Use this image when USB key presses have no effect after the kernel starts.

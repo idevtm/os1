@@ -85,7 +85,7 @@ General operation cancellation, external kill, and automatic restart/replay rema
 
 ## TextProcessor protocol and examples
 
-`/bin/textprocessor` receives only a provider endpoint at fd 3 through an explicit
+`/disk/bin/textprocessor` receives only a provider endpoint at fd 3 through an explicit
 launch grant, with READ|WRITE. It receives no root/cwd or standard streams. Its
 code initializes enabled=true, revision=1, processed=0, publishes READY, serves
 requests sequentially, and exits after client closure. This private activation
@@ -135,11 +135,11 @@ own Operation after obtaining the result.
 
 ## Offline interface records and intf
 
-Run these initrd commands:
+Run these disk commands:
 
 ```text
 ipccheck
-intf /bin/textprocessor
+intf /disk/bin/textprocessor
 ```
 
 `intf` opens the file with READ|SEEK|INSPECT, reads its ELF section table and the
@@ -175,7 +175,7 @@ The initrd packager strips symbol tables from staged executables to keep both
 boot paths within the current 187.5 KiB BIOS initrd slot.
 The [ext2 implementation record](../../archive/filesystems/2026-11-06-ext2-implementation.md) records the latest layout change.
 The [sessions/parameters phase](../../archive/native-api/2026-11-05-client-sessions-and-parameters.md) used an earlier 192 KiB slot.
-Full ELF build artifacts are retained. Reflective binaries retain their allocated metadata and section headers.
+Disk deployment copies complete ELF build artifacts. Reflective binaries retain their allocated metadata and section headers.
 Non-reflective packaged programs can omit their section tables.
 
 ## Public member names

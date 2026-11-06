@@ -67,7 +67,7 @@ int main(int argc, char** argv)
           "enumeration authority");
     close(directory);
 
-    const long executable = open("/bin/vfscheck", OS1_RIGHT_EXECUTE);
+    const long executable = open("/disk/bin/vfscheck", OS1_RIGHT_EXECUTE);
     CHECK(executable >= 0, "open executable");
     os1_launch_request request{};
     request.version = OS1_STARTUP_VERSION;

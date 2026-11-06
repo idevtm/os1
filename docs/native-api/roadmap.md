@@ -139,12 +139,10 @@ The same demo must run through UEFI and BIOS smokes.
 ## Milestone 2: keyboard and mouse services
 
 Qualify the existing USB keyboard path and expose usable input objects.
-[Issue #27](https://github.com/idevtm/os1/issues/27) remains the physical keyboard investigation.
+[Issue #27](https://github.com/idevtm/os1/issues/27) is closed after the user confirmed keyboard input on 2026-11-06.
 The affected desktop uses a Gigabyte H81M-S1 and Lenovo keyboard `17ef:6190`.
-The returned log shows BIOS ownership and no USB ports routed to Intel xHCI `8086:8c31`.
-Linux connects the keyboard directly to that controller.
-The [firmware handoff correction](../hardware/2026-11-06-usb-keyboard-handoff.md) adds ownership transfer and ordered port routing.
-Physical keyboard recovery remains unverified.
+PR 33 corrects firmware ownership, Intel port routing, and control-transfer construction.
+The [acceptance record](../archive/filesystems/2026-11-06-minimal-initrd.md#keyboard-hardware-acceptance) records the physical result and its limits.
 
 Current xHCI code decodes keyboard reports into console characters.
 Its mouse handler only counts reports; it does not deliver useful pointer input.
@@ -293,7 +291,7 @@ This table records priority, acceptance, and dependencies without assigning new 
 | Order | Work | Acceptance | Dependency |
 | --- | --- | --- | --- |
 | 1 | Physical update preservation | An existing user file survives boot-only and program-only updates, synchronization, and reboot; updated code also runs | Existing managed USB tooling; record image hash, disk identity, commands, and results |
-| 2 | Keyboard issue #27 | Record controller/topology and reproduce the failure; verify shell input after correction | Access to the affected computer; firmware input alone proves no kernel support |
+| 2 | Minimal initrd and disk programs | Keep recovery without storage; verify lookup, providers, and preserving deployment | Ext2 and offline deployment implemented; hardware update acceptance remains |
 | 3 | Native keyboard/mouse objects | Two clients receive future events; unsubscribe, overflow recovery, removal, and console typing work | Input protocol and kernel adapter event support; controller additions follow observed hardware needs |
 | 4 | Service discovery and lifecycle | Startup grants a scoped service directory; lookup attenuates authority; shutdown/restart outcomes remain explicit | Existing capabilities and sessions; prove supported connection topology |
 | 5 | Kernel bulk I/O and BlockDevice | A real file/block client uses retained Buffer ranges; failure ends access before ownership returns | Internal kernel borrower lifetime; DMA pinning/quiescence only where device access requires it |
@@ -313,7 +311,7 @@ Input events remain volatile broadcast with explicit unsubscribe and state recov
 
 ## Immediate implementation slice
 
-Complete physical update acceptance when hardware is available, and diagnose issue #27 on its original machine.
+Complete physical update acceptance when hardware is available. Issue #27 now has user-confirmed keyboard recovery.
 In parallel, define native input records and the snapshot/event synchronization boundary described in [Milestone 2](#milestone-2-keyboard-and-mouse-services).
 Implement an event-monitor client before compositor work.
 General reflection and generated C++ bindings do not gate this slice.

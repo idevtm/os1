@@ -15,6 +15,7 @@ def main():
     parser.add_argument('--qemu', required=True)
     parser.add_argument('--image', required=True)
     parser.add_argument('--log', required=True)
+    parser.add_argument('--program-disk')
     parser.add_argument('--code')
     parser.add_argument('--vars')
     args = parser.parse_args()
@@ -22,6 +23,9 @@ def main():
     log.parent.mkdir(parents=True, exist_ok=True)
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown']
+    if args.program_disk:
+        command += ['-drive', f'if=none,id=data,format=raw,file={args.program_disk},snapshot=on',
+                    '-device', 'virtio-blk-pci,drive=data,disable-legacy=on']
     if args.code:
         variables = log.with_suffix('.vars.fd')
         shutil.copyfile(args.vars, variables)
@@ -83,6 +87,13 @@ def main():
     try:
         expect(b'shell prompt ready\n')
         expect()
+        assert (b'ext2 mounted /disk' in transcript) == bool(args.program_disk)
+        listed = run('ls /bin')
+        lines = re.sub(rb'^root alloc 0x[0-9a-f]+\n', b'', listed, flags=re.M).decode().splitlines()[1:-1]
+        assert set(lines) == {'init', 'sh', 'ls', 'cat'}, listed
+        if not args.program_disk:
+            assert b'unknown command: counter' in run('counter')
+            assert b'cannot open directory' in run('ls /disk')
         for command, expected in [('echo', b'\n'), ('echo hello world', b'hello world\n'),
                                   ('echo "a  b" c', b'a  b c\n')]:
             result = run(command)
@@ -186,7 +197,8 @@ def main():
         # Errors stay on stderr; only successful method output enters the file.
         assert b'call: cannot open image' in run('call absent render > /tmp/call-error')
         content('/tmp/call-error', '')
-        assert b'parameter error' in run('call paramdemo render unknown:1 > /tmp/param-error')
+        expected_error = b'parameter error' if args.program_disk else b'call: cannot open image'
+        assert expected_error in run('call paramdemo render unknown:1 > /tmp/param-error')
         content('/tmp/param-error', '')
         assert b'command failed:' not in run('cat - < /tmp/writer > /tmp/dash')
         content('/tmp/dash', 'replaced\n')

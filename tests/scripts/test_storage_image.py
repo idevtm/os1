@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import json
 import struct
 import subprocess
 import sys
@@ -37,6 +38,31 @@ class StorageImage(unittest.TestCase):
             self.assertEqual(data[510:512], b'\x55\xaa')
             self.assertEqual(struct.unpack_from('<II', data, 454), (2048, 8192))
             self.assertEqual(data[2048*512+1024+56:2048*512+1024+58], b'\x53\xef')
+
+    def test_manifest_seeds_only_new_images_and_failure_does_not_publish(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            image, utility, manifest = (directory / n for n in ('disk.raw', 'utility', 'programs.json'))
+            executable = bytearray(64)
+            executable[:6] = b'\x7fELF\x02\x01'
+            executable[18:20] = b'\x3e\x00'
+            utility.write_bytes(executable)
+            manifest.write_text(json.dumps({'version': 1, 'programs': [
+                {'source': str(utility), 'destination': '/disk/bin/probe'}]}))
+            builder.create(image, utility, 4, manifest=manifest)
+            original = image.read_bytes()
+            self.assertIn(b'probe', original)
+            # Invalid new policy must neither update an existing image nor replace it on failure.
+            manifest.write_text('{}')
+            builder.create(image, utility, 4, manifest=manifest)
+            self.assertEqual(image.read_bytes(), original)
+            with self.assertRaises(ValueError):
+                builder.create(image, utility, 4, reset=True, manifest=manifest)
+            self.assertEqual(image.read_bytes(), original)
+            fresh = directory / 'failed.raw'
+            with self.assertRaises(ValueError):
+                builder.create(fresh, utility, 4, manifest=manifest)
+            self.assertFalse(fresh.exists())
 
     def test_active_image_cannot_be_reset(self):
         with tempfile.TemporaryDirectory() as directory:

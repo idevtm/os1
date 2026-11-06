@@ -19,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('qemu', 'image', 'utility', 'version1', 'version2', 'log'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--programs-manifest', required=True)
     parser.add_argument('--transport', choices=['virtio', 'usb'], default='virtio')
     parser.add_argument('--code')
     parser.add_argument('--vars')
@@ -28,7 +29,7 @@ def main():
     disk = log.with_suffix('.raw')
     manifest = log.with_suffix('.json')
     part = log.with_suffix('.ext2')
-    create(disk, args.utility, reset=True)
+    create(disk, args.utility, reset=True, manifest=args.programs_manifest)
 
     def install(program):
         manifest.write_text(json.dumps({'version': 1, 'programs': [
@@ -40,6 +41,10 @@ def main():
         check(tool('e2fsck'), part)
         return snapshot(part)
 
+    # A disk program must not shadow an immutable recovery utility.
+    manifest.write_text(json.dumps({'version': 1, 'programs': [
+        {'source': str(Path(args.version1).resolve()), 'destination': '/disk/bin/cat'}]}))
+    deploy(disk, manifest)
     install(args.version1)
 
     def active_image_is_locked():
@@ -53,7 +58,12 @@ def main():
         assert disk.read_bytes() == before
 
     boot(args, disk, 'version1', [
-        ('/disk/bin/probe', b'deployed program version 1'),
+        ('probe', b'deployed program version 1'),
+        ('cat /disk/readme', b'Persistent ext2 storage.'),
+        ('call absent_provider render', b'call: cannot open image'),
+        ('disk/bin/probe', b'deployed program version 1'),
+        ('counter --initial 7 --ceiling 20', b'counter initial=7 ceiling=20'),
+        ('intf /disk/bin/textprocessor', b'interface TextProcessor'),
         ('/disk/diskutil seed', b'diskutil seed ok'),
         ('echo "my file survives deployment" > /disk/bin/note', None),
         ('echo appended >> /disk/bin/note', None),
@@ -68,7 +78,9 @@ def main():
             assert after[name] == value, f'changed unrelated entry: {name}'
     assert after['/bin/probe'][1] != before['/bin/probe'][1]
     assert disk.read_bytes()[:2048*512] == prefix
-    commands = [('/disk/bin/probe', b'deployed program version 2'),
+    commands = [('probe', b'deployed program version 2'),
+                ('/disk/bin/probe', b'deployed program version 2'),
+                ('counter --initial 8 --ceiling 20', b'counter initial=8 ceiling=20'),
                 ('/disk/diskutil verify', b'diskutil verify ok'),
                 ('cat /disk/bin/note', b'my file survives deployment\nappended\n')]
     boot(args, disk, 'version2', commands)

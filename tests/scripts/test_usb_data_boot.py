@@ -18,6 +18,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ('qemu', 'image', 'utility', 'version1', 'version2', 'log'):
         p.add_argument('--' + name, required=True)
+    p.add_argument('--programs-manifest', required=True)
     p.add_argument('--code')
     p.add_argument('--vars')
     p.add_argument('--transport', choices=['usb', 'ehci'], default='usb')
@@ -29,12 +30,15 @@ def main():
     staged = log.with_suffix('.updated.img')
     new_boot = log.with_suffix('.boot.img')
     def program(path):
-        manifest.write_text(json.dumps({'version': 1, 'programs': [
-            {'source': str(Path(path).resolve()), 'destination': '/disk/bin/probe'}]}))
+        programs = json.loads(Path(args.programs_manifest).read_text())['programs']
+        programs += [{'source': str(Path(path).resolve()), 'destination': '/disk/bin/probe'}]
+        manifest.write_text(json.dumps({'version': 1, 'programs': programs}))
     program(args.version1)
     create(args.image, args.utility, manifest, disk)
     boot(args, disk, 'initial', [
-        ('/disk/bin/probe', b'deployed program version 1'),
+        ('probe', b'deployed program version 1'),
+        ('counter --initial 7 --ceiling 20', b'counter initial=7 ceiling=20'),
+        ('intf /disk/bin/textprocessor', b'interface TextProcessor'),
         ('/disk/diskutil seed', b'diskutil seed ok'),
         ('echo retained-usb-data > /disk/note', None),
         ('/disk/diskutil sync', b'diskutil sync ok')])
@@ -54,10 +58,10 @@ def main():
     update('boot')
     commands = [('/disk/diskutil verify', b'diskutil verify ok'),
                 ('cat /disk/note', b'retained-usb-data\n')]
-    boot(args, disk, 'boot-update', [('/disk/bin/probe', b'deployed program version 1'), *commands])
+    boot(args, disk, 'boot-update', [('probe', b'deployed program version 1'), *commands])
     program(args.version2)
     update('programs')
-    boot(args, disk, 'program-update', [('/disk/bin/probe', b'deployed program version 2'), *commands])
+    boot(args, disk, 'program-update', [('probe', b'deployed program version 2'), *commands])
     boot(args, disk, 'reboot', commands)
     print('Combined USB-only boot, boot update, program update and reboot preservation passed')
 

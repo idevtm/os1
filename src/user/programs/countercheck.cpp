@@ -133,7 +133,7 @@ int main(int argc, char** argv)
     }
     os1_ipc_pair pair{};
     CHECK(ipc(OS1_IPC_CREATE, 0, &pair) == 0, "pair");
-    long pid = start("/bin/counter", pair.provider);
+    long pid = start("/disk/bin/counter", pair.provider);
     close(pair.provider);
     CHECK(pid > 0, "launch typed provider");
     CHECK(ipc_wait_until(pair.client, deadline()) == 0, "ready");
@@ -145,7 +145,7 @@ int main(int argc, char** argv)
     CHECK(first >= 0 && second >= 0, "subscriptions");
     os1_ipc_event event{};
     CHECK(ipc(OS1_IPC_EVENT_READ, first, &event) == OS1_ERR_WOULD_BLOCK, "no history");
-    long listener_image = open("/bin/countercheck", OS1_RIGHT_EXECUTE);
+    long listener_image = open("/disk/bin/countercheck", OS1_RIGHT_EXECUTE);
     CHECK(listener_image >= 0, "listener image");
     os1_launch_request listener{};
     launch_base(listener);
@@ -198,7 +198,8 @@ int main(int argc, char** argv)
     for(unsigned delivered = 0; delivered < 2; ++delivered)
     {
         CHECK(ipc(OS1_IPC_CREATE, 0, &pair) == 0, "hang pair");
-        pid = start("/bin/countercheck", pair.provider, delivered ? "hang_after" : "hang_before");
+        pid = start(
+            "/disk/bin/countercheck", pair.provider, delivered ? "hang_after" : "hang_before");
         close(pair.provider);
         CHECK(pid > 0, "hang launch");
         long pending = -1;

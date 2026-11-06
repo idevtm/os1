@@ -3,7 +3,7 @@
 Status: broader metadata and service proposal, with implemented subsets identified below.
 The complete design is not implemented or frozen. The narrower
 [copied IPC prototype](abi/copied-ipc-abi.md#offline-interface-records-and-intf)
-implements versioned flat records in `/bin/textprocessor` and offline `intf`
+implements versioned flat records in `/disk/bin/textprocessor` and offline `intf`
 inspection. The [Counter extension](abi/counter-events-abi.md) also implements
 bounded scalar constructor metadata, caller-side CLI conversion, typed startup,
 and runtime events. The [rich-parameter ABI](abi/rich-parameters-abi.md) adds bounded recursive constructor/method input schemas and metadata bindings.

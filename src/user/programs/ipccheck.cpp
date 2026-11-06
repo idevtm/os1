@@ -61,7 +61,7 @@ int main(int argc, char**)
     say("[user/ipccheck] kernel console two clients ok\n");
     os1_ipc_pair pair{};
     CHECK(ipc(OS1_IPC_CREATE, 0, &pair) == 0, "pair");
-    long image = open("/bin/textprocessor", OS1_RIGHT_EXECUTE);
+    long image = open("/disk/bin/textprocessor", OS1_RIGHT_EXECUTE);
     CHECK(image >= 0, "image");
     os1_launch_request launch_request{};
     launch_request.version = OS1_STARTUP_VERSION;

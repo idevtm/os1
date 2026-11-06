@@ -25,7 +25,7 @@ inline bool run()
     int observer = console_bind(1, OS1_RIGHT_INSPECT);
     if(client < 0 || observer < 0)
         return false;
-    int image = open("/bin/ipccheck", OS1_RIGHT_EXECUTE);
+    int image = open("/disk/bin/ipccheck", OS1_RIGHT_EXECUTE);
     if(image < 0)
         return false;
     os1_launch_request launch_request{};

@@ -62,7 +62,7 @@ bool rejected(const os1_constructor_args& args)
 }
 int main()
 {
-    long image = open("/bin/paramdemo",
+    long image = open("/disk/bin/paramdemo",
                       OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
     CHECK(image >= 0, "image");
     CHECK(parameter_metadata(image, schema, scratch) == 1, "retained metadata");

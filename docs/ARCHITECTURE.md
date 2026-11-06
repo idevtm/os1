@@ -33,10 +33,10 @@ The [service roadmap](native-api/roadmap.md) defines the next integration milest
 - `WaitQueue` / `Completion` primitives wired through block-I/O, child-exit, and console-read waits
 - a higher-half shared kernel image plus a kernel-owned direct map
 - a source tree split by major responsibility: `arch/x86_64`, `core`, `handoff`, `mm`, `proc`, `sched`, `syscall`, `console`, `drivers`, `platform`, `storage`, `fs`, `vfs`, `security`, `debug`, `util`, and `linker`
-- protected ring-3 user programs loaded from an initrd
+- protected ring-3 user programs loaded from initrd or immutable ext2 executable snapshots
 - a terminal-first operator environment that boots directly into a ring-3 shell
 - structured observability snapshots and kernel event records exposed through a shared UAPI; ACPI observation reads cached routes without firmware execution
-- initrd-backed `spawn` / `waitpid` / `exec` process control for user commands
+- file-backed `spawn` / `waitpid` / `exec` process control for user commands
 - a terminal model that can render either through VGA text mode or a framebuffer text backend
 - serial-driven smoke coverage and interactive serial run targets for both the UEFI and BIOS paths, including dedicated SMP observe / balance smokes
 
@@ -295,11 +295,11 @@ The diagram below is the end-to-end picture of a running `os1` system: the two b
                          |  Ring-3 user processes          |
                          |                                 |
                          |  /bin/init -> /bin/sh           |
-                         |  /bin/yield  /bin/fault         |
-                         |  /bin/balanceworker            |
-                         |  /bin/busyyield /bin/smpcheck  |
-                         |  /bin/balancecheck             |
-                         |  /bin/copycheck /bin/ascii     |
+                         |  /disk/bin/yield  /disk/bin/fault         |
+                         |  /disk/bin/balanceworker            |
+                         |  /disk/bin/busyyield /disk/bin/smpcheck  |
+                         |  /disk/bin/balancecheck             |
+                         |  /disk/bin/copycheck /disk/bin/ascii     |
                          |                                 |
                          |  syscalls:  write, read, exit,  |
                          |    yield, getpid, observe,      |
@@ -452,8 +452,8 @@ The shell runs a line-buffered REPL:
 
 1. `write(1, "os1> ")` via `SYSCALL`.
 2. `read(0, buf, N)` blocks on the typed console-read wait state until enter commits a line.
-3. Tokens are dispatched: `help`, `echo`, `pid`, built-in observers (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`) each make one `observe(kind, buf, len)` call and render the resulting fixed-record table; `exec <path> [args...]` replaces the shell image through native `launch`; external commands resolve via `/bin/<name>` and use native `launch` + `waitpid`, forwarding bounded arguments and explicit stream/root/cwd grants.
-4. User exceptions (e.g. `/bin/fault`) are caught in `HandleException`, the thread is marked `Dying`, `ScheduleNext(false)` runs, and `reapDeadThreads` reclaims the thread stack and address space from a different stack on a later trap.
+3. Tokens are dispatched: `help`, `echo`, `pid`, built-in observers (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`) each make one `observe(kind, buf, len)` call and render the resulting fixed-record table; `exec <path> [args...]` replaces the shell image through native `launch`; bare external commands search `/bin/<name>` then `/disk/bin/<name>` and use native `launch` + `waitpid`, forwarding bounded arguments and explicit stream/root/cwd grants.
+4. User exceptions (e.g. `/disk/bin/fault`) are caught in `HandleException`, the thread is marked `Dying`, `ScheduleNext(false)` runs, and `reapDeadThreads` reclaims the thread stack and address space from a different stack on a later trap.
 
 ### Phase 6 — exec and in-place image replacement
 
@@ -969,7 +969,7 @@ The event ring currently stores 256 overwrite-on-full records with monotonic seq
 
 `/bin/sh events` is a snapshot command. Continuous streaming and `Ctrl-C` cancellation are intentionally deferred until the console/process layer has nonblocking input, cancellation, or signal-like infrastructure.
 
-The ring-3 shell consumes most records through built-ins such as `sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, and `irqs`; `/bin/acpiprobe` consumes the ACPICA snapshot. Keeping these paths explicit avoids turning observability into parsed boot logs.
+The ring-3 shell consumes most records through built-ins such as `sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, and `irqs`; `/disk/bin/acpiprobe` consumes the ACPICA snapshot. Keeping these paths explicit avoids turning observability into parsed boot logs.
 
 ### Performance measurement clock
 
@@ -1064,25 +1064,39 @@ Live-reader and shared read/write modes remain proposals.
 
 The initrd is a `cpio newc` archive built from `src/user`.
 
+The [packaging record](archive/filesystems/2026-11-06-minimal-initrd.md) defines the recovery and disk sets.
+
+| Location | Contents |
+| --- | --- |
+| Initrd `/bin` | `init`, `sh`, `ls`, and `cat` |
+| Initrd `/etc` | `motd` |
+| Ext2 `/disk/bin` | Verification programs, providers, examples, `intf`, and `diskutil` |
+| Ext2 `/disk/diskutil` | Compatibility copy for existing synchronization commands |
+
+The shell, editor, file-writing commands, and observers remain available without ext2.
+Bare external commands search `/bin` first, then `/disk/bin`.
+Names containing `/` are explicit paths and bypass search.
+An access or I/O failure stops search; only NOT_FOUND permits the next directory.
+
 Current user programs:
 
 - `/bin/init` — minimal init process that `exec`s `/bin/sh`
 - `/bin/sh` — the ring-3 shell built from [`src/user/programs/sh.cpp`](../src/user/programs/sh.cpp)
-- `/bin/yield` — cooperative yield probe built from [`src/user/programs/yield.cpp`](../src/user/programs/yield.cpp)
-- `/bin/balanceworker` — busy worker used by the SMP balance smoke, built from [`src/user/programs/balanceworker.cpp`](../src/user/programs/balanceworker.cpp)
-- `/bin/busyyield` — mixed busy/yield probe used by SMP observability smokes, built from [`src/user/programs/busyyield.cpp`](../src/user/programs/busyyield.cpp)
-- `/bin/balancecheck` — user-visible run-queue balance verifier built from [`src/user/programs/balancecheck.cpp`](../src/user/programs/balancecheck.cpp)
-- `/bin/smpcheck` — observe-driven SMP state verifier built from [`src/user/programs/smpcheck.cpp`](../src/user/programs/smpcheck.cpp)
-- `/bin/fault` — deliberate page-fault probe built from [`src/user/programs/fault.cpp`](../src/user/programs/fault.cpp)
-- `/bin/textprocessor`, `/bin/ipccheck`, and `/bin/intf` provide private copied IPC, retained Operations, methods/properties, and offline interface inspection. See [the concrete ABI](native-api/abi/copied-ipc-abi.md).
-- `/bin/buffercheck` exercises exclusive loans, same-buffer processing, distinct outputs, and recovery. See [the Buffer ABI](native-api/abi/buffer-loans-abi.md).
-- `/bin/activation` and `/bin/activationcheck` — explicitly registered Counter activation, copied capability transfer, class-controlled singleton construction, and independent clients. See [the shared activation ABI](native-api/abi/shared-activation-abi.md).
-- `/bin/counter` and `/bin/countercheck` — a second IPC protocol, typed constructor metadata/CLI conversion, event broadcast/overflow/unsubscribe, deadline waits, and restricted provider supervision. See [the phase ABI](native-api/abi/counter-events-abi.md).
-- `/bin/ls`, `/bin/cat`, and `/bin/vfscheck` — directory/file operations, argument forwarding, and restricted native child launch.
-- `/bin/fdcheck` and `/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
-- `/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
-- `/bin/acpiprobe` — ACPICA observe probe built from [`src/user/programs/acpiprobe.cpp`](../src/user/programs/acpiprobe.cpp)
-- `/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify 8x16 font rendering on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
+- `/disk/bin/yield` — cooperative yield probe built from [`src/user/programs/yield.cpp`](../src/user/programs/yield.cpp)
+- `/disk/bin/balanceworker` — busy worker used by the SMP balance smoke, built from [`src/user/programs/balanceworker.cpp`](../src/user/programs/balanceworker.cpp)
+- `/disk/bin/busyyield` — mixed busy/yield probe used by SMP observability smokes, built from [`src/user/programs/busyyield.cpp`](../src/user/programs/busyyield.cpp)
+- `/disk/bin/balancecheck` — user-visible run-queue balance verifier built from [`src/user/programs/balancecheck.cpp`](../src/user/programs/balancecheck.cpp)
+- `/disk/bin/smpcheck` — observe-driven SMP state verifier built from [`src/user/programs/smpcheck.cpp`](../src/user/programs/smpcheck.cpp)
+- `/disk/bin/fault` — deliberate page-fault probe built from [`src/user/programs/fault.cpp`](../src/user/programs/fault.cpp)
+- `/disk/bin/textprocessor`, `/disk/bin/ipccheck`, and `/disk/bin/intf` provide private copied IPC, retained Operations, methods/properties, and offline interface inspection. See [the concrete ABI](native-api/abi/copied-ipc-abi.md).
+- `/disk/bin/buffercheck` exercises exclusive loans, same-buffer processing, distinct outputs, and recovery. See [the Buffer ABI](native-api/abi/buffer-loans-abi.md).
+- `/disk/bin/activation` and `/disk/bin/activationcheck` — explicitly registered Counter activation, copied capability transfer, class-controlled singleton construction, and independent clients. See [the shared activation ABI](native-api/abi/shared-activation-abi.md).
+- `/disk/bin/counter` and `/disk/bin/countercheck` — a second IPC protocol, typed constructor metadata/CLI conversion, event broadcast/overflow/unsubscribe, deadline waits, and restricted provider supervision. See [the phase ABI](native-api/abi/counter-events-abi.md).
+- `/bin/ls`, `/bin/cat`, and `/disk/bin/vfscheck` — directory/file operations, argument forwarding, and restricted native child launch.
+- `/disk/bin/fdcheck` and `/disk/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
+- `/disk/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
+- `/disk/bin/acpiprobe` — ACPICA observe probe built from [`src/user/programs/acpiprobe.cpp`](../src/user/programs/acpiprobe.cpp)
+- `/disk/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify 8x16 font rendering on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
 
 The kernel keeps its fixed `/bin/init` boot contract, but init is now a real first user process rather than an alias for the shell. It immediately calls `exec("/bin/sh")`, so later init responsibilities can grow without changing the kernel boot path. The kernel parses the initrd, finds those paths, and loads ELF64 `ET_EXEC` images with `PT_LOAD` segments only. It maps segment permissions from ELF flags and zero-fills `memsz - filesz` for `.bss`.
 
@@ -1094,8 +1108,8 @@ Mutable `/tmp` files cannot execute. There is no `fork`.
 User programs use small-model position-relative code, a static GOT, size optimization, and link-time optimization.
 They remain fixed-address static `ET_EXEC` images; no dynamic linker or runtime relocation step is added.
 Disabling PLT calls and linker relaxation preserves high-address references and optional weak startup symbols.
-Packaging removes symbols and the nonallocated compiler `.comment` section; allocated interface metadata remains available to `intf`.
-Non-reflective staged programs omit unused section tables; class binaries retain metadata sections and their tables.
+Initrd packaging removes symbols and the nonallocated compiler `.comment` section; allocated interface metadata remains available to `intf`.
+Non-reflective initrd programs omit unused section tables. Disk deployment copies complete ELF files, including class metadata sections.
 
 ### Persistent QEMU storage
 

@@ -48,7 +48,13 @@ Do not access the image through a host filesystem mount during deployment.
 
 ## Program manifest
 
-The default manifest updates `/disk/diskutil` from its current build output.
+The default manifest installs all optional bundled programs under `/disk/bin`.
+It also retains `/disk/diskutil` for existing synchronization workflows.
+Initrd contains only `init`, `sh`, `ls`, `cat`, and `/etc/motd`.
+The shell searches `/bin` before `/disk/bin` for bare command names.
+Names containing `/` bypass search. Providers in verification programs use explicit `/disk/bin` paths.
+New QEMU images receive the manifest during creation; an existing image remains unchanged.
+After upgrading an older image, run `storage_deploy` to install the moved programs.
 Ordinary builds and QEMU launches preserve the installed version until deployment runs.
 The deployment target builds bundled user programs before reading the manifest.
 
@@ -121,8 +127,8 @@ Processes that ignore locks or disable QEMU locking are outside this contract.
 
 This operation does not erase unlisted files, uninstall programs, or migrate filesystem formats.
 A program removed from the manifest remains installed.
-Online installation, automatic program search paths, and larger ext2 profiles remain separate work.
-The initrd still contains the existing recovery and verification programs.
+Online installation, configurable search paths, and larger ext2 profiles remain separate work.
+The [packaging record](../archive/filesystems/2026-11-06-minimal-initrd.md) covers the recovery split and validation.
 
 ## Validation
 
