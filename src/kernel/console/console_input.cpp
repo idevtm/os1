@@ -2,6 +2,7 @@
 // It maintains a small completed-line queue for blocking read syscalls.
 #include "console/console_input.hpp"
 
+#include <os1/vfs.h>
 #include <stdlib.h>
 
 #if !defined(OS1_HOST_TEST)
@@ -29,8 +30,10 @@ constexpr size_t kConsoleInputCompletedLineCapacity = 8;
 // be running on any CPU.
 OS1_LOCKED_BY(g_console_input_lock) char g_pending_line[kConsoleInputMaxLineBytes]{};
 OS1_LOCKED_BY(g_console_input_lock) size_t g_pending_length = 0;
+OS1_LOCKED_BY(g_console_input_lock) bool g_pending_overflow = false;
 OS1_LOCKED_BY(g_console_input_lock) char g_completed_lines[kConsoleInputCompletedLineCapacity][kConsoleInputMaxLineBytes]{};
 OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_lengths[kConsoleInputCompletedLineCapacity]{};
+OS1_LOCKED_BY(g_console_input_lock) long g_completed_status[kConsoleInputCompletedLineCapacity]{};
 OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_head = 0;
 OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_tail = 0;
 OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_count = 0;
@@ -58,8 +61,15 @@ void echo_backspace()
     }
 }
 
-void commit_pending_line()
+void commit_pending_line(bool newline = true)
 {
+    const long status = g_pending_overflow ? OS1_ERR_RANGE : 0;
+    if(g_pending_overflow)
+    {
+        g_pending_length = 0;
+        g_pending_overflow = false;
+        newline = false;
+    }
     if(g_completed_count == kConsoleInputCompletedLineCapacity)
     {
         debug("console input line dropped: queue full")();
@@ -67,9 +77,11 @@ void commit_pending_line()
         return;
     }
 
+    if(newline)
+        g_pending_line[g_pending_length++] = '\n';
     memcpy(g_completed_lines[g_completed_tail], g_pending_line, g_pending_length);
-    g_completed_lines[g_completed_tail][g_pending_length] = '\n';
-    g_completed_lengths[g_completed_tail] = g_pending_length + 1;
+    g_completed_lengths[g_completed_tail] = g_pending_length;
+    g_completed_status[g_completed_tail] = status;
     g_completed_tail = (g_completed_tail + 1) % kConsoleInputCompletedLineCapacity;
     ++g_completed_count;
     g_pending_length = 0;
@@ -88,6 +100,8 @@ void handle_input_char(char ascii)
 
     if('\b' == ascii)
     {
+        if(g_pending_overflow)
+            return;
         if(g_pending_length > 0)
         {
             --g_pending_length;
@@ -103,6 +117,12 @@ void handle_input_char(char ascii)
         return;
     }
 
+    if(ascii == 4)
+    {
+        commit_pending_line(false);
+        return;
+    }
+
     if(!isprint(ascii))
     {
         return;
@@ -110,7 +130,9 @@ void handle_input_char(char ascii)
 
     if((g_pending_length + 1) >= kConsoleInputMaxLineBytes)
     {
-        debug("console input line dropped: line too long")();
+        if(!g_pending_overflow)
+            debug("console input line discarded: too long")();
+        g_pending_overflow = true;
         return;
     }
 
@@ -126,7 +148,9 @@ void console_input_initialize()
     memset(g_pending_line, 0, sizeof(g_pending_line));
     memset(g_completed_lines, 0, sizeof(g_completed_lines));
     memset(g_completed_lengths, 0, sizeof(g_completed_lengths));
+    memset(g_completed_status, 0, sizeof(g_completed_status));
     g_pending_length = 0;
+    g_pending_overflow = false;
     g_read_reserved = false;
     g_reserved_bytes = 0;
     g_completed_head = 0;
@@ -175,11 +199,15 @@ WaitQueue& console_input_read_wait_queue()
     return g_console_read_waiters;
 }
 
-bool console_input_reserve(char* buffer, size_t capacity, size_t& count)
+bool console_input_reserve(char* buffer, size_t capacity, size_t& count, long* status)
 {
     IrqSpinGuard guard(g_console_input_lock);
     count = 0;
+    if(status)
+        *status = 0;
     if(!buffer || !capacity || !g_completed_count || g_read_reserved) return false;
+    if(status)
+        *status = g_completed_status[g_completed_head];
     count = g_completed_lengths[g_completed_head];
     if(count > capacity) count = capacity;
     memcpy(buffer, g_completed_lines[g_completed_head], count);
@@ -188,11 +216,16 @@ bool console_input_reserve(char* buffer, size_t capacity, size_t& count)
     return true;
 }
 
-void console_input_finish(size_t delivered)
+void console_input_finish(size_t delivered, bool commit)
 {
     IrqSpinGuard guard(g_console_input_lock);
     if(!g_read_reserved) return;
-    if(delivered > g_reserved_bytes) delivered = 0;
+    if(!commit || delivered > g_reserved_bytes)
+    {
+        g_read_reserved = false;
+        g_reserved_bytes = 0;
+        return;
+    }
     const size_t remaining = g_completed_lengths[g_completed_head] - delivered;
     for(size_t i = 0; i < remaining; ++i)
         g_completed_lines[g_completed_head][i] = g_completed_lines[g_completed_head][i + delivered];

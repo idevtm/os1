@@ -32,10 +32,17 @@ static bool try_complete_console_read(PageFrameContainer& frames,
     char line[kConsoleInputMaxLineBytes];
     size_t count = 0;
     const size_t capacity = length < sizeof(line) ? length : sizeof(line);
-    if(!instance->object->reserve_read(line, capacity, count))
+    long status = 0;
+    if(!instance->object->reserve_read(line, capacity, count, &status))
         return false;
+    if(status < 0)
+    {
+        instance->object->finish_read(0, true);
+        result = status;
+        return true;
+    }
     const bool copied = copy_to_user(frames, thread, user_buffer, line, count);
-    instance->object->finish_read(copied ? count : 0);
+    instance->object->finish_read(count, copied);
     if(copied)
         result = static_cast<long>(count);
     return true;

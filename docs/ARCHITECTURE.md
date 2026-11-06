@@ -760,6 +760,8 @@ The terminal remains fixed-size for the lifetime of a boot, but not across all b
 - decoded keyboard input and serial RX feed the same pending line buffer
 - backspace edits the pending line locally before it is committed
 - enter commits a complete line and wakes a blocking `read(0, ...)`
+- Ctrl-D completes pending bytes or queues one zero-byte EOF record
+- overlong input produces RANGE instead of a truncated command or altered file line
 - serial echo stays enabled so local scripted runs and CI smoke transcripts exercise the same prompt/command flow
 
 This keeps manual keyboard sessions and serial-driven automation on one kernel-visible console path instead of two separate control planes.
@@ -1072,7 +1074,30 @@ The kernel keeps its fixed `/bin/init` boot contract, but init is now a real fir
 
 The user stack is non-executable. ELF segment flags control writable/executable permissions, but the loader does not reject a segment requesting both: strict user-image W^X is not enforced.
 
-This userland is still intentionally a vertical slice, not a general Unix process-launch environment. The kernel can boot the shell, `spawn(path)` a child initrd program for foreground commands, `waitpid(pid)` for child completion, and `exec(path)` to replace the current image in place. There is still no filesystem-backed `exec`, no `fork`, and no arguments/environment yet.
+The [startup ABI](native-api/abi/initrd-vfs-abi.md) supports file-backed immutable image loading, bounded arguments/environment, and explicit child grants.
+Mutable `/tmp` files cannot execute. There is no `fork`.
+
+User programs use small-model position-relative code, a static GOT, size optimization, and link-time optimization.
+They remain fixed-address static `ET_EXEC` images; no dynamic linker or runtime relocation step is added.
+Disabling PLT calls and linker relaxation preserves high-address references and optional weak startup symbols.
+Packaging removes symbols and the nonallocated compiler `.comment` section; allocated interface metadata remains available to `intf`.
+
+### Interactive file tools
+
+```text
+Canonical console / file -> bounded parser -> command and redirection specification
+  -> save stream grants -> prepare input/output -> built-in or child -> restore grants
+Directory/File IPC -> create, truncate, append; descriptor I/O -> shared file cursor
+```
+
+The [shell guide](shell/interactive-files.md) defines `touch`, `write`, `edit`, redirection, and here-documents.
+[File helpers](../src/user/include/os1/file_tools.hpp) own temporary descriptors and restore streams through scoped cleanup.
+Here-documents use unlinked `/tmp` files and finish collection before opening an output target.
+[The editor](../src/user/include/os1/line_editor.hpp) uses a 64 KiB text buffer and a separate insertion buffer of equal size.
+It saves explicitly; failed saves retain the edit buffer and report possible partial file contents.
+The [parser and text model](../src/common/shell) contain bounded logic shared with host tests.
+Native File `append` and descriptor APPEND commit each 256-byte unit under the filesystem lock.
+This preserves one descriptor table, existing grant authority, and shared open-instance state.
 
 ### Process Fault Handling And Teardown
 
@@ -1220,7 +1245,7 @@ The host support layer under `tests/host/support/` provides serial-debug stubs, 
 
 ### Smoke Tests
 
-With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers eleven QEMU shell smokes:
+With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers thirteen QEMU shell smokes:
 
 - `os1_smoke`
 - `os1_smoke_observe`
@@ -1233,11 +1258,13 @@ With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers eleven 
 - `os1_smoke_balance_bios`
 - `os1_smoke_spawn_bios`
 - `os1_smoke_exec_bios`
+- `os1_smoke_files_bios`
+- `os1_smoke_files_uefi`
 
 `OS1_QEMU_DEBUGCON=ON` adds `os1_smoke_no_uart`, which tests debugcon output and PS/2 input without COM1.
 `BUILD_TESTING=ON` registers four script contracts: monitor exchange, smoke settling, USB kernel update, and USB menu.
-The complete CI configuration has 12 QEMU smokes and four contracts, for 16 root CTest cases.
-Without debugcon, the complete-tool configuration has 11 QEMU smokes and four contracts, for 15 root CTest cases.
+The complete CI configuration has 14 QEMU smokes and four contracts, for 18 root CTest cases.
+Without debugcon, the complete-tool configuration has 13 QEMU smokes and four contracts, for 17 root CTest cases.
 Missing emulator or firmware prerequisites can reduce registration.
 The separate host suite is not part of these totals.
 

@@ -244,7 +244,7 @@ Document which existing layouts support safe updates; reject incompatible layout
 | GOALS area | Native API dependency | Independent work still required |
 | --- | --- | --- |
 | Writable VFS and persistence | Kernel provider adapter, file/directory mutation, Buffer I/O, block failure contract | Filesystem implementation, USB storage, partition parsing, durable writes |
-| Shell redirection and pipelines | Writable streams, pipe endpoint semantics, readiness, close/EOF behavior | Shell syntax and process orchestration; generated bindings are unnecessary |
+| Shell and pipelines | File redirection, append, console EOF, and a line editor are [implemented](../shell/interactive-files.md). Pipes still need endpoint semantics and readiness. | Pipeline syntax and process orchestration; generated bindings are unnecessary |
 | Networking and sockets | Endpoint interfaces, packet ownership, backpressure, deadlines and cancellation semantics | IP/UDP/TCP, addressing, DNS, driver buffering |
 | PTYs and SSH | Terminal/session objects, streams, process control, credential-aware grants | Authentication, cryptography, entropy, permissions, network stack |
 | Input and compositor | Input events, recovery snapshots, display authority | Mouse decoding, hardware qualification, rendering and focus policy |

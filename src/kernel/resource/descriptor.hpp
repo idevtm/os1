@@ -13,8 +13,8 @@ struct NativeObject
     uint32_t allowed_rights;
     void (*destroy)(NativeObject*);
     // Console-stage byte providers; reservation is bounded and must be finished.
-    bool (*reserve_read)(char*, size_t, size_t&) = nullptr;
-    void (*finish_read)(size_t) = nullptr;
+    bool (*reserve_read)(char*, size_t, size_t&, long*) = nullptr;
+    void (*finish_read)(size_t, bool) = nullptr;
     void (*write_bytes)(const char*, size_t) = nullptr;
     long (*acquire_open)(NativeObject*) = nullptr;
     void (*release_open)(NativeObject*) = nullptr;

@@ -15,7 +15,8 @@ long tmpfs_create(VfsNode*, const char*, size_t, uint32_t kind, OpenInstance*&);
 long tmpfs_remove(VfsNode*, const char*, size_t);
 long tmpfs_rename(VfsNode*, const char*, size_t, const char*, size_t);
 long tmpfs_read(VfsNode*, uint64_t offset, void*, size_t);
-long tmpfs_write(VfsNode*, uint64_t offset, const void*, size_t);
+long tmpfs_write(
+    VfsNode*, uint64_t offset, const void*, size_t, bool append = false, uint64_t* end = nullptr);
 long tmpfs_truncate(VfsNode*, uint64_t size);
 long tmpfs_seek(VfsNode*, uint64_t cursor, int64_t offset, uint32_t origin);
 long tmpfs_next(VfsNode*, uint64_t cursor, os1_directory_entry&, uint64_t& next);

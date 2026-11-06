@@ -58,10 +58,11 @@ void invoke_console(OpenInstance& source,
             result.application_status = OS1_ERR_INVALID;
             return;
         }
-        os1_console_info info{rights,
-                              object->write_bytes ? OS1_CONSOLE_MAX_BYTES : 0u,
-                              object->reserve_read ? uint32_t(kConsoleInputMaxLineBytes) : 0u,
-                              object->reserve_read ? OS1_CONSOLE_CANONICAL_INPUT : 0u};
+        os1_console_info info{
+            rights,
+            object->write_bytes ? OS1_CONSOLE_MAX_BYTES : 0u,
+            object->reserve_read ? uint32_t(kConsoleInputMaxLineBytes) : 0u,
+            object->reserve_read ? OS1_CONSOLE_CANONICAL_INPUT | OS1_CONSOLE_EOF_INPUT : 0u};
         memcpy(result.payload, &info, sizeof(info));
         result.payload_bytes = sizeof(info);
         return;
@@ -86,15 +87,18 @@ void invoke_console(OpenInstance& source,
     if(!read.capacity)
         return;
     size_t bytes = 0;
-    if(!object->reserve_read(reinterpret_cast<char*>(result.payload), read.capacity, bytes))
+    long status = 0;
+    if(!object->reserve_read(
+           reinterpret_cast<char*>(result.payload), read.capacity, bytes, &status))
     {
         result.application_status = OS1_ERR_WOULD_BLOCK;
         return;
     }
     // Delivery is into the retained Operation result, not a user buffer. Later
     // RESULT copy faults can retry without consuming another console prefix.
+    result.application_status = status;
     result.payload_bytes = static_cast<uint32_t>(bytes);
-    object->finish_read(bytes);
+    object->finish_read(bytes, true);
 }
 template<class T>
 bool decode(const os1_ipc_message& request, T& value)
@@ -283,6 +287,7 @@ void invoke_file(OpenInstance& source,
         case OS1_FILE_READ:
             required = OS1_RIGHT_READ;
             break;
+        case OS1_FILE_APPEND:
         case OS1_FILE_WRITE:
         case OS1_FILE_TRUNCATE:
             required = OS1_RIGHT_WRITE;
@@ -329,12 +334,19 @@ void invoke_file(OpenInstance& source,
             status = 0;
         }
     }
-    else if(request.member == OS1_FILE_WRITE)
+    else if(request.member == OS1_FILE_WRITE || request.member == OS1_FILE_APPEND)
     {
-        status = tmpfs_write(node, source.cursor, request.payload, request.payload_bytes);
+        uint64_t end = source.cursor;
+        status = tmpfs_write(node,
+                             source.cursor,
+                             request.payload,
+                             request.payload_bytes,
+                             request.member == OS1_FILE_APPEND ||
+                                 (atomic_load_acquire(&source.status_flags) & OS1_STATUS_APPEND),
+                             &end);
         if(status >= 0)
         {
-            source.cursor += status;
+            source.cursor = end;
             encode(result, os1_file_written{static_cast<uint32_t>(status)});
             status = 0;
         }

@@ -1723,6 +1723,27 @@ os1_register_menu_target(smoke_no_uart
   "Remove COM1 and verify a shell command through debugcon and PS/2."
 )
 
+if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
+  foreach(boot IN ITEMS bios uefi)
+    if(boot STREQUAL "uefi")
+      if(NOT OS1_OVMF_CODE OR NOT OS1_OVMF_VARS_TEMPLATE)
+        continue()
+      endif()
+      set(file_test_image "${OS1_ISO_IMAGE}")
+      set(file_test_firmware --code "${OS1_OVMF_CODE}" --vars "${OS1_OVMF_VARS_TEMPLATE}")
+    else()
+      set(file_test_image "${OS1_RAW_IMAGE}")
+      set(file_test_firmware)
+    endif()
+    add_test(NAME os1_smoke_files_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_interactive_files.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-files-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_files_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_files_${boot})
+  endforeach()
+endif()
+
 if(OS1_QEMU_SMOKE_TESTS)
   set_tests_properties(
     ${OS1_QEMU_SMOKE_TESTS}
@@ -1735,7 +1756,7 @@ endif()
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(
     smoke_all
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke(_observe|_balance|_spawn|_exec|_xhci|_no_uart)?(_bios)?$"
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke(_observe|_balance|_spawn|_exec|_xhci|_no_uart|_files_bios|_files_uefi)?(_bios)?$"
     DEPENDS os1_image os1_bios_image "${OS1_VIRTIO_TEST_DISK}"
     USES_TERMINAL
     VERBATIM

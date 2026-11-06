@@ -56,10 +56,17 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
                 if(request.buffer > UINT64_MAX - delivered ||
                    !copy_from_user(frames, thread, request.buffer + delivered, bytes, count))
                     return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
-                long result = tmpfs_write(node, instance->cursor, bytes, count);
+                uint64_t end = instance->cursor;
+                long result =
+                    tmpfs_write(node,
+                                instance->cursor,
+                                bytes,
+                                count,
+                                atomic_load_acquire(&instance->status_flags) & OS1_STATUS_APPEND,
+                                &end);
                 if(result < 0)
                     return delivered ? static_cast<long>(delivered) : result;
-                instance->cursor += result;
+                instance->cursor = end;
                 delivered += result;
                 continue;
             }

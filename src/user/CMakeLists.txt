@@ -23,14 +23,19 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       -fno-rtti
       -fno-threadsafe-statics
       -fno-use-cxa-atexit
-      -fno-pic
+      # Fixed high-address executables use RIP-relative code and a static GOT.
+      # Disable relaxation: absolute 32-bit addresses cannot encode this window.
+      -fpie
+      -fno-plt
+      -no-pie
       -nostdinc++
       -march=x86-64
       -mtune=generic
       -mgeneral-regs-only
-      -mcmodel=large
+      -mcmodel=small
       # Keep bundled programs within the bounded BIOS initrd load window.
       -Os
+      -flto
       -ffunction-sections
       -fdata-sections
       -Wall
@@ -43,6 +48,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       -nodefaultlibs
       "-Wl,-T,${USER_LINKER_SCRIPT}"
       -Wl,-static
+      -Wl,--no-relax
       -Wl,-n
       -Wl,--gc-sections
       -Wl,--build-id=none
@@ -58,6 +64,10 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/vfs.h"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/startup.h"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/vfs.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/file_tools.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/line_editor.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/shell/command.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/shell/text_buffer.hpp"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/ipc.h"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/console.h"

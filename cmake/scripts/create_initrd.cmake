@@ -17,7 +17,7 @@ if(NOT DEFINED STRIP_EXECUTABLE)
 endif()
 file(GLOB initrd_programs "${STAGE_DIR}/bin/*")
 foreach(program IN LISTS initrd_programs)
-  execute_process(COMMAND "${STRIP_EXECUTABLE}" --strip-all "${program}"
+  execute_process(COMMAND "${STRIP_EXECUTABLE}" --strip-all --remove-section=.comment "${program}"
     RESULT_VARIABLE strip_result)
   if(NOT strip_result EQUAL 0)
     message(FATAL_ERROR "Failed to strip initrd program ${program}")

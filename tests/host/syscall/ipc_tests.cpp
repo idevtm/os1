@@ -1785,6 +1785,63 @@ TEST_F(KernelConsole, DelegationCannotBeRecoveredByBinding)
     ASSERT_GE(readonly, 0);
     EXPECT_EQ(OS1_ERR_ACCESS, bind(readonly, OS1_RIGHT_WRITE));
 }
+TEST_F(KernelConsole, EofIsRetainedAcrossResultFaultWithoutConsumingNextInput)
+{
+    int client = bind(0, OS1_RIGHT_READ);
+    ASSERT_GE(client, 0);
+    auto m = console_request(OS1_CONSOLE_TRY_READ);
+    os1_console_read read{8};
+    m.payload_bytes = sizeof(read);
+    std::memcpy(m.payload, &read, sizeof(read));
+    console_input_on_keyboard_char(4);
+    console_input_on_keyboard_char('x');
+    console_input_on_keyboard_char('\n');
+    int op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    ASSERT_TRUE(ipc_run_kernel_request());
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RESULT, op, 0));
+    os1_ipc_result result{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT, op, result));
+    EXPECT_EQ(0, result.application_status);
+    EXPECT_EQ(0u, result.payload_bytes);
+    ASSERT_EQ(0, call(OS1_IPC_RESULT, op, result));
+    descriptor_close(table(), op);
+    op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    result = complete(op);
+    EXPECT_EQ(2u, result.payload_bytes);
+    EXPECT_EQ('x', result.payload[0]);
+}
+TEST_F(KernelConsole, OverlongInputRetainsRangeErrorAndPreservesFollowingLine)
+{
+    int client = bind(0, OS1_RIGHT_READ);
+    ASSERT_GE(client, 0);
+    auto m = console_request(OS1_CONSOLE_TRY_READ);
+    os1_console_read read{8};
+    m.payload_bytes = sizeof(read);
+    std::memcpy(m.payload, &read, sizeof(read));
+    for(unsigned i = 0; i < 140; ++i)
+        console_input_on_keyboard_char('x');
+    console_input_on_keyboard_char('\n');
+    console_input_on_keyboard_char('y');
+    console_input_on_keyboard_char('\n');
+    int op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    ASSERT_TRUE(ipc_run_kernel_request());
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RESULT, op, 0));
+    os1_ipc_result result{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT, op, result));
+    EXPECT_EQ(OS1_ERR_RANGE, result.application_status);
+    EXPECT_EQ(0u, result.payload_bytes);
+    ASSERT_EQ(0, call(OS1_IPC_RESULT, op, result));
+    EXPECT_EQ(OS1_ERR_RANGE, result.application_status);
+    descriptor_close(table(), op);
+    op = call(OS1_IPC_SUBMIT, client, m);
+    ASSERT_GE(op, 0);
+    result = complete(op);
+    EXPECT_EQ(2u, result.payload_bytes);
+    EXPECT_EQ('y', result.payload[0]);
+}
 TEST_F(KernelConsole, TryReadRetainsConsumedInputAcrossResultFaultAndRetry)
 {
     int client = bind(0, OS1_RIGHT_READ | OS1_RIGHT_INSPECT);
@@ -1798,7 +1855,7 @@ TEST_F(KernelConsole, TryReadRetainsConsumedInputAcrossResultFaultAndRetry)
     std::memcpy(&info, query_result.payload, sizeof(info));
     EXPECT_EQ(0u, info.max_write_bytes);
     EXPECT_EQ(128u, info.max_read_bytes);
-    EXPECT_EQ(OS1_CONSOLE_CANONICAL_INPUT, info.flags);
+    EXPECT_EQ(OS1_CONSOLE_CANONICAL_INPUT | OS1_CONSOLE_EOF_INPUT, info.flags);
     descriptor_close(table(), query_op);
     auto m = console_request(OS1_CONSOLE_TRY_READ);
     os1_console_read read{2};

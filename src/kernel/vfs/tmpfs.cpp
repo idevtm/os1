@@ -285,15 +285,18 @@ long tmpfs_read(VfsNode* node, uint64_t offset, void* output, size_t size)
     }
     return size;
 }
-long tmpfs_write(VfsNode* node, uint64_t offset, const void* input, size_t size)
+long tmpfs_write(
+    VfsNode* node, uint64_t offset, const void* input, size_t size, bool append, uint64_t* end)
 {
+    auto* file = static_cast<TmpNode*>(node);
+    auto* fs = node->filesystem;
+    IrqSpinGuard guard(fs->lock);
+    if(append)
+        offset = node->byte_size;
     if(size > 256 || offset > OS1_TMPFS_FILE_MAX || size > OS1_TMPFS_FILE_MAX - offset)
         return OS1_ERR_RANGE;
     if(!size)
         return 0;
-    auto* file = static_cast<TmpNode*>(node);
-    auto* fs = node->filesystem;
-    IrqSpinGuard guard(fs->lock);
     unsigned first = offset / page_bytes, last = (offset + size - 1) / page_bytes;
     uint8_t* fresh[2]{};
     unsigned needed = 0;
@@ -325,6 +328,8 @@ long tmpfs_write(VfsNode* node, uint64_t offset, const void* input, size_t size)
         file->pages[(offset + i) / page_bytes][(offset + i) % page_bytes] = bytes[i];
     if(offset + size > node->byte_size)
         node->byte_size = offset + size;
+    if(end)
+        *end = offset + size;
     return size;
 }
 long tmpfs_truncate(VfsNode* node, uint64_t size)

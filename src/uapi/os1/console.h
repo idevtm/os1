@@ -8,6 +8,7 @@
 #define OS1_CONSOLE_GET_INFO 3u
 #define OS1_CONSOLE_MAX_BYTES 256u
 #define OS1_CONSOLE_CANONICAL_INPUT 1u
+#define OS1_CONSOLE_EOF_INPUT 2u
 
 // WRITE input is 0..256 raw bytes; output is os1_console_written.
 // TRY_READ input is os1_console_read; output is 0..capacity raw bytes.

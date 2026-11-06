@@ -1374,4 +1374,67 @@ TEST_F(TmpfsContract, MountAllocationFailureLeavesUnpublishedTreeUnchanged)
     EXPECT_EQ(0u, info.data_pages);
     object_release(fresh);
 }
+TEST_F(TmpfsContract, NativeAndDescriptorAppendIgnoreCursorAndShareStatus)
+{
+    int fd = create("append");
+    ASSERT_GE(fd, 0);
+    int f = bind(fd, OS1_FILE_INTERFACE_ID, OS1_RIGHT_WRITE);
+    ASSERT_GE(f, 0);
+    EXPECT_EQ(0, file_call(f, OS1_FILE_WRITE, "a", 1));
+    EXPECT_EQ(0, seek(fd, 0));
+    EXPECT_EQ(0, file_call(f, OS1_FILE_APPEND, "b", 1));
+    EXPECT_EQ(2u, table().entries[fd].instance->cursor);
+    int alias = duplicate(fd, OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT);
+    ASSERT_GE(alias, 0);
+    EXPECT_EQ(0, descriptor_set_status(table(), alias, OS1_STATUS_APPEND));
+    EXPECT_EQ(0, seek(fd, 0));
+    ASSERT_TRUE(copy_to_user(frames, thread, kBuffer, "c", 1));
+    EXPECT_EQ(1, sys_write({.frames = &frames}, alias, kBuffer, 1));
+    EXPECT_EQ(3u, table().entries[fd].instance->cursor);
+    EXPECT_EQ(0, seek(fd, 0));
+    EXPECT_EQ(0, file_call(f, OS1_FILE_WRITE, "d", 1));
+    int read_only = duplicate(fd, OS1_RIGHT_READ);
+    ASSERT_GE(read_only, 0);
+    EXPECT_EQ(OS1_ERR_ACCESS, descriptor_set_status(table(), read_only, 0));
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, descriptor_set_status(table(), fd, OS1_STATUS_NONBLOCK));
+    char bytes[4]{};
+    EXPECT_EQ(4,
+              tmpfs_read(static_cast<VfsNode*>(table().entries[fd].instance->object), 0, bytes, 4));
+    EXPECT_EQ(0, std::memcmp(bytes, "abcd", 4));
+}
+TEST_F(TmpfsContract, ConcurrentAppendRecordsDoNotOverlapOrInterleave)
+{
+    int fd = create("append");
+    ASSERT_GE(fd, 0);
+    auto* file = static_cast<VfsNode*>(table().entries[fd].instance->object);
+    auto writer = [&](char value) {
+        char bytes[8];
+        std::memset(bytes, value, 8);
+        for(unsigned i = 0; i < 32; ++i)
+            EXPECT_EQ(8, tmpfs_write(file, 0, bytes, 8, true));
+    };
+    std::thread a(writer, 'a'), b(writer, 'b');
+    a.join();
+    b.join();
+    char data[512];
+    ASSERT_EQ(512, tmpfs_read(file, 0, data, sizeof(data)));
+    unsigned count_a = 0, count_b = 0;
+    for(unsigned i = 0; i < sizeof(data); i += 8)
+    {
+        if(data[i] == 'a')
+            ++count_a;
+        else
+        {
+            EXPECT_EQ('b', data[i]);
+            ++count_b;
+        }
+        for(unsigned j = 1; j < 8; ++j)
+            EXPECT_EQ(data[i], data[i + j]);
+    }
+    EXPECT_EQ(32u, count_a);
+    EXPECT_EQ(32u, count_b);
+    EXPECT_EQ(0, tmpfs_truncate(file, OS1_TMPFS_FILE_MAX));
+    EXPECT_EQ(OS1_ERR_RANGE, tmpfs_write(file, 0, "x", 1, true));
+    EXPECT_EQ(OS1_TMPFS_FILE_MAX, tmpfs_info(file).byte_size);
+}
 }  // namespace

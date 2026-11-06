@@ -27,7 +27,7 @@ to `CLOEXEC` and the lowest free slot. Raw C calls specify flags explicitly.
 | 2: duplicate | Pointer to a 24-byte `os1_duplicate_request`: six 32-bit fields, alignment 4. Version 1, exact size, signed target, rights, entry flags, reserved zero. Requires `DELEGATE` and a rights subset. Target -1 selects the lowest free slot; 0–63 atomically replaces that slot after validation. Self-replacement is a no-op only with identical rights/flags. |
 | 3: query | Pointer to a 48-byte `os1_resource_info`, alignment 4. Requires `INSPECT`. Returns version, size, object kind, supported interface bits, granted rights, entry/status flags, transfer/slot limits, and three reserved-zero words. Writes the entire record, returns 0. |
 | 4: set descriptor flags | An unsigned 32-bit value; only `CLOEXEC` (bit 0) is accepted. No additional right is needed to change an owned entry's flag. |
-| 5: set status flags | An unsigned 32-bit value; only `NONBLOCK` (bit 0) is accepted. Currently requires `READ` and console byte-input support. Changes are shared by aliases; they affect subsequent reads, not already accepted waits. |
+| 5: set status flags | Replace shared status with an unsigned 32-bit value. Console input accepts NONBLOCK (bit 0), requiring READ. Writable temporary files accept APPEND (bit 1), requiring WRITE. Known flags unsupported by that resource return UNSUPPORTED. Aliases share changes; existing console waits are unchanged. |
 
 Unknown operations return `UNSUPPORTED`; unknown flag/right bits, nonzero
 reserved request fields, wrong version/size, or invalid targets return `INVALID`.
@@ -50,7 +50,12 @@ the already-emitted count, while a failure before output returns `FAULT`.
 Console input remains canonical, with eight completed lines of at most 128
 bytes each. A short read preserves the remaining line. A failed copy may modify
 a prefix of the destination but consumes no input; callers must disregard the
-buffer on error. Empty input blocks or returns `WOULD_BLOCK`; it is not EOF.
+buffer on error. An empty queue blocks or returns `WOULD_BLOCK`; it is not EOF.
+Ctrl-D completes pending bytes without a newline, or produces one zero-byte EOF record if the pending line is empty.
+A positive-length read consumes EOF once; a zero-length read consumes nothing.
+An overlong line discards its complete prefix and produces one RANGE error record.
+The bound is 127 text bytes plus an optional newline.
+A full completed queue drops the new record.
 A read reserves a prefix, copies without holding the input lock, and commits
 only successful delivery. Another reader cannot consume the reserved prefix.
 

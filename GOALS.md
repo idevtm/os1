@@ -513,6 +513,8 @@ The [VFS/startup extension](docs/native-api/abi/initrd-vfs-abi.md) now provides 
 ### Milestone D: writable storage, input services, and local security
 
 Console descriptors, startup grants, immutable initrd VFS, bounded writable `/tmp`, and bounded object IPC are implemented.
+The shell also supports [interactive file creation, redirection, here-documents, and a line editor](docs/shell/interactive-files.md).
+Pipelines, full terminal editing, and persistent storage remain separate work.
 The [service roadmap](docs/native-api/roadmap.md) gives the detailed sequence and acceptance tests.
 
 | Next slice | Required outcome |

@@ -25,5 +25,5 @@ WaitQueue& console_input_read_wait_queue();
 
 // Reserve a bounded prefix; copying to userspace happens with no input lock held.
 // A successful reservation must be finished exactly once, committing only delivered bytes.
-bool console_input_reserve(char* buffer, size_t capacity, size_t& count);
-void console_input_finish(size_t delivered);
+bool console_input_reserve(char* buffer, size_t capacity, size_t& count, long* status = nullptr);
+void console_input_finish(size_t delivered, bool commit = true);

@@ -26,12 +26,13 @@ docs/
   filesystems/            Temporary filesystem contracts and validation
   kernel/                 Synchronization, ACPI, and measurement clock
   hardware/               USB images, boot logs, and firmware investigation
-  shell/                  Shell language proposal
+  shell/                  Interactive files, editor, and language proposal
   reviews/                Latest whole-project review snapshot
   archive/                Older reviews and completed plans or records
     reviews/
     native-api/
     filesystems/
+    shell/
     kernel/
     boot/
     tooling/

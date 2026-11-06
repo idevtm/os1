@@ -7,6 +7,7 @@
 #include "console/terminal_switcher.hpp"
 #include "debug/bootlog.hpp"
 #include "debug/debug.hpp"
+#include "input/ps2_modifiers.hpp"
 
 namespace
 {
@@ -76,11 +77,15 @@ uint16_t shift_map[256] = {
     0xf200, 0xf200, 0xf200, 0xf200,
 };
 
-int shift = 0;
+os1::input::Ps2Modifiers modifiers;
 
 char key_to_char(uint8_t key)
 {
-    return (shift ? shift_map[key] : plain_map[key]) & 0xFF;
+    if(key == 0x1c)
+        return '\n';
+    if(modifiers.keypad && key == 0x35)
+        return '/';
+    return (modifiers.shift ? shift_map[key] : plain_map[key]) & 0xFF;
 }
 
 void Keyboard::irq_handler(Keyboard* object)
@@ -103,25 +108,11 @@ void Keyboard::irq_handler(Keyboard* object)
         ++g_logged_scancodes;
         debug("ps2: scancode 0x")(scancode, 16, 2)();
     }
-    uint8_t brk = scancode & 0x80;
-    uint8_t key = scancode & 0x7f;
-
-    // shifts
-    if((key == 0x2A) || (key == 0x36))
-    {
-        shift = brk ? 0 : 1;
+    uint8_t key = 0;
+    if(!modifiers.press(scancode, key))
         return;
-    }
-
-    // first let kernel handle the scan code
-    // process further if kernel approves
     if(kernel_keyboard_hook(scancode))
-    {
-        if(!brk)
-        {
-            console_input_on_keyboard_char(key_to_char(key));
-        }
-    }
+        console_input_on_keyboard_char(modifiers.control && key == 0x20 ? 4 : key_to_char(key));
 }
 
 bool Keyboard::initialize()

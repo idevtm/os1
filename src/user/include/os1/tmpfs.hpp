@@ -105,10 +105,10 @@ inline long rename(int client, const char* from, const char* to)
     os1_ipc_result result{};
     return call(client, true, OS1_DIRECTORY_RENAME, &a, sizeof(a), result);
 }
-inline long write(int client, const void* data, unsigned bytes)
+inline long write_bytes(int client, const void* data, unsigned bytes, unsigned member)
 {
     os1_ipc_result result{};
-    long status = call(client, false, OS1_FILE_WRITE, data, bytes, result);
+    long status = call(client, false, member, data, bytes, result);
     if(status < 0)
         return status;
     if(result.payload_bytes != sizeof(os1_file_written))
@@ -117,6 +117,14 @@ inline long write(int client, const void* data, unsigned bytes)
     for(unsigned i = 0; i < sizeof(out); ++i)
         reinterpret_cast<uint8_t*>(&out)[i] = result.payload[i];
     return out.bytes <= bytes ? out.bytes : OS1_ERR_INVALID;
+}
+inline long write(int client, const void* data, unsigned bytes)
+{
+    return write_bytes(client, data, bytes, OS1_FILE_WRITE);
+}
+inline long append(int client, const void* data, unsigned bytes)
+{
+    return write_bytes(client, data, bytes, OS1_FILE_APPEND);
 }
 inline long read(int client, void* data, unsigned bytes)
 {

@@ -8,7 +8,7 @@ The initrd remains immutable. This experimental profile does not promise long-te
 Granted root/cwd -> OPEN_AT("tmp") -> directory resource
   -> BIND_KERNEL(Directory, selected rights)
   -> create/open -> retained Operation -> RESULT_CAPS -> file resource
-  -> BIND_KERNEL(File, selected rights) -> read/write/seek/truncate/info
+  -> BIND_KERNEL(File, selected rights) -> read/write/append/seek/truncate/info
 Descriptor read/write/seek/enumeration use the same nodes and open instances.
 ```
 
@@ -66,6 +66,7 @@ Reserved fields and unused name bytes must be zero.
 | `seek` | 3 | SEEK | Existing 24-byte `os1_seek_request` | `u64` absolute position |
 | `truncate` | 4 | WRITE | `os1_file_truncate` | Empty |
 | Read-only property `info` | 5 | INSPECT | Empty | `os1_filesystem_info` |
+| `append` | 6 | WRITE | 0–256 raw bytes | `os1_file_written` |
 
 | Record | Bytes | Fields in order |
 | --- | ---: | --- |
@@ -123,6 +124,16 @@ Shrink releases complete pages and zeros the retained tail; it does not move ope
 A native write reserves all needed pages before changing data or size.
 Allocation failure leaves that write unchanged. Quota exhaustion returns LIMIT; allocation failure returns NO_MEMORY.
 
+Native `append` selects the current logical end and commits bytes under the same filesystem lock.
+Successful nonempty append moves that open cursor to the end of the appended bytes.
+It ignores the previous cursor position. An empty append does not move the cursor.
+Separate opens cannot overlap or interleave bytes within one append request.
+
+Descriptor status `OS1_STATUS_APPEND` (bit 1) applies this rule to each compatibility write chunk and native `write`.
+Aliases and bindings share that status; separate opens have independent status.
+Setting or clearing APPEND requires WRITE on a writable temporary file.
+Native `append` always appends, regardless of the shared flag.
+
 ## Dispatch, delivery, and compatibility
 
 These providers share the kernel adapter's FIFO worker, 16-binding limit, and four retained Operations per binding.
@@ -160,7 +171,7 @@ Kernel Buffer borrowing remains the next bulk-transfer extension; this profile m
 
 ## C++ usage and validation
 
-[Handwritten helpers](../../../src/user/include/os1/tmpfs.hpp) provide `fs::bind`, `open`, `read`, `write`, `seek`, `truncate`, `next`, `rename`, and `remove`.
+[Handwritten helpers](../../../src/user/include/os1/tmpfs.hpp) provide `fs::bind`, `open`, `read`, `write`, `append`, `seek`, `truncate`, `next`, `rename`, and `remove`.
 `fs::open` optionally creates an entry and claims its returned resource capability.
 `fs::submit` exposes asynchronous calls; callers retain and close the returned Operation.
 The [compiled example](../../../src/user/programs/tmpfs_check.hpp) is part of `/bin/vfscheck`.

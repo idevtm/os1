@@ -294,6 +294,29 @@ No-UART tests use debugcon. Monitor-driven tests also exercise keyboard input. T
 The [reliability record](docs/archive/kernel/2026-11-05-reliability-and-clock-plan.md) documents that correction and the new measurement clock.
 Historical BIOS failures remain separate evidence.
 
+## Create and edit temporary files
+
+The shell provides `touch`, interactive `write`, and the line editor `edit`.
+Files under `/tmp` disappear on reboot.
+
+```text
+touch /tmp/empty
+write /tmp/note
+Hello from os1.
+.
+cat /tmp/note > /tmp/copy
+edit /tmp/copy
+p
+a
+Another line.
+.
+wq
+```
+
+Use `<`, `>`, `>>`, and `<< marker` to redirect command streams.
+See [interactive files and editor](docs/shell/interactive-files.md) for commands, EOF behavior, error handling, and limits.
+Run the UEFI and BIOS interactive checks with `ctest --test-dir build -R '^os1_smoke_files_' --output-on-failure`.
+
 ## Local CI With `act`
 
 The main CI job is still:
