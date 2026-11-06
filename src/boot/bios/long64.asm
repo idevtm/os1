@@ -1,5 +1,8 @@
 [bits 16]
 %define EARLY_PAGE_TABLE_BYTES (5 * PAGE_SIZE)
+%if EARLY_LONG_MODE_PAGE_TABLES_ADDRESS < (LOADER16_LOAD_ADDRESS + LOADER16_IMAGE_SECTOR_COUNT * 512)
+    %error "Early page tables overlap the BIOS loader"
+%endif
 %if KERNEL_IMAGE_LOAD_ADDRESS < (EARLY_LONG_MODE_PAGE_TABLES_ADDRESS + EARLY_PAGE_TABLE_BYTES)
     %error "BIOS kernel staging overlaps early page tables"
 %endif
@@ -67,6 +70,7 @@ idt:
 ; ss:esp    Should point to memory that can be used as a small (1 uint32_t) stack
  
 switch_to_long_mode:
+    ; All BIOS disk and boot-log I/O is complete. Its scratch page can now be reused.
     ; Zero out the 20KiB buffer.
     ; Since we are doing a rep stosd, count should be bytes/4.   
     push di                           ; REP STOSD alters DI.

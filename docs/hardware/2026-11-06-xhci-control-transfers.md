@@ -39,7 +39,7 @@ These are confirmed construction defects. Physical recovery after correction rem
 | Area | Assessment |
 | --- | --- |
 | Scope | Correct the existing kernel USB transport; retain bounded, readable control requests. |
-| Boot/platform | Both UEFI and BIOS use this path after firmware handoff. BIOS staging reclaims one unused page; BootInfo and runtime mappings do not change. |
+| Boot/platform | Both UEFI and BIOS use this path after firmware handoff. BIOS staging reclaims two pages through explicit buffer lifetimes; BootInfo and runtime mappings do not change. |
 | Memory/isolation | DMA buffers remain pinned after publication. Errors preserve device quarantine; descriptor bounds precede field use. |
 | Concurrency | Completion state stays under the event lock. Setup publication follows all request writes. |
 | Interfaces | No Native API, syscall, descriptor-handle, IPC, or executable-format changes. |
@@ -57,7 +57,8 @@ The host suite passes 440 tests, including ten new control-transfer and descript
 All three keyboard diagnostic capture checks pass across UEFI and BIOS.
 Eight USB storage, combined-image, and preserving-deployment smokes pass across both boot paths.
 All eleven selected tooling contracts pass.
-A negative assembly check moves staging to `0xE000` and confirms rejection for page-table overlap.
+A negative assembly check moves staging to `0xD000` and confirms rejection for page-table overlap.
+A second check moves page tables to `0x8000` and confirms rejection for loader overlap.
 QEMU cannot prove physical desktop recovery.
 
 ```sh
@@ -82,11 +83,13 @@ The preceding PR revision failed CI before smoke tests.
 The runner produced a 377,088-byte kernel; the BIOS slot allowed only 373,248 bytes.
 Local GCC 11.2.0 produced a smaller file, so local builds did not reveal this limit.
 
-The BIOS loader uses five page-table pages in `[0xA000,0xF000)`.
-Move kernel staging from `0x10000` to `0xF000` to use the adjacent free page.
-The new slot holds 377,344 bytes. The initrd retains `[0x6b200,0x9A000)` and 192,000 bytes.
+The first correction reclaimed one unused page, but CI then measured the completed kernel at 381,184 bytes.
+The final correction moves the five page tables to `[0x9000,0xE000)` and starts kernel staging at `0xE000`.
+The first table page reuses disk and journal scratch only after all BIOS disk I/O completes.
+Loader code ends at or below `0x9000`. An assembler assertion enforces that boundary.
+The new slot holds 381,440 bytes. The initrd retains `[0x6b200,0x9A000)` and 192,000 bytes.
 An assembler assertion rejects page-table overlap. Existing file-size and physical-load checks remain enabled.
-The initrd disk slot shifts by eight sectors; generated loader constants follow that shift.
+The initrd disk slot shifts by sixteen sectors; generated loader constants follow that shift.
 Boot-log LBAs, the raw-image size, and the EFI partition offset remain unchanged.
 This change requires a rebuilt BIOS loader with its matching payload layout.
 The normal preserving-update tool updates the complete boot region; historical UEFI-only replacement keeps its old BIOS payload.
@@ -107,7 +110,7 @@ Baseline `d8b9c46` and the corrected build use GCC 11.2.0, Debug configuration, 
 Normal boot measurements disable debugcon and diagnostics.
 The macOS ARM64 host runs QEMU 11.1.3 with TCG, q35, four CPUs, and 128 MiB RAM.
 UEFI uses Homebrew `edk2-x86_64-code.fd` and fresh `edk2-i386-vars.fd` copies.
-Each run includes the ten-second boot menu and checks USB input at the shell.
+Each UEFI run includes the ten-second boot menu and checks USB input at the shell.
 
 | Property | Baseline | Candidate | Absolute change | Relative change |
 | --- | ---: | ---: | ---: | ---: |
@@ -117,7 +120,8 @@ Each run includes the ten-second boot menu and checks USB input at the shell.
 | Stripped kernel | 372,992 B | 372,992 B | 0 B | 0% |
 | USB boot image | 35,651,584 B | 35,651,584 B | 0 B | 0% |
 | Median UEFI boot, three runs | 12.234 s | 12.254 s | +0.020 s | +0.163% |
-| BIOS staging capacity | 373,248 B | 377,344 B | +4,096 B | +1.10% |
+| Median BIOS boot, three runs | 0.640 s | 0.641 s | +0.001 s | +0.156% |
+| BIOS staging capacity | 373,248 B | 381,440 B | +8,192 B | +2.19% |
 
 The control state adds 40 bytes per device, within existing BSS page padding.
 No new heap or DMA allocation is required.
@@ -126,4 +130,9 @@ Measurements cover QEMU behavior; physical control-transfer timing and keyboard 
 
 Baseline boot times: 12.255, 12.211, and 12.234 seconds.
 Candidate boot times: 12.254, 12.286, 12.244 seconds.
-Logs are under `build/control-evidence/`. Normal serial output remains 25,891 bytes per run.
+Logs are under `build/control-evidence/`. UEFI serial output remains 25,891 bytes per run.
+
+BIOS uses QEMU SeaBIOS with the same CPU, memory, and machine settings.
+Baseline BIOS samples are 0.647, 0.635, and 0.640 seconds.
+Final BIOS samples are 0.641, 0.640, and 0.643 seconds.
+Each sample accepts injected USB input. Logs are under `build/control-evidence/bios-*`.

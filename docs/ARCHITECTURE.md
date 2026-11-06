@@ -521,15 +521,15 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-801`: `kernel_bios.elf`
-- LBA `802-1176`: `initrd.cpio`
+- LBA `65-809`: `kernel_bios.elf`
+- LBA `810-1184`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
 The core ELF uses 256-byte file alignment while kernel memory boundaries remain page-aligned.
 BIOS packaging removes unused section metadata; the diagnostic kernel ELF retains symbols.
-The BIOS loader stages the stripped kernel in `[0xF000,0x6b200)` (368.5 KiB).
+The BIOS loader stages the stripped kernel in `[0xE000,0x6b200)` (372.5 KiB).
 It stages the plain initrd in `[0x6b200,0x9A000)` (187.5 KiB).
 The ext2 slice moves 12 KiB of staging capacity from initrd to the kernel.
 Compact non-reflective executables keep the initrd within its new bound.
@@ -592,8 +592,8 @@ Key addresses:
 | `0x6000` | `BootMemoryRegion[]` buffer |
 | `0x7000` | `BootModuleInfo[]` buffer |
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
-| `0x0A000` | temporary page-table scratch used by the BIOS long-mode transition |
-| `0xF000` | BIOS kernel-image load buffer; follows the five temporary page tables |
+| `0x09000` | BIOS disk scratch, then temporary page tables after firmware disk I/O completes |
+| `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
 | `0x6b200` | BIOS initrd load buffer (187.5 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x20000-0x5FFFF` | page-frame bitmap |
