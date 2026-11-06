@@ -465,8 +465,10 @@ add_custom_command(
   OUTPUT "${OS1_KERNEL_BIOS_ELF}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}"
   COMMAND "${OS1_STRIP_EXECUTABLE}" -o "${OS1_KERNEL_BIOS_ELF}" --strip-unneeded "${OS1_KERNEL_ELF}"
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/compact_user_elf.py" "${OS1_KERNEL_BIOS_ELF}"
   DEPENDS
     "${OS1_KERNEL_ELF}"
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/compact_user_elf.py"
   VERBATIM
 )
 

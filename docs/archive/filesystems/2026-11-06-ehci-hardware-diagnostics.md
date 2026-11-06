@@ -280,3 +280,9 @@ The reviewer inspected source and logs without rerunning tests. Full ASD-STE100 
 The user subsequently confirmed successful mounting and file persistence across reboot on the Asus G74SX.
 The [hardware validation record](2026-11-06-usb-hardware-validation.md) separates observed behavior from remaining qualification gaps.
 Earlier pending-hardware statements above describe the state when each implementation check ran.
+
+## Subsequent interrupt-return investigation
+
+The [interrupt-return investigation](../kernel/2026-11-06-interrupt-return.md) reproduced the retained BIOS fault and corrected interruptible scheduler handoff.
+The earlier unresolved statements above describe the evidence available during this report.
+Physical validation of the scheduler correction remains separate from the USB persistence result.

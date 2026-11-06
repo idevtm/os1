@@ -523,6 +523,8 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
+The core ELF uses 256-byte file alignment while kernel memory boundaries remain page-aligned.
+BIOS packaging removes unused section metadata; the diagnostic kernel ELF retains symbols.
 The BIOS loader stages the stripped kernel in `[0x10000,0x6b200)` (364.5 KiB).
 It stages the plain initrd in `[0x6b200,0x9A000)` (187.5 KiB).
 The ext2 slice moves 12 KiB of staging capacity from initrd to the kernel.
@@ -901,6 +903,11 @@ The assembly trap entry code now builds a shared `TrapFrame` layout for:
 - scheduler return paths
 
 That means the C++ dispatch logic receives one coherent view of machine state. Interrupts and scheduler switches still restore full frames through `iretq`; same-thread syscall returns use the `SYSRET` fast path.
+
+Direct kernel handoffs mask interrupts before selecting or publishing the next thread.
+Assembly entry also masks interrupts before changing the stack, CR3, current-thread pointer, or saved-register state.
+Only the destination frame restores the interrupt-enable flag through `iretq`.
+The [interrupt-return investigation](archive/kernel/2026-11-06-interrupt-return.md) records the reproduced BIOS fault and regression test.
 
 ### Syscalls
 

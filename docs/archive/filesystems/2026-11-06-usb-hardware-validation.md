@@ -76,3 +76,9 @@ Formatting, local document links, staged diff checks, and added-text secret insp
 Independent publication review found no blocking defect in the report or inspected integration boundaries.
 The reviewer did not rerun tests or operate hardware. Full ASD-STE100 dictionary compliance remains unverified.
 The earlier BIOS fault remains open despite this passing matrix.
+
+## Subsequent interrupt-return investigation
+
+The [interrupt-return investigation](../kernel/2026-11-06-interrupt-return.md) reproduced the retained BIOS fault and corrected interruptible scheduler handoff.
+The earlier unresolved statements above describe the evidence available during this report.
+Physical validation of the scheduler correction remains separate from the USB persistence result.
