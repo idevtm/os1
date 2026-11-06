@@ -116,6 +116,25 @@ struct LegacySupport
     uint32_t control = 0;
 };
 LegacySupportResult read_legacy_support(const ControllerLayout&, LegacySupport&);
+// Delay callback receives microseconds. A BIOS timeout fails without forcing ownership.
+bool acquire_legacy_ownership(const ControllerLayout&,
+                              void (*delay)(uint32_t, void*),
+                              void* context);
+
+struct RoutingIo
+{
+    void* context;
+    uint32_t (*read)(void*, uint16_t);
+    void (*write)(void*, uint16_t, uint32_t);
+};
+enum class RoutingResult : uint8_t
+{
+    NotApplicable,
+    Unchanged,
+    Changed,
+    Failed
+};
+RoutingResult route_intel_ports(uint16_t vendor, uint16_t device, const RoutingIo&);
 
 struct CommandRingInfo
 {

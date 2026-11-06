@@ -486,7 +486,8 @@ Selecting a write destination starts the writer without a typed confirmation.
 Menus use the alternate terminal screen; the helper restores the normal screen before displaying the sudo password guidance.
 Only raw-device snapshot, write, readback, and eject steps use sudo.
 The [keyboard diagnostic profile](hardware/usb-image-workflow.md#keyboard-independent-diagnostics) uses a separate build and an automatic capture boot.
-It adds bounded xHCI observations and a startup summary without changing ownership or port routing.
+Its bounded xHCI observations are read-only.
+Both normal and diagnostic profiles use the shared firmware handoff and port-routing sequence.
 The replacement option retains the base image’s UEFI files and updates the kernel and initrd.
 Its BIOS payload remains historical; the fresh hybrid image supplies both current boot paths.
 
@@ -1405,6 +1406,16 @@ The [initrd VFS milestone](archive/native-api/2026-11-04-initrd-vfs-implementati
 - ACPICA upgrade/footprint policy, OSL feature boundaries, and broader real-hardware ACPI coverage when new hardware requires it
 
 The shared boot contract, driver resource records, event ring, and dual-frontend QEMU coverage provide infrastructure for those steps. The review's source findings and physical-hardware evidence define what still needs to be established before claiming broader reliability or isolation.
+
+### USB firmware handoff and probe order
+
+Drivers marked `probe_early` finish before ordinary PCI probes, independent of PCI discovery order.
+xHCI uses this phase to request firmware ownership before reset and DMA setup.
+An ownership timeout leaves BIOS ownership intact and rejects that controller.
+After xHCI starts, Intel `8086:8c31` routing enables supported SuperSpeed ports before switching supported USB 2.0 ports.
+A 100 ms settling delay follows changed routing; device enumeration then precedes EHCI probing.
+Other PCI IDs receive no Intel routing-register writes.
+See the [hardware evidence and validation plan](hardware/2026-11-06-usb-keyboard-handoff.md).
 
 ### USB controller-independent storage
 

@@ -83,7 +83,10 @@ Detailed records include pre-reset port state, firmware ownership, enumeration, 
 Intel routing-register reads apply only to controller `8086:8c31`.
 Legacy result values are `0` absent, `1` present, and `2` invalid.
 The legacy support register uses bit 16 for BIOS ownership and bit 24 for OS ownership.
-No diagnostic code changes these registers or corrects the keyboard failure.
+Diagnostic observations do not modify these registers.
+All profiles include the [firmware handoff and Intel routing correction](2026-11-06-usb-keyboard-handoff.md), pending physical acceptance.
+Expect `xhci: firmware handoff complete`, then Intel routing result `2` when routes change or `1` when already enabled.
+Result `3` means routing verification failed; the driver attempts to restore original routing.
 
 BIOS diagnostic boot also starts automatically and captures logs in reserved image sectors.
 The EFI volume does not contain BIOS logs; use [BIOS log extraction](boot-log.md#operator-procedure) after a warm restart.

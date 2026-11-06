@@ -140,11 +140,11 @@ The same demo must run through UEFI and BIOS smokes.
 
 Qualify the existing USB keyboard path and expose usable input objects.
 [Issue #27](https://github.com/idevtm/os1/issues/27) remains the physical keyboard investigation.
-The user reconfirms the failure on 2026-11-06: a desktop, USB keyboard, and USB 2.0 port.
-Controller, keyboard identity, topology, and exact image revision remain unrecorded.
-A USB 2.0 port alone does not identify the host controller.
-Firmware input success does not establish kernel controller support.
-Record the controller, USB topology, keyboard identity, and image revision before choosing a controller-specific fix.
+The affected desktop uses a Gigabyte H81M-S1 and Lenovo keyboard `17ef:6190`.
+The returned log shows BIOS ownership and no USB ports routed to Intel xHCI `8086:8c31`.
+Linux connects the keyboard directly to that controller.
+The [firmware handoff correction](../hardware/2026-11-06-usb-keyboard-handoff.md) adds ownership transfer and ordered port routing.
+Physical keyboard recovery remains unverified.
 
 Current xHCI code decodes keyboard reports into console characters.
 Its mouse handler only counts reports; it does not deliver useful pointer input.

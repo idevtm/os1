@@ -116,6 +116,66 @@ LegacySupportResult read_legacy_support(const ControllerLayout& layout, LegacySu
     return offset ? LegacySupportResult::Invalid : LegacySupportResult::Absent;
 }
 
+bool acquire_legacy_ownership(const ControllerLayout& layout,
+                              void (*delay)(uint32_t, void*),
+                              void* context)
+{
+    LegacySupport legacy{};
+    const auto found = read_legacy_support(layout, legacy);
+    if(found == LegacySupportResult::Absent)
+        return true;
+    if(found == LegacySupportResult::Invalid || !delay)
+        return false;
+    constexpr uint32_t bios_owned = 1u << 16;
+    constexpr uint32_t os_owned = 1u << 24;
+    write32(layout.mmio_base, legacy.offset, legacy.support | os_owned);
+    for(unsigned wait = 0;; ++wait)
+    {
+        const uint32_t support = read32(layout.mmio_base, legacy.offset);
+        if(!(support & bios_owned) && (support & os_owned))
+            break;
+        if(wait == 1000u)
+            return false;
+        delay(1000u, context);
+    }
+    // xHCI 7.1.2: clear only SMI enables and acknowledge W1C events.
+    // Read-only event/error status can remain set after this write.
+    constexpr uint32_t enables = (1u << 0) | (1u << 4) | (7u << 13);
+    constexpr uint32_t events = 7u << 29;
+    const uint32_t control = read32(layout.mmio_base, legacy.offset + 4u);
+    write32(layout.mmio_base, legacy.offset + 4u, (control & ~enables) | events);
+    return !(read32(layout.mmio_base, legacy.offset + 4u) & enables);
+}
+
+RoutingResult route_intel_ports(uint16_t vendor, uint16_t device, const RoutingIo& io)
+{
+    // The returned H81M-S1 log qualifies these PCI register offsets for this ID.
+    if(vendor != 0x8086u || device != 0x8c31u)
+        return RoutingResult::NotApplicable;
+    if(!io.read || !io.write)
+        return RoutingResult::Failed;
+    const uint32_t usb2 = io.read(io.context, 0xd0);
+    const uint32_t mask2 = io.read(io.context, 0xd4);
+    const uint32_t usb3 = io.read(io.context, 0xd8);
+    const uint32_t mask3 = io.read(io.context, 0xdc);
+    if(usb2 == 0xffffffffu || usb3 == 0xffffffffu || mask2 == 0xffffffffu || mask3 == 0xffffffffu)
+        return RoutingResult::Failed;
+    if((usb2 & mask2) == mask2 && (usb3 & mask3) == mask3)
+        return RoutingResult::Unchanged;
+    io.write(io.context, 0xd8, usb3 | mask3);
+    if((io.read(io.context, 0xd8) & mask3) == mask3)
+    {
+        io.write(io.context, 0xd0, usb2 | mask2);
+        if((io.read(io.context, 0xd0) & mask2) == mask2)
+            return RoutingResult::Changed;
+    }
+    // No device has been enumerated on this controller yet. Restore routing
+    // before EHCI probes, so a partial switchover cannot publish stale storage.
+    io.write(io.context, 0xd0, usb2);
+    io.write(io.context, 0xd8, usb3);
+    return RoutingResult::Failed;
+}
+
 bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayout& out)
 {
     out = {};

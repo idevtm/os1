@@ -1,5 +1,9 @@
 # USB keyboard diagnostic boot — 2026-11-06
 
+This historical report records the diagnostic implementation before the returned USB log was available.
+The [handoff report](2026-11-06-usb-keyboard-handoff.md) contains the subsequent evidence, correction, and validation.
+Measurements and artifact hashes below apply to the earlier diagnostic build.
+
 This task collects evidence for issue #27 without requiring a working os1 keyboard.
 Key presses have no effect on the affected desktop. Sluggish input is not the reported failure.
 

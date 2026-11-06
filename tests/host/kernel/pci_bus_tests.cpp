@@ -307,3 +307,51 @@ TEST(PciBus, DeviceBindingsGrowPastLegacyLimit)
 
     platform_reset_state();
 }
+
+TEST(PciBus, EarlyDriverRunsBeforeLowerBdfOrdinaryDeviceAndDoesNotRetryFailure)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory kernel_vm(frames);
+    for(bool enable_early : {true, false})
+    {
+        reset_state();
+        g_platform.device_count = 2;
+        g_platform.devices[0].device_id = 1;
+        g_platform.devices[1].device_id = 2;
+        const PciMatch ordinary_match{.device_id = 1, .match_flags = kPciMatchDeviceId};
+        const PciMatch early_match{.device_id = 2, .match_flags = kPciMatchDeviceId};
+        const PciDriver ordinary{
+            .name = "ordinary",
+            .matches = &ordinary_match,
+            .match_count = 1,
+            .probe = [](VirtualMemory&, PageFrameContainer&, const PciDevice&, size_t, DeviceId) {
+                EXPECT_EQ(g_probe_harness.second_probe_calls, 0u);
+                ++g_probe_harness.first_probe_calls;
+                return true;
+            }};
+        const PciDriver early{
+            .name = "early",
+            .matches = &early_match,
+            .match_count = 1,
+            .probe =
+                [](VirtualMemory&, PageFrameContainer&, const PciDevice&, size_t, DeviceId) {
+                    EXPECT_EQ(g_probe_harness.first_probe_calls, 0u);
+                    ++g_probe_harness.failing_probe_calls;
+                    return false;
+                },
+            .probe_early = true};
+        const PciDriver fallback{
+            .name = "fallback", .matches = &early_match, .match_count = 1, .probe = second_probe};
+        ASSERT_TRUE(driver_registry_add_pci_driver(ordinary));
+        if(enable_early)
+            ASSERT_TRUE(driver_registry_add_pci_driver(early));
+        ASSERT_TRUE(driver_registry_add_pci_driver(fallback));
+        ASSERT_TRUE(pci_bus_probe_all(kernel_vm, frames));
+        EXPECT_EQ(g_probe_harness.first_probe_calls, 1u);
+        EXPECT_EQ(g_probe_harness.failing_probe_calls, enable_early ? 1u : 0u);
+        EXPECT_EQ(g_probe_harness.second_probe_calls, enable_early ? 0u : 1u);
+    }
+    platform_reset_state();
+}

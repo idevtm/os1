@@ -8,6 +8,7 @@
 #include "debug/event_ring.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/resource.hpp"
+#include "drivers/timer/tsc_clock.hpp"
 #include "drivers/usb/hid_keyboard.hpp"
 #include "drivers/usb/mass_storage.hpp"
 #include "drivers/usb/xhci_controller.hpp"
@@ -221,6 +222,7 @@ struct XhciDeviceState
 
 struct XhciControllerState
 {
+    bool owned = false;
     bool present = false;
     bool failed = false;
     bool dma_published = false;
@@ -453,7 +455,7 @@ void release_controller(PageFrameContainer& frames, XhciControllerState& control
         controller.present = true;  // Reserve the quarantined slot; never recycle handles.
         return;
     }
-    if(nullptr != controller.controller.operational)
+    if(controller.owned && nullptr != controller.controller.operational)
     {
         (void)xhci::controller_stop(controller.controller, kXhciInitTimeoutSpins);
     }
@@ -1716,6 +1718,19 @@ void xhci_irq(void* data)
     service_events(controller);
 }
 
+void handoff_delay(uint32_t us, void*)
+{
+    tsc_clock_delay_us(us);
+}
+uint32_t routing_read(void* context, uint16_t offset)
+{
+    return pci_config_read32(*static_cast<const PciDevice*>(context), offset);
+}
+void routing_write(void* context, uint16_t offset, uint32_t value)
+{
+    pci_config_write32(*static_cast<const PciDevice*>(context), offset, value);
+}
+
 bool probe_xhci_controller(VirtualMemory& kernel_vm,
                            PageFrameContainer& frames,
                            const PciDevice& device,
@@ -1820,6 +1835,21 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         }
     }
 
+    if(!xhci::acquire_legacy_ownership(controller->controller, handoff_delay, nullptr))
+    {
+        debug("xhci: firmware handoff failed")();
+        release_controller(frames, *controller);
+        return false;
+    }
+    controller->owned = true;
+    debug("xhci: firmware handoff complete")();
+    if(!xhci::controller_reset(controller->controller, kXhciInitTimeoutSpins))
+    {
+        debug("xhci: controller reset failed")();
+        release_controller(frames, *controller);
+        return false;
+    }
+
     debug("xhci: capability ok ports=")(controller->controller.capability.max_ports)(" slots=")(
         controller->controller.capability.max_slots)(" scratchpad=")(
         controller->controller.capability.scratchpad_buffers)();
@@ -1840,14 +1870,8 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         release_controller(frames, *controller);
         return false;
     }
-    debug("xhci: interrupt bound vector=0x")(controller->interrupt.vector, 16, 2)(", resetting")();
+    debug("xhci: interrupt bound vector=0x")(controller->interrupt.vector, 16, 2)();
 
-    if(!xhci::controller_reset(controller->controller, kXhciInitTimeoutSpins))
-    {
-        debug("xhci: controller reset failed")();
-        release_controller(frames, *controller);
-        return false;
-    }
     pci_enable_mmio_bus_mastering(device);
 
     const xhci::RingSet rings{
@@ -1868,6 +1892,18 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         return false;
     }
 
+    const xhci::RoutingIo routing_io{const_cast<PciDevice*>(&device), routing_read, routing_write};
+    const auto routing = xhci::route_intel_ports(device.vendor_id, device.device_id, routing_io);
+    if(routing != xhci::RoutingResult::NotApplicable)
+        debug("xhci: Intel routing result=")(static_cast<uint8_t>(routing))(" USB2=0x")(
+            pci_config_read32(device, 0xd0), 16)(" USB3=0x")(pci_config_read32(device, 0xd8), 16)();
+    if(routing == xhci::RoutingResult::Failed)
+    {
+        release_controller(frames, *controller);
+        return false;
+    }
+    if(routing == xhci::RoutingResult::Changed)
+        tsc_clock_delay_us(100000u);
     enumerate_ports(frames, *controller);
 
     controller->present = true;
@@ -1903,6 +1939,7 @@ const PciDriver& xhci_pci_driver()
                     device_binding_remove(id);
                 }
             },
+        .probe_early = true,
     };
     return driver;
 }

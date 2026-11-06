@@ -12,30 +12,38 @@ bool pci_bus_probe_all(VirtualMemory& kernel_vm, PageFrameContainer& frames)
 {
     const PciDevice* devices = platform_pci_devices();
     const size_t device_count = platform_pci_device_count();
-    for(size_t device_index = 0; device_index < device_count; ++device_index)
+    // Early drivers complete before ordinary devices, regardless of PCI BDF order.
+    for(unsigned phase = 0; phase < 2u; ++phase)
     {
-        DeviceId id{DeviceBus::Pci, static_cast<uint16_t>(device_index)};
-        (void)device_binding_set_state(id, DeviceState::Probing);
-        for(size_t driver_index = 0; driver_index < pci_driver_count(); ++driver_index)
+        for(size_t device_index = 0; device_index < device_count; ++device_index)
         {
-            const PciDriver* driver = pci_driver_at(driver_index);
-            if((nullptr == driver) || !pci_driver_matches_device(*driver, devices[device_index]))
+            DeviceId id{DeviceBus::Pci, static_cast<uint16_t>(device_index)};
+            for(size_t driver_index = 0; driver_index < pci_driver_count(); ++driver_index)
             {
-                continue;
-            }
+                const PciDriver* driver = pci_driver_at(driver_index);
+                if((nullptr == driver) ||
+                   !pci_driver_matches_device(*driver, devices[device_index]))
+                {
+                    continue;
+                }
 
-            if(driver->probe(kernel_vm, frames, devices[device_index], device_index, id))
-            {
+                if(driver->probe_early != (phase == 0u))
+                    break;  // The first matching driver retains ownership in either phase.
+                (void)device_binding_set_state(id, DeviceState::Probing);
+
+                if(driver->probe(kernel_vm, frames, devices[device_index], device_index, id))
+                {
+                    break;
+                }
+
+                // One misbehaving device must not stop bring-up: real machines carry
+                // controllers that emulator-tested drivers have never seen.
+                debug("pci: ")(driver->name)(" probe failed for ")(
+                    devices[device_index].bus, 16, 2)(":")(devices[device_index].slot, 16, 2)(".")(
+                    devices[device_index].function, 16, 1)("; continuing without it")();
+                (void)device_binding_set_state(id, DeviceState::Failed);
                 break;
             }
-
-            // One misbehaving device must not stop bring-up: real machines carry
-            // controllers that emulator-tested drivers have never seen.
-            debug("pci: ")(driver->name)(" probe failed for ")(devices[device_index].bus, 16, 2)(":")(
-                devices[device_index].slot, 16, 2)(".")(devices[device_index].function, 16, 1)(
-                "; continuing without it")();
-            (void)device_binding_set_state(id, DeviceState::Failed);
-            break;
         }
     }
     return true;

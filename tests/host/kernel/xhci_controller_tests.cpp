@@ -395,3 +395,172 @@ TEST(XhciDiagnostics, LegacyTraversalHasAFixedReadBudget)
     EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
     EXPECT_EQ(snapshot.offset, 0u);
 }
+
+namespace
+{
+struct HandoffFixture
+{
+    alignas(4) std::array<uint8_t, 256> bytes{};
+    unsigned waits = 0;
+    bool release = true;
+    xhci::ControllerLayout layout()
+    {
+        xhci::ControllerLayout value{};
+        value.mmio_base = bytes.data();
+        value.mmio_size = bytes.size();
+        return value;
+    }
+    static void delay(uint32_t us, void* context)
+    {
+        auto& f = *static_cast<HandoffFixture*>(context);
+        EXPECT_EQ(us, 1000u);
+        EXPECT_NE(read32(f.bytes, 0x40) & (1u << 24), 0u);
+        if(++f.waits == 2 && f.release)
+            write32(f.bytes, 0x40, read32(f.bytes, 0x40) & ~(1u << 16));
+    }
+    HandoffFixture()
+    {
+        write32(bytes, 0x10, 0x10u << 16);
+        write32(bytes, 0x40, 0x10001u);
+        write32(bytes, 0x44, 0xc00fffffu);
+    }
+};
+struct RoutingFixture
+{
+    std::array<uint32_t, 4> registers{0, 0xfff, 0, 3};
+    std::array<uint16_t, 8> writes{};
+    unsigned write_count = 0, read_count = 0;
+    uint16_t reject = 0;
+    static uint32_t read(void* context, uint16_t offset)
+    {
+        auto& f = *static_cast<RoutingFixture*>(context);
+        ++f.read_count;
+        EXPECT_GE(offset, 0xd0);
+        EXPECT_LE(offset, 0xdc);
+        return f.registers[(offset - 0xd0) / 4];
+    }
+    static void write(void* context, uint16_t offset, uint32_t value)
+    {
+        auto& f = *static_cast<RoutingFixture*>(context);
+        EXPECT_TRUE(offset == 0xd0 || offset == 0xd8);
+        if(f.write_count < f.writes.size())
+            f.writes[f.write_count++] = offset;
+        if(offset != f.reject)
+            f.registers[(offset - 0xd0) / 4] = value;
+    }
+    xhci::RoutingIo io()
+    {
+        return {this, read, write};
+    }
+};
+}  // namespace
+
+TEST(XhciHandoff, RequestsOwnershipBeforePollingAndDisablesSmiAfterRelease)
+{
+    HandoffFixture f;
+    ASSERT_TRUE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+    EXPECT_EQ(f.waits, 2u);
+    EXPECT_EQ(read32(f.bytes, 0x40), 0x01000001u);
+    // Preserve reserved fields; write ones to W1C status bits; clear SMI enables.
+    EXPECT_EQ(read32(f.bytes, 0x44), 0xe00f1feeu);
+}
+
+TEST(XhciHandoff, PendingReadOnlyStatusDoesNotRejectOwnership)
+{
+    for(const uint32_t status : {1u << 16, 1u << 20, (1u << 16) | (1u << 20)})
+    {
+        HandoffFixture f;
+        write32(f.bytes, 0x44, status | 0xe011u);
+        ASSERT_TRUE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+        // RMW retains these RO bits in the fixture, as hardware does on writes.
+        EXPECT_EQ(read32(f.bytes, 0x44) & status, status);
+        EXPECT_EQ(read32(f.bytes, 0x44) & 0xe011u, 0u);
+    }
+}
+
+TEST(XhciHandoff, TimeoutNeverForcesBiosReleaseOrChangesSmiControl)
+{
+    HandoffFixture f;
+    f.release = false;
+    ASSERT_FALSE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+    EXPECT_EQ(f.waits, 1000u);
+    EXPECT_EQ(read32(f.bytes, 0x40), 0x01010001u);
+    EXPECT_EQ(read32(f.bytes, 0x44), 0xc00fffffu);
+}
+
+TEST(XhciHandoff, AlreadyReleasedAndAbsentCapabilitiesDoNotWait)
+{
+    HandoffFixture f;
+    write32(f.bytes, 0x40, 1u);
+    ASSERT_TRUE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+    EXPECT_EQ(f.waits, 0u);
+    EXPECT_EQ(read32(f.bytes, 0x40), 0x01000001u);
+    write32(f.bytes, 0x10, 0u);
+    const auto before = f.bytes;
+    ASSERT_TRUE(xhci::acquire_legacy_ownership(f.layout(), nullptr, nullptr));
+    EXPECT_EQ(f.bytes, before);
+}
+
+TEST(XhciHandoff, InvalidTableAndMissingDelayHaveNoWrites)
+{
+    HandoffFixture f;
+    auto before = f.bytes;
+    EXPECT_FALSE(xhci::acquire_legacy_ownership(f.layout(), nullptr, nullptr));
+    EXPECT_EQ(f.bytes, before);
+    write32(f.bytes, 0x10, 0xffff0000u);
+    before = f.bytes;
+    EXPECT_FALSE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+    EXPECT_EQ(f.bytes, before);
+}
+
+TEST(XhciRouting, EnablesSuperSpeedBeforeUsb2AndPreservesOtherBits)
+{
+    RoutingFixture f;
+    f.registers[0] = 0x80000000u;
+    f.registers[2] = 0x40000000u;
+    EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Changed);
+    EXPECT_EQ(f.write_count, 2u);
+    EXPECT_EQ(f.writes[0], 0xd8);
+    EXPECT_EQ(f.writes[1], 0xd0);
+    EXPECT_EQ(f.registers[0], 0x80000fffu);
+    EXPECT_EQ(f.registers[2], 0x40000003u);
+    EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Unchanged);
+    EXPECT_EQ(f.write_count, 2u);
+}
+
+TEST(XhciRouting, OtherDevicesAndZeroMasksDoNotWrite)
+{
+    RoutingFixture f;
+    EXPECT_EQ(xhci::route_intel_ports(0x1b36, 0x000d, f.io()), xhci::RoutingResult::NotApplicable);
+    EXPECT_EQ(xhci::route_intel_ports(0x8086, 0xffff, f.io()), xhci::RoutingResult::NotApplicable);
+    EXPECT_EQ(f.read_count, 0u);
+    EXPECT_EQ(f.write_count, 0u);
+    f.registers = {};
+    EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Unchanged);
+    EXPECT_EQ(f.write_count, 0u);
+}
+
+TEST(XhciRouting, InaccessibleRegistersNeverWrite)
+{
+    for(unsigned index = 0; index < 4; ++index)
+    {
+        RoutingFixture f;
+        f.registers[index] = 0xffffffffu;
+        EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Failed);
+        EXPECT_EQ(f.write_count, 0u);
+    }
+}
+
+TEST(XhciRouting, FailedReadbackRestoresOriginalRoutesBeforeReturning)
+{
+    for(uint16_t reg : {0xd0, 0xd8})
+    {
+        RoutingFixture f;
+        f.reject = reg;
+        const auto before = f.registers;
+        EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Failed);
+        EXPECT_EQ(f.registers, before);
+        EXPECT_EQ(f.writes[f.write_count - 2], 0xd0);
+        EXPECT_EQ(f.writes[f.write_count - 1], 0xd8);
+    }
+}

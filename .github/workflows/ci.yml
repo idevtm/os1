@@ -83,3 +83,12 @@ jobs:
 
       - name: Smoke test
         run: ctest --test-dir build --output-on-failure
+
+      - name: Configure keyboard diagnostics
+        run: cmake --preset default -B build/usb-diagnostics -DOS1_REQUIRE_UEFI_SMOKE=ON -DOS1_KMEM_DEBUG=ON -DOS1_QEMU_DEBUGCON=OFF -DOS1_USB_KEYBOARD_DIAGNOSTICS=ON
+
+      - name: Build keyboard diagnostic image
+        run: cmake --build build/usb-diagnostics --target os1_usb_image
+
+      - name: Test keyboard diagnostic capture
+        run: ctest --test-dir build/usb-diagnostics --output-on-failure --no-tests=error -R '^os1_smoke_usb_keyboard_'
