@@ -144,34 +144,47 @@ def menu_text(text):
     return "".join(char if char.isprintable() else " " for char in str(text))
 
 
-def choose_menu(title, options, detail=""):
+def menu_frame(title, items, selected, detail, columns, rows):
+    """Keep the selected item visible without wrapping or scrolling the terminal."""
+    # A new PTY can report zero dimensions until its owner sets a size.
+    columns, rows = columns or 80, rows or 24
+    width, height = max(1, columns - 1), max(1, rows)
+    headers = [menu_text(title)] if height >= 2 else []
+    if height >= 4:
+        headers.append("Up/Down: move   Enter: select   q/Esc: cancel")
+    footers = [menu_text(detail)] if height >= 4 else []
+    if height >= 7:
+        headers.append("")
+        footers.insert(0, "")
+    visible = max(1, height - len(headers) - len(footers))
+    first = max(0, min(selected - visible + 1, len(items) - visible))
+    lines = [line[:width] for line in headers]
+    for index in range(first, min(len(items), first + visible)):
+        label = (("> " if index == selected else "  ") + menu_text(items[index][1]))[:width]
+        lines.append("\x1b[7m" + label + "\x1b[0m" if index == selected else label)
+    lines.extend(line[:width] for line in footers)
+    return "\x1b[2J\x1b[H" + "\n".join(lines)
+
+
+def choose_menu(title, options, detail="", cancel_label="Cancel", descriptions=None):
     """Arrow-key menu; Enter selects, q/Escape cancels. Restore the terminal on exit."""
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
     handlers = {}
     selected = 0
-    items = [*options, (None, "Cancel")]
+    items = [*options, (None, cancel_label)]
     def interrupted(signum, frame):
         raise KeyboardInterrupt
     try:
         for signum in (signal.SIGTERM, signal.SIGHUP):
             handlers[signum] = signal.signal(signum, interrupted)
-        tty.setcbreak(fd)
+        # Keep queued navigation keys when entering a submenu.
+        tty.setcbreak(fd, termios.TCSANOW)
         sys.stderr.write("\x1b[?1049h\x1b[?25l")
         while True:
             columns, rows = os.get_terminal_size(fd)
-            width = max(1, columns - 4)
-            visible = max(1, rows - 8)
-            first = max(0, min(selected - visible + 1, len(items) - visible))
-            sys.stderr.write("\x1b[2J\x1b[H" + menu_text(title)[:width] + "\n")
-            sys.stderr.write("Up/Down: move   Enter: select   q/Esc: cancel\n\n")
-            for index in range(first, min(len(items), first + visible)):
-                label = menu_text(items[index][1])[:width]
-                if index == selected:
-                    sys.stderr.write("\x1b[7m> " + label + "\x1b[0m\n")
-                else:
-                    sys.stderr.write("  " + label + "\n")
-            sys.stderr.write("\n" + menu_text(detail)[:width] + "\n")
+            selected_detail = descriptions.get(items[selected][0], detail) if descriptions else detail
+            sys.stderr.write(menu_frame(title, items, selected, selected_detail, columns, rows))
             sys.stderr.flush()
             key = menu_key(fd)
             if key in (b"\x1b[A", b"\x1bOA", b"k"):
@@ -180,7 +193,7 @@ def choose_menu(title, options, detail=""):
                 selected = (selected + 1) % len(items)
             elif key in (b"\r", b"\n"):
                 return items[selected][0]
-            elif key in (b"q", b"Q", b"\x1b", b""):
+            elif key in (b"q", b"Q", b"\x1b", b"\x1b[D", b"\x1bOD", b""):
                 return None
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)

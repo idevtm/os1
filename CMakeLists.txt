@@ -18,6 +18,9 @@ endif()
 
 project(os1 LANGUAGES C CXX)
 
+# Initialize BUILD_TESTING before subdirectories define test-only artifacts.
+include(CTest)
+
 option(OS1_KMEM_DEBUG "Enable kernel small-object allocator debug instrumentation" ON)
 option(OS1_BOOT_DIAGNOSTICS "Enable USB pre-loader and BIOS boot-log diagnostics" OFF)
 option(OS1_QEMU_DEBUGCON "Mirror kernel output to QEMU port 0xE9 for no-UART tests" OFF)
@@ -391,6 +394,16 @@ add_custom_target(storage_reset
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/create_ext2_image.py"
     --output "${OS1_PERSISTENT_DISK}" --utility "${OS1_USER_DISKUTIL_ELF}" --reset
   DEPENDS os1_diskutil USES_TERMINAL VERBATIM)
+
+# Custom manifests use paths relative to the manifest file. Existing images are required.
+set(OS1_STORAGE_MANIFEST "${OS1_GENERATED_DIR}/storage-programs.json" CACHE FILEPATH "Program deployment manifest")
+file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json" CONTENT
+  "{\"version\":1,\"programs\":[{\"source\":\"${OS1_USER_DISKUTIL_ELF}\",\"destination\":\"/disk/diskutil\"}]}\n")
+add_custom_target(storage_deploy
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/deploy_storage.py"
+    --image "${OS1_PERSISTENT_DISK}" --manifest "${OS1_STORAGE_MANIFEST}"
+  DEPENDS os1_diskutil user_programs USES_TERMINAL VERBATIM)
+os1_register_menu_target(storage_deploy "Deploy programs (preserve data)" "Stop QEMU, then install the manifest programs without resetting the image. Requires e2fsprogs.")
 os1_register_menu_target(storage_reset "Recreate QEMU storage (erase data)" "Replace the persistent data image and reinstall the disk-only utility.")
 
 add_custom_command(
@@ -817,7 +830,6 @@ os1_register_menu_target(
   "Keep the BIOS boot path but route the shell through serial stdio instead of the display-first run target."
 )
 
-include(CTest)
 if(BUILD_TESTING)
   add_test(NAME os1_usb_menu_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_usb_menu.py")
@@ -1742,6 +1754,12 @@ if(OS1_E2FSCK_EXECUTABLE)
   set(OS1_EXT2_CHECK_ARGS --e2fsck "${OS1_E2FSCK_EXECUTABLE}")
 endif()
 if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
+  add_test(NAME os1_storage_deploy_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_storage_deploy.py")
+  add_test(NAME os1_build_configuration_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_build_configuration.py")
+  add_test(NAME os1_target_menu_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_target_menu.py")
   add_test(NAME os1_storage_image_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_storage_image.py")
 endif()
@@ -1767,6 +1785,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-ext2-${boot}.log" ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
+    add_test(NAME os1_smoke_deploy_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_deployment_boot.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
+        --version1 "${OS1_DEPLOY_PROBE_1}" --version2 "${OS1_DEPLOY_PROBE_2}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-deploy-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_deploy_${boot} PROPERTIES TIMEOUT 240)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_deploy_${boot})
     set_tests_properties(os1_smoke_ext2_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_ext2_${boot})
   endforeach()
@@ -1796,6 +1821,19 @@ if(OS1_QEMU_EXECUTABLE)
   endif()
 endif()
 
+if(BUILD_TESTING)
+  add_dependencies(os1_image os1_deploy_probe_1 os1_deploy_probe_2)
+  add_dependencies(os1_bios_image os1_deploy_probe_1 os1_deploy_probe_2)
+endif()
+if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
+  add_custom_target(smoke_storage
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke_(ext2|deploy)_"
+    DEPENDS os1_image os1_bios_image USES_TERMINAL VERBATIM)
+else()
+  os1_add_unavailable_target(smoke_storage "Storage checks need QEMU, OVMF, and BUILD_TESTING")
+endif()
+os1_register_menu_target(smoke_storage "Persistence and deployment" "Test disk execution, updates, and preserved files across BIOS/UEFI reboots. Requires e2fsprogs.")
+
 if(OS1_QEMU_SMOKE_TESTS)
   set_tests_properties(
     ${OS1_QEMU_SMOKE_TESTS}
@@ -1808,7 +1846,7 @@ endif()
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(
     smoke_all
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke(_observe|_balance|_spawn|_exec|_xhci|_no_uart|_files_bios|_files_uefi)?(_bios)?$"
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke"
     DEPENDS os1_image os1_bios_image "${OS1_VIRTIO_TEST_DISK}"
     USES_TERMINAL
     VERBATIM

@@ -377,7 +377,7 @@ The helper wrapper scripts remain available as thin CMake frontends:
 
 ## Build And Write A USB Stick
 
-Run `./os1.sh` and select **Build and write USB stick**, or run `./os1.sh usb` directly.
+Run `./os1.sh` and select **USB > Build and write USB stick**, or run `./os1.sh usb` directly.
 
 | Step | Action |
 | --- | --- |
@@ -469,9 +469,14 @@ Current guides and contracts are grouped by topic; completed plans and older rev
 
 ### Persistent QEMU disk
 
-Select `storage_create`, `run_persistent`, or `run_persistent_bios` in `./os1.sh`.
+Run `./os1.sh`. The menu groups targets under **Run QEMU**, **Storage**, **USB**, and **Checks**.
+Use **Storage** to create or deploy an image. Use **Run QEMU** to select UEFI or BIOS.
+Up/Down moves the selection. Enter opens a category or runs a target. Back, Left, or Esc returns to the parent.
+At the root, Quit or Esc exits. Direct commands such as `./os1.sh run_persistent` remain available.
 The default data image persists across ordinary builds and launches.
 Use `storage_reset` only to replace its contents explicitly.
+Use `storage_deploy` to update selected programs while preserving files.
+See [program deployment](docs/filesystems/program-deployment.md) for manifests and required host tools.
 
 ```sh
 cmake --build build --target run_persistent

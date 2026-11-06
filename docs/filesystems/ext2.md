@@ -20,6 +20,7 @@ The same targets are available through `cmake --build build --target TARGET`.
 | `storage_create` | Create the data image if absent. Preserve an existing image. |
 | `run_persistent` | Boot UEFI with the persistent image attached. |
 | `run_persistent_bios` | Boot BIOS with the same persistent image. |
+| `storage_deploy` | Install or update manifest programs. Preserve other existing files. |
 | `storage_reset` | Replace the image, erase its files, and reinstall the utility. |
 
 The default image is `build/artifacts/persistent-data.raw`.
@@ -29,8 +30,9 @@ The default partition size is 32 MiB. The image builder accepts sizes from 4 thr
 Host files can be sparse; the logical capacity does not require immediate allocation of every host block.
 
 Ordinary builds do not recreate or update the image.
-A utility rebuild does not replace its installed disk copy.
-Deployment into an existing filesystem remains separate work; use explicit reset only when its data is disposable.
+Use **Storage > Deploy programs** after rebuilding a utility.
+The [deployment guide](program-deployment.md) defines manifests, preservation checks, and offline updates.
+Use explicit reset only when the data is disposable.
 The builder rejects replacement while another process holds a conflicting image lock.
 Do not mount the backing filesystem on the host while QEMU uses it.
 
@@ -125,7 +127,7 @@ The persistence test uses two independent QEMU processes and one backing file.
 It checks disk-only execution, indirect blocks, exact bytes, shell-created files, and immutable executable contents.
 When available, `e2fsck -fn` checks the fresh image and both post-boot states.
 
-USB mass storage, multi-group ext2, multi-block directories, general deployment, journal recovery, and loadable hardware drivers remain deferred.
+USB mass storage, multi-group ext2, multi-block directories, online installation, journal recovery, and loadable hardware drivers remain deferred.
 Physical disks are unchanged by this QEMU milestone.
 
 ## References

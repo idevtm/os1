@@ -231,6 +231,9 @@ Verify bounds, full media, I/O errors, removal during I/O, and clean rollback be
 
 ### Preserve data during image updates
 
+[Offline QEMU deployment](../filesystems/program-deployment.md) updates listed programs while preserving other files.
+It requires a stopped guest and publishes a validated image copy. Physical partition updates remain separate work.
+
 The current USB menu writes a complete boot image, including its partition table.
 Preserving the boot layout does not establish preservation of a future data partition.
 
