@@ -238,9 +238,26 @@ class MenuTests(unittest.TestCase):
         with patch.object(writer, "choose_menu", return_value="boot") as menu:
             self.assertEqual(writer.choose_layout(Path("/missing")), ("boot", None))
             keys = [item[0] for item in menu.call_args.args[1]]
-            self.assertEqual(keys, ["data", "boot", "programs", "all", "legacy"])
+            self.assertEqual(keys, ["data", "boot", "programs", "all", "diagnostic", "legacy"])
         with patch.object(writer, "choose_menu", side_effect=["legacy", "fresh"]):
             self.assertEqual(writer.choose_layout(Path("/missing")), ("fresh", None))
+
+    def test_diagnostic_build_is_isolated_and_normal_build_resets_options(self):
+        for layout in ("diagnostic", "fresh", "data"):
+            with self.subTest(layout=layout), patch.object(writer.subprocess, "run") as command:
+                image = writer.build_image(Path("build/usb-write"), Path("toolchain"), layout, None)
+                configure = command.call_args_list[0].args[0]
+                build = command.call_args_list[1].args[0]
+                mode = "ON" if layout == "diagnostic" else "OFF"
+                self.assertIn("-DOS1_BOOT_DIAGNOSTICS=" + mode, configure)
+                self.assertIn("-DOS1_USB_KEYBOARD_DIAGNOSTICS=" + mode, configure)
+                expected = Path("build/usb-write")
+                if layout == "diagnostic":
+                    expected /= "keyboard-diagnostic"
+                self.assertEqual(configure[configure.index("-B") + 1], str(expected))
+                self.assertEqual(build[build.index("--build") + 1], str(expected))
+                self.assertEqual(image.parent, expected / "artifacts")
+                self.assertNotIn("sudo", str(command.call_args_list))
 
     def test_layout_cancel_never_builds(self):
         with patch.object(writer.os, "geteuid", return_value=501), \

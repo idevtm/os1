@@ -336,3 +336,62 @@ TEST(XhciController, QuiesceMasksControllerAndInterrupterSources)
     EXPECT_EQ(xhci::kUsbcmdRunStop, read32(mmio, 0x40 + xhci::kOperationalUsbcmd));
     EXPECT_EQ(xhci::kImanInterruptPending, read32(mmio, 0x200 + xhci::kRuntimeInterrupter0));
 }
+
+TEST(XhciDiagnostics, LegacySnapshotIsReadOnlyAndFollowsForwardCapabilities)
+{
+    alignas(4) std::array<uint8_t, 256> bytes{};
+    write32(bytes, 0x10, 0x10u << 16);
+    write32(bytes, 0x40, 2u | (4u << 8));
+    write32(bytes, 0x50, 1u | (1u << 16) | (1u << 24));
+    write32(bytes, 0x54, 0x12345678);
+    const auto before = bytes;
+    xhci::ControllerLayout layout{};
+    layout.mmio_base = bytes.data();
+    layout.mmio_size = bytes.size();
+    xhci::LegacySupport snapshot{};
+    ASSERT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Present);
+    EXPECT_EQ(snapshot.offset, 0x50u);
+    EXPECT_EQ(snapshot.support, 0x01010001u);
+    EXPECT_EQ(snapshot.control, 0x12345678u);
+    EXPECT_EQ(bytes, before);
+}
+
+TEST(XhciDiagnostics, MissingAndMalformedLegacyTablesAreDistinct)
+{
+    alignas(4) std::array<uint8_t, 256> bytes{};
+    xhci::ControllerLayout layout{};
+    layout.mmio_base = bytes.data();
+    layout.mmio_size = bytes.size();
+    xhci::LegacySupport snapshot{};
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Absent);
+    for(const uint32_t offset : {0x10u, 0x100u, 0x3fffcu})
+    {
+        write32(bytes, 0x10, (offset / 4u) << 16);
+        EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    }
+    write32(bytes, 0x10, 0x3fu << 16);
+    write32(bytes, 0xfc, 1u);  // Missing legacy control register.
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    write32(bytes, 0xfc, 2u | (1u << 8));  // Next capability outside the BAR.
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    write32(bytes, 0xfc, 2u);  // A terminating unrelated capability is valid.
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Absent);
+    layout.mmio_size = 0x10;
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    layout.mmio_base = nullptr;
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+}
+
+TEST(XhciDiagnostics, LegacyTraversalHasAFixedReadBudget)
+{
+    alignas(4) std::array<uint8_t, 2048> bytes{};
+    write32(bytes, 0x10, 0x10u << 16);
+    for(size_t offset = 0x40; offset < bytes.size(); offset += 4)
+        write32(bytes, offset, 2u | (1u << 8));
+    xhci::ControllerLayout layout{};
+    layout.mmio_base = bytes.data();
+    layout.mmio_size = bytes.size();
+    xhci::LegacySupport snapshot{};
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    EXPECT_EQ(snapshot.offset, 0u);
+}

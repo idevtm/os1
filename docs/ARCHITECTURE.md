@@ -485,6 +485,8 @@ A separate macOS helper provides arrow-key menus for image layout and the extern
 Selecting a write destination starts the writer without a typed confirmation.
 Menus use the alternate terminal screen; the helper restores the normal screen before displaying the sudo password guidance.
 Only raw-device snapshot, write, readback, and eject steps use sudo.
+The [keyboard diagnostic profile](hardware/usb-image-workflow.md#keyboard-independent-diagnostics) uses a separate build and an automatic capture boot.
+It adds bounded xHCI observations and a startup summary without changing ownership or port routing.
 The replacement option retains the base image’s UEFI files and updates the kernel and initrd.
 Its BIOS payload remains historical; the fresh hybrid image supplies both current boot paths.
 

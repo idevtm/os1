@@ -89,6 +89,33 @@ void set_slot_context(uint32_t* words, uint8_t speed, uint8_t port, uint8_t cont
     words[1] = uint32_t(port) << 16;
 }
 
+LegacySupportResult read_legacy_support(const ControllerLayout& layout, LegacySupport& out)
+{
+    out = {};
+    if(!layout.mmio_base || layout.mmio_size < 0x14u)
+        return LegacySupportResult::Invalid;
+    size_t offset = static_cast<size_t>(read32(layout.mmio_base, 0x10u) >> 16) * 4u;
+    // Next pointers are forward DWORD offsets. Limit reads even in hostile tables.
+    for(unsigned visited = 0; offset && visited < 256u; ++visited)
+    {
+        if(offset < 0x20u || offset > layout.mmio_size || layout.mmio_size - offset < 4u)
+            return LegacySupportResult::Invalid;
+        const uint32_t header = read32(layout.mmio_base, offset);
+        if((header & 0xffu) == 1u)
+        {
+            if(layout.mmio_size - offset < 8u)
+                return LegacySupportResult::Invalid;
+            out = {static_cast<uint32_t>(offset), header, read32(layout.mmio_base, offset + 4u)};
+            return LegacySupportResult::Present;
+        }
+        const size_t next = ((header >> 8) & 0xffu) * 4u;
+        if(!next)
+            return LegacySupportResult::Absent;
+        offset += next;
+    }
+    return offset ? LegacySupportResult::Invalid : LegacySupportResult::Absent;
+}
+
 bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayout& out)
 {
     out = {};

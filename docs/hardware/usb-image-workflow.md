@@ -42,6 +42,64 @@ It recreates that output image explicitly; it does not modify the interactive QE
 The host requires e2fsprogs for validation and program deployment.
 On macOS, install it with `brew install e2fsprogs`.
 
+## Keyboard-independent diagnostics
+
+Use this image when USB key presses have no effect after the kernel starts.
+The [diagnostic plan](2026-11-06-keyboard-diagnostic-plan.md) records the hardware evidence and validation.
+
+```text
+USB menu -> diagnostic image -> automatic boot -> try keys
+    -> warm restart -> saved boot log -> collect on development computer
+```
+
+1. Run `./os1.sh usb` without sudo.
+2. Select **Create keyboard diagnostic image (erase USB)**.
+3. Select the target USB disk after the build completes.
+4. Enter your password if the writer requests it.
+5. Wait for verification and ejection.
+6. Boot the target computer from the UEFI USB entry.
+7. Wait for the USB diagnostic summary and shell.
+8. Press a few ordinary keys.
+9. Wait for a warm restart and the **previous boot log saved** message.
+10. Power off after that message.
+11. Connect the stick to the development computer.
+12. Copy the `os1logs` folder from the **OS1 EFI** volume.
+
+The image starts diagnostics without a boot-menu key press or shell command.
+It replaces USB contents and contains no ext2 data partition.
+Its separate build directory is `build/usb-write/keyboard-diagnostic/`.
+Normal USB builds explicitly disable this profile.
+The new records contain counts and transfer results, not key values; ordinary console output can still contain typed text.
+
+The existing Intel watchdog attempts a reset about three minutes after user space starts.
+If automatic reset is unavailable, use the physical reset button without removing power.
+Then boot the same USB image again to save the RAM log.
+A power cycle can discard that log. Photograph the summary if warm restart is unavailable.
+Firmware behavior can prevent RAM-log recovery; QEMU validation does not establish physical recovery.
+After saving a log, the pre-loader waits to prevent a restart loop.
+
+The summary reports controller state, configured keyboards, and armed input transfers.
+Detailed records include pre-reset port state, firmware ownership, enumeration, and completion codes.
+Intel routing-register reads apply only to controller `8086:8c31`.
+Legacy result values are `0` absent, `1` present, and `2` invalid.
+The legacy support register uses bit 16 for BIOS ownership and bit 24 for OS ownership.
+No diagnostic code changes these registers or corrects the keyboard failure.
+
+BIOS diagnostic boot also starts automatically and captures logs in reserved image sectors.
+The EFI volume does not contain BIOS logs; use [BIOS log extraction](boot-log.md#operator-procedure) after a warm restart.
+UEFI is the recommended collection path for this desktop test.
+
+Build without writing a device:
+
+```sh
+cmake --preset default -B build/usb-write/keyboard-diagnostic \
+  -DOS1_USB_KEYBOARD_DIAGNOSTICS=ON -DOS1_BOOT_DIAGNOSTICS=ON -DOS1_QEMU_DEBUGCON=OFF
+cmake --build build/usb-write/keyboard-diagnostic --target os1_usb_image user_programs
+ctest --test-dir build/usb-write/keyboard-diagnostic --output-on-failure -R '^os1_smoke_usb_keyboard_'
+```
+
+The image is `build/usb-write/keyboard-diagnostic/artifacts/os1-usb.img`.
+
 ## Boot and use storage
 
 Boot the USB disk through the computer's BIOS or UEFI menu.

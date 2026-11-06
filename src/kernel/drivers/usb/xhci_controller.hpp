@@ -102,6 +102,21 @@ struct ControllerLayout
     volatile uint8_t* doorbells = nullptr;
 };
 
+// Read-only firmware ownership snapshot. No handoff or SMI writes.
+enum class LegacySupportResult : uint8_t
+{
+    Absent,
+    Present,
+    Invalid
+};
+struct LegacySupport
+{
+    uint32_t offset = 0;
+    uint32_t support = 0;
+    uint32_t control = 0;
+};
+LegacySupportResult read_legacy_support(const ControllerLayout&, LegacySupport&);
+
 struct CommandRingInfo
 {
     uint32_t trb_count = 0;

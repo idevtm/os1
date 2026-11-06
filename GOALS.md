@@ -192,7 +192,9 @@ These observations do not establish complete hardware qualification or explain t
 Physical boot/program update preservation and retesting of the scheduler correction remain pending.
 Record image identity, controller/input behavior, and sustained-runtime results for each tested machine.
 [Issue #27](https://github.com/idevtm/os1/issues/27) tracks a separate physical USB keyboard failure.
-The user reconfirms it on a desktop with a USB keyboard in a USB 2.0 port; controller identity remains unknown.
+The affected desktop uses a Gigabyte H81M-S1 and Lenovo keyboard `17ef:6190` in a rear port.
+Linux routes it directly through Intel xHCI `8086:8c31`; the failing os1 path remains unconfirmed.
+The [diagnostic plan](docs/hardware/2026-11-06-keyboard-diagnostic-plan.md) records the next evidence collection.
 
 Broader real-hardware goals remain:
 

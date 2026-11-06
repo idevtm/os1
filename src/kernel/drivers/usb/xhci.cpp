@@ -3,6 +3,7 @@
 #include "drivers/usb/xhci.hpp"
 
 #include "console/console_input.hpp"
+#include "debug/bootlog.hpp"
 #include "debug/debug.hpp"
 #include "debug/event_ring.hpp"
 #include "drivers/bus/device.hpp"
@@ -214,6 +215,8 @@ struct XhciDeviceState
     bool interrupt_transfer_armed = false;
     uint64_t interrupt_transfer_trb = 0;
     uint32_t report_count = 0;
+    uint8_t diagnostic_reports = 0;
+    uint8_t diagnostic_controls = 0;
 };
 
 struct XhciControllerState
@@ -227,6 +230,7 @@ struct XhciControllerState
     uint16_t configured_slots = 0;
     uint16_t scratchpad_count = 0;
     uint32_t interrupt_count = 0;
+    uint8_t diagnostic_commands = 0;
     PciBarResource controller_bar{};
     PciInterruptHandle interrupt{};
     xhci::ControllerLayout controller{};
@@ -677,6 +681,9 @@ void handle_keyboard_report(XhciDeviceState& device)
         return;
     }
 
+    if(bootlog_diagnostics_enabled() && device.diagnostic_reports <= 8u)
+        debug("usbdiag: decoded port=")(device.port_id)(" chars=")(output_count)(" queued=")(
+            g_input_count)();
     for(size_t index = 0; index < output_count; ++index)
     {
         if(g_input_count < sizeof(g_input_chars))
@@ -748,6 +755,14 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
         if(event.endpoint_id == device.endpoint_dci && device.interrupt_transfer_armed &&
            (device.interrupt_transfer_trb == event.parameter))
         {
+            if(bootlog_diagnostics_enabled() && device.diagnostic_reports < 8u)
+            {
+                ++device.diagnostic_reports;
+                debug("usbdiag: input pci=")(controller.pci_index)(" port=")(device.port_id)(
+                    " cc=")(event.completion_code)(" residual=")(event.transfer_length)();
+            }
+            else if(bootlog_diagnostics_enabled() && device.diagnostic_reports == 8u)
+                ++device.diagnostic_reports;
             device.interrupt_transfer_armed = false;
             dma_sync_for_cpu(device.report_buffer_dma);
             if(transfer_completion_ok(event.completion_code))
@@ -880,7 +895,14 @@ bool submit_command(XhciControllerState& controller,
         dma_sync_for_device(controller.command_ring_dma);
         xhci::ring_doorbell(controller.controller, 0u, 0u);
     }
-    if(!wait_for_command_completion(controller, timeout_spins))
+    const bool completed = wait_for_command_completion(controller, timeout_spins);
+    if(bootlog_diagnostics_enabled() && controller.diagnostic_commands < 32u)
+    {
+        ++controller.diagnostic_commands;
+        debug("usbdiag: command pci=")(controller.pci_index)(" type=")((trb.control >> 10) & 63u)(
+            " completed=")(completed)(" cc=")(controller.pending_command_completion_code)();
+    }
+    if(!completed)
     {
         IrqSpinGuard guard(g_event_lock);
         xhci::disable_interrupts(controller.controller);
@@ -1037,9 +1059,16 @@ bool submit_control_transfer(XhciControllerState& controller,
     }
     uint8_t completion_code = 0u;
     uint32_t residual_length = 0u;
-    if(!wait_for_transfer_completion(
-           controller, device, kXhciTransferTimeoutSpins, completion_code, residual_length) ||
-       !transfer_completion_ok(completion_code))
+    const bool completed = wait_for_transfer_completion(
+        controller, device, kXhciTransferTimeoutSpins, completion_code, residual_length);
+    if(bootlog_diagnostics_enabled() && device.diagnostic_controls < 32u)
+    {
+        ++device.diagnostic_controls;
+        debug("usbdiag: control pci=")(controller.pci_index)(" port=")(device.port_id)(" request=")(
+            setup.request)(" value=0x")(setup.value, 16)(" index=")(setup.index)(" completed=")(
+            completed)(" cc=")(completion_code)(" residual=")(residual_length)();
+    }
+    if(!completed || !transfer_completion_ok(completion_code))
     {
         return false;
     }
@@ -1561,6 +1590,10 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
         return false;
     }
 
+    if(bootlog_diagnostics_enabled())
+        debug("usbdiag: device pci=")(controller.pci_index)(" port=")(port_id)(" id=")(
+            descriptor.vendor_id, 16, 4)(":")(
+            descriptor.product_id, 16, 4)(" speed=")(device->speed)();
     uint8_t config_header[sizeof(UsbConfigurationDescriptor)]{};
     if(!usb_get_descriptor(controller,
                            *device,
@@ -1616,6 +1649,10 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
         return false;
     }
 
+    if(bootlog_diagnostics_enabled())
+        debug("usbdiag: HID port=")(port_id)(" interface=")(hid.interface_number)(" protocol=")(
+            static_cast<uint8_t>(hid.protocol))(" ep=0x")(
+            hid.endpoint_address, 16)(" mps=")(hid.max_packet_size)(" interval=")(hid.interval)();
     device->protocol = hid.protocol;
     device->configuration_value = hid.configuration_value;
     device->interface_number = hid.interface_number;
@@ -1661,7 +1698,13 @@ void enumerate_ports(PageFrameContainer& frames, XhciControllerState& controller
         xhci::PortStatus status{};
         if(xhci::read_port_status(controller.controller, port_id, status) && status.connected)
         {
-            (void)initialize_port(frames, controller, port_id);
+            if(bootlog_diagnostics_enabled())
+                debug("usbdiag: enumerate pci=")(controller.pci_index)(" port=")(
+                    port_id)(" raw=0x")(status.raw, 16)(" speed=")(status.speed)();
+            const bool initialized = initialize_port(frames, controller, port_id);
+            if(bootlog_diagnostics_enabled())
+                debug("usbdiag: enumeration pci=")(controller.pci_index)(" port=")(port_id)(" ok=")(
+                    initialized)();
         }
     }
 }
@@ -1752,6 +1795,29 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         debug("xhci: controller capability unsupported")();
         release_controller(frames, *controller);
         return false;
+    }
+
+    if(bootlog_diagnostics_enabled())
+    {
+        // Observe firmware state before reset; never change ownership or routing here.
+        xhci::LegacySupport legacy{};
+        const auto result = xhci::read_legacy_support(controller->controller, legacy);
+        debug("usbdiag: legacy pci=")(device_index)(" result=")(static_cast<uint8_t>(result))(
+            " offset=0x")(legacy.offset, 16)(" support=0x")(legacy.support, 16)(" control=0x")(
+            legacy.control, 16)();
+        // These chipset-specific offsets are qualified only for the issue #27 controller.
+        if(device.vendor_id == 0x8086u && device.device_id == 0x8c31u)
+            debug("usbdiag: Intel 8c31 USB2 route=0x")(pci_config_read32(device, 0xd0), 16)(
+                " mask=0x")(pci_config_read32(device, 0xd4), 16)(" USB3 enable=0x")(
+                pci_config_read32(device, 0xd8), 16)(" mask=0x")(pci_config_read32(device, 0xdc),
+                                                                 16)();
+        for(unsigned port = 1; port <= controller->controller.capability.max_ports; ++port)
+        {
+            xhci::PortStatus status{};
+            if(xhci::read_port_status(controller->controller, port, status))
+                debug("usbdiag: before-reset pci=")(device_index)(" port=")(port)(" raw=0x")(
+                    status.raw, 16)(" speed=")(status.speed)();
+        }
     }
 
     debug("xhci: capability ok ports=")(controller->controller.capability.max_ports)(" slots=")(
@@ -1870,7 +1936,41 @@ void xhci_poll_input()
             --g_input_count;
         }
     }
+    static unsigned diagnostic_batches = 0;
+    if(bootlog_diagnostics_enabled() && count && diagnostic_batches < 8u)
+    {
+        ++diagnostic_batches;
+        debug("usbdiag: console dispatch chars=")(count)();
+    }
     // No controller lock may be held across console callbacks.
     for(size_t index = 0; index < count; ++index)
         console_input_on_keyboard_char(pending[index]);
+}
+
+void xhci_diagnostic_summary()
+{
+    if(!bootlog_diagnostics_enabled())
+        return;
+    IrqSpinGuard guard(g_event_lock);
+    debug("USB diagnostic summary (details retained in boot log)")();
+    unsigned ready = 0;
+    for(const auto* controller : g_xhci_controllers)
+    {
+        if(!controller || !controller->present)
+            continue;
+        debug("usbdiag: controller pci=")(controller->pci_index)(" failed=")(controller->failed)(
+            " irq=")(controller->interrupt_count)();
+        for(const auto& device : controller->devices)
+        {
+            if(!device.present)
+                continue;
+            const bool keyboard = device.protocol == HidBootProtocol::Keyboard;
+            debug("usbdiag: port=")(device.port_id)(" speed=")(device.speed)(" keyboard=")(
+                keyboard)(" configured=")(device.configured)(" failed=")(device.failed)(" armed=")(
+                device.interrupt_transfer_armed)();
+            if(keyboard && device.configured && !device.failed)
+                ++ready;
+        }
+    }
+    debug("usbdiag: configured keyboards=")(ready)();
 }
