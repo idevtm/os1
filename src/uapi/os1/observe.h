@@ -16,6 +16,11 @@ enum
     OS1_OBSERVE_IRQS = 9,
     OS1_OBSERVE_KMEM = 10,
     OS1_OBSERVE_ACPI = 11,
+    OS1_OBSERVE_USB = 12,
+    OS1_OBSERVE_USB_CONTROLLER = 1,
+    OS1_OBSERVE_USB_ROOT_PORT = 2,
+    OS1_OBSERVE_USB_DEVICE = 3,
+    OS1_OBSERVE_USB_MOUNT = 4,
     OS1_OBSERVE_CONSOLE_NONE = 0,
     OS1_OBSERVE_CONSOLE_VGA = 1,
     OS1_OBSERVE_CONSOLE_FRAMEBUFFER = 2,
@@ -69,6 +74,13 @@ enum
 #define OS1_KERNEL_EVENT_SMOKE_MAGIC UINT64_C(0x4F53314556454E54)
 
 #pragma pack(push, 1)
+
+struct Os1ObserveUsbRecord
+{
+    uint32_t kind, pci_index, root_port, port, address, parent_address, status, detail;
+    uint64_t sectors;
+    char stage[24];
+};
 
 struct Os1ObserveHeader
 {

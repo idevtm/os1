@@ -47,6 +47,12 @@ set(KERNEL_DRIVER_SOURCES
   drivers/timer/pit.cpp
   drivers/timer/tsc_clock.cpp
   drivers/watchdog/intel_tco.cpp
+  drivers/usb/diagnostics.cpp
+  drivers/usb/ehci.cpp
+  drivers/usb/ehci_controller.cpp
+  drivers/usb/hub.cpp
+  drivers/usb/storage_devices.cpp
+  drivers/usb/mass_storage.cpp
   drivers/usb/hid_keyboard.cpp
   drivers/usb/xhci.cpp
   drivers/usb/xhci_controller.cpp
@@ -331,6 +337,26 @@ set(KERNEL_ASM_OBJECTS
   "${KERNEL_CPU_START_OBJECT}"
 )
 
+if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
+  set(OS1_HANDOFF_LINK_OBJECTS ${KERNEL_ASM_OBJECTS})
+  list(REMOVE_ITEM OS1_HANDOFF_LINK_OBJECTS "${KERNEL_MULTITASK_OBJECT}")
+  file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/handoff-test-objects.txt"
+    CONTENT "$<JOIN:$<TARGET_OBJECTS:kernel_core_objects>,\n>\n$<JOIN:${OS1_HANDOFF_LINK_OBJECTS},\n>\n$<TARGET_FILE:os1_acpica>\n")
+  add_test(NAME os1_interrupt_handoff_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_interrupt_handoff.py"
+      --root "${PROJECT_SOURCE_DIR}"
+      --objects "${OS1_GENERATED_DIR}/handoff-test-objects.txt"
+      --linker "${CMAKE_LINKER}" --link-script "${KERNEL_CORE_LINKER_SCRIPT}"
+      --nasm "${OS1_NASM_EXECUTABLE}" --strip "${OS1_STRIP_EXECUTABLE}"
+      --physical-base "${OS1_KERNEL_RESERVED_PHYSICAL_START}"
+      --virtual-offset "${OS1_KERNEL_VIRTUAL_OFFSET}"
+      --image "${OS1_RAW_IMAGE}" --qemu "${OS1_QEMU_EXECUTABLE}"
+      --kernel-lba "${OS1_KERNEL_IMAGE_START_LBA}" --kernel-sectors "${OS1_KERNEL_IMAGE_SECTOR_COUNT}"
+      --log "${OS1_ARTIFACT_DIR}/interrupt-handoff.log")
+  set_tests_properties(os1_interrupt_handoff_contract PROPERTIES TIMEOUT 90)
+endif()
+
+# Pack file offsets tightly; kernel_core.ld still page-aligns memory boundaries.
 add_custom_command(
   OUTPUT "${OS1_KERNEL_ELF}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}"
@@ -339,7 +365,7 @@ add_custom_command(
     -T "${KERNEL_CORE_LINKER_SCRIPT}"
     "--defsym=OS1_KERNEL_PHYSICAL_BASE=${OS1_KERNEL_RESERVED_PHYSICAL_START}"
     "--defsym=OS1_KERNEL_VIRTUAL_OFFSET=${OS1_KERNEL_VIRTUAL_OFFSET}"
-    -z max-page-size=0x1000
+    -z max-page-size=0x100 -z common-page-size=0x100
     $<TARGET_OBJECTS:kernel_core_objects>
     ${KERNEL_ASM_OBJECTS}
     "$<TARGET_FILE:os1_acpica>"

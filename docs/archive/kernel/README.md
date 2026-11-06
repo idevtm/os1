@@ -5,6 +5,7 @@ Use the [documentation index](../../README.md) for current guidance.
 
 | Record | Document |
 | --- | --- |
+| 2026-11-06 | [Interrupt-return fault investigation](2026-11-06-interrupt-return.md) |
 | 2026-11-05 | [Exception stacks, smoke settling, and measurement clock](2026-11-05-reliability-and-clock-plan.md) |
 | 2026-11-05 | [Passive ACPI observation](2026-11-05-passive-acpi-observation.md) |
 | 2026-05-05 | [Phased SMP Enablement for `os1` - 2026-05-05](2026-05-05-phased-smp-enablement.md) |

@@ -173,9 +173,9 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-# Share the existing low-memory staging span: 364 KiB kernel, 188 KiB initrd.
+# Share the existing low-memory staging span: 364.5 KiB kernel, 187.5 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x6b000)
+set(OS1_INITRD_LOAD_ADDRESS 0x6b200)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -198,7 +198,7 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 376)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 375)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
 set(OS1_INITRD_LOAD_LIMIT 0x9A000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
@@ -465,8 +465,10 @@ add_custom_command(
   OUTPUT "${OS1_KERNEL_BIOS_ELF}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}"
   COMMAND "${OS1_STRIP_EXECUTABLE}" -o "${OS1_KERNEL_BIOS_ELF}" --strip-unneeded "${OS1_KERNEL_ELF}"
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/compact_user_elf.py" "${OS1_KERNEL_BIOS_ELF}"
   DEPENDS
     "${OS1_KERNEL_ELF}"
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/compact_user_elf.py"
   VERBATIM
 )
 
@@ -612,6 +614,15 @@ add_custom_command(
   VERBATIM
 )
 add_custom_target(os1_usb_image ALL DEPENDS "${OS1_USB_IMAGE}")
+
+set(OS1_USB_DATA_MIB 128 CACHE STRING "USB ext2 partition capacity in MiB (4..128)")
+add_custom_target(os1_usb_data_image
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" -I "${PROJECT_SOURCE_DIR}/cmake/scripts/usb_data_image.py" create
+    --boot "${OS1_USB_IMAGE}" --utility "${OS1_USER_DISKUTIL_ELF}"
+    --manifest "${OS1_STORAGE_MANIFEST}" --size-mib "${OS1_USB_DATA_MIB}"
+    --output "${OS1_ARTIFACT_DIR}/os1-usb-data.img"
+  DEPENDS os1_usb_image os1_diskutil user_programs USES_TERMINAL VERBATIM)
+
 
 # os1.sh handles this menu action so CMake never launches an elevated build.
 add_custom_target(usb
@@ -894,7 +905,7 @@ set(OS1_SMOKE_REJECT_MARKERS
 # Split quoted echo arguments distinguish output markers from echoed input.
 set(OS1_SHELL_INPUT_EVENTS
   "shell prompt ready::help\\n"
-  "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit::echo shell-echo-'ok'\\n"
+  "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit::echo shell-echo-'ok'\\n"
   "shell-echo-ok::pid\\n"
 )
 
@@ -1055,7 +1066,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "initrd module discovered"
     "starting first user process"
     "shell prompt ready"
-    "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit"
+    "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit"
     "shell-echo-ok"
     "pid: "
     "idle thread online"
@@ -1397,7 +1408,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "initrd module discovered"
     "starting first user process"
     "shell prompt ready"
-    "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit"
+    "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit"
     "shell-echo-ok"
     "pid: "
     "idle thread online"
@@ -1754,6 +1765,10 @@ if(OS1_E2FSCK_EXECUTABLE)
   set(OS1_EXT2_CHECK_ARGS --e2fsck "${OS1_E2FSCK_EXECUTABLE}")
 endif()
 if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
+  add_test(NAME os1_usb_progress_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_progress.py")
+  add_test(NAME os1_usb_data_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_data_image.py")
   add_test(NAME os1_storage_deploy_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_storage_deploy.py")
   add_test(NAME os1_build_configuration_contract
@@ -1790,6 +1805,46 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --version1 "${OS1_DEPLOY_PROBE_1}" --version2 "${OS1_DEPLOY_PROBE_2}"
         --log "${OS1_ARTIFACT_DIR}/smoke-deploy-${boot}.log" ${file_test_firmware})
+    add_test(NAME os1_smoke_usb_data_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_data_boot.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_USB_IMAGE}" --utility "${OS1_USER_DISKUTIL_ELF}"
+        --version1 "${OS1_DEPLOY_PROBE_1}" --version2 "${OS1_DEPLOY_PROBE_2}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-usb-data-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_usb_data_${boot} PROPERTIES TIMEOUT 300)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_usb_data_${boot})
+    add_test(NAME os1_smoke_usb_storage_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-usb-storage-${boot}.log" --transport usb ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
+    add_test(NAME os1_smoke_ehci_storage_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-ehci-storage-${boot}.log" --transport ehci ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
+    add_test(NAME os1_smoke_ehci_data_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_data_boot.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_USB_IMAGE}" --utility "${OS1_USER_DISKUTIL_ELF}"
+        --version1 "${OS1_DEPLOY_PROBE_1}" --version2 "${OS1_DEPLOY_PROBE_2}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-ehci-data-${boot}.log" --transport ehci ${file_test_firmware})
+    set_tests_properties(os1_smoke_ehci_data_${boot} PROPERTIES TIMEOUT 300)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_ehci_data_${boot})
+    add_test(NAME os1_smoke_ehci_failure_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_storage_failures.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-ehci-failure-${boot}.log" --transport ehci ${file_test_firmware})
+    set_tests_properties(os1_smoke_ehci_storage_${boot} os1_smoke_ehci_failure_${boot} PROPERTIES TIMEOUT 240)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_ehci_storage_${boot} os1_smoke_ehci_failure_${boot})
+    add_test(NAME os1_smoke_usb_deploy_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_deployment_boot.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
+        --version1 "${OS1_DEPLOY_PROBE_1}" --version2 "${OS1_DEPLOY_PROBE_2}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-usb-deploy-${boot}.log" --transport usb ${file_test_firmware})
+    add_test(NAME os1_smoke_usb_failure_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_storage_failures.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-usb-failure-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_usb_storage_${boot} os1_smoke_usb_deploy_${boot} os1_smoke_usb_failure_${boot}
+      PROPERTIES TIMEOUT 240)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_usb_storage_${boot} os1_smoke_usb_deploy_${boot} os1_smoke_usb_failure_${boot})
     set_tests_properties(os1_smoke_deploy_${boot} PROPERTIES TIMEOUT 240)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_deploy_${boot})
     set_tests_properties(os1_smoke_ext2_${boot} PROPERTIES TIMEOUT 180)
@@ -1834,6 +1889,44 @@ else()
 endif()
 os1_register_menu_target(smoke_storage "Persistence and deployment" "Test disk execution, updates, and preserved files across BIOS/UEFI reboots. Requires e2fsprogs.")
 
+if(OS1_QEMU_EXECUTABLE)
+  foreach(boot IN ITEMS bios uefi)
+    if(boot STREQUAL "uefi")
+      if(NOT OS1_OVMF_CODE OR NOT OS1_OVMF_VARS_TEMPLATE)
+        continue()
+      endif()
+      set(usb_run_target run_usb_storage)
+      set(usb_run_image "${OS1_ISO_IMAGE}")
+      set(usb_run_dependency os1_image)
+      set(usb_run_firmware --code "${OS1_OVMF_CODE}" --vars "${OS1_OVMF_VARS_TEMPLATE}")
+    else()
+      set(usb_run_target run_usb_storage_bios)
+      set(usb_run_image "${OS1_RAW_IMAGE}")
+      set(usb_run_dependency os1_bios_image)
+      set(usb_run_firmware)
+    endif()
+    add_custom_target(${usb_run_target}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/run_usb_storage.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${usb_run_image}" --disk "${OS1_PERSISTENT_DISK}" ${usb_run_firmware}
+      DEPENDS ${usb_run_dependency} storage_create USES_TERMINAL VERBATIM)
+    add_custom_target(run_ehci_storage_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/run_usb_storage.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${usb_run_image}" --disk "${OS1_PERSISTENT_DISK}"
+        --controller ehci ${usb_run_firmware}
+      DEPENDS ${usb_run_dependency} storage_create USES_TERMINAL VERBATIM)
+    os1_register_menu_target(run_ehci_storage_${boot} "EHCI USB 2 storage (${boot})" "Boot with /disk over EHCI; console input uses PS/2 or serial.")
+    os1_register_menu_target(${usb_run_target} "USB storage (${boot})" "Boot with /disk over xHCI USB mass storage and a USB keyboard.")
+  endforeach()
+endif()
+if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
+  add_custom_target(smoke_usb_storage
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke_(usb|ehci)_"
+    DEPENDS os1_image os1_bios_image os1_usb_image USES_TERMINAL VERBATIM)
+else()
+  os1_add_unavailable_target(smoke_usb_storage "USB storage checks need QEMU, OVMF and BUILD_TESTING")
+endif()
+os1_register_menu_target(smoke_usb_storage "USB persistence and removal" "Test USB storage, deployment, readonly rejection, removal and keyboard coexistence.")
+
 if(OS1_QEMU_SMOKE_TESTS)
   set_tests_properties(
     ${OS1_QEMU_SMOKE_TESTS}
@@ -1847,7 +1940,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
   add_custom_target(
     smoke_all
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke"
-    DEPENDS os1_image os1_bios_image "${OS1_VIRTIO_TEST_DISK}"
+    DEPENDS os1_image os1_bios_image os1_usb_image "${OS1_VIRTIO_TEST_DISK}"
     USES_TERMINAL
     VERBATIM
   )

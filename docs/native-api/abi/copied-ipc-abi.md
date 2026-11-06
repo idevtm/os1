@@ -172,7 +172,7 @@ rejects duplicate member IDs, unknown formats, malformed names/types, missing
 metadata, duplicate metadata sections, truncation, and arithmetic-overflow ranges.
 
 The initrd packager strips symbol tables from staged executables to keep both
-boot paths within the current 188 KiB BIOS initrd slot.
+boot paths within the current 187.5 KiB BIOS initrd slot.
 The [ext2 implementation record](../../archive/filesystems/2026-11-06-ext2-implementation.md) records the latest layout change.
 The [sessions/parameters phase](../../archive/native-api/2026-11-05-client-sessions-and-parameters.md) used an earlier 192 KiB slot.
 Full ELF build artifacts are retained. Reflective binaries retain their allocated metadata and section headers.

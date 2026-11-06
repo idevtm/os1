@@ -13,18 +13,40 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 
-def boot(args, disk, phase, commands=None, on_boot=None):
+def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_boot=None):
     log = Path(args.log).with_suffix(f'.{phase}.log')
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
-               '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback',
-               '-device', 'virtio-blk-pci,drive=data,disable-legacy=on']
+               '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
+    if getattr(args, 'stall_init', False):
+        command[-1] = command[-1].replace(f'file={disk}', f'file=blkdebug::{disk}')
+        command += ['-S']
+    if getattr(args, 'readonly', False):
+        command[-1] += ',readonly=on'
+    if getattr(args, 'qtest', None):
+        command += ['-qtest', f'unix:{args.qtest},server=on,wait=off']
+    if getattr(args, 'qmp', None):
+        command += ['-qmp', f'unix:{args.qmp},server=on,wait=off']
+    if getattr(args, 'transport', 'virtio') == 'usb':
+        controller = 'qemu-xhci,id=xhci' + (',p3=0' if getattr(args, 'high_speed', False) else '')
+        command += ['-device', controller,
+                    '-device', 'usb-storage,id=usbdata,bus=xhci.0,drive=data' + (',bootindex=1' if getattr(args, 'combined', False) else ''),
+                    '-device', 'usb-kbd,bus=xhci.0']
+    elif getattr(args, 'transport', '') == 'ehci':
+        command += ['-device', 'usb-ehci,id=ehci',
+                    '-device', 'usb-storage,id=usbdata,bus=ehci.0,drive=data' + (',bootindex=1' if getattr(args, 'combined', False) else '')]
+        if getattr(args, 'coexist', False):
+            command += ['-device', 'qemu-xhci,id=xhci', '-device', 'usb-kbd,bus=xhci.0']
+    else:
+        command += ['-device', 'virtio-blk-pci,drive=data,disable-legacy=on']
     if args.code:
         variables = log.with_suffix('.vars.fd')
         shutil.copyfile(args.vars, variables)
         command += ['-drive', f'if=pflash,format=raw,readonly=on,file={args.code}',
-                    '-drive', f'if=pflash,format=raw,file={variables}', '-cdrom', args.image]
-    else:
+                    '-drive', f'if=pflash,format=raw,file={variables}']
+        if not getattr(args, 'combined', False):
+            command += ['-cdrom', args.image]
+    elif not getattr(args, 'combined', False):
         command += ['-drive', f'format=raw,file={args.image}']
     child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     selector = selectors.DefaultSelector()
@@ -33,7 +55,7 @@ def boot(args, disk, phase, commands=None, on_boot=None):
     transcript = bytearray()
     started = time.monotonic()
 
-    def expect(marker=b'os1> ', timeout=60):
+    def expect(marker=b'os1> ', timeout=60, allow_errors=False):
         end = time.monotonic() + timeout
         while marker not in pending:
             if time.monotonic() > end:
@@ -48,28 +70,68 @@ def boot(args, disk, phase, commands=None, on_boot=None):
         at = pending.index(marker) + len(marker)
         result = bytes(pending[:at])
         del pending[:at]
-        for forbidden in [b'PANIC', b'#GP general protection', b'command failed:', b'ext2 mount rejected']:
+        forbidden_messages = [b'PANIC', b'#GP general protection', b'ext2 mount rejected']
+        if not allow_errors:
+            forbidden_messages.append(b'command failed:')
+        for forbidden in forbidden_messages:
             assert forbidden not in result, result[-2000:]
         return result
 
-    def run(text, marker=None):
+    def run(text, marker=None, allow_errors=False):
         child.stdin.write((text + '\n').encode())
         child.stdin.flush()
-        out = expect()
+        out = expect(allow_errors=allow_errors)
         if marker:
             assert marker in out, out
         return out
 
     try:
+        if before_boot is not None:
+            before_boot()
         startup = expect()
-        assert b'ext2 mounted /disk' in startup, startup[-2000:]
+        if getattr(args, 'readonly', False) or getattr(args, 'stall_init', False):
+            rejected = b'ehci: storage rejected' if args.transport == 'ehci' else b'usb-storage: unsupported or failed device'
+            if getattr(args, 'stall_init', False) and args.transport == 'ehci':
+                rejected = b'ehci: controller retired'
+            assert rejected in startup, startup[-4000:]
+            assert b'ext2 mounted /disk' not in startup
+        else:
+            assert b'ext2 mounted /disk' in startup, startup[-2000:]
+        if getattr(args, 'transport', 'virtio') == 'usb':
+            assert b'xhci: HID keyboard ready' in startup, startup[-4000:]
+            if not (getattr(args, 'readonly', False) or getattr(args, 'stall_init', False)):
+                assert b'usb-storage: ready' in startup, startup[-4000:]
+        if getattr(args, 'transport', '') == 'ehci' and not (getattr(args, 'readonly', False) or getattr(args, 'stall_init', False)):
+            assert b'ehci: storage ready' in startup, startup[-4000:]
+        if getattr(args, 'coexist', False):
+            assert b'xhci: HID keyboard ready' in startup, startup[-4000:]
         boot_seconds = time.monotonic() - started
+        if getattr(args, 'transport', '') == 'ehci':
+            snapshot = run('usb', b'USB boot snapshot: EHCI topology and USB mounts')
+            assert b'controller pci=' in snapshot and b'root pci=' in snapshot, snapshot
+            if not (getattr(args, 'readonly', False) or getattr(args, 'stall_init', False)):
+                assert b'storage-ready' in snapshot and b'mount mounted status=0x0' in snapshot, snapshot
+                ready = next(line for line in snapshot.splitlines() if b' storage-ready ' in line)
+                detail = int(ready.split(b'detail=')[1].split()[0], 16)
+                assert detail & 0xffffff80 == 0x35000000, snapshot
+            elif getattr(args, 'readonly', False):
+                protected = next(line for line in snapshot.splitlines() if b' storage-write-protect ' in line)
+                detail = int(protected.split(b'detail=')[1].split()[0], 16)
+                assert detail & 0xffffff80 == 0x1a000080, snapshot
+            run('usb > /tmp/usb')
+            captured = run('cat /tmp/usb')
+            assert b'USB boot snapshot:' in captured and b'controller pci=' in captured, captured
+            repeated = run('usb')
+            assert snapshot == repeated, 'USB boot diagnostics must be immutable'
+
         listed = run('ls /bin')
         assert b'diskutil' not in listed, 'utility must not be installed in initrd'
         if on_boot is not None:
             on_boot()
         operation = time.monotonic()
-        if commands is not None:
+        if exercise is not None:
+            exercise(run, expect)
+        elif commands is not None:
             for command, marker in commands:
                 out = run(command, marker)
                 assert b'unknown command:' not in out and b'redirection failed' not in out, out
@@ -102,6 +164,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ['qemu', 'image', 'utility', 'log']:
         p.add_argument('--' + name, required=True)
+    p.add_argument('--transport', choices=['virtio', 'usb', 'ehci'], default='virtio')
     p.add_argument('--e2fsck')
     p.add_argument('--code')
     p.add_argument('--vars')

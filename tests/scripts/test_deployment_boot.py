@@ -19,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('qemu', 'image', 'utility', 'version1', 'version2', 'log'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--transport', choices=['virtio', 'usb'], default='virtio')
     parser.add_argument('--code')
     parser.add_argument('--vars')
     args = parser.parse_args()

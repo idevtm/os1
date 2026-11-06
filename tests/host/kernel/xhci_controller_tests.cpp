@@ -1,9 +1,9 @@
-#include "drivers/usb/xhci_controller.hpp"
-
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstring>
+
+#include "drivers/usb/xhci_controller.hpp"
 
 namespace
 {
@@ -144,7 +144,8 @@ TEST(XhciController, EnqueuesCommandTrbsAndWrapsProducerCycle)
         .status = 0x55aa00u,
         .control = xhci::kTrbTypeNoOpCommand << 10,
     };
-    ASSERT_TRUE(xhci::enqueue_command_trb(ring.data(), ring.size(), 0x200000u, info, no_op, &trb_physical));
+    ASSERT_TRUE(
+        xhci::enqueue_command_trb(ring.data(), ring.size(), 0x200000u, info, no_op, &trb_physical));
     EXPECT_EQ(0x200000u, trb_physical);
     EXPECT_EQ(1u, info.enqueue_index);
     EXPECT_TRUE(info.cycle_state);
@@ -168,7 +169,8 @@ TEST(XhciController, EnqueuesCommandTrbsAndWrapsProducerCycle)
 TEST(XhciController, InitializesEventRingSegmentTable)
 {
     std::array<uint8_t, 64> erst{};
-    ASSERT_TRUE(xhci::initialize_event_ring_segment_table(erst.data(), erst.size(), 0x345000u, 128u));
+    ASSERT_TRUE(
+        xhci::initialize_event_ring_segment_table(erst.data(), erst.size(), 0x345000u, 128u));
     EXPECT_EQ(0x345000u, read64(erst, 0u));
     EXPECT_EQ(128u, read32(erst, 8u));
     EXPECT_EQ(0u, read32(erst, 12u));
@@ -184,8 +186,7 @@ TEST(XhciController, DequeuesEventsAndTracksCycleWrap)
                     0u,
                     0x200040u,
                     1u << 24,
-                    (xhci::kTrbTypeCommandCompletionEvent << 10) | xhci::kTrbCycleBit |
-                        (5u << 24));
+                    (xhci::kTrbTypeCommandCompletionEvent << 10) | xhci::kTrbCycleBit | (5u << 24));
     write_event_trb(ring,
                     16u,
                     static_cast<uint64_t>(3u) << 24,
@@ -225,9 +226,7 @@ TEST(XhciController, ControllerResetStopsAndClearsReset)
 
     xhci::ControllerLayout layout{};
     ASSERT_TRUE(xhci::parse_capability(mmio.data(), mmio.size(), layout));
-    write32(mmio,
-            layout.capability.cap_length + xhci::kOperationalUsbcmd,
-            xhci::kUsbcmdRunStop);
+    write32(mmio, layout.capability.cap_length + xhci::kOperationalUsbcmd, xhci::kUsbcmdRunStop);
     write32(mmio,
             layout.capability.cap_length + xhci::kOperationalUsbsts,
             xhci::kUsbstsControllerNotReady);
@@ -258,10 +257,8 @@ TEST(XhciController, ProgramsOperationalAndInterrupterRegisters)
     };
     ASSERT_TRUE(xhci::controller_program(layout, rings, 8u));
 
-    EXPECT_EQ(0x124001u,
-              read64(mmio, layout.capability.cap_length + xhci::kOperationalCrcr));
-    EXPECT_EQ(0x120000u,
-              read64(mmio, layout.capability.cap_length + xhci::kOperationalDcbaap));
+    EXPECT_EQ(0x124001u, read64(mmio, layout.capability.cap_length + xhci::kOperationalCrcr));
+    EXPECT_EQ(0x120000u, read64(mmio, layout.capability.cap_length + xhci::kOperationalDcbaap));
     EXPECT_EQ(8u, read32(mmio, layout.capability.cap_length + xhci::kOperationalConfig));
 
     const size_t interrupter = layout.capability.runtime_offset + xhci::kRuntimeInterrupter0;
@@ -284,8 +281,8 @@ TEST(XhciController, ReadsPortStatusAndPowersPort)
                          xhci::kPortRegisterStride;
     write32(mmio,
             port2,
-            xhci::kPortScCurrentConnectStatus | xhci::kPortScPortEnabled |
-                (3u << 10) | xhci::kPortScConnectStatusChange);
+            xhci::kPortScCurrentConnectStatus | xhci::kPortScPortEnabled | (3u << 10) |
+                xhci::kPortScConnectStatusChange);
 
     xhci::PortStatus status{};
     ASSERT_TRUE(xhci::read_port_status(layout, 2u, status));
@@ -297,4 +294,45 @@ TEST(XhciController, ReadsPortStatusAndPowersPort)
 
     ASSERT_TRUE(xhci::power_on_port(layout, 2u));
     EXPECT_TRUE(0u != (read32(mmio, port2) & xhci::kPortScPortPower));
+}
+TEST(XhciController, SlotContextEntriesBelongToDwordZero)
+{
+    uint32_t slot[8]{};
+    xhci::set_slot_context(slot, 4, 3, 5);
+    EXPECT_EQ(slot[0], (4u << 20) | (5u << 27));
+    EXPECT_EQ(slot[1], 3u << 16);
+    EXPECT_EQ(slot[2], 0u);
+}
+
+TEST(XhciController, PortWritesDoNotDisableOrResetAnEnabledPort)
+{
+    std::array<uint8_t, 0x1000> mmio{};
+    populate_capability_block(mmio);
+    xhci::ControllerLayout layout{};
+    ASSERT_TRUE(xhci::parse_capability(mmio.data(), mmio.size(), layout));
+    const size_t port = layout.capability.cap_length + xhci::kOperationalPortRegisterBase;
+    const uint32_t raw = 0xFFFFFFFFu;
+    write32(mmio, port, raw);
+    ASSERT_TRUE(xhci::clear_port_change_bits(layout, 1, xhci::kPortScConnectStatusChange));
+    EXPECT_EQ(xhci::kPortScPreservedBits | xhci::kPortScConnectStatusChange, read32(mmio, port));
+    write32(mmio, port, raw);
+    ASSERT_TRUE(xhci::power_on_port(layout, 1));
+    EXPECT_EQ(xhci::kPortScPreservedBits, read32(mmio, port));
+}
+
+TEST(XhciController, QuiesceMasksControllerAndInterrupterSources)
+{
+    std::array<uint8_t, 0x1000> mmio{};
+    populate_capability_block(mmio);
+    xhci::ControllerLayout layout{};
+    ASSERT_TRUE(xhci::parse_capability(mmio.data(), mmio.size(), layout));
+    write32(mmio,
+            0x40 + xhci::kOperationalUsbcmd,
+            xhci::kUsbcmdRunStop | xhci::kUsbcmdInterrupterEnable);
+    write32(mmio,
+            0x200 + xhci::kRuntimeInterrupter0,
+            xhci::kImanInterruptEnable | xhci::kImanInterruptPending);
+    xhci::disable_interrupts(layout);
+    EXPECT_EQ(xhci::kUsbcmdRunStop, read32(mmio, 0x40 + xhci::kOperationalUsbcmd));
+    EXPECT_EQ(xhci::kImanInterruptPending, read32(mmio, 0x200 + xhci::kRuntimeInterrupter0));
 }

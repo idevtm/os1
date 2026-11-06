@@ -1,8 +1,6 @@
 // Generic IRQ flow around the current legacy PIC/APIC hybrid routing.
 #include "core/irq_dispatch.hpp"
 
-#include "syscall/vfs.hpp"
-#include "ipc/channel.hpp"
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/apic/lapic.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
@@ -12,10 +10,13 @@
 #include "core/kernel_state.hpp"
 #include "core/timer_source.hpp"
 #include "debug/event_ring.hpp"
+#include "drivers/usb/xhci.hpp"
+#include "ipc/channel.hpp"
 #include "proc/thread.hpp"
 #include "sched/scheduler.hpp"
 #include "sync/atomic.hpp"
 #include "syscall/console_read.hpp"
+#include "syscall/vfs.hpp"
 
 namespace
 {
@@ -49,12 +50,8 @@ void account_scheduler_tick()
 
     if(!cpu_on_boot() && ((1u == local_ticks) || (0u == (local_ticks % kApTickEventInterval))))
     {
-        kernel_event::record(OS1_KERNEL_EVENT_AP_TICK,
-                             OS1_KERNEL_EVENT_FLAG_SUCCESS,
-                             c->id,
-                             local_ticks,
-                             0,
-                             0);
+        kernel_event::record(
+            OS1_KERNEL_EVENT_AP_TICK, OS1_KERNEL_EVENT_FLAG_SUCCESS, c->id, local_ticks, 0, 0);
     }
 }
 }  // namespace
@@ -75,12 +72,13 @@ Thread* handle_irq(TrapFrame* frame)
     const bool tlb_shootdown_ipi = ipi_is_tlb_shootdown_vector(vector);
     if(!scheduler_tick && !reschedule_ipi && !tlb_shootdown_ipi)
     {
-        kernel_event::record(OS1_KERNEL_EVENT_IRQ,
-                             0,
-                             (irq >= 0) ? static_cast<uint64_t>(irq) : static_cast<uint64_t>(vector),
-                             frame->vector,
-                             g_timer_ticks,
-                             0);
+        kernel_event::record(
+            OS1_KERNEL_EVENT_IRQ,
+            0,
+            (irq >= 0) ? static_cast<uint64_t>(irq) : static_cast<uint64_t>(vector),
+            frame->vector,
+            g_timer_ticks,
+            0);
     }
     if(scheduler_tick)
     {
@@ -94,6 +92,7 @@ Thread* handle_irq(TrapFrame* frame)
         scheduler_handle_timer_tick();
         if(cpu_on_boot())
         {
+            xhci_poll_input();
             console_input_poll_serial();
         }
     }

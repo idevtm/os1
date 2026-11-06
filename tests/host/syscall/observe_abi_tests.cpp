@@ -1,7 +1,5 @@
-#include <os1/observe.h>
-
 #include <gtest/gtest.h>
-
+#include <os1/observe.h>
 #include <stddef.h>
 
 TEST(ObserveAbi, ConstantsAreStable)
@@ -18,6 +16,7 @@ TEST(ObserveAbi, ConstantsAreStable)
     EXPECT_EQ(9, OS1_OBSERVE_IRQS);
     EXPECT_EQ(10, OS1_OBSERVE_KMEM);
     EXPECT_EQ(11, OS1_OBSERVE_ACPI);
+    EXPECT_EQ(12, OS1_OBSERVE_USB);
     EXPECT_EQ(256, OS1_OBSERVE_EVENT_RING_CAPACITY);
     EXPECT_EQ(32, OS1_OBSERVE_DRIVER_NAME_BYTES);
     EXPECT_EQ(32, OS1_OBSERVE_KMEM_NAME_BYTES);
@@ -112,4 +111,11 @@ TEST(ObserveAbi, RecordLayoutsArePacked)
     EXPECT_EQ(20u, offsetof(Os1ObserveAcpiRecord, route_flags));
     EXPECT_EQ(22u, offsetof(Os1ObserveAcpiRecord, route_bus));
     EXPECT_EQ(26u, offsetof(Os1ObserveAcpiRecord, route_source_is_gsi));
+}
+
+TEST(ObserveAbi, UsbBootRecordLayout)
+{
+    EXPECT_EQ(64u, sizeof(Os1ObserveUsbRecord));
+    EXPECT_EQ(32u, offsetof(Os1ObserveUsbRecord, sectors));
+    EXPECT_EQ(40u, offsetof(Os1ObserveUsbRecord, stage));
 }

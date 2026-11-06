@@ -27,7 +27,7 @@ set(OS1_HOST_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 include("${OS1_REPO_ROOT}/cmake/acpica_sources.cmake")
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-set(OS1_INITRD_LOAD_ADDRESS 0x6b000)
+set(OS1_INITRD_LOAD_ADDRESS 0x6b200)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -115,6 +115,10 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/driver_registry.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/pci_bus.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/net/arp_cache.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/drivers/usb/diagnostics.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/drivers/usb/ehci_controller.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/drivers/usb/hub.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/drivers/usb/mass_storage.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/usb/hid_keyboard.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/usb/xhci_controller.cpp"
   "${OS1_REPO_ROOT}/src/kernel/fs/cpio_newc.cpp"
@@ -189,6 +193,8 @@ add_executable(os1_host_tests
   kernel/pci_resource_tests.cpp
   kernel/wait_queue_tests.cpp
   kernel/arp_cache_tests.cpp
+  kernel/ehci_tests.cpp
+  kernel/usb_storage_tests.cpp
   kernel/hid_keyboard_tests.cpp
   kernel/ext2_tests.cpp
   kernel/xhci_controller_tests.cpp

@@ -42,6 +42,7 @@
 #include "proc/user_program.hpp"
 #include "sched/idle.hpp"
 #include "sched/scheduler.hpp"
+#include "sync/smp.hpp"
 #include "util/align.hpp"
 #include "util/memory.h"
 
@@ -129,6 +130,8 @@ void attach_uefi_bootlog(VirtualMemory& kvm)
 
 [[noreturn]] void finish_kernel_thread(int exit_status)
 {
+    // Selection and assembly restoration form one interrupt-masked handoff.
+    IrqGuard handoff_guard;
     mark_current_thread_dying(exit_status);
     if(Thread* next = schedule_next(false); nullptr != next)
     {
@@ -798,6 +801,8 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
 
     kernel_event::record(OS1_KERNEL_EVENT_SMOKE_MARKER, 0, OS1_KERNEL_EVENT_SMOKE_MAGIC, 0, 0, 0);
     intel_tco_watchdog_kick();
+    // Do not publish the new current thread while still using the boot stack.
+    IrqGuard handoff_guard;
     set_current_thread(boot_sequence_thread);
     enter_first_thread(boot_sequence_thread, boot_sequence_thread->kernel_stack_top);
     halt_forever();

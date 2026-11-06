@@ -15,6 +15,8 @@ global restore_thread
 global restore_frame_ptr
 
 enter_first_thread:
+	; Keep the old current-thread identity paired with its stack until handoff.
+	cli
 	mov rsp, rsi
 	and rsp, -16
 	jmp start_multi_task
@@ -35,6 +37,8 @@ kernel_thread_start:
 ; Install the selected thread into per-CPU state, load its CR3/RSP0, and resume
 ; from the embedded TrapFrame.
 restore_thread:
+	; Direct kernel callers must not expose a partially restored context to IRQs.
+	cli
 	; Leave the outgoing stack AND address space before publishing that it is
 	; no longer current. The BSP may then complete its read or reap it. Use the
 	; permanent per-CPU stack for restore scratch, never the outgoing stack.
