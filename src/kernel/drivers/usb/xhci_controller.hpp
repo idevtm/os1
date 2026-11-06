@@ -181,6 +181,32 @@ struct EventInfo
     uint8_t trb_type = 0;
 };
 
+// One serialized endpoint-zero request; stage addresses identify completion events.
+struct ControlTransfer
+{
+    uint64_t stages[3]{};  // setup, optional data, status
+    uint32_t requested = 0;
+    uint32_t residual = 0;
+    uint8_t completion = 0;
+    bool done = false;
+    bool direction_in = false;
+};
+bool queue_control_transfer(void* ring_base,
+                            size_t ring_bytes,
+                            uint64_t ring_physical,
+                            CommandRingInfo& ring,
+                            uint64_t setup,
+                            uint64_t buffer,
+                            ControlTransfer& transfer);
+// Call once, after queueing succeeds and DMA/state writes are complete.
+void publish_control_transfer(void* ring_base,
+                              uint64_t ring_physical,
+                              const ControlTransfer& transfer);
+// Caller matches slot and endpoint under the event lock. Returns true for a matched event.
+bool control_transfer_event(ControlTransfer& transfer, const EventInfo& event);
+bool valid_descriptor_header(const void* bytes, size_t actual, uint8_t type, uint8_t minimum);
+bool valid_configuration_descriptors(const void* bytes, size_t actual);
+
 struct PortStatus
 {
     uint32_t raw = 0;
@@ -226,7 +252,8 @@ bool enqueue_command_trb(void* ring_base,
                          uint64_t ring_physical,
                          CommandRingInfo& ring,
                          const TrbFields& trb,
-                         uint64_t* trb_physical = nullptr);
+                         uint64_t* trb_physical = nullptr,
+                         bool publish = true);
 bool initialize_event_ring_segment_table(void* erst_base,
                                          size_t erst_bytes,
                                          uint64_t event_ring_physical,

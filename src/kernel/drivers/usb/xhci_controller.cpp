@@ -279,7 +279,8 @@ bool enqueue_command_trb(void* ring_base,
                          uint64_t ring_physical,
                          CommandRingInfo& ring,
                          const TrbFields& trb,
-                         uint64_t* trb_physical)
+                         uint64_t* trb_physical,
+                         bool publish)
 {
     if((nullptr == ring_base) || (ring.trb_count < 2u) ||
        (ring_bytes != (static_cast<size_t>(ring.trb_count) * kTrbBytes)) ||
@@ -293,7 +294,8 @@ bool enqueue_command_trb(void* ring_base,
     entry.parameter_low = static_cast<uint32_t>(trb.parameter & 0xFFFFFFFFull);
     entry.parameter_high = static_cast<uint32_t>(trb.parameter >> 32);
     entry.status = trb.status;
-    entry.control = (trb.control & ~kTrbCycleBit) | (ring.cycle_state ? kTrbCycleBit : 0u);
+    entry.control =
+        (trb.control & ~kTrbCycleBit) | ((ring.cycle_state == publish) ? kTrbCycleBit : 0u);
 
     if(nullptr != trb_physical)
     {
@@ -309,6 +311,108 @@ bool enqueue_command_trb(void* ring_base,
         ring.cycle_state = !ring.cycle_state;
     }
 
+    return true;
+}
+
+bool queue_control_transfer(void* ring_base,
+                            size_t ring_bytes,
+                            uint64_t ring_physical,
+                            CommandRingInfo& ring,
+                            uint64_t setup,
+                            uint64_t buffer,
+                            ControlTransfer& transfer)
+{
+    transfer = {};
+    const uint32_t length = setup >> 48;
+    const bool in = setup & 0x80u;
+    // This profile uses one bounded, physically contiguous data TRB.
+    if(!ring_base || !ring_physical || length > 4096u ||
+       (length && (!buffer || (buffer & 0xffffu) + length > 65536u)) ||
+       ring.trb_count < (length ? 4u : 3u) || ring_bytes != size_t(ring.trb_count) * kTrbBytes ||
+       ring.enqueue_index >= ring.trb_count - 1u)
+        return false;
+    const TrbFields stages[3]{
+        {setup,
+         8u,
+         (kTrbTypeSetupStage << 10) | (1u << 6) | (length ? ((in ? 3u : 2u) << 16) : 0u)},
+        {buffer, length, (kTrbTypeDataStage << 10) | (in ? ((1u << 16) | (1u << 2)) : 0u)},
+        {0, 0, (kTrbTypeStatusStage << 10) | (1u << 5) | ((!length || !in) ? (1u << 16) : 0u)}};
+    transfer.requested = length;
+    transfer.direction_in = in;
+    for(unsigned i = 0; i < 3; ++i)
+    {
+        if(i == 1 && !length)
+            continue;
+        // Setup remains unowned until every stage and completion field is ready.
+        if(!enqueue_command_trb(
+               ring_base, ring_bytes, ring_physical, ring, stages[i], &transfer.stages[i], i != 0))
+            return false;
+    }
+    return true;
+}
+
+void publish_control_transfer(void* ring_base,
+                              uint64_t ring_physical,
+                              const ControlTransfer& transfer)
+{
+    auto* control = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ring_base) +
+                                                transfer.stages[0] - ring_physical + 12u);
+    __atomic_store_n(control, *control ^ kTrbCycleBit, __ATOMIC_RELEASE);
+}
+
+bool control_transfer_event(ControlTransfer& transfer, const EventInfo& event)
+{
+    if(transfer.done || !event.parameter || !transfer.stages[0])
+        return false;
+    unsigned stage = 0;
+    while(stage < 3 && transfer.stages[stage] != event.parameter)
+        ++stage;
+    if(stage == 3)
+        return false;
+    if(stage == 1 && transfer.direction_in && event.completion_code == 13u &&
+       event.transfer_length <= transfer.requested)
+    {
+        transfer.residual = event.transfer_length;
+        return true;  // Short data is not completion of the status stage.
+    }
+    transfer.done = true;
+    if(stage == 2 && event.completion_code == 1u && !event.transfer_length)
+        transfer.completion = 1u;
+    else
+    {
+        transfer.completion = (event.completion_code == 0u || event.completion_code == 1u ||
+                               event.completion_code == 13u)
+                                  ? 5u
+                                  : event.completion_code;
+        transfer.residual = transfer.requested;
+    }
+    return true;
+}
+
+bool valid_descriptor_header(const void* bytes, size_t actual, uint8_t type, uint8_t minimum)
+{
+    const auto* header = static_cast<const uint8_t*>(bytes);
+    return header && actual >= minimum && minimum >= 2 && header[0] >= minimum &&
+           header[0] <= actual && header[1] == type;
+}
+
+bool valid_configuration_descriptors(const void* bytes, size_t actual)
+{
+    if(!valid_descriptor_header(bytes, actual, 2, 9))
+        return false;
+    const auto* data = static_cast<const uint8_t*>(bytes);
+    if((uint32_t(data[2]) | (uint32_t(data[3]) << 8)) != actual)
+        return false;
+    for(size_t offset = 0; offset < actual;)
+    {
+        if(actual - offset < 2)
+            return false;
+        const uint8_t type = data[offset + 1];
+        const uint8_t minimum = (type == 2 || type == 4) ? 9 : (type == 5 ? 7 : 2);
+        if(!valid_descriptor_header(data + offset, actual - offset, type, minimum))
+            return false;
+        offset += data[offset];
+    }
     return true;
 }
 

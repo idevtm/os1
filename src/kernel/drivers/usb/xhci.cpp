@@ -78,14 +78,7 @@ constexpr uint8_t kUsbEndpointDirectionIn = 0x80u;
 constexpr uint8_t kUsbEndpointTransferInterrupt = 3u;
 
 constexpr uint32_t kTrbInterruptOnShortPacket = 1u << 2;
-constexpr uint32_t kTrbChainBit = 1u << 4;
 constexpr uint32_t kTrbInterruptOnCompletion = 1u << 5;
-constexpr uint32_t kTrbImmediateData = 1u << 6;
-constexpr uint32_t kSetupTransferTypeNoData = 0u << 16;
-constexpr uint32_t kSetupTransferTypeOut = 2u << 16;
-constexpr uint32_t kSetupTransferTypeIn = 3u << 16;
-constexpr uint32_t kDataDirectionIn = 1u << 16;
-constexpr uint32_t kStatusDirectionIn = 1u << 16;
 constexpr uint8_t kXhciControlEndpointDci = 1u;
 constexpr uint8_t kXhciCompletionSuccess = 1u;
 constexpr uint8_t kXhciCompletionShortPacket = 13u;
@@ -209,6 +202,7 @@ struct XhciDeviceState
     DmaBuffer control_buffer_dma{};
     DmaBuffer report_buffer_dma{};
     usb::hid::BootKeyboardState keyboard_state{};
+    xhci::ControlTransfer control_transfer{};
     bool synchronous_transfer_complete = false;
     uint8_t synchronous_transfer_completion_code = 0;
     uint32_t synchronous_transfer_residual = 0;
@@ -218,6 +212,7 @@ struct XhciDeviceState
     uint32_t report_count = 0;
     uint8_t diagnostic_reports = 0;
     uint8_t diagnostic_controls = 0;
+    uint8_t diagnostic_ep0_events = 0;
 };
 
 struct XhciControllerState
@@ -743,6 +738,28 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
             continue;
         }
 
+        if(event.endpoint_id == kXhciControlEndpointDci &&
+           xhci::control_transfer_event(device.control_transfer, event))
+        {
+            const auto& transfer = device.control_transfer;
+            if(bootlog_diagnostics_enabled() && device.diagnostic_ep0_events < 64u)
+            {
+                ++device.diagnostic_ep0_events;
+                debug("usbdiag: ep0 port=")(device.port_id)(" stage=")(
+                    event.parameter == transfer.stages[0]
+                        ? 0
+                        : (event.parameter == transfer.stages[1] ? 1 : 2))(" cc=")(
+                    event.completion_code)(" residual=")(event.transfer_length)();
+            }
+            if(transfer.done)
+            {
+                device.synchronous_transfer_complete = true;
+                device.synchronous_transfer_completion_code = transfer.completion;
+                device.synchronous_transfer_residual = transfer.residual;
+            }
+            return;
+        }
+
         if(event.endpoint_id == device.synchronous_endpoint &&
            (device.synchronous_transfer_trb != 0u) &&
            (device.synchronous_transfer_trb == event.parameter))
@@ -962,7 +979,7 @@ bool submit_control_transfer(XhciControllerState& controller,
                              size_t& actual_length)
 {
     actual_length = 0;
-    if(buffer_length > device.control_buffer_dma.size_bytes)
+    if(buffer_length > device.control_buffer_dma.size_bytes || setup.length != buffer_length)
     {
         return false;
     }
@@ -997,66 +1014,23 @@ bool submit_control_transfer(XhciControllerState& controller,
         device.synchronous_transfer_residual = 0u;
         device.synchronous_transfer_trb = 0u;
 
-        uint64_t status_trb_physical = 0;
         const uint64_t setup_parameter = static_cast<uint64_t>(setup.request_type) |
                                          (static_cast<uint64_t>(setup.request) << 8) |
                                          (static_cast<uint64_t>(setup.value) << 16) |
                                          (static_cast<uint64_t>(setup.index) << 32) |
                                          (static_cast<uint64_t>(setup.length) << 48);
-        const uint32_t setup_transfer_type =
-            !has_data_stage ? kSetupTransferTypeNoData
-                            : (direction_in ? kSetupTransferTypeIn : kSetupTransferTypeOut);
-        xhci::TrbFields setup_trb{
-            .parameter = setup_parameter,
-            .status = sizeof(UsbSetupPacket),
-            .control = (xhci::kTrbTypeSetupStage << 10) | kTrbImmediateData | kTrbChainBit |
-                       setup_transfer_type,
-        };
-        if(!xhci::enqueue_command_trb(device.control_ring_dma.virtual_address,
-                                      device.control_ring_dma.size_bytes,
-                                      device.control_ring_dma.physical_address,
-                                      device.control_ring,
-                                      setup_trb))
-        {
+        if(!xhci::queue_control_transfer(device.control_ring_dma.virtual_address,
+                                         device.control_ring_dma.size_bytes,
+                                         device.control_ring_dma.physical_address,
+                                         device.control_ring,
+                                         setup_parameter,
+                                         device.control_buffer_dma.physical_address,
+                                         device.control_transfer))
             return false;
-        }
-
-        if(has_data_stage)
-        {
-            xhci::TrbFields data_trb{
-                .parameter = device.control_buffer_dma.physical_address,
-                .status = static_cast<uint32_t>(buffer_length),
-                .control = (xhci::kTrbTypeDataStage << 10) | kTrbChainBit |
-                           (direction_in ? kDataDirectionIn : 0u),
-            };
-            if(!xhci::enqueue_command_trb(device.control_ring_dma.virtual_address,
-                                          device.control_ring_dma.size_bytes,
-                                          device.control_ring_dma.physical_address,
-                                          device.control_ring,
-                                          data_trb))
-            {
-                return false;
-            }
-        }
-
-        xhci::TrbFields status_trb{
-            .parameter = 0u,
-            .status = 0u,
-            .control = (xhci::kTrbTypeStatusStage << 10) | kTrbInterruptOnCompletion |
-                       ((!has_data_stage || !direction_in) ? kStatusDirectionIn : 0u),
-        };
-        if(!xhci::enqueue_command_trb(device.control_ring_dma.virtual_address,
-                                      device.control_ring_dma.size_bytes,
-                                      device.control_ring_dma.physical_address,
-                                      device.control_ring,
-                                      status_trb,
-                                      &status_trb_physical))
-        {
-            return false;
-        }
-
-        device.synchronous_transfer_trb = status_trb_physical;
         dma_sync_for_device(device.control_ring_dma);
+        xhci::publish_control_transfer(device.control_ring_dma.virtual_address,
+                                       device.control_ring_dma.physical_address,
+                                       device.control_transfer);
         xhci::ring_doorbell(controller.controller, device.slot_id, kXhciControlEndpointDci);
     }
     uint8_t completion_code = 0u;
@@ -1070,16 +1044,16 @@ bool submit_control_transfer(XhciControllerState& controller,
             setup.request)(" value=0x")(setup.value, 16)(" index=")(setup.index)(" completed=")(
             completed)(" cc=")(completion_code)(" residual=")(residual_length)();
     }
-    if(!completed || !transfer_completion_ok(completion_code))
+    if(!completed || completion_code != kXhciCompletionSuccess || residual_length > buffer_length)
     {
+        fail_device(device);
         return false;
     }
 
     if(has_data_stage && direction_in)
     {
         dma_sync_for_cpu(device.control_buffer_dma);
-        actual_length =
-            buffer_length - ((residual_length <= buffer_length) ? residual_length : buffer_length);
+        actual_length = buffer_length - residual_length;
         if((nullptr != in_buffer) && (actual_length > 0u))
         {
             memcpy(in_buffer, device.control_buffer_dma.virtual_address, actual_length);
@@ -1585,7 +1559,8 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
                            &descriptor,
                            sizeof(descriptor),
                            actual_length) ||
-       (actual_length < sizeof(descriptor)))
+       !xhci::valid_descriptor_header(
+           &descriptor, actual_length, kUsbDescriptorDevice, sizeof(descriptor)))
     {
         debug("xhci: device descriptor failed port=")(port_id)();
         release_device(frames, controller, *device);
@@ -1604,7 +1579,10 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
                            config_header,
                            sizeof(config_header),
                            actual_length) ||
-       (actual_length < sizeof(UsbConfigurationDescriptor)))
+       !xhci::valid_descriptor_header(config_header,
+                                      actual_length,
+                                      kUsbDescriptorConfiguration,
+                                      sizeof(UsbConfigurationDescriptor)))
     {
         debug("xhci: config header failed port=")(port_id)();
         release_device(frames, controller, *device);
@@ -1612,7 +1590,7 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
     }
 
     const auto* configuration = reinterpret_cast<const UsbConfigurationDescriptor*>(config_header);
-    if((0u == configuration->total_length) ||
+    if((sizeof(UsbConfigurationDescriptor) > configuration->total_length) ||
        (configuration->total_length > device->control_buffer_dma.size_bytes))
     {
         debug("xhci: config length unsupported port=")(port_id)(" total=")(
@@ -1628,7 +1606,9 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
                            0u,
                            device->control_buffer_dma.virtual_address,
                            configuration->total_length,
-                           actual_length))
+                           actual_length) ||
+       !xhci::valid_configuration_descriptors(device->control_buffer_dma.virtual_address,
+                                              actual_length))
     {
         release_device(frames, controller, *device);
         return false;

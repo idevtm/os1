@@ -564,3 +564,208 @@ TEST(XhciRouting, FailedReadbackRestoresOriginalRoutesBeforeReturning)
         EXPECT_EQ(f.writes[f.write_count - 1], 0xd8);
     }
 }
+
+namespace
+{
+struct ControlFixture
+{
+    alignas(64) std::array<uint8_t, 128> bytes{};
+    xhci::CommandRingInfo ring{};
+    xhci::ControlTransfer transfer{};
+    ControlFixture()
+    {
+        EXPECT_TRUE(xhci::initialize_command_ring(bytes.data(), bytes.size(), 0x1000, ring));
+    }
+    bool queue(uint16_t length = 18, bool in = true)
+    {
+        const uint64_t setup = (uint64_t(length) << 48) | 0x01000600u | (in ? 0x80u : 0u);
+        return xhci::queue_control_transfer(
+            bytes.data(), bytes.size(), 0x1000, ring, setup, 0x2000, transfer);
+    }
+    uint32_t control(unsigned stage)
+    {
+        return read32(bytes, transfer.stages[stage] - 0x1000 + 12);
+    }
+    bool event(unsigned stage, uint8_t cc, uint32_t residual = 0)
+    {
+        xhci::EventInfo event{};
+        event.parameter = transfer.stages[stage];
+        event.completion_code = cc;
+        event.transfer_length = residual;
+        return xhci::control_transfer_event(transfer, event);
+    }
+};
+}  // namespace
+
+TEST(XhciControl, InRequestHasSeparateStagesAndPublishesSetupLast)
+{
+    ControlFixture f;
+    ASSERT_TRUE(f.queue());
+    EXPECT_EQ(f.control(0), (2u << 10) | (1u << 6) | (3u << 16));  // Cycle initially withheld.
+    EXPECT_EQ(f.control(1), (3u << 10) | (1u << 16) | (1u << 2) | 1u);
+    EXPECT_EQ(f.control(2), (4u << 10) | (1u << 5) | 1u);
+    EXPECT_EQ(read64(f.bytes, 0), (18ull << 48) | 0x01000680u);
+    EXPECT_EQ(read32(f.bytes, 8), 8u);
+    EXPECT_EQ(read64(f.bytes, 16), 0x2000u);
+    EXPECT_EQ(read32(f.bytes, 24), 18u);
+    xhci::publish_control_transfer(f.bytes.data(), 0x1000, f.transfer);
+    EXPECT_EQ(f.control(0) & 1u, 1u);
+    EXPECT_TRUE(f.event(2, 1));
+    EXPECT_TRUE(f.transfer.done);
+    EXPECT_EQ(f.transfer.completion, 1u);
+    EXPECT_EQ(f.transfer.residual, 0u);
+}
+
+TEST(XhciControl, OutAndNoDataHaveInStatusWithoutShortPacketInterrupt)
+{
+    for(uint16_t length : {0u, 8u})
+    {
+        ControlFixture f;
+        ASSERT_TRUE(f.queue(length, false));
+        EXPECT_EQ((f.control(0) >> 16) & 3u, length ? 2u : 0u);
+        EXPECT_EQ(f.control(2), (4u << 10) | (1u << 16) | (1u << 5) | 1u);
+        if(length)
+            EXPECT_EQ(f.control(1), (3u << 10) | 1u);
+        else
+            EXPECT_EQ(f.transfer.stages[1], 0u);
+        EXPECT_TRUE(f.event(2, 1));
+        EXPECT_TRUE(f.transfer.done);
+    }
+}
+
+TEST(XhciControl, ShortDataWaitsForStatusAndRetainsActualLength)
+{
+    for(uint32_t residual : {0u, 10u, 18u})
+    {
+        ControlFixture f;
+        ASSERT_TRUE(f.queue());
+        ASSERT_TRUE(f.event(1, 13, residual));
+        EXPECT_FALSE(f.transfer.done);
+        ASSERT_TRUE(f.event(2, 1));
+        EXPECT_TRUE(f.transfer.done);
+        EXPECT_EQ(f.transfer.completion, 1u);
+        EXPECT_EQ(f.transfer.requested - f.transfer.residual, 18u - residual);
+        EXPECT_FALSE(f.event(1, 13, 0));  // Late event cannot overwrite a retired request.
+        EXPECT_EQ(f.transfer.residual, residual);
+    }
+}
+
+TEST(XhciControl, ErrorsAtEveryStageCompleteWithoutWaitingForStatus)
+{
+    for(unsigned stage = 0; stage < 3; ++stage)
+        for(uint8_t cc : {4u, 5u, 6u})
+        {
+            ControlFixture f;
+            ASSERT_TRUE(f.queue());
+            EXPECT_TRUE(f.event(stage, cc));
+            EXPECT_TRUE(f.transfer.done);
+            EXPECT_EQ(f.transfer.completion, cc);
+            EXPECT_EQ(f.transfer.residual, 18u);
+            EXPECT_FALSE(f.event(2, 1));
+        }
+}
+
+TEST(XhciControl, MalformedCompletionCannotBecomeSuccessfulData)
+{
+    for(unsigned stage = 0; stage < 3; ++stage)
+    {
+        ControlFixture f;
+        ASSERT_TRUE(f.queue());
+        ASSERT_TRUE(f.event(stage, 13, 19));
+        EXPECT_TRUE(f.transfer.done);
+        EXPECT_EQ(f.transfer.completion, 5u);
+        EXPECT_EQ(f.transfer.residual, 18u);
+    }
+    ControlFixture f;
+    ASSERT_TRUE(f.queue());
+    ASSERT_TRUE(f.event(2, 13, 0));  // Captured Intel result must not imply 18 valid bytes.
+    EXPECT_EQ(f.transfer.completion, 5u);
+    EXPECT_EQ(f.transfer.residual, 18u);
+    ASSERT_TRUE(f.queue());
+    ASSERT_TRUE(f.event(0, 1));  // Setup has no IOC; success here cannot finish the request.
+    EXPECT_EQ(f.transfer.completion, 5u);
+    ASSERT_TRUE(f.queue(18, false));
+    ASSERT_TRUE(f.event(1, 13, 1));
+    EXPECT_EQ(f.transfer.completion, 5u);
+    ASSERT_TRUE(f.queue());
+    ASSERT_TRUE(f.event(2, 1, 1));
+    EXPECT_EQ(f.transfer.completion, 5u);
+}
+
+TEST(XhciControl, UnrelatedEventCannotCompleteCurrentRequest)
+{
+    ControlFixture f;
+    ASSERT_TRUE(f.queue());
+    xhci::EventInfo event{};
+    event.parameter = 0x7770;
+    event.completion_code = 1;
+    EXPECT_FALSE(xhci::control_transfer_event(f.transfer, event));
+    EXPECT_FALSE(f.transfer.done);
+    event.parameter = 0;
+    EXPECT_FALSE(xhci::control_transfer_event(f.transfer, event));
+}
+
+TEST(XhciControl, RingWrapKeepsStageAddressesCyclesAndLinkBoundaries)
+{
+    for(uint32_t start : {5u, 6u})
+    {
+        ControlFixture f;
+        f.ring.enqueue_index = start;
+        ASSERT_TRUE(f.queue());
+        EXPECT_EQ(f.transfer.stages[0], 0x1000u + start * 16u);
+        EXPECT_EQ(f.transfer.stages[1], 0x1000u + ((start + 1) % 7) * 16u);
+        EXPECT_EQ(f.transfer.stages[2], 0x1000u + ((start + 2) % 7) * 16u);
+        EXPECT_EQ(f.control(0) & 1u, 0u);
+        EXPECT_EQ(f.control(2) & 1u, 0u);  // Wrapped producer cycle.
+        EXPECT_EQ(read32(f.bytes, 7 * 16 + 12) & (1u << 4), 0u);
+        xhci::publish_control_transfer(f.bytes.data(), 0x1000, f.transfer);
+        EXPECT_EQ(f.control(0) & 1u, 1u);
+        EXPECT_TRUE(f.event(1, 13, 10));
+        EXPECT_TRUE(f.event(2, 1));
+        EXPECT_EQ(f.transfer.residual, 10u);
+    }
+}
+
+TEST(XhciControl, InvalidQueueInputsLeaveRingUnchanged)
+{
+    ControlFixture f;
+    const auto before = f.bytes;
+    for(uint64_t buffer : {0ull, 0xfff8ull})
+        EXPECT_FALSE(xhci::queue_control_transfer(
+            f.bytes.data(), f.bytes.size(), 0x1000, f.ring, 18ull << 48, buffer, f.transfer));
+    EXPECT_FALSE(f.queue(4097));
+    EXPECT_EQ(f.bytes, before);
+    EXPECT_EQ(f.ring.enqueue_index, 0u);
+}
+
+TEST(XhciControl, RejectsTruncatedAndMismatchedDescriptorHeaders)
+{
+    uint8_t descriptor[18]{18, 1};
+    EXPECT_TRUE(xhci::valid_descriptor_header(descriptor, 18, 1, 18));
+    EXPECT_FALSE(xhci::valid_descriptor_header(descriptor, 8, 1, 18));
+    EXPECT_FALSE(xhci::valid_descriptor_header(descriptor, 18, 2, 9));
+    descriptor[0] = 0;
+    EXPECT_FALSE(xhci::valid_descriptor_header(descriptor, 18, 1, 18));
+    descriptor[0] = 19;
+    EXPECT_FALSE(xhci::valid_descriptor_header(descriptor, 18, 1, 18));
+    EXPECT_FALSE(xhci::valid_descriptor_header(nullptr, 18, 1, 18));
+}
+
+TEST(XhciControl, ConfigurationMustContainCompleteBoundedDescriptors)
+{
+    // A configuration, HID interface, and interrupt endpoint.
+    std::array<uint8_t, 25> bytes{9, 2, 25, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0,
+                                  1, 3, 1,  1, 0, 7, 5, 0x81, 3,  8, 0, 10};
+    EXPECT_TRUE(xhci::valid_configuration_descriptors(bytes.data(), bytes.size()));
+    EXPECT_FALSE(xhci::valid_configuration_descriptors(bytes.data(), 18));
+    for(size_t offset : {0u, 9u, 18u})
+    {
+        auto corrupt = bytes;
+        corrupt[offset] = 2;  // Header exists but required fields are missing.
+        EXPECT_FALSE(xhci::valid_configuration_descriptors(corrupt.data(), corrupt.size()));
+        corrupt[offset] = 0;
+        EXPECT_FALSE(xhci::valid_configuration_descriptors(corrupt.data(), corrupt.size()));
+    }
+    bytes[18] = 8;
+    EXPECT_FALSE(xhci::valid_configuration_descriptors(bytes.data(), bytes.size()));
+}

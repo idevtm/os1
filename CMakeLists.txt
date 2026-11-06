@@ -179,8 +179,8 @@ foreach(OS1_VENDOR_FILE
   endif()
 endforeach()
 
-set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-# Share the existing low-memory staging span: 364.5 KiB kernel, 187.5 KiB initrd.
+set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xF000)
+# Use the free page after the five early page tables: 368.5 KiB kernel, 187.5 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
 set(OS1_INITRD_LOAD_ADDRESS 0x6b200)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)

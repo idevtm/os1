@@ -1,4 +1,8 @@
 [bits 16]
+%define EARLY_PAGE_TABLE_BYTES (5 * PAGE_SIZE)
+%if KERNEL_IMAGE_LOAD_ADDRESS < (EARLY_LONG_MODE_PAGE_TABLES_ADDRESS + EARLY_PAGE_TABLE_BYTES)
+    %error "BIOS kernel staging overlaps early page tables"
+%endif
 ; Checks whether CPU supports long mode or not.
 ; Returns with carry set if CPU doesn't support long mode.
 check_long_mode:
@@ -66,7 +70,7 @@ switch_to_long_mode:
     ; Zero out the 20KiB buffer.
     ; Since we are doing a rep stosd, count should be bytes/4.   
     push di                           ; REP STOSD alters DI.
-    mov ecx, 0x1400
+    mov ecx, EARLY_PAGE_TABLE_BYTES / 4
     xor eax, eax
     cld
     rep stosd

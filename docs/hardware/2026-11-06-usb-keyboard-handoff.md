@@ -2,7 +2,9 @@
 
 This change addresses the controller routing failure observed on the Gigabyte H81M-S1.
 The keyboard has no effect because os1 does not enumerate it on the supported xHCI path.
-Physical acceptance of the correction remains pending.
+The second physical capture confirms handoff and routing, but keyboard enumeration still fails during control transfers.
+The [control-transfer report](2026-11-06-xhci-control-transfers.md) records that next failure and correction.
+The original measurements and acceptance status below describe this handoff revision.
 
 ```text
 PCI discovery -> early xHCI probe -> request firmware ownership
