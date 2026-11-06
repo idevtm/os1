@@ -170,9 +170,9 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-# Share the existing low-memory staging span: 360 KiB kernel, 192 KiB initrd.
+# Share the existing low-memory staging span: 364 KiB kernel, 188 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x6a000)
+set(OS1_INITRD_LOAD_ADDRESS 0x6b000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -195,7 +195,7 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 384)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 376)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
 set(OS1_INITRD_LOAD_LIMIT 0x9A000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
@@ -560,6 +560,9 @@ add_custom_command(
 
 add_custom_target(os1_image ALL DEPENDS "${OS1_ISO_IMAGE}" os1_virtio_test_disk os1_bios_layout_check)
 add_custom_target(os1_bios_image ALL DEPENDS "${OS1_RAW_IMAGE}" os1_virtio_test_disk)
+# CI builds image targets explicitly; persistence tests need the separate utility.
+add_dependencies(os1_image os1_diskutil)
+add_dependencies(os1_bios_image os1_diskutil)
 
 # Hybrid USB stick image: the BIOS raw image (legacy boot + boot log area) plus
 # a FAT16 EFI System Partition with Limine, so one stick boots on legacy BIOS

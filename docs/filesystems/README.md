@@ -6,7 +6,7 @@ Temporary contents disappear on reboot. A bounded ext2 profile provides persiste
 | Document | Status |
 | --- | --- |
 | [Persistent ext2 storage](ext2.md) | Current disk profile, native sync, QEMU workflow, and limitations |
-| [Ext2 implementation plan](2026-11-06-ext2-plan.md) | Scope, impact, validation, measurements, and review |
+| [Ext2 implementation plan](../archive/filesystems/2026-11-06-ext2-implementation.md) | Scope, impact, validation, measurements, and review |
 | [Temporary filesystem ABI](../native-api/abi/tmpfs-abi.md) | Implemented native Directory/File and descriptor compatibility contract |
 | [Temporary filesystem plan and evidence](../archive/filesystems/2026-11-06-tmpfs-implementation.md) | Current implementation scope, impact, measurements, and review |
 | [Interactive file tools](../shell/interactive-files.md) | Create, redirect, append, and edit files in `/tmp` |

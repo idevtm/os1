@@ -76,7 +76,11 @@ Regression tests cover high PCI mappings, timeout-boundary completion, error pay
 
 Logs: `/tmp/os1-ext2-host-final.log`, `/tmp/os1-ext2-full.log`, `/tmp/os1-ext2-repeat.log`, and `build/artifacts/smoke-ext2-*`.
 The socket rerun logs are `/tmp/os1-ext2-monitor.log` and `/tmp/os1-ext2-no-uart.log`.
-GitHub CI will validate the committed head separately.
+CI #170 passed all host tests, then detected a compiler-specific BIOS kernel overrun.
+Its GCC 16.2 artifact required 369152 bytes, exceeding the initial 368640-byte slot by 512 bytes.
+The corrected split reserves 372736 bytes for the kernel and 192512 bytes for initrd, preserving the same total span.
+Explicit image targets now also depend on the disk-only utility; CI does not build the default ALL target.
+The follow-up CI run validates both corrections.
 
 ### Measurements
 
@@ -95,8 +99,8 @@ The BIOS path uses QEMU's default firmware. Guest acceleration is QEMU's default
 | Initrd | 201728 | 191488 | -10240 | -5.08% |
 
 The BIOS staging span remains unchanged: `[0x10000,0x9A000)`.
-Its split changes to 360 KiB for the kernel and 192 KiB for initrd.
-Local artifact slack is 3584 bytes and 5120 bytes respectively; compiler variation remains a CI concern.
+Its split changes to 364 KiB for the kernel and 188 KiB for initrd.
+Local artifact slack is 7680 bytes and 1024 bytes respectively; compiler variation remains a CI concern.
 The kernel's reserved physical window remains unchanged.
 
 The unchanged BIOS interactive-file smoke took 2.40 seconds before and 2.19 seconds after this change.
@@ -143,3 +147,6 @@ Full ASD-STE100 dictionary verification is unavailable; prose receives a manual 
 The second pass identified stale block-completion prose and BIOS sector ranges in maintained documentation.
 Those statements now match implemented Flush, polling, the new staging split, and persistent VFS support.
 No physical hardware validation or full language-dictionary verification is claimed.
+
+The CI layout correction passed an explicit local image build and all four interactive-file/ext2 firmware smokes.
+A separate reviewer verified the corrected sector arithmetic, unchanged firmware ceiling, image dependencies, and archived-record links.

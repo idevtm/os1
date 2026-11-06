@@ -7,7 +7,7 @@ These records retain their dates, revision identities, measurements, and histori
 | --- | --- |
 | [Reviews](reviews/README.md) | Earlier project and subsystem assessments |
 | [Native API](native-api/README.md) | Completed descriptor, VFS, IPC, session, parameter, and Buffer work |
-| [Filesystems](filesystems/README.md) | Temporary filesystem implementation and validation |
+| [Filesystems](filesystems/README.md) | Temporary and persistent filesystem implementation and validation |
 | [Shell](shell/README.md) | Interactive file tools, editor, and validation |
 | [Kernel](kernel/README.md) | Process/platform milestones, memory, SMP, and reliability changes |
 | [Boot](boot/README.md) | Boot milestones, shim decomposition, and machine-specific bring-up |

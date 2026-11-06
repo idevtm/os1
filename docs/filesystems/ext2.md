@@ -120,7 +120,7 @@ The poll bound counts iterations; a monotonic deadline and sleeping storage work
 
 ## Validation and deferred work
 
-The [implementation record](2026-11-06-ext2-plan.md) contains results, limitations, and review dispositions.
+The [implementation record](../archive/filesystems/2026-11-06-ext2-implementation.md) contains results, limitations, and review dispositions.
 The persistence test uses two independent QEMU processes and one backing file.
 It checks disk-only execution, indirect blocks, exact bytes, shell-created files, and immutable executable contents.
 When available, `e2fsck -fn` checks the fresh image and both post-boot states.
