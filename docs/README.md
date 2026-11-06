@@ -6,7 +6,7 @@ Completed plans and older reviews are preserved in the archive.
 | Read first | Purpose |
 | --- | --- |
 | [Architecture](ARCHITECTURE.md) | Current system structure, responsibilities, and data flow |
-| [Native API roadmap](native-api/roadmap.md) | Next milestones: kernel services, writable `/tmp`, input, and persistent USB data |
+| [Native API roadmap](native-api/roadmap.md) | Implemented services and next milestones: bulk buffers, input, and persistent USB data |
 | [Native API index](native-api/README.md) | Implemented ABI profiles, accepted design, and explicitly marked proposals |
 | [Latest review](latest-review.md) | Latest whole-project review and subsequent implementation evidence |
 | [USB image workflow](hardware/usb-image-workflow.md) | Build, write, verify, and eject a boot image |
@@ -23,13 +23,16 @@ docs/
   latest-review.md         Stable review entry point
   native-api/             Object model, roadmap, and design profiles
     abi/                  Implemented records and behavior
+  filesystems/            Temporary filesystem contracts and validation
   kernel/                 Synchronization, ACPI, and measurement clock
   hardware/               USB images, boot logs, and firmware investigation
-  shell/                  Shell language proposal
+  shell/                  Interactive files, editor, and language proposal
   reviews/                Latest whole-project review snapshot
   archive/                Older reviews and completed plans or records
     reviews/
     native-api/
+    filesystems/
+    shell/
     kernel/
     boot/
     tooling/
@@ -38,6 +41,7 @@ docs/
 | Topic | Entry point |
 | --- | --- |
 | Native API | [Contracts, profiles, and ABI index](native-api/README.md) |
+| Filesystems | [Writable temporary storage](filesystems/README.md) |
 | Kernel | [Kernel contracts](kernel/README.md) |
 | Hardware and boot media | [Hardware guides](hardware/README.md) |
 | Shell | [Current shell and language proposal](shell/README.md) |

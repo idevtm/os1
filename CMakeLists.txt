@@ -170,9 +170,9 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-# Share the existing low-memory staging span: 356 KiB kernel, 196 KiB initrd.
+# Share the existing low-memory staging span: 352 KiB kernel, 200 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x69000)
+set(OS1_INITRD_LOAD_ADDRESS 0x68000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -195,7 +195,7 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 392)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 400)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
 set(OS1_INITRD_LOAD_LIMIT 0x9A000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
@@ -828,6 +828,23 @@ set(OS1_BIOS_SMOKE_TIMEOUT_SECONDS 30)
 set(OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS 1)
 set(OS1_SMOKE_SEND_DELAY_SECONDS 0.2)
 set(OS1_SMOKE_REJECT_MARKERS
+  "shell spawn "
+  "shell prompt resumed"
+  "wait failed:"
+  "command failed: acpiprobe "
+  "command failed: yield "
+  "command failed: copycheck "
+  "command failed: fdcheck "
+  "command failed: ls "
+  "command failed: cat "
+  "command failed: vfscheck "
+  "command failed: ipccheck "
+  "command failed: buffercheck "
+  "command failed: intf "
+  "command failed: countercheck "
+  "command failed: activationcheck "
+  "command failed: counter "
+  "command failed: paramcheck "
   "#GP general protection"
   "#UD invalid opcode"
   "[user/buffercheck] fail"
@@ -846,10 +863,11 @@ set(OS1_SMOKE_REJECT_MARKERS
 
 # The shell prompt does not terminate with a newline, so the line-buffered
 # smoke runner observes it when the following command output flushes.
+# Split quoted echo arguments distinguish output markers from echoed input.
 set(OS1_SHELL_INPUT_EVENTS
   "shell prompt ready::help\\n"
-  "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit::echo hi\\n"
-  "echo: hi::pid\\n"
+  "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit::echo shell-echo-'ok'\\n"
+  "shell-echo-ok::pid\\n"
 )
 
 set(OS1_SHELL_OBSERVE_INPUT_EVENTS
@@ -864,25 +882,25 @@ set(OS1_SHELL_OBSERVE_INPUT_EVENTS
   "irqs complete::resources\\n"
   "resources complete::kmem\\n"
   "kmem complete::acpiprobe\\n"
-  "shell spawn acpiprobe ok pid=::smpcheck\\n"
+  "[user/acpiprobe] passive snapshot power control disabled::smpcheck\\n"
 )
 
 set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "shell prompt ready::yield\\n"
-  "shell spawn yield ok pid=::fault\\n"
-  "shell spawn fault ok pid=::nope\\n"
+  "[user/yield] tick 2::fault\\n"
+  "command failed: fault status=::nope\\n"
   "unknown command: nope::copycheck\\n"
-  "shell spawn copycheck ok pid=::fdcheck\\n"
-  "shell spawn fdcheck ok pid=::ls /bin\\n"
-  "shell spawn ls ok pid=::cat /etc/motd\\n"
-  "shell spawn cat ok pid=::vfscheck\\n"
-  "shell spawn vfscheck ok pid=::ipccheck\\n"
-  "shell spawn ipccheck ok pid=::buffercheck\\n"
-  "shell spawn buffercheck ok pid=::intf /bin/textprocessor\\n"
-  "shell spawn intf ok pid=::countercheck\\n"
-  "shell spawn countercheck ok pid=::activationcheck\\n"
-  "shell spawn activationcheck ok pid=::counter --initial 10 --ceiling 100\\n"
-  "shell spawn counter ok pid=::intf /bin/counter\\n"
+  "[user/copycheck] ok::fdcheck\\n"
+  "[user/fdcheck] ok::ls /bin\\necho smoke-ls-'complete'\\n"
+  "smoke-ls-complete::cat /etc/motd\\n"
+  "os1: native initrd file reads work.::vfscheck\\n"
+  "[user/vfscheck] ok::ipccheck\\n"
+  "[user/ipccheck] ok::buffercheck\\n"
+  "[user/buffercheck] ok::intf /bin/textprocessor\\n"
+  "event progress id=6 input=4 output=0 implemented::countercheck\\n"
+  "[user/countercheck] ok::activationcheck\\n"
+  "[user/activationcheck] ok::counter --initial 10 --ceiling 100\\n"
+  "counter initial=10 ceiling=100::intf /bin/counter\\n"
   "initial: u64 offset=0 default=0 cli=--initial::paramdemo initial:4 source.text:'Hi there' options.suffix:null\\n"
   "parameter constructor count=12 text=Hi there::call paramdemo render mode.thorough source.text:\"hello world\" options:{limit:5,suffix:null}\\n"
   "parameter method count=5 text=HELLO::call paramdemo render source.text:'a\"b' options.suffix:null\\n"
@@ -890,12 +908,12 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "parameter method count=1 text=!::paramdemo mode:bogus\\n"
   "unknown enum name::call paramdemo render source.bogus\\n"
   "unknown field, enumerator or case::paramcheck\\n"
-  "shell spawn paramcheck ok pid=::intf /bin/paramdemo\\n"
+  "[user/paramcheck] ok::intf /bin/paramdemo\\n"
 )
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
   "shell prompt ready::exec yield\\n"
-  "[user/yield] tick 2::echo after-exec\\n"
+  "[user/yield] tick 2::echo after-'exec'\\n"
 )
 
 set(OS1_SHELL_BALANCE_INPUT_EVENTS
@@ -905,7 +923,7 @@ set(OS1_SHELL_BALANCE_INPUT_EVENTS
 set(OS1_EXEC_SMOKE_REJECT_MARKERS
   ${OS1_SMOKE_REJECT_MARKERS}
   "shell exec returned"
-  "echo: after-exec"
+  "after-exec"
 )
 
 # Preventive: if CI (or any caller) sets OS1_REQUIRE_UEFI_SMOKE=ON, a missing
@@ -1010,7 +1028,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "starting first user process"
     "shell prompt ready"
     "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit"
-    "echo: hi"
+    "shell-echo-ok"
     "pid: "
     "idle thread online"
   )
@@ -1179,22 +1197,16 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "starting first user process"
     "shell prompt ready"
     "[user/yield] tick 2"
-    "shell spawn yield ok pid="
-    "shell prompt resumed"
     "[user/fault] boom"
-    "shell spawn fault ok pid="
+    "command failed: fault status="
     "unknown command: nope"
     "[user/copycheck] ok"
-    "shell spawn copycheck ok pid="
     "[user/fdcheck] duplicate output"
     "[user/fdcheck] ok"
-    "shell spawn fdcheck ok pid="
-    "shell spawn ls ok pid="
     "os1: native initrd file reads work."
-    "shell spawn cat ok pid="
     "[user/vfscheck] restricted child ok"
+    "[user/vfscheck] tmpfs native two clients compatibility unlink ok"
     "[user/vfscheck] ok"
-    "shell spawn vfscheck ok pid="
     "[user/buffercheck] clock hpet resolution_ns="
     "[user/buffercheck] timing bytes=65536 repeats=8 sample=2"
     "[user/buffercheck] sync same identity restored address ok"
@@ -1202,15 +1214,12 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "[user/buffercheck] revoked read write and execute faults recovered"
     "[user/buffercheck] timeout aliases provider failure recovery ok"
     "[user/buffercheck] ok"
-    "shell spawn buffercheck ok pid="
     "[user/ipccheck] kernel console two clients ok"
     "[user/ipccheck] ok"
-    "shell spawn ipccheck ok pid="
     "interface TextProcessor id="
     "method lowercase id=1 input=2 output=2 implemented"
     "property set enabled id=4 input=3 output=3 implemented"
     "event progress id=6 input=4 output=0 implemented"
-    "shell spawn intf ok pid="
     "[user/countercheck] second client ok"
     "[user/countercheck] ok"
     "[user/activationcheck] second client ok"
@@ -1361,7 +1370,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "starting first user process"
     "shell prompt ready"
     "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit"
-    "echo: hi"
+    "shell-echo-ok"
     "pid: "
     "idle thread online"
   )
@@ -1523,37 +1532,28 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "starting first user process"
     "shell prompt ready"
     "[user/yield] tick 2"
-    "shell spawn yield ok pid="
-    "shell prompt resumed"
     "[user/fault] boom"
-    "shell spawn fault ok pid="
+    "command failed: fault status="
     "unknown command: nope"
     "[user/copycheck] ok"
-    "shell spawn copycheck ok pid="
     "[user/fdcheck] duplicate output"
     "[user/fdcheck] ok"
-    "shell spawn fdcheck ok pid="
-    "shell spawn ls ok pid="
     "os1: native initrd file reads work."
-    "shell spawn cat ok pid="
     "[user/vfscheck] restricted child ok"
+    "[user/vfscheck] tmpfs native two clients compatibility unlink ok"
     "[user/vfscheck] ok"
-    "shell spawn vfscheck ok pid="
     "[user/buffercheck] timing unavailable high-resolution clock"
     "[user/buffercheck] sync same identity restored address ok"
     "[user/buffercheck] async distinct output one claim ok"
     "[user/buffercheck] revoked read write and execute faults recovered"
     "[user/buffercheck] timeout aliases provider failure recovery ok"
     "[user/buffercheck] ok"
-    "shell spawn buffercheck ok pid="
     "[user/ipccheck] kernel console two clients ok"
     "[user/ipccheck] ok"
-    "shell spawn ipccheck ok pid="
     "interface TextProcessor id="
     "method lowercase id=1 input=2 output=2 implemented"
     "property set enabled id=4 input=3 output=3 implemented"
     "event progress id=6 input=4 output=0 implemented"
-    "shell spawn intf ok pid="
     "[user/countercheck] second client ok"
     "[user/countercheck] ok"
     "[user/activationcheck] second client ok"
@@ -1685,7 +1685,7 @@ os1_register_menu_target(
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE AND OS1_QEMU_DEBUGCON)
   # COM1 is absent; output uses debugcon and input uses the actual PS/2 path.
   set(OS1_NO_UART_INPUT_EVENTS
-    "shell prompt ready::sendkey e 1\\nsendkey c 1\\nsendkey h 1\\nsendkey o 1\\nsendkey spc 1\\nsendkey n 1\\nsendkey o 1\\nsendkey minus 1\\nsendkey u 1\\nsendkey a 1\\nsendkey r 1\\nsendkey t 1\\nsendkey ret 1"
+    "shell prompt ready::sendkey e 1\\nsendkey c 1\\nsendkey h 1\\nsendkey o 1\\nsendkey spc 1\\nsendkey n 1\\nsendkey o 1\\nsendkey minus 1\\nsendkey apostrophe 1\\nsendkey u 1\\nsendkey a 1\\nsendkey r 1\\nsendkey t 1\\nsendkey apostrophe 1\\nsendkey ret 1"
   )
   add_test(
     NAME os1_smoke_no_uart
@@ -1697,7 +1697,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DLOG_FILE=${OS1_ARTIFACT_DIR}/smoke-no-uart.log"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_UEFI_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DEXPECTED_MARKERS=shell prompt ready;echo: no-uart"
+      "-DEXPECTED_MARKERS=shell prompt ready;no-uart"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DMONITOR_SOCKET=${OS1_ARTIFACT_DIR}/smoke-no-uart.sock"
       "-DMONITOR_SEND_EVENTS=${OS1_NO_UART_INPUT_EVENTS}"
@@ -1721,6 +1721,27 @@ os1_register_menu_target(smoke_no_uart
   "Remove COM1 and verify a shell command through debugcon and PS/2."
 )
 
+if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
+  foreach(boot IN ITEMS bios uefi)
+    if(boot STREQUAL "uefi")
+      if(NOT OS1_OVMF_CODE OR NOT OS1_OVMF_VARS_TEMPLATE)
+        continue()
+      endif()
+      set(file_test_image "${OS1_ISO_IMAGE}")
+      set(file_test_firmware --code "${OS1_OVMF_CODE}" --vars "${OS1_OVMF_VARS_TEMPLATE}")
+    else()
+      set(file_test_image "${OS1_RAW_IMAGE}")
+      set(file_test_firmware)
+    endif()
+    add_test(NAME os1_smoke_files_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_interactive_files.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-files-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_files_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_files_${boot})
+  endforeach()
+endif()
+
 if(OS1_QEMU_SMOKE_TESTS)
   set_tests_properties(
     ${OS1_QEMU_SMOKE_TESTS}
@@ -1733,7 +1754,7 @@ endif()
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(
     smoke_all
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke(_observe|_balance|_spawn|_exec|_xhci|_no_uart)?(_bios)?$"
+    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke(_observe|_balance|_spawn|_exec|_xhci|_no_uart|_files_bios|_files_uefi)?(_bios)?$"
     DEPENDS os1_image os1_bios_image "${OS1_VIRTIO_TEST_DISK}"
     USES_TERMINAL
     VERBATIM

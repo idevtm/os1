@@ -22,7 +22,7 @@ flowchart TD
 | [Native object contract](object-contract.md) | Shared semantic direction. Its approved decisions and implemented subsets are identified explicitly. |
 | [Service roadmap](roadmap.md) | Current gaps, dependencies, milestone acceptance, and deferred work. Proposed interfaces have no assigned ABI yet. |
 | Implemented ABI profiles below | Exact current records, rights, limits, operations, and failure rules. UAPI headers and tests establish implementation evidence. |
-| [VFS profile](vfs-contract.md) | Namespace semantics; immutable initrd implemented, writable service extensions planned. The large object catalog remains illustrative. |
+| [VFS profile](vfs-contract.md) | Namespace semantics; immutable initrd and bounded writable `/tmp` implemented. The large object catalog remains illustrative. |
 | [IPC design](ipc-transport.md) | Accepted transport direction and rationale. Bounded copied calls, events, sessions, and exclusive Buffer loans are implemented. |
 | [Buffer ownership](buffer-ownership.md) | Exclusive loans implemented. Live readers, cooperative writers, and general permanent moves remain proposals. |
 | [Parameter profile](parameter-schema.md) | Bounded constructor/method input schemas implemented. Broader reflective outputs and generated bindings remain proposals. |
@@ -40,6 +40,7 @@ Documents can contain proposals after promotion, provided their scope and status
 | Capability | Current contract |
 | --- | --- |
 | Kernel-hosted Console methods, information property, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |
+| Kernel-hosted writable `/tmp`, mutation rights, resource results, quotas | [Temporary filesystem ABI](abi/tmpfs-abi.md) |
 | Descriptors, rights, lifetime, console | [Console descriptor ABI](abi/console-descriptor-abi.md) |
 | Immutable files/directories, launch grants, argv/environment | [Initrd VFS and startup ABI](abi/initrd-vfs-abi.md) |
 | Sync/async copied calls, retained Operations, TextProcessor, offline `intf` | [Copied IPC ABI](abi/copied-ipc-abi.md) |
@@ -55,15 +56,16 @@ The current encoding remains `fd`; general typed owning/borrowed C++ wrappers re
 
 ## Latest implementation
 
-The [kernel console plan](kernel-console-plan.md) records the first kernel provider adapter slice and its validation evidence.
+The [temporary filesystem plan](../archive/filesystems/2026-11-06-tmpfs-implementation.md) records Directory/File integration, checks, measurements, and review.
+The [kernel console plan](kernel-console-plan.md) records the preceding adapter slice.
 
 ## What remains
 
-Console now supports both descriptor I/O and native copied IPC through a kernel provider adapter.
+Console and `/tmp` now support descriptor I/O and native copied IPC through the kernel provider adapter.
 Initrd objects still use descriptor syscalls; hardware drivers use internal kernel interfaces.
 The [roadmap](roadmap.md#shared-service-foundation) connects these paths through native service contracts.
 
-General service discovery, writable namespace rules, durable storage, and input recovery need concrete protocols.
+General service discovery, kernel Buffer borrowing, durable storage, and input recovery still need concrete protocols.
 Console bindings capture method-specific authority; each additional service needs its own policy.
 Generated SDKs, `.so` bindings, a reflective shell, userspace drivers, and shared-memory rings are not prerequisites for those milestones.
 Class code continues to select new or existing object instances; ordinary callers receive no creation-policy override.

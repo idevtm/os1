@@ -605,7 +605,8 @@ These terms describe software interfaces and process behavior. The API drafts ex
 | Auxiliary vector / `auxv` | A typed sequence of extra process-startup values supplied by a loader, such as platform or executable information. `AT_NULL` marks its end in the System V model. |
 | `errno` / error ABI | `errno` is the conventional C/POSIX error indicator; an error ABI specifies how errors cross an interface, including numeric codes, return values, and partial success. |
 | Blocking / nonblocking I/O | A blocking operation may suspend its caller until progress is possible; a nonblocking operation returns promptly if it cannot currently proceed. |
-| `NONBLOCK` | Proposed open-instance status flag selecting nonblocking behavior where supported; duplicates share it. Empty input then reports would-block rather than EOF. |
+| `NONBLOCK` | Shared open-instance status selecting nonblocking console reads. An empty input queue reports would-block rather than EOF. |
+| `APPEND` | Shared open-instance status that selects the current file end for each write unit. The temporary filesystem commits units of at most 256 bytes atomically. |
 | Partial I/O | A successful transfer of fewer bytes than requested; callers must use the returned length rather than assume the whole request completed. |
 | IPC | **Interprocess Communication**: mechanisms for exchanging data or notifications between processes, such as messages, pipes, shared memory, or mediated object calls. |
 | Pipe | A kernel-managed byte channel commonly connecting one process's output to another's input. |
@@ -646,6 +647,10 @@ The distinctions among headers, sections, segments, symbols, and relocations fol
 | Relocation | Adjustment of an encoded reference according to a relocation record, allowing code or data to refer to its final target. |
 | Load base / load bias | The address placement, or displacement from linked addresses, used when an executable or shared object is mapped into a process. |
 | PIE | **Position-Independent Executable**: an executable built to run at different load addresses, commonly supporting address-space randomization. |
+| GOT | **Global Offset Table**: address entries used by generated code. A static executable can resolve these entries during linking. |
+| PLT | **Procedure Linkage Table**: call stubs commonly used for externally resolved functions. Current user programs disable these stubs. |
+| LTO | **Link-Time Optimization**: compiler optimization across translation units during linking. |
+| Linker relaxation | Replacement of a general instruction sequence with a shorter form when the linker determines that its constraints hold. |
 | Stripped binary | A binary from which selected symbols or debugging metadata have been removed; required loadable code and data can remain unchanged. |
 | ELF note | A structured ELF metadata record with an owner/name, type, and payload, used for auxiliary information. |
 | `.os.interface` / `.os.iface.v1` | Proposed section names in the API drafts for serialized descriptions of a program object's properties, methods, events, and types. |
@@ -776,6 +781,9 @@ Filesystem terminology is illustrated by the [Linux VFS overview](https://www.ke
 | SCSI — Small Computer System Interface | A family of storage command and interface standards. USB storage can use SCSI commands without a physical SCSI bus. |
 | UAS — USB Attached SCSI | A USB storage protocol with command queuing; distinct from the simpler Bulk-Only Transport profile. |
 | Bounce buffer | An intermediate buffer used when a device cannot directly access the original memory range or its layout. |
+| Sparse file | A file with logical ranges that have no allocated data pages; reads return zeros for those ranges. |
+| Unlink | Removal of a namespace entry; retained open references can keep the object and its data alive. |
+| Directory cookie | An opaque enumeration position; `/tmp` assigns increasing cookies to created or renamed entries. |
 | RAM filesystem / `tmpfs` | A filesystem backed primarily by memory; `tmpfs` specifically denotes a temporary in-memory filesystem with OS-defined backing and accounting behavior. |
 | FAT | **File Allocation Table**: a filesystem family that records file cluster chains in an allocation table. |
 | FAT12 / FAT16 / FAT32 | FAT variants named for their allocation-entry representation; FAT32 reserves some bits rather than providing 32 unrestricted cluster-number bits. |
@@ -916,6 +924,8 @@ Terminal processing includes software policy as well as a hardware path; a [line
 | Job control | Shell and terminal mechanisms for managing process groups, foreground access, stopping, and continuing interactive work. |
 | Shell | A command interpreter that starts programs and may provide scripting, redirection, and job-control facilities. |
 | Pipeline / redirection | Connecting one command's output to another's input, or assigning a command's standard streams to selected resources. |
+| Here-document | Literal command input collected until a line matches a chosen delimiter. The current shell stores it in an unlinked temporary file. |
+| Line editor | A text editor controlled by line numbers and commands, without full-screen cursor movement. |
 | EOF | **End of File**: an interface indication that no more bytes are available in a completed stream; it is not universally a byte value stored in the data. |
 | Escape sequence / ANSI control sequence / ECMA-48 | A sequence interpreted as a terminal-control command rather than printable text; common conventions are standardized in ECMA-48. |
 | SGR | **Select Graphic Rendition**: terminal controls selecting text attributes such as colors, intensity, and underline. |

@@ -7,6 +7,7 @@
 #include "proc/startup.hpp"
 #include "proc/thread.hpp"
 #include "proc/user_program.hpp"
+#include "syscall/vfs.hpp"
 #include "util/fixed_string.hpp"
 
 long sys_write(const ProcessSyscallContext& context, int fd, uint64_t user_buffer, size_t length)
@@ -18,6 +19,8 @@ long sys_write(const ProcessSyscallContext& context, int fd, uint64_t user_buffe
     const long status = descriptor_acquire(thread->process->descriptors, fd, OS1_RIGHT_WRITE, instance);
     if(status < 0) return status;
     InstanceRef retained(instance);
+    if(instance->object->kind == OS1_OBJECT_FILE)
+        return vfs_write_or_block(*context.frames, thread, instance, user_buffer, length);
     if(!(instance->object->interfaces & OS1_INTERFACE_BYTE_OUTPUT) || !instance->object->write_bytes)
         return OS1_ERR_UNSUPPORTED;
     if(length > OS1_IO_MAX_BYTES) return OS1_ERR_INVALID;

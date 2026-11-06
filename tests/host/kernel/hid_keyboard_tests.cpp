@@ -81,3 +81,18 @@ TEST(HidKeyboard, RejectsTruncatedReports)
         state, report.data(), report.size(), output.data(), output.size(), output_count));
     EXPECT_EQ(0u, output_count);
 }
+TEST(HidKeyboard, LeftAndRightControlDProduceEof)
+{
+    for(uint8_t control : {0x01, 0x10})
+    {
+        usb::hid::BootKeyboardState state{};
+        uint8_t report[8]{control, 0, 0x07};
+        char out[6]{};
+        size_t count = 0;
+        ASSERT_TRUE(usb::hid::boot_keyboard_apply_report(state, report, 8, out, 6, count));
+        ASSERT_EQ(1u, count);
+        EXPECT_EQ(4, out[0]);
+        ASSERT_TRUE(usb::hid::boot_keyboard_apply_report(state, report, 8, out, 6, count));
+        EXPECT_EQ(0u, count);
+    }
+}

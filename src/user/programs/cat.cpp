@@ -1,15 +1,11 @@
 #include <os1/vfs.hpp>
 int main(int argc, char** argv)
 {
-    if(argc < 2)
-    {
-        os1::user::write(2, "usage: cat <path>...\n", sizeof("usage: cat <path>...\n") - 1);
-        return 1;
-    }
     char bytes[1024];
-    for(int i = 1; i < argc; ++i)
+    for(int i = argc < 2 ? 0 : 1; i < argc; ++i)
     {
-        const long file = os1::user::open(argv[i], OS1_RIGHT_READ);
+        const bool standard = !i || (argv[i][0] == '-' && !argv[i][1]);
+        const long file = standard ? 0 : os1::user::open(argv[i], OS1_RIGHT_READ);
         if(file < 0)
         {
             os1::user::write(2, "cat: cannot open file\n", sizeof("cat: cannot open file\n") - 1);
@@ -20,7 +16,8 @@ int main(int argc, char** argv)
             long count = os1::user::read(file, bytes, sizeof(bytes));
             if(count < 0)
             {
-                os1::user::close(file);
+                if(!standard)
+                    os1::user::close(file);
                 return 1;
             }
             if(!count)
@@ -31,13 +28,15 @@ int main(int argc, char** argv)
                 long written = os1::user::write(1, bytes + done, count - done);
                 if(written <= 0)
                 {
-                    os1::user::close(file);
+                    if(!standard)
+                        os1::user::close(file);
                     return 1;
                 }
                 done += written;
             }
         }
-        os1::user::close(file);
+        if(!standard)
+            os1::user::close(file);
     }
     return 0;
 }

@@ -31,7 +31,7 @@ struct Connection
     Account* account;
     const KernelProvider* kernel;
     OpenInstance* source;
-    uint32_t service_rights;
+    uint32_t service_rights, service_ceiling;
     bool account_created;
     uint64_t generation, next_request;
     bool client_closed, provider_closed, ready;
@@ -543,13 +543,14 @@ long bind_kernel(PageFrameContainer& frames, Thread* thread, uint64_t fd, uint64
     os1_ipc_kernel_binding request{};
     if(!copy_from_user(frames, thread, pointer, &request, sizeof(request)))
         return OS1_ERR_FAULT;
-    constexpr uint32_t service_rights = OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT;
     if(request.version != 1 || request.size != sizeof(request) || !request.rights ||
-       (request.rights & ~service_rights))
+       (request.rights & ~OS1_RIGHT_ALL))
         return OS1_ERR_INVALID;
     auto* provider = kernel_provider(request.interface_id, request.interface_version);
     if(!provider)
         return OS1_ERR_UNSUPPORTED;
+    if(request.rights & ~provider->allowed_rights)
+        return OS1_ERR_INVALID;
     DescriptorEntry grant{};
     long status = descriptor_acquire_entry(thread->process->descriptors, fd, 0, grant);
     if(status < 0)
@@ -557,7 +558,8 @@ long bind_kernel(PageFrameContainer& frames, Thread* thread, uint64_t fd, uint64
     InstanceRef source(grant.instance);
     if((request.rights & ~grant.rights))
         return OS1_ERR_ACCESS;
-    if(source.get()->object->kind != provider->object_kind)
+    if(source.get()->object->kind != provider->object_kind ||
+       (provider->accepts && !provider->accepts(source.get()->object)))
         return OS1_ERR_UNSUPPORTED;
     auto* c = kernel_allocation_allowed()
                   ? static_cast<Connection*>(kmalloc(sizeof(Connection), KmallocFlags::Zero))
@@ -587,6 +589,9 @@ long bind_kernel(PageFrameContainer& frames, Thread* thread, uint64_t fd, uint64
     c->kernel = provider;
     c->source = source.take();
     c->service_rights = request.rights;
+    c->service_ceiling =
+        grant.descendant_rights &
+        ((grant.rights & OS1_RIGHT_DELEGATE) ? OS1_RIGHT_ALL : ~OS1_RIGHT_DELEGATE);
     c->next_request = 1;
     c->ready = true;
     c->interface_id = provider->interface_id;
@@ -1501,7 +1506,9 @@ bool ipc_run_kernel_request()
     // retains the resource even if all client and result descriptors are closed.
     auto* c = op->connection;
     os1_ipc_result response{};
-    c->kernel->invoke(*c->source, c->service_rights, op->request, response);
+    DescriptorEntry output{};
+    c->kernel->invoke(
+        *c->source, c->service_rights, c->service_ceiling, op->request, response, output);
     {
         IrqSpinGuard guard(waiters.lock);
         detach_locked(op);
@@ -1514,8 +1521,15 @@ bool ipc_run_kernel_request()
         }
         else
             op->result.application_status = OS1_ERR_INVALID;
+        if(!op->result.application_status && output.instance)
+        {
+            op->result_caps.count = 1;
+            op->result_caps.entries[0] = output;
+            output = {};
+        }
         signal_locked();
     }
+    instance_release(output.instance);
     object_release(op);
     ipc_drain_wakeups();
     return true;

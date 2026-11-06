@@ -7,8 +7,12 @@ constexpr uint32_t kDirectoryRights =
 constexpr uint32_t kFileRights =
     OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT | OS1_RIGHT_EXECUTE | OS1_RIGHT_DELEGATE;
 constexpr uint32_t kInitrdCeiling = kDirectoryRights | kFileRights;
+struct Tmpfs;
 struct VfsNode : NativeObject
 {
+    Tmpfs* filesystem;
+    uint64_t cookie;
+    bool linked;
     VfsNode* children;
     VfsNode* next;
     const uint8_t* bytes;

@@ -118,7 +118,8 @@ bool boot_keyboard_apply_report(BootKeyboardState& state,
             return false;
         }
 
-        const char ascii = boot_key_usage_to_ascii(usage, shift);
+        const char ascii =
+            (modifiers & 0x11u) && usage == 0x07u ? 4 : boot_key_usage_to_ascii(usage, shift);
         if(0 != ascii)
         {
             output[output_count++] = ascii;

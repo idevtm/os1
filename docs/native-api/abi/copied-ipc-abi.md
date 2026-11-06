@@ -172,7 +172,8 @@ rejects duplicate member IDs, unknown formats, malformed names/types, missing
 metadata, duplicate metadata sections, truncation, and arithmetic-overflow ranges.
 
 The initrd packager strips symbol tables from staged executables to keep both
-boot paths within the 196 KiB BIOS initrd slot.
+boot paths within the current 200 KiB BIOS initrd slot.
+The [temporary filesystem record](../../archive/filesystems/2026-11-06-tmpfs-implementation.md) records the latest layout change.
 The [sessions/parameters phase](../../archive/native-api/2026-11-05-client-sessions-and-parameters.md) used an earlier 192 KiB slot. Full ELF build artifacts
 are retained; allocated metadata and section headers remain in packaged images.
 

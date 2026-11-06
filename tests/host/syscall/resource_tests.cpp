@@ -610,4 +610,50 @@ TEST_F(Resources, FinalObjectDestructionWaitsForAcceptedReferenceAndRunsUnlocked
     EXPECT_TRUE(object.destroyed);
     EXPECT_TRUE(object.unlocked);
 }
+TEST_F(Resources, CanonicalEofIsConsumedOnceAndPartialTextHasNoNewline)
+{
+    ASSERT_EQ(0, descriptor_set_status(table(), 0, OS1_STATUS_NONBLOCK));
+    input("abc\4");
+    EXPECT_EQ(3, read(0, 16));
+    EXPECT_EQ("abc", copied(3));
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, read(0, 16));
+    input("\4");
+    EXPECT_EQ(0, read(0, 0));
+    EXPECT_TRUE(console_input_has_line());
+    EXPECT_EQ(OS1_ERR_FAULT, read(0, 16, 0));
+    EXPECT_TRUE(console_input_has_line());
+    EXPECT_EQ(0, read(0, 16));
+    EXPECT_FALSE(console_input_has_line());
+    input("next\n");
+    EXPECT_EQ(5, read(0, 16));
+    EXPECT_EQ("next\n", copied(5));
+}
+TEST_F(Resources, EofReservationRollbackKeepsRecordAndWakesBlockedReader)
+{
+    input("\4");
+    char bytes[8];
+    size_t count = 99;
+    ASSERT_TRUE(console_input_reserve(bytes, sizeof(bytes), count));
+    EXPECT_EQ(0u, count);
+    console_input_finish(0, false);
+    EXPECT_TRUE(console_input_has_line());
+    EXPECT_EQ(0, read(0, 8));
+    long result = 0;
+    EXPECT_FALSE(read_or_block(frames, thread, 0, kUserImageBase, 8, result));
+    input("\4");
+    set_current_thread(nullptr);
+    wake_console_readers(frames);
+    EXPECT_EQ(ThreadState::Ready, thread->state);
+    EXPECT_EQ(0u, thread->frame.rax);
+}
+TEST_F(Resources, OverlongConsoleLineDiscardsTheWholePrefix)
+{
+    input(std::string(140, 'x').c_str());
+    input("\n");
+    EXPECT_EQ(OS1_ERR_RANGE, read(0, 128));
+    EXPECT_FALSE(console_input_has_line());
+    input("ok\n");
+    EXPECT_EQ(3, read(0, 128));
+    EXPECT_EQ("ok\n", copied(3));
+}
 }  // namespace

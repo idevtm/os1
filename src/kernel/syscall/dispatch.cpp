@@ -56,6 +56,8 @@ Thread* handle_syscall(TrapFrame* frame)
                 (int)frame->rdi,
                 frame->rsi,
                 (size_t)frame->rdx);
+            if(static_cast<long>(frame->rax) == kVfsBlocked)
+                return schedule_next(false);
             return thread;
         case os1_sys_read: {
             long read_result = OS1_ERR_INVALID;

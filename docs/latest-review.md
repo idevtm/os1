@@ -27,6 +27,9 @@ It records the selected `/tmp` filesystem and kernel-driver scope, plus dependen
 The [Native API index](native-api/README.md) replaces the draft-folder index and distinguishes current ABI profiles from proposals.
 This focused documentation assessment does not replace the whole-project review above.
 
+The [temporary filesystem record](archive/filesystems/2026-11-06-tmpfs-implementation.md) adds writable `/tmp` implementation and validation evidence.
+It preserves the initrd and does not close persistent-storage or hardware findings.
+
 ## Previous
 
 See the [review archive](archive/reviews/README.md) for earlier snapshots and their carry-forward notes.

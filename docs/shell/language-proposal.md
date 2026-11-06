@@ -11,6 +11,9 @@ the language after the implemented descriptor, console, launch, initrd, and boun
 A full reflective shell remains a later client of those interfaces.
 The [service roadmap](../native-api/roadmap.md) prioritizes OS services before this language.
 
+The current bounded shell already supports [interactive files, redirection, and a line editor](interactive-files.md).
+Those features do not implement the reflective language described below.
+
 ## 1. Purpose and design limits
 
 The shell should make typed data and granted resources convenient to use while

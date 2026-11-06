@@ -5,6 +5,7 @@
 #include "mm/kmem.hpp"
 #include "sync/atomic.hpp"
 #include "util/memory.h"
+#include "vfs/tmpfs.hpp"
 
 namespace
 {
@@ -63,17 +64,33 @@ void object_release(NativeObject* object)
        object->destroy)
         object->destroy(object);
 }
-OpenInstance* open_instance(NativeObject* object)
+OpenInstance* open_instance(NativeObject* object, long* error)
 {
+    if(error)
+        *error = OS1_ERR_NO_MEMORY;
     if(!object)
         return nullptr;
+    if(object->acquire_open)
+    {
+        long status = object->acquire_open(object);
+        if(status < 0)
+        {
+            if(error)
+                *error = status;
+            return nullptr;
+        }
+    }
     auto* instance = static_cast<OpenInstance*>(kmalloc(sizeof(OpenInstance), KmallocFlags::Zero));
     if(instance)
     {
         instance->references = 1;
         instance->object = object;
         object_retain(object);
+        if(error)
+            *error = 0;
     }
+    else if(object->release_open)
+        object->release_open(object);
     return instance;
 }
 void instance_retain(OpenInstance* instance)
@@ -84,6 +101,8 @@ void instance_release(OpenInstance* instance)
 {
     if(instance && __atomic_fetch_sub(&instance->references, 1u, __ATOMIC_ACQ_REL) == 1u)
     {
+        if(instance->object->release_open)
+            instance->object->release_open(instance->object);
         object_release(instance->object);
         kfree(instance);
     }
@@ -245,19 +264,36 @@ long descriptor_set_flags(DescriptorTable& table, int fd, uint32_t flags)
 }
 long descriptor_set_status(DescriptorTable& table, int fd, uint32_t flags)
 {
-    if(flags & ~OS1_STATUS_NONBLOCK)
+    if(flags & ~(OS1_STATUS_NONBLOCK | OS1_STATUS_APPEND))
         return OS1_ERR_INVALID;
-    OpenInstance* instance = nullptr;
-    long status = descriptor_acquire(table, fd, OS1_RIGHT_READ, instance);
+    DescriptorEntry entry{};
+    long status = descriptor_acquire_entry(table, fd, 0, entry);
     if(status < 0)
         return status;
+    auto* instance = entry.instance;
     InstanceRef retained(instance);
-    if(instance->object->kind != OS1_OBJECT_CONSOLE ||
-       !(instance->object->interfaces & OS1_INTERFACE_BYTE_INPUT))
+    uint32_t required;
+    if(instance->object->kind == OS1_OBJECT_CONSOLE &&
+       (instance->object->interfaces & OS1_INTERFACE_BYTE_INPUT))
+    {
+        if(flags & ~OS1_STATUS_NONBLOCK)
+            return OS1_ERR_UNSUPPORTED;
+        required = OS1_RIGHT_READ;
+    }
+    else if(tmpfs_node(instance->object) && instance->object->kind == OS1_OBJECT_FILE)
+    {
+        if(flags & ~OS1_STATUS_APPEND)
+            return OS1_ERR_UNSUPPORTED;
+        required = OS1_RIGHT_WRITE;
+    }
+    else
         return OS1_ERR_UNSUPPORTED;
+    if(!(entry.rights & required))
+        return OS1_ERR_ACCESS;
     atomic_store_release(&instance->status_flags, flags);
     return 0;
 }
+
 void descriptor_close_all(DescriptorTable& table)
 {
     close_selected(table, true);

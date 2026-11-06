@@ -127,6 +127,8 @@ long load_user_object_image(PageFrameContainer& frames,
 {
     if(!instance || instance->object->kind != OS1_OBJECT_FILE)
         return OS1_ERR_UNSUPPORTED;
+    if(!(instance->object->allowed_rights & OS1_RIGHT_EXECUTE))
+        return OS1_ERR_ACCESS;
     const auto* file = static_cast<VfsNode*>(instance->object);
     return load_user_elf(
         frames, kernel_root_cr3, file->bytes, file->byte_size, user_cr3, entry, user_rsp);

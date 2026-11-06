@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <os1/line_editor.hpp>
 #include <os1/parameter_client.hpp>
 #include <os1/syscall.hpp>
 #include <os1/vfs.hpp>
@@ -12,6 +13,20 @@ namespace
 {
 constexpr size_t kShellLineBytes = 128;
 constexpr size_t kShellMaxTokens = 16;
+int output_fd = 1;
+bool output_failed = false;
+struct DiagnosticOutput
+{
+    int saved = output_fd;
+    DiagnosticOutput()
+    {
+        output_fd = 2;
+    }
+    ~DiagnosticOutput()
+    {
+        output_fd = saved;
+    }
+};
 constexpr size_t kShellObserveBufferBytes = 64 * 1024;
 
 alignas(16) uint8_t g_observe_buffer[kShellObserveBufferBytes];
@@ -32,7 +47,13 @@ void write_bytes(const char* data, size_t length)
     {
         return;
     }
-    os1::user::write(1, data, length);
+    if(output_fd == 1 && output_failed)
+        return;
+    if(!os1::user::files::put(output_fd, data, length) && output_fd == 1)
+    {
+        output_failed = true;
+        os1::user::files::message("shell: output failed; file may be partial\n");
+    }
 }
 
 void write_string(const char* text)
@@ -128,40 +149,15 @@ size_t normalize_line(char* buffer, long count)
     return length;
 }
 
-size_t tokenize(char* buffer, char* tokens[kShellMaxTokens])
-{
-    size_t count = 0;
-    size_t index = 0;
-    while(buffer[index])
-    {
-        while(buffer[index] && is_space(buffer[index]))
-        {
-            buffer[index++] = 0;
-        }
-        if(0 == buffer[index])
-        {
-            break;
-        }
-        if(count == kShellMaxTokens)
-        {
-            return count;
-        }
-        tokens[count++] = buffer + index;
-        while(buffer[index] && !is_space(buffer[index]))
-        {
-            ++index;
-        }
-    }
-    return count;
-}
-
 void write_prompt()
 {
+    DiagnosticOutput diagnostic_output;
     write_string("os1> ");
 }
 
 void write_observe_failure(const char* command)
 {
+    DiagnosticOutput diagnostic_output;
     write_string("observe failed: ");
     write_string(command);
     write_char('\n');
@@ -440,6 +436,8 @@ bool observe(uint32_t kind, const Record*& records, uint32_t& record_count)
 
 void run_help()
 {
+    write_string("files: touch path; write [--append|--replace] path; edit path\n");
+    write_string("streams: < file, > file, >> file, << delimiter; Ctrl-D ends input\n");
     write_string(
         "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit\n");
     write_string(
@@ -449,10 +447,10 @@ void run_help()
 
 void run_echo(size_t argc, char* argv[kShellMaxTokens])
 {
-    write_string("echo:");
     for(size_t i = 1; i < argc; ++i)
     {
-        write_char(' ');
+        if(i > 1)
+            write_char(' ');
         write_string(argv[i]);
     }
     write_char('\n');
@@ -890,6 +888,7 @@ void run_events()
 
 void run_unknown(const char* command)
 {
+    DiagnosticOutput diagnostic_output;
     write_string("unknown command: ");
     write_string(command);
     write_char('\n');
@@ -948,22 +947,20 @@ bool resolve_command_path(const char* command, char* path, size_t path_size)
     return true;
 }
 
-void write_spawn_outcome(const char* command, long pid, int status)
+void write_child_failure(const char* command, int status)
 {
-    write_string("shell spawn ");
+    write_string("command failed: ");
     write_string(command);
-    write_string(" ok pid=");
-    write_signed(pid);
     write_string(" status=");
     write_signed(status);
     write_char('\n');
-    write_string("shell prompt resumed\n");
 }
 
 const char* raw_tail(const char* raw, unsigned words);
 void parameter_diagnostic(const os1::parameters::Diagnostic& d);
 void run_exec(size_t argc, char* argv[kShellMaxTokens], const char* raw)
 {
+    DiagnosticOutput diagnostic_output;
     if(argc < 2)
     {
         write_string("usage: exec <path> [args...]\n");
@@ -994,6 +991,7 @@ void run_exec(size_t argc, char* argv[kShellMaxTokens], const char* raw)
 
 void parameter_diagnostic(const os1::parameters::Diagnostic& d)
 {
+    DiagnosticOutput diagnostic_output;
     write_string("parameter error code=");
     write_unsigned(static_cast<unsigned>(d.code));
     write_string(" path=");
@@ -1024,6 +1022,7 @@ const char* raw_tail(const char* raw, unsigned words)
 }
 void run_call(size_t argc, char** argv, const char* raw)
 {
+    DiagnosticOutput diagnostic_output;
     if(argc < 3)
     {
         write_string("usage: call <image> <method> [raw named parameters]\n");
@@ -1079,6 +1078,7 @@ void run_call(size_t argc, char** argv, const char* raw)
         write_char('\n');
         return;
     }
+    output_fd = diagnostic_output.saved;
     if(client.interface.interface_id == os1::parameter_demo::interface_id &&
        member == os1::parameter_demo::Render && result.payload_bytes >= 8)
     {
@@ -1101,6 +1101,7 @@ void run_call(size_t argc, char** argv, const char* raw)
 
 void run_external(size_t argc, char** argv, const char* raw)
 {
+    DiagnosticOutput diagnostic_output;
     const char* command = argv[0];
     char path[OS1_OBSERVE_INITRD_PATH_BYTES];
     if(!resolve_command_path(command, path, sizeof(path)))
@@ -1140,41 +1141,72 @@ void run_external(size_t argc, char** argv, const char* raw)
         return;
     }
 
-    write_spawn_outcome(command, waited, status);
+    if(status != 0)
+        write_child_failure(command, status);
 }
 }  // namespace
 
 int main(int, char**)
 {
     char line[kShellLineBytes];
-    char raw[kShellLineBytes];
-    char* tokens[kShellMaxTokens];
+    os1::user::files::Reader reader;
+    os1::user::files::Line input;
 
-    write_string("shell prompt ready\n");
+    os1_resource_info input_info{};
+    const bool console_input =
+        os1::user::query(0, &input_info) >= 0 && input_info.kind == OS1_OBJECT_CONSOLE;
+    os1::user::files::message("shell prompt ready\n");
     for(;;)
     {
+        output_failed = false;
         write_prompt();
-        const long count = os1::user::read(0, line, sizeof(line));
-        if(count <= 0)
+        long input_status = reader.line(input);
+        if(input_status < 0)
         {
-            write_string("shell read failed\n");
-            os1::user::yield();
+            os1::user::files::message("shell read failed\n");
+            if(input_status != OS1_ERR_RANGE)
+                return 1;
             continue;
         }
 
-        for(size_t i = 0; i < kShellMaxTokens; ++i)
+        if(!input.size)
         {
-            tokens[i] = nullptr;
+            if(input.eof && !console_input)
+                return 0;
+            os1::user::files::message("\n");
+            continue;
         }
-        normalize_line(line, count);
-        copy_string(raw, sizeof(raw), line);
-        const size_t argc = tokenize(line, tokens);
+        for(size_t i = 0; i < input.size; ++i)
+            line[i] = input.bytes[i];
+        normalize_line(line, input.size);
+        os1::shell::Command parsed;
+        if(!os1::shell::parse(line, parsed))
+        {
+            os1::user::files::message(parsed.error);
+            os1::user::files::message("\n");
+            continue;
+        }
+        const size_t argc = parsed.argc;
+        char** tokens = parsed.argv;
+        const char* raw = parsed.raw;
         if(0 == argc)
         {
             continue;
         }
 
-        if(strings_equal(tokens[0], "help"))
+        os1::user::files::Streams streams;
+        if(!streams.apply(parsed))
+        {
+            os1::user::files::message("shell: redirection failed\n");
+            continue;
+        }
+        if(strings_equal(tokens[0], "touch"))
+            os1::user::files::touch(argc, tokens);
+        else if(strings_equal(tokens[0], "write"))
+            os1::user::files::write_command(argc, tokens);
+        else if(strings_equal(tokens[0], "edit"))
+            os1::user::files::edit(argc, tokens);
+        else if(strings_equal(tokens[0], "help"))
         {
             run_help();
         }

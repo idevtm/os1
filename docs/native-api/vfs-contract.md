@@ -7,11 +7,11 @@ extension profiles remain unfrozen. This document specifies the namespace and
 file profile of the [native object kernel contract](object-contract.md).
 The [approval record](object-contract.md#approved-decisions--2026-11-04)
 defines the accepted scope. Requirements below describe the intended interface;
-the console and immutable initrd subset now has an
-[implemented ABI](abi/initrd-vfs-abi.md). Credentials and extension profiles remain
+the console and immutable initrd subset has an
+[implemented ABI](abi/initrd-vfs-abi.md). The bounded [writable `/tmp` profile](abi/tmpfs-abi.md) adds Directory/File services. Credentials and extension profiles remain
 unimplemented. The
 [Native API index](README.md) separates implemented subsets from proposed extensions.
-The [service roadmap](roadmap.md#milestone-1-writable-ram-filesystem) plans writable `/tmp` and subsequent persistent USB data.
+The [service roadmap](roadmap.md#milestone-1-writable-ram-filesystem) records remaining bulk-transfer work and planned persistent USB data.
 
 The native contract owns descriptor representation, rights, argument/result
 encoding, failure transport, duplication, close, and process inheritance. This
@@ -21,8 +21,8 @@ The shell and POSIX bindings use these same contracts.
 
 The first profile contains descriptor-backed console streams, a read-only initrd
 namespace, regular-file reads, bounded metadata, and explicit root/cwd handles.
-Filesystem service providers, writable filesystems, mutable mounts, links, general file mappings,
-device control, and the broad `/os` tree are later profiles. Appendix A preserves
+The temporary filesystem extension adds writable nodes, mutation rights, quotas, and native kernel providers.
+Public mutable mounts, persistent filesystems, links, general file mappings, device control, and the broad `/os` tree remain later profiles. Appendix A preserves
 the larger object catalog as illustrative design material.
 
 ## 1. Objects, names, open instances, and descriptors

@@ -40,7 +40,8 @@ Attenuating endpoint transport rights does not change those captured rights.
 Create a separate binding with reduced service rights before delegation when that reduction is required.
 
 No ambient service lookup, provider descriptor, registration syscall, or class activation is exposed.
-The fixed internal provider table currently contains only Console v1.
+The fixed internal provider table contains Console v1 and the [Directory/File v1 providers](tmpfs-abi.md).
+The limits below apply across all three providers.
 Separate console bindings share the existing underlying console state.
 
 ## Members and records
@@ -58,14 +59,22 @@ All fields use the current x86-64 little-endian ABI.
 `info` contains four `u32` fields: `rights`, `max_write_bytes`, `max_read_bytes`, and `flags`.
 `rights` reports captured service rights.
 The output console reports maximum write size 256, maximum read size zero, and flags zero.
-The input console reports maximum write size zero, maximum read size 128, and flag `OS1_CONSOLE_CANONICAL_INPUT`.
+The input console reports maximum write size zero, maximum read size 128, and flags `OS1_CONSOLE_CANONICAL_INPUT` (1) and `OS1_CONSOLE_EOF_INPUT` (2).
 These maxima describe callback support; they do not grant method authority.
 
 `try_read` accepts capacities from zero through 128.
 Zero capacity succeeds without consuming input.
 A positive capacity consumes at most one completed line prefix.
 No available completed input, including a competing read reservation, produces application status WOULD_BLOCK.
-There is no end-of-file indication or blocking read in this profile.
+Ctrl-D with pending text completes those bytes without a newline.
+Ctrl-D on an empty pending line produces one EOF record: successful `try_read` with zero result bytes.
+A positive-capacity read consumes that record once; later reads can receive new input.
+Overlong console lines discard their full contents and produce one RANGE error record.
+The bound is 127 text bytes plus an optional newline.
+EOF and error records occupy the same eight-entry queue as completed lines.
+A full queue drops the newly completed record, as before.
+The retained Operation preserves EOF or RANGE across RESULT faults and retries.
+There is no blocking `try_read` in this profile.
 Descriptor readers and IPC readers compete for the same canonical queue.
 
 Unknown members produce application status UNSUPPORTED.
