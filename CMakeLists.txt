@@ -23,6 +23,10 @@ include(CTest)
 
 option(OS1_KMEM_DEBUG "Enable kernel small-object allocator debug instrumentation" ON)
 option(OS1_BOOT_DIAGNOSTICS "Enable USB pre-loader and BIOS boot-log diagnostics" OFF)
+option(OS1_USB_KEYBOARD_DIAGNOSTICS "Boot unattended USB keyboard diagnostics" OFF)
+if(OS1_USB_KEYBOARD_DIAGNOSTICS)
+  set(OS1_BOOT_DIAGNOSTICS ON)
+endif()
 option(OS1_QEMU_DEBUGCON "Mirror kernel output to QEMU port 0xE9 for no-UART tests" OFF)
 set(OS1_USB_BASE_IMAGE "" CACHE FILEPATH "Verified base image for kernel-only USB updates")
 # Reject stale profile caches rather than silently switching their image recipe.
@@ -158,6 +162,9 @@ set(OS1_USB_PRELOADER_ARGS)
 set(OS1_USB_PRELOADER_DEPENDS)
 if(OS1_BOOT_DIAGNOSTICS)
   set(OS1_LIMINE_USB_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine-usb-diagnostic.conf")
+  if(OS1_USB_KEYBOARD_DIAGNOSTICS)
+    set(OS1_LIMINE_USB_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine-usb-keyboard.conf")
+  endif()
   set(OS1_USB_PRELOADER_ARGS --preloader "${OS1_EFI_PRELOADER}")
   set(OS1_USB_PRELOADER_DEPENDS "${OS1_EFI_PRELOADER}" os1_efi_preloader)
 endif()
@@ -172,8 +179,8 @@ foreach(OS1_VENDOR_FILE
   endif()
 endforeach()
 
-set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0x10000)
-# Share the existing low-memory staging span: 364.5 KiB kernel, 187.5 KiB initrd.
+set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
+# Use the free page after the five early page tables: 372.5 KiB kernel, 187.5 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
 set(OS1_INITRD_LOAD_ADDRESS 0x6b200)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
@@ -1036,6 +1043,28 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "${PROJECT_SOURCE_DIR}/cmake/scripts/run_smoke_test.cmake"
   )
   list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_xhci)
+
+  if(OS1_USB_KEYBOARD_DIAGNOSTICS)
+    add_test(NAME os1_smoke_usb_keyboard_absent
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_keyboard_diagnostics.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_ARTIFACT_DIR}/os1-usb.img"
+        --log "${OS1_ARTIFACT_DIR}/keyboard-absent.log" --no-keyboard
+        --code "${OS1_OVMF_CODE}" --vars "${OS1_OVMF_VARS_TEMPLATE}")
+    set_tests_properties(os1_smoke_usb_keyboard_absent PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_usb_keyboard_absent)
+    foreach(boot IN ITEMS uefi bios)
+      set(keyboard_firmware_args)
+      if(boot STREQUAL "uefi")
+        list(APPEND keyboard_firmware_args --code "${OS1_OVMF_CODE}" --vars "${OS1_OVMF_VARS_TEMPLATE}")
+      endif()
+      add_test(NAME os1_smoke_usb_keyboard_${boot}
+        COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_keyboard_diagnostics.py"
+          --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_ARTIFACT_DIR}/os1-usb.img"
+          --log "${OS1_ARTIFACT_DIR}/keyboard-${boot}.log" ${keyboard_firmware_args})
+      set_tests_properties(os1_smoke_usb_keyboard_${boot} PROPERTIES TIMEOUT 180)
+      list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_usb_keyboard_${boot})
+    endforeach()
+  endif()
 
   add_custom_target(
     smoke_xhci

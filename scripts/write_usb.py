@@ -334,6 +334,7 @@ def choose_layout(base):
         ("boot", "Update boot files (preserve data)"),
         ("programs", "Deploy programs (preserve other files)"),
         ("all", "Update boot and programs (preserve data)"),
+        ("diagnostic", "Create keyboard diagnostic image (erase USB)"),
         ("legacy", "Boot-only image options >")],
         "Initial creation defaults to a 128 MiB data partition. Updates require the os1 boot/data layout.")
     if choice == "legacy":
@@ -461,13 +462,19 @@ def update_device(image, disk, expected_identity, mode, before, after):
 
 
 def build_image(build_dir, toolchain, layout, base):
+    diagnostic = layout == "diagnostic"
+    if diagnostic:
+        build_dir = build_dir / "keyboard-diagnostic"
+        print("Building keyboard diagnostic image in " + str(build_dir), flush=True)
     subprocess.run(["cmake", "-S", str(ROOT), "-B", str(build_dir), "-G", "Ninja",
                     "-DCMAKE_TOOLCHAIN_FILE=" + str(toolchain), "-DCMAKE_BUILD_TYPE=Debug",
-                    "-DOS1_QEMU_DEBUGCON=OFF", "-DOS1_BOOT_DIAGNOSTICS=OFF"], check=True)
+                    "-DOS1_QEMU_DEBUGCON=OFF",
+                    "-DOS1_BOOT_DIAGNOSTICS=" + ("ON" if diagnostic else "OFF"),
+                    "-DOS1_USB_KEYBOARD_DIAGNOSTICS=" + ("ON" if diagnostic else "OFF")], check=True)
     subprocess.run(["cmake", "--build", str(build_dir), "--target",
                     "os1_usb_data_image" if layout == "data" else "os1_usb_image", "user_programs"], check=True)
     artifacts = build_dir / "artifacts"
-    if layout in ("fresh", "data"):
+    if layout in ("fresh", "data", "diagnostic"):
         return artifacts / ("os1-usb-data.img" if layout == "data" else "os1-usb.img")
     output = artifacts / "os1-usb-preserved.img"
     subprocess.run([sys.executable, "-I", str(ROOT / "cmake/scripts/update_usb_payloads.py"),
@@ -493,6 +500,12 @@ def interactive(args):
         size = image.stat().st_size
         checksum = digest_stream(source, size)
     print(f"\nImage: {image}\nBytes: {size}\nSHA-256: {checksum}", flush=True)
+    if layout == "diagnostic":
+        print("Boot the UEFI USB entry. Diagnostics start without keyboard input.\n"
+              "Try a few keys after the summary. The watchdog may restart the computer after about 3 minutes.\n"
+              "If it does not restart, use the physical reset button; do not power off before log collection.\n"
+              "After 'previous boot log saved', power off and collect os1logs from the USB EFI volume.\n"
+              "This image replaces the USB contents and has no ext2 data partition.", flush=True)
     disks = list_disks(size)
     if not disks:
         raise ValueError("no writable external physical USB disk with 512-byte sectors is available; image is ready")

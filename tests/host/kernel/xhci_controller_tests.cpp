@@ -336,3 +336,436 @@ TEST(XhciController, QuiesceMasksControllerAndInterrupterSources)
     EXPECT_EQ(xhci::kUsbcmdRunStop, read32(mmio, 0x40 + xhci::kOperationalUsbcmd));
     EXPECT_EQ(xhci::kImanInterruptPending, read32(mmio, 0x200 + xhci::kRuntimeInterrupter0));
 }
+
+TEST(XhciDiagnostics, LegacySnapshotIsReadOnlyAndFollowsForwardCapabilities)
+{
+    alignas(4) std::array<uint8_t, 256> bytes{};
+    write32(bytes, 0x10, 0x10u << 16);
+    write32(bytes, 0x40, 2u | (4u << 8));
+    write32(bytes, 0x50, 1u | (1u << 16) | (1u << 24));
+    write32(bytes, 0x54, 0x12345678);
+    const auto before = bytes;
+    xhci::ControllerLayout layout{};
+    layout.mmio_base = bytes.data();
+    layout.mmio_size = bytes.size();
+    xhci::LegacySupport snapshot{};
+    ASSERT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Present);
+    EXPECT_EQ(snapshot.offset, 0x50u);
+    EXPECT_EQ(snapshot.support, 0x01010001u);
+    EXPECT_EQ(snapshot.control, 0x12345678u);
+    EXPECT_EQ(bytes, before);
+}
+
+TEST(XhciDiagnostics, MissingAndMalformedLegacyTablesAreDistinct)
+{
+    alignas(4) std::array<uint8_t, 256> bytes{};
+    xhci::ControllerLayout layout{};
+    layout.mmio_base = bytes.data();
+    layout.mmio_size = bytes.size();
+    xhci::LegacySupport snapshot{};
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Absent);
+    for(const uint32_t offset : {0x10u, 0x100u, 0x3fffcu})
+    {
+        write32(bytes, 0x10, (offset / 4u) << 16);
+        EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    }
+    write32(bytes, 0x10, 0x3fu << 16);
+    write32(bytes, 0xfc, 1u);  // Missing legacy control register.
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    write32(bytes, 0xfc, 2u | (1u << 8));  // Next capability outside the BAR.
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    write32(bytes, 0xfc, 2u);  // A terminating unrelated capability is valid.
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Absent);
+    layout.mmio_size = 0x10;
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    layout.mmio_base = nullptr;
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+}
+
+TEST(XhciDiagnostics, LegacyTraversalHasAFixedReadBudget)
+{
+    alignas(4) std::array<uint8_t, 2048> bytes{};
+    write32(bytes, 0x10, 0x10u << 16);
+    for(size_t offset = 0x40; offset < bytes.size(); offset += 4)
+        write32(bytes, offset, 2u | (1u << 8));
+    xhci::ControllerLayout layout{};
+    layout.mmio_base = bytes.data();
+    layout.mmio_size = bytes.size();
+    xhci::LegacySupport snapshot{};
+    EXPECT_EQ(xhci::read_legacy_support(layout, snapshot), xhci::LegacySupportResult::Invalid);
+    EXPECT_EQ(snapshot.offset, 0u);
+}
+
+namespace
+{
+struct HandoffFixture
+{
+    alignas(4) std::array<uint8_t, 256> bytes{};
+    unsigned waits = 0;
+    bool release = true;
+    xhci::ControllerLayout layout()
+    {
+        xhci::ControllerLayout value{};
+        value.mmio_base = bytes.data();
+        value.mmio_size = bytes.size();
+        return value;
+    }
+    static void delay(uint32_t us, void* context)
+    {
+        auto& f = *static_cast<HandoffFixture*>(context);
+        EXPECT_EQ(us, 1000u);
+        EXPECT_NE(read32(f.bytes, 0x40) & (1u << 24), 0u);
+        if(++f.waits == 2 && f.release)
+            write32(f.bytes, 0x40, read32(f.bytes, 0x40) & ~(1u << 16));
+    }
+    HandoffFixture()
+    {
+        write32(bytes, 0x10, 0x10u << 16);
+        write32(bytes, 0x40, 0x10001u);
+        write32(bytes, 0x44, 0xc00fffffu);
+    }
+};
+struct RoutingFixture
+{
+    std::array<uint32_t, 4> registers{0, 0xfff, 0, 3};
+    std::array<uint16_t, 8> writes{};
+    unsigned write_count = 0, read_count = 0;
+    uint16_t reject = 0;
+    static uint32_t read(void* context, uint16_t offset)
+    {
+        auto& f = *static_cast<RoutingFixture*>(context);
+        ++f.read_count;
+        EXPECT_GE(offset, 0xd0);
+        EXPECT_LE(offset, 0xdc);
+        return f.registers[(offset - 0xd0) / 4];
+    }
+    static void write(void* context, uint16_t offset, uint32_t value)
+    {
+        auto& f = *static_cast<RoutingFixture*>(context);
+        EXPECT_TRUE(offset == 0xd0 || offset == 0xd8);
+        if(f.write_count < f.writes.size())
+            f.writes[f.write_count++] = offset;
+        if(offset != f.reject)
+            f.registers[(offset - 0xd0) / 4] = value;
+    }
+    xhci::RoutingIo io()
+    {
+        return {this, read, write};
+    }
+};
+}  // namespace
+
+TEST(XhciHandoff, RequestsOwnershipBeforePollingAndDisablesSmiAfterRelease)
+{
+    HandoffFixture f;
+    ASSERT_TRUE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+    EXPECT_EQ(f.waits, 2u);
+    EXPECT_EQ(read32(f.bytes, 0x40), 0x01000001u);
+    // Preserve reserved fields; write ones to W1C status bits; clear SMI enables.
+    EXPECT_EQ(read32(f.bytes, 0x44), 0xe00f1feeu);
+}
+
+TEST(XhciHandoff, PendingReadOnlyStatusDoesNotRejectOwnership)
+{
+    for(const uint32_t status : {1u << 16, 1u << 20, (1u << 16) | (1u << 20)})
+    {
+        HandoffFixture f;
+        write32(f.bytes, 0x44, status | 0xe011u);
+        ASSERT_TRUE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+        // RMW retains these RO bits in the fixture, as hardware does on writes.
+        EXPECT_EQ(read32(f.bytes, 0x44) & status, status);
+        EXPECT_EQ(read32(f.bytes, 0x44) & 0xe011u, 0u);
+    }
+}
+
+TEST(XhciHandoff, TimeoutNeverForcesBiosReleaseOrChangesSmiControl)
+{
+    HandoffFixture f;
+    f.release = false;
+    ASSERT_FALSE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+    EXPECT_EQ(f.waits, 1000u);
+    EXPECT_EQ(read32(f.bytes, 0x40), 0x01010001u);
+    EXPECT_EQ(read32(f.bytes, 0x44), 0xc00fffffu);
+}
+
+TEST(XhciHandoff, AlreadyReleasedAndAbsentCapabilitiesDoNotWait)
+{
+    HandoffFixture f;
+    write32(f.bytes, 0x40, 1u);
+    ASSERT_TRUE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+    EXPECT_EQ(f.waits, 0u);
+    EXPECT_EQ(read32(f.bytes, 0x40), 0x01000001u);
+    write32(f.bytes, 0x10, 0u);
+    const auto before = f.bytes;
+    ASSERT_TRUE(xhci::acquire_legacy_ownership(f.layout(), nullptr, nullptr));
+    EXPECT_EQ(f.bytes, before);
+}
+
+TEST(XhciHandoff, InvalidTableAndMissingDelayHaveNoWrites)
+{
+    HandoffFixture f;
+    auto before = f.bytes;
+    EXPECT_FALSE(xhci::acquire_legacy_ownership(f.layout(), nullptr, nullptr));
+    EXPECT_EQ(f.bytes, before);
+    write32(f.bytes, 0x10, 0xffff0000u);
+    before = f.bytes;
+    EXPECT_FALSE(xhci::acquire_legacy_ownership(f.layout(), f.delay, &f));
+    EXPECT_EQ(f.bytes, before);
+}
+
+TEST(XhciRouting, EnablesSuperSpeedBeforeUsb2AndPreservesOtherBits)
+{
+    RoutingFixture f;
+    f.registers[0] = 0x80000000u;
+    f.registers[2] = 0x40000000u;
+    EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Changed);
+    EXPECT_EQ(f.write_count, 2u);
+    EXPECT_EQ(f.writes[0], 0xd8);
+    EXPECT_EQ(f.writes[1], 0xd0);
+    EXPECT_EQ(f.registers[0], 0x80000fffu);
+    EXPECT_EQ(f.registers[2], 0x40000003u);
+    EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Unchanged);
+    EXPECT_EQ(f.write_count, 2u);
+}
+
+TEST(XhciRouting, OtherDevicesAndZeroMasksDoNotWrite)
+{
+    RoutingFixture f;
+    EXPECT_EQ(xhci::route_intel_ports(0x1b36, 0x000d, f.io()), xhci::RoutingResult::NotApplicable);
+    EXPECT_EQ(xhci::route_intel_ports(0x8086, 0xffff, f.io()), xhci::RoutingResult::NotApplicable);
+    EXPECT_EQ(f.read_count, 0u);
+    EXPECT_EQ(f.write_count, 0u);
+    f.registers = {};
+    EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Unchanged);
+    EXPECT_EQ(f.write_count, 0u);
+}
+
+TEST(XhciRouting, InaccessibleRegistersNeverWrite)
+{
+    for(unsigned index = 0; index < 4; ++index)
+    {
+        RoutingFixture f;
+        f.registers[index] = 0xffffffffu;
+        EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Failed);
+        EXPECT_EQ(f.write_count, 0u);
+    }
+}
+
+TEST(XhciRouting, FailedReadbackRestoresOriginalRoutesBeforeReturning)
+{
+    for(uint16_t reg : {0xd0, 0xd8})
+    {
+        RoutingFixture f;
+        f.reject = reg;
+        const auto before = f.registers;
+        EXPECT_EQ(xhci::route_intel_ports(0x8086, 0x8c31, f.io()), xhci::RoutingResult::Failed);
+        EXPECT_EQ(f.registers, before);
+        EXPECT_EQ(f.writes[f.write_count - 2], 0xd0);
+        EXPECT_EQ(f.writes[f.write_count - 1], 0xd8);
+    }
+}
+
+namespace
+{
+struct ControlFixture
+{
+    alignas(64) std::array<uint8_t, 128> bytes{};
+    xhci::CommandRingInfo ring{};
+    xhci::ControlTransfer transfer{};
+    ControlFixture()
+    {
+        EXPECT_TRUE(xhci::initialize_command_ring(bytes.data(), bytes.size(), 0x1000, ring));
+    }
+    bool queue(uint16_t length = 18, bool in = true)
+    {
+        const uint64_t setup = (uint64_t(length) << 48) | 0x01000600u | (in ? 0x80u : 0u);
+        return xhci::queue_control_transfer(
+            bytes.data(), bytes.size(), 0x1000, ring, setup, 0x2000, transfer);
+    }
+    uint32_t control(unsigned stage)
+    {
+        return read32(bytes, transfer.stages[stage] - 0x1000 + 12);
+    }
+    bool event(unsigned stage, uint8_t cc, uint32_t residual = 0)
+    {
+        xhci::EventInfo event{};
+        event.parameter = transfer.stages[stage];
+        event.completion_code = cc;
+        event.transfer_length = residual;
+        return xhci::control_transfer_event(transfer, event);
+    }
+};
+}  // namespace
+
+TEST(XhciControl, InRequestHasSeparateStagesAndPublishesSetupLast)
+{
+    ControlFixture f;
+    ASSERT_TRUE(f.queue());
+    EXPECT_EQ(f.control(0), (2u << 10) | (1u << 6) | (3u << 16));  // Cycle initially withheld.
+    EXPECT_EQ(f.control(1), (3u << 10) | (1u << 16) | (1u << 2) | 1u);
+    EXPECT_EQ(f.control(2), (4u << 10) | (1u << 5) | 1u);
+    EXPECT_EQ(read64(f.bytes, 0), (18ull << 48) | 0x01000680u);
+    EXPECT_EQ(read32(f.bytes, 8), 8u);
+    EXPECT_EQ(read64(f.bytes, 16), 0x2000u);
+    EXPECT_EQ(read32(f.bytes, 24), 18u);
+    xhci::publish_control_transfer(f.bytes.data(), 0x1000, f.transfer);
+    EXPECT_EQ(f.control(0) & 1u, 1u);
+    EXPECT_TRUE(f.event(2, 1));
+    EXPECT_TRUE(f.transfer.done);
+    EXPECT_EQ(f.transfer.completion, 1u);
+    EXPECT_EQ(f.transfer.residual, 0u);
+}
+
+TEST(XhciControl, OutAndNoDataHaveInStatusWithoutShortPacketInterrupt)
+{
+    for(uint16_t length : {0u, 8u})
+    {
+        ControlFixture f;
+        ASSERT_TRUE(f.queue(length, false));
+        EXPECT_EQ((f.control(0) >> 16) & 3u, length ? 2u : 0u);
+        EXPECT_EQ(f.control(2), (4u << 10) | (1u << 16) | (1u << 5) | 1u);
+        if(length)
+            EXPECT_EQ(f.control(1), (3u << 10) | 1u);
+        else
+            EXPECT_EQ(f.transfer.stages[1], 0u);
+        EXPECT_TRUE(f.event(2, 1));
+        EXPECT_TRUE(f.transfer.done);
+    }
+}
+
+TEST(XhciControl, ShortDataWaitsForStatusAndRetainsActualLength)
+{
+    for(uint32_t residual : {0u, 10u, 18u})
+    {
+        ControlFixture f;
+        ASSERT_TRUE(f.queue());
+        ASSERT_TRUE(f.event(1, 13, residual));
+        EXPECT_FALSE(f.transfer.done);
+        ASSERT_TRUE(f.event(2, 1));
+        EXPECT_TRUE(f.transfer.done);
+        EXPECT_EQ(f.transfer.completion, 1u);
+        EXPECT_EQ(f.transfer.requested - f.transfer.residual, 18u - residual);
+        EXPECT_FALSE(f.event(1, 13, 0));  // Late event cannot overwrite a retired request.
+        EXPECT_EQ(f.transfer.residual, residual);
+    }
+}
+
+TEST(XhciControl, ErrorsAtEveryStageCompleteWithoutWaitingForStatus)
+{
+    for(unsigned stage = 0; stage < 3; ++stage)
+        for(uint8_t cc : {4u, 5u, 6u})
+        {
+            ControlFixture f;
+            ASSERT_TRUE(f.queue());
+            EXPECT_TRUE(f.event(stage, cc));
+            EXPECT_TRUE(f.transfer.done);
+            EXPECT_EQ(f.transfer.completion, cc);
+            EXPECT_EQ(f.transfer.residual, 18u);
+            EXPECT_FALSE(f.event(2, 1));
+        }
+}
+
+TEST(XhciControl, MalformedCompletionCannotBecomeSuccessfulData)
+{
+    for(unsigned stage = 0; stage < 3; ++stage)
+    {
+        ControlFixture f;
+        ASSERT_TRUE(f.queue());
+        ASSERT_TRUE(f.event(stage, 13, 19));
+        EXPECT_TRUE(f.transfer.done);
+        EXPECT_EQ(f.transfer.completion, 5u);
+        EXPECT_EQ(f.transfer.residual, 18u);
+    }
+    ControlFixture f;
+    ASSERT_TRUE(f.queue());
+    ASSERT_TRUE(f.event(2, 13, 0));  // Captured Intel result must not imply 18 valid bytes.
+    EXPECT_EQ(f.transfer.completion, 5u);
+    EXPECT_EQ(f.transfer.residual, 18u);
+    ASSERT_TRUE(f.queue());
+    ASSERT_TRUE(f.event(0, 1));  // Setup has no IOC; success here cannot finish the request.
+    EXPECT_EQ(f.transfer.completion, 5u);
+    ASSERT_TRUE(f.queue(18, false));
+    ASSERT_TRUE(f.event(1, 13, 1));
+    EXPECT_EQ(f.transfer.completion, 5u);
+    ASSERT_TRUE(f.queue());
+    ASSERT_TRUE(f.event(2, 1, 1));
+    EXPECT_EQ(f.transfer.completion, 5u);
+}
+
+TEST(XhciControl, UnrelatedEventCannotCompleteCurrentRequest)
+{
+    ControlFixture f;
+    ASSERT_TRUE(f.queue());
+    xhci::EventInfo event{};
+    event.parameter = 0x7770;
+    event.completion_code = 1;
+    EXPECT_FALSE(xhci::control_transfer_event(f.transfer, event));
+    EXPECT_FALSE(f.transfer.done);
+    event.parameter = 0;
+    EXPECT_FALSE(xhci::control_transfer_event(f.transfer, event));
+}
+
+TEST(XhciControl, RingWrapKeepsStageAddressesCyclesAndLinkBoundaries)
+{
+    for(uint32_t start : {5u, 6u})
+    {
+        ControlFixture f;
+        f.ring.enqueue_index = start;
+        ASSERT_TRUE(f.queue());
+        EXPECT_EQ(f.transfer.stages[0], 0x1000u + start * 16u);
+        EXPECT_EQ(f.transfer.stages[1], 0x1000u + ((start + 1) % 7) * 16u);
+        EXPECT_EQ(f.transfer.stages[2], 0x1000u + ((start + 2) % 7) * 16u);
+        EXPECT_EQ(f.control(0) & 1u, 0u);
+        EXPECT_EQ(f.control(2) & 1u, 0u);  // Wrapped producer cycle.
+        EXPECT_EQ(read32(f.bytes, 7 * 16 + 12) & (1u << 4), 0u);
+        xhci::publish_control_transfer(f.bytes.data(), 0x1000, f.transfer);
+        EXPECT_EQ(f.control(0) & 1u, 1u);
+        EXPECT_TRUE(f.event(1, 13, 10));
+        EXPECT_TRUE(f.event(2, 1));
+        EXPECT_EQ(f.transfer.residual, 10u);
+    }
+}
+
+TEST(XhciControl, InvalidQueueInputsLeaveRingUnchanged)
+{
+    ControlFixture f;
+    const auto before = f.bytes;
+    for(uint64_t buffer : {0ull, 0xfff8ull})
+        EXPECT_FALSE(xhci::queue_control_transfer(
+            f.bytes.data(), f.bytes.size(), 0x1000, f.ring, 18ull << 48, buffer, f.transfer));
+    EXPECT_FALSE(f.queue(4097));
+    EXPECT_EQ(f.bytes, before);
+    EXPECT_EQ(f.ring.enqueue_index, 0u);
+}
+
+TEST(XhciControl, RejectsTruncatedAndMismatchedDescriptorHeaders)
+{
+    uint8_t descriptor[18]{18, 1};
+    EXPECT_TRUE(xhci::valid_descriptor_header(descriptor, 18, 1, 18));
+    EXPECT_FALSE(xhci::valid_descriptor_header(descriptor, 8, 1, 18));
+    EXPECT_FALSE(xhci::valid_descriptor_header(descriptor, 18, 2, 9));
+    descriptor[0] = 0;
+    EXPECT_FALSE(xhci::valid_descriptor_header(descriptor, 18, 1, 18));
+    descriptor[0] = 19;
+    EXPECT_FALSE(xhci::valid_descriptor_header(descriptor, 18, 1, 18));
+    EXPECT_FALSE(xhci::valid_descriptor_header(nullptr, 18, 1, 18));
+}
+
+TEST(XhciControl, ConfigurationMustContainCompleteBoundedDescriptors)
+{
+    // A configuration, HID interface, and interrupt endpoint.
+    std::array<uint8_t, 25> bytes{9, 2, 25, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0,
+                                  1, 3, 1,  1, 0, 7, 5, 0x81, 3,  8, 0, 10};
+    EXPECT_TRUE(xhci::valid_configuration_descriptors(bytes.data(), bytes.size()));
+    EXPECT_FALSE(xhci::valid_configuration_descriptors(bytes.data(), 18));
+    for(size_t offset : {0u, 9u, 18u})
+    {
+        auto corrupt = bytes;
+        corrupt[offset] = 2;  // Header exists but required fields are missing.
+        EXPECT_FALSE(xhci::valid_configuration_descriptors(corrupt.data(), corrupt.size()));
+        corrupt[offset] = 0;
+        EXPECT_FALSE(xhci::valid_configuration_descriptors(corrupt.data(), corrupt.size()));
+    }
+    bytes[18] = 8;
+    EXPECT_FALSE(xhci::valid_configuration_descriptors(bytes.data(), bytes.size()));
+}

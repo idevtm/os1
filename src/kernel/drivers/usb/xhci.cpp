@@ -3,10 +3,12 @@
 #include "drivers/usb/xhci.hpp"
 
 #include "console/console_input.hpp"
+#include "debug/bootlog.hpp"
 #include "debug/debug.hpp"
 #include "debug/event_ring.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/resource.hpp"
+#include "drivers/timer/tsc_clock.hpp"
 #include "drivers/usb/hid_keyboard.hpp"
 #include "drivers/usb/mass_storage.hpp"
 #include "drivers/usb/xhci_controller.hpp"
@@ -76,14 +78,7 @@ constexpr uint8_t kUsbEndpointDirectionIn = 0x80u;
 constexpr uint8_t kUsbEndpointTransferInterrupt = 3u;
 
 constexpr uint32_t kTrbInterruptOnShortPacket = 1u << 2;
-constexpr uint32_t kTrbChainBit = 1u << 4;
 constexpr uint32_t kTrbInterruptOnCompletion = 1u << 5;
-constexpr uint32_t kTrbImmediateData = 1u << 6;
-constexpr uint32_t kSetupTransferTypeNoData = 0u << 16;
-constexpr uint32_t kSetupTransferTypeOut = 2u << 16;
-constexpr uint32_t kSetupTransferTypeIn = 3u << 16;
-constexpr uint32_t kDataDirectionIn = 1u << 16;
-constexpr uint32_t kStatusDirectionIn = 1u << 16;
 constexpr uint8_t kXhciControlEndpointDci = 1u;
 constexpr uint8_t kXhciCompletionSuccess = 1u;
 constexpr uint8_t kXhciCompletionShortPacket = 13u;
@@ -207,6 +202,7 @@ struct XhciDeviceState
     DmaBuffer control_buffer_dma{};
     DmaBuffer report_buffer_dma{};
     usb::hid::BootKeyboardState keyboard_state{};
+    xhci::ControlTransfer control_transfer{};
     bool synchronous_transfer_complete = false;
     uint8_t synchronous_transfer_completion_code = 0;
     uint32_t synchronous_transfer_residual = 0;
@@ -214,10 +210,14 @@ struct XhciDeviceState
     bool interrupt_transfer_armed = false;
     uint64_t interrupt_transfer_trb = 0;
     uint32_t report_count = 0;
+    uint8_t diagnostic_reports = 0;
+    uint8_t diagnostic_controls = 0;
+    uint8_t diagnostic_ep0_events = 0;
 };
 
 struct XhciControllerState
 {
+    bool owned = false;
     bool present = false;
     bool failed = false;
     bool dma_published = false;
@@ -227,6 +227,7 @@ struct XhciControllerState
     uint16_t configured_slots = 0;
     uint16_t scratchpad_count = 0;
     uint32_t interrupt_count = 0;
+    uint8_t diagnostic_commands = 0;
     PciBarResource controller_bar{};
     PciInterruptHandle interrupt{};
     xhci::ControllerLayout controller{};
@@ -449,7 +450,7 @@ void release_controller(PageFrameContainer& frames, XhciControllerState& control
         controller.present = true;  // Reserve the quarantined slot; never recycle handles.
         return;
     }
-    if(nullptr != controller.controller.operational)
+    if(controller.owned && nullptr != controller.controller.operational)
     {
         (void)xhci::controller_stop(controller.controller, kXhciInitTimeoutSpins);
     }
@@ -677,6 +678,9 @@ void handle_keyboard_report(XhciDeviceState& device)
         return;
     }
 
+    if(bootlog_diagnostics_enabled() && device.diagnostic_reports <= 8u)
+        debug("usbdiag: decoded port=")(device.port_id)(" chars=")(output_count)(" queued=")(
+            g_input_count)();
     for(size_t index = 0; index < output_count; ++index)
     {
         if(g_input_count < sizeof(g_input_chars))
@@ -734,6 +738,28 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
             continue;
         }
 
+        if(event.endpoint_id == kXhciControlEndpointDci &&
+           xhci::control_transfer_event(device.control_transfer, event))
+        {
+            const auto& transfer = device.control_transfer;
+            if(bootlog_diagnostics_enabled() && device.diagnostic_ep0_events < 64u)
+            {
+                ++device.diagnostic_ep0_events;
+                debug("usbdiag: ep0 port=")(device.port_id)(" stage=")(
+                    event.parameter == transfer.stages[0]
+                        ? 0
+                        : (event.parameter == transfer.stages[1] ? 1 : 2))(" cc=")(
+                    event.completion_code)(" residual=")(event.transfer_length)();
+            }
+            if(transfer.done)
+            {
+                device.synchronous_transfer_complete = true;
+                device.synchronous_transfer_completion_code = transfer.completion;
+                device.synchronous_transfer_residual = transfer.residual;
+            }
+            return;
+        }
+
         if(event.endpoint_id == device.synchronous_endpoint &&
            (device.synchronous_transfer_trb != 0u) &&
            (device.synchronous_transfer_trb == event.parameter))
@@ -748,6 +774,14 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
         if(event.endpoint_id == device.endpoint_dci && device.interrupt_transfer_armed &&
            (device.interrupt_transfer_trb == event.parameter))
         {
+            if(bootlog_diagnostics_enabled() && device.diagnostic_reports < 8u)
+            {
+                ++device.diagnostic_reports;
+                debug("usbdiag: input pci=")(controller.pci_index)(" port=")(device.port_id)(
+                    " cc=")(event.completion_code)(" residual=")(event.transfer_length)();
+            }
+            else if(bootlog_diagnostics_enabled() && device.diagnostic_reports == 8u)
+                ++device.diagnostic_reports;
             device.interrupt_transfer_armed = false;
             dma_sync_for_cpu(device.report_buffer_dma);
             if(transfer_completion_ok(event.completion_code))
@@ -880,7 +914,14 @@ bool submit_command(XhciControllerState& controller,
         dma_sync_for_device(controller.command_ring_dma);
         xhci::ring_doorbell(controller.controller, 0u, 0u);
     }
-    if(!wait_for_command_completion(controller, timeout_spins))
+    const bool completed = wait_for_command_completion(controller, timeout_spins);
+    if(bootlog_diagnostics_enabled() && controller.diagnostic_commands < 32u)
+    {
+        ++controller.diagnostic_commands;
+        debug("usbdiag: command pci=")(controller.pci_index)(" type=")((trb.control >> 10) & 63u)(
+            " completed=")(completed)(" cc=")(controller.pending_command_completion_code)();
+    }
+    if(!completed)
     {
         IrqSpinGuard guard(g_event_lock);
         xhci::disable_interrupts(controller.controller);
@@ -938,7 +979,7 @@ bool submit_control_transfer(XhciControllerState& controller,
                              size_t& actual_length)
 {
     actual_length = 0;
-    if(buffer_length > device.control_buffer_dma.size_bytes)
+    if(buffer_length > device.control_buffer_dma.size_bytes || setup.length != buffer_length)
     {
         return false;
     }
@@ -973,82 +1014,46 @@ bool submit_control_transfer(XhciControllerState& controller,
         device.synchronous_transfer_residual = 0u;
         device.synchronous_transfer_trb = 0u;
 
-        uint64_t status_trb_physical = 0;
         const uint64_t setup_parameter = static_cast<uint64_t>(setup.request_type) |
                                          (static_cast<uint64_t>(setup.request) << 8) |
                                          (static_cast<uint64_t>(setup.value) << 16) |
                                          (static_cast<uint64_t>(setup.index) << 32) |
                                          (static_cast<uint64_t>(setup.length) << 48);
-        const uint32_t setup_transfer_type =
-            !has_data_stage ? kSetupTransferTypeNoData
-                            : (direction_in ? kSetupTransferTypeIn : kSetupTransferTypeOut);
-        xhci::TrbFields setup_trb{
-            .parameter = setup_parameter,
-            .status = sizeof(UsbSetupPacket),
-            .control = (xhci::kTrbTypeSetupStage << 10) | kTrbImmediateData | kTrbChainBit |
-                       setup_transfer_type,
-        };
-        if(!xhci::enqueue_command_trb(device.control_ring_dma.virtual_address,
-                                      device.control_ring_dma.size_bytes,
-                                      device.control_ring_dma.physical_address,
-                                      device.control_ring,
-                                      setup_trb))
-        {
+        if(!xhci::queue_control_transfer(device.control_ring_dma.virtual_address,
+                                         device.control_ring_dma.size_bytes,
+                                         device.control_ring_dma.physical_address,
+                                         device.control_ring,
+                                         setup_parameter,
+                                         device.control_buffer_dma.physical_address,
+                                         device.control_transfer))
             return false;
-        }
-
-        if(has_data_stage)
-        {
-            xhci::TrbFields data_trb{
-                .parameter = device.control_buffer_dma.physical_address,
-                .status = static_cast<uint32_t>(buffer_length),
-                .control = (xhci::kTrbTypeDataStage << 10) | kTrbChainBit |
-                           (direction_in ? kDataDirectionIn : 0u),
-            };
-            if(!xhci::enqueue_command_trb(device.control_ring_dma.virtual_address,
-                                          device.control_ring_dma.size_bytes,
-                                          device.control_ring_dma.physical_address,
-                                          device.control_ring,
-                                          data_trb))
-            {
-                return false;
-            }
-        }
-
-        xhci::TrbFields status_trb{
-            .parameter = 0u,
-            .status = 0u,
-            .control = (xhci::kTrbTypeStatusStage << 10) | kTrbInterruptOnCompletion |
-                       ((!has_data_stage || !direction_in) ? kStatusDirectionIn : 0u),
-        };
-        if(!xhci::enqueue_command_trb(device.control_ring_dma.virtual_address,
-                                      device.control_ring_dma.size_bytes,
-                                      device.control_ring_dma.physical_address,
-                                      device.control_ring,
-                                      status_trb,
-                                      &status_trb_physical))
-        {
-            return false;
-        }
-
-        device.synchronous_transfer_trb = status_trb_physical;
         dma_sync_for_device(device.control_ring_dma);
+        xhci::publish_control_transfer(device.control_ring_dma.virtual_address,
+                                       device.control_ring_dma.physical_address,
+                                       device.control_transfer);
         xhci::ring_doorbell(controller.controller, device.slot_id, kXhciControlEndpointDci);
     }
     uint8_t completion_code = 0u;
     uint32_t residual_length = 0u;
-    if(!wait_for_transfer_completion(
-           controller, device, kXhciTransferTimeoutSpins, completion_code, residual_length) ||
-       !transfer_completion_ok(completion_code))
+    const bool completed = wait_for_transfer_completion(
+        controller, device, kXhciTransferTimeoutSpins, completion_code, residual_length);
+    if(bootlog_diagnostics_enabled() && device.diagnostic_controls < 32u)
     {
+        ++device.diagnostic_controls;
+        debug("usbdiag: control pci=")(controller.pci_index)(" port=")(device.port_id)(" request=")(
+            setup.request)(" value=0x")(setup.value, 16)(" index=")(setup.index)(" completed=")(
+            completed)(" cc=")(completion_code)(" residual=")(residual_length)();
+    }
+    if(!completed || completion_code != kXhciCompletionSuccess || residual_length > buffer_length)
+    {
+        fail_device(device);
         return false;
     }
 
     if(has_data_stage && direction_in)
     {
         dma_sync_for_cpu(device.control_buffer_dma);
-        actual_length =
-            buffer_length - ((residual_length <= buffer_length) ? residual_length : buffer_length);
+        actual_length = buffer_length - residual_length;
         if((nullptr != in_buffer) && (actual_length > 0u))
         {
             memcpy(in_buffer, device.control_buffer_dma.virtual_address, actual_length);
@@ -1554,13 +1559,18 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
                            &descriptor,
                            sizeof(descriptor),
                            actual_length) ||
-       (actual_length < sizeof(descriptor)))
+       !xhci::valid_descriptor_header(
+           &descriptor, actual_length, kUsbDescriptorDevice, sizeof(descriptor)))
     {
         debug("xhci: device descriptor failed port=")(port_id)();
         release_device(frames, controller, *device);
         return false;
     }
 
+    if(bootlog_diagnostics_enabled())
+        debug("usbdiag: device pci=")(controller.pci_index)(" port=")(port_id)(" id=")(
+            descriptor.vendor_id, 16, 4)(":")(
+            descriptor.product_id, 16, 4)(" speed=")(device->speed)();
     uint8_t config_header[sizeof(UsbConfigurationDescriptor)]{};
     if(!usb_get_descriptor(controller,
                            *device,
@@ -1569,7 +1579,10 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
                            config_header,
                            sizeof(config_header),
                            actual_length) ||
-       (actual_length < sizeof(UsbConfigurationDescriptor)))
+       !xhci::valid_descriptor_header(config_header,
+                                      actual_length,
+                                      kUsbDescriptorConfiguration,
+                                      sizeof(UsbConfigurationDescriptor)))
     {
         debug("xhci: config header failed port=")(port_id)();
         release_device(frames, controller, *device);
@@ -1577,7 +1590,7 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
     }
 
     const auto* configuration = reinterpret_cast<const UsbConfigurationDescriptor*>(config_header);
-    if((0u == configuration->total_length) ||
+    if((sizeof(UsbConfigurationDescriptor) > configuration->total_length) ||
        (configuration->total_length > device->control_buffer_dma.size_bytes))
     {
         debug("xhci: config length unsupported port=")(port_id)(" total=")(
@@ -1593,7 +1606,9 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
                            0u,
                            device->control_buffer_dma.virtual_address,
                            configuration->total_length,
-                           actual_length))
+                           actual_length) ||
+       !xhci::valid_configuration_descriptors(device->control_buffer_dma.virtual_address,
+                                              actual_length))
     {
         release_device(frames, controller, *device);
         return false;
@@ -1616,6 +1631,10 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
         return false;
     }
 
+    if(bootlog_diagnostics_enabled())
+        debug("usbdiag: HID port=")(port_id)(" interface=")(hid.interface_number)(" protocol=")(
+            static_cast<uint8_t>(hid.protocol))(" ep=0x")(
+            hid.endpoint_address, 16)(" mps=")(hid.max_packet_size)(" interval=")(hid.interval)();
     device->protocol = hid.protocol;
     device->configuration_value = hid.configuration_value;
     device->interface_number = hid.interface_number;
@@ -1661,7 +1680,13 @@ void enumerate_ports(PageFrameContainer& frames, XhciControllerState& controller
         xhci::PortStatus status{};
         if(xhci::read_port_status(controller.controller, port_id, status) && status.connected)
         {
-            (void)initialize_port(frames, controller, port_id);
+            if(bootlog_diagnostics_enabled())
+                debug("usbdiag: enumerate pci=")(controller.pci_index)(" port=")(
+                    port_id)(" raw=0x")(status.raw, 16)(" speed=")(status.speed)();
+            const bool initialized = initialize_port(frames, controller, port_id);
+            if(bootlog_diagnostics_enabled())
+                debug("usbdiag: enumeration pci=")(controller.pci_index)(" port=")(port_id)(" ok=")(
+                    initialized)();
         }
     }
 }
@@ -1671,6 +1696,19 @@ void xhci_irq(void* data)
     auto& controller = *static_cast<XhciControllerState*>(data);
     ++controller.interrupt_count;
     service_events(controller);
+}
+
+void handoff_delay(uint32_t us, void*)
+{
+    tsc_clock_delay_us(us);
+}
+uint32_t routing_read(void* context, uint16_t offset)
+{
+    return pci_config_read32(*static_cast<const PciDevice*>(context), offset);
+}
+void routing_write(void* context, uint16_t offset, uint32_t value)
+{
+    pci_config_write32(*static_cast<const PciDevice*>(context), offset, value);
 }
 
 bool probe_xhci_controller(VirtualMemory& kernel_vm,
@@ -1754,6 +1792,44 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         return false;
     }
 
+    if(bootlog_diagnostics_enabled())
+    {
+        // Observe firmware state before reset; never change ownership or routing here.
+        xhci::LegacySupport legacy{};
+        const auto result = xhci::read_legacy_support(controller->controller, legacy);
+        debug("usbdiag: legacy pci=")(device_index)(" result=")(static_cast<uint8_t>(result))(
+            " offset=0x")(legacy.offset, 16)(" support=0x")(legacy.support, 16)(" control=0x")(
+            legacy.control, 16)();
+        // These chipset-specific offsets are qualified only for the issue #27 controller.
+        if(device.vendor_id == 0x8086u && device.device_id == 0x8c31u)
+            debug("usbdiag: Intel 8c31 USB2 route=0x")(pci_config_read32(device, 0xd0), 16)(
+                " mask=0x")(pci_config_read32(device, 0xd4), 16)(" USB3 enable=0x")(
+                pci_config_read32(device, 0xd8), 16)(" mask=0x")(pci_config_read32(device, 0xdc),
+                                                                 16)();
+        for(unsigned port = 1; port <= controller->controller.capability.max_ports; ++port)
+        {
+            xhci::PortStatus status{};
+            if(xhci::read_port_status(controller->controller, port, status))
+                debug("usbdiag: before-reset pci=")(device_index)(" port=")(port)(" raw=0x")(
+                    status.raw, 16)(" speed=")(status.speed)();
+        }
+    }
+
+    if(!xhci::acquire_legacy_ownership(controller->controller, handoff_delay, nullptr))
+    {
+        debug("xhci: firmware handoff failed")();
+        release_controller(frames, *controller);
+        return false;
+    }
+    controller->owned = true;
+    debug("xhci: firmware handoff complete")();
+    if(!xhci::controller_reset(controller->controller, kXhciInitTimeoutSpins))
+    {
+        debug("xhci: controller reset failed")();
+        release_controller(frames, *controller);
+        return false;
+    }
+
     debug("xhci: capability ok ports=")(controller->controller.capability.max_ports)(" slots=")(
         controller->controller.capability.max_slots)(" scratchpad=")(
         controller->controller.capability.scratchpad_buffers)();
@@ -1774,14 +1850,8 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         release_controller(frames, *controller);
         return false;
     }
-    debug("xhci: interrupt bound vector=0x")(controller->interrupt.vector, 16, 2)(", resetting")();
+    debug("xhci: interrupt bound vector=0x")(controller->interrupt.vector, 16, 2)();
 
-    if(!xhci::controller_reset(controller->controller, kXhciInitTimeoutSpins))
-    {
-        debug("xhci: controller reset failed")();
-        release_controller(frames, *controller);
-        return false;
-    }
     pci_enable_mmio_bus_mastering(device);
 
     const xhci::RingSet rings{
@@ -1802,6 +1872,18 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         return false;
     }
 
+    const xhci::RoutingIo routing_io{const_cast<PciDevice*>(&device), routing_read, routing_write};
+    const auto routing = xhci::route_intel_ports(device.vendor_id, device.device_id, routing_io);
+    if(routing != xhci::RoutingResult::NotApplicable)
+        debug("xhci: Intel routing result=")(static_cast<uint8_t>(routing))(" USB2=0x")(
+            pci_config_read32(device, 0xd0), 16)(" USB3=0x")(pci_config_read32(device, 0xd8), 16)();
+    if(routing == xhci::RoutingResult::Failed)
+    {
+        release_controller(frames, *controller);
+        return false;
+    }
+    if(routing == xhci::RoutingResult::Changed)
+        tsc_clock_delay_us(100000u);
     enumerate_ports(frames, *controller);
 
     controller->present = true;
@@ -1837,6 +1919,7 @@ const PciDriver& xhci_pci_driver()
                     device_binding_remove(id);
                 }
             },
+        .probe_early = true,
     };
     return driver;
 }
@@ -1870,7 +1953,41 @@ void xhci_poll_input()
             --g_input_count;
         }
     }
+    static unsigned diagnostic_batches = 0;
+    if(bootlog_diagnostics_enabled() && count && diagnostic_batches < 8u)
+    {
+        ++diagnostic_batches;
+        debug("usbdiag: console dispatch chars=")(count)();
+    }
     // No controller lock may be held across console callbacks.
     for(size_t index = 0; index < count; ++index)
         console_input_on_keyboard_char(pending[index]);
+}
+
+void xhci_diagnostic_summary()
+{
+    if(!bootlog_diagnostics_enabled())
+        return;
+    IrqSpinGuard guard(g_event_lock);
+    debug("USB diagnostic summary (details retained in boot log)")();
+    unsigned ready = 0;
+    for(const auto* controller : g_xhci_controllers)
+    {
+        if(!controller || !controller->present)
+            continue;
+        debug("usbdiag: controller pci=")(controller->pci_index)(" failed=")(controller->failed)(
+            " irq=")(controller->interrupt_count)();
+        for(const auto& device : controller->devices)
+        {
+            if(!device.present)
+                continue;
+            const bool keyboard = device.protocol == HidBootProtocol::Keyboard;
+            debug("usbdiag: port=")(device.port_id)(" speed=")(device.speed)(" keyboard=")(
+                keyboard)(" configured=")(device.configured)(" failed=")(device.failed)(" armed=")(
+                device.interrupt_transfer_armed)();
+            if(keyboard && device.configured && !device.failed)
+                ++ready;
+        }
+    }
+    debug("usbdiag: configured keyboards=")(ready)();
 }

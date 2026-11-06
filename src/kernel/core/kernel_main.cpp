@@ -26,6 +26,7 @@
 #include "drivers/block/virtio_blk.hpp"
 #include "drivers/display/text_display.hpp"
 #include "drivers/timer/pit.hpp"
+#include "drivers/usb/xhci.hpp"
 #include "drivers/watchdog/intel_tco.hpp"
 #include "fs/initrd.hpp"
 #include "handoff/boot_info.hpp"
@@ -430,15 +431,16 @@ bool prepare_scheduler_timer()
     }
 
     bootlog_mark(kBootLogFlagUserInitStarted);
+    xhci_diagnostic_summary();
     // The on-screen debug mirror is for bring-up; drawing every debug line on
     // the framebuffer is slow enough to perturb user-space scheduling.
-    debug.set_mirror(nullptr);
     if(intel_tco_watchdog_armed())
     {
         intel_tco_watchdog_set_timeout(kPostInitWatchdogStageSeconds);
         debug("tco: user space reached; machine resets in ~")(2u * kPostInitWatchdogStageSeconds)(
             " s to save this boot log")();
     }
+    debug.set_mirror(nullptr);
     write_console_line("starting first user process");
     mark_thread_ready(init_thread);
     finish_boot_sequence_thread(0);

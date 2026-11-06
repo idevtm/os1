@@ -20,7 +20,8 @@
 %define BOOT_STRING_BUFFER_SIZE_BYTES 0x0E00
 %define BOOT_MEMORY_REGION_CAPACITY 128
 
-%define EARLY_LONG_MODE_PAGE_TABLES_ADDRESS 0xA000
+; After BIOS disk and boot-log I/O, reuse their scratch page for page tables.
+%define EARLY_LONG_MODE_PAGE_TABLES_ADDRESS 0x9000
 %include "kernel_layout.inc"
 
 %define AP_STARTUP_CPU_PAGE_ADDRESS 0x20

@@ -102,6 +102,40 @@ struct ControllerLayout
     volatile uint8_t* doorbells = nullptr;
 };
 
+// Read-only firmware ownership snapshot. No handoff or SMI writes.
+enum class LegacySupportResult : uint8_t
+{
+    Absent,
+    Present,
+    Invalid
+};
+struct LegacySupport
+{
+    uint32_t offset = 0;
+    uint32_t support = 0;
+    uint32_t control = 0;
+};
+LegacySupportResult read_legacy_support(const ControllerLayout&, LegacySupport&);
+// Delay callback receives microseconds. A BIOS timeout fails without forcing ownership.
+bool acquire_legacy_ownership(const ControllerLayout&,
+                              void (*delay)(uint32_t, void*),
+                              void* context);
+
+struct RoutingIo
+{
+    void* context;
+    uint32_t (*read)(void*, uint16_t);
+    void (*write)(void*, uint16_t, uint32_t);
+};
+enum class RoutingResult : uint8_t
+{
+    NotApplicable,
+    Unchanged,
+    Changed,
+    Failed
+};
+RoutingResult route_intel_ports(uint16_t vendor, uint16_t device, const RoutingIo&);
+
 struct CommandRingInfo
 {
     uint32_t trb_count = 0;
@@ -146,6 +180,32 @@ struct EventInfo
     uint8_t port_id = 0;
     uint8_t trb_type = 0;
 };
+
+// One serialized endpoint-zero request; stage addresses identify completion events.
+struct ControlTransfer
+{
+    uint64_t stages[3]{};  // setup, optional data, status
+    uint32_t requested = 0;
+    uint32_t residual = 0;
+    uint8_t completion = 0;
+    bool done = false;
+    bool direction_in = false;
+};
+bool queue_control_transfer(void* ring_base,
+                            size_t ring_bytes,
+                            uint64_t ring_physical,
+                            CommandRingInfo& ring,
+                            uint64_t setup,
+                            uint64_t buffer,
+                            ControlTransfer& transfer);
+// Call once, after queueing succeeds and DMA/state writes are complete.
+void publish_control_transfer(void* ring_base,
+                              uint64_t ring_physical,
+                              const ControlTransfer& transfer);
+// Caller matches slot and endpoint under the event lock. Returns true for a matched event.
+bool control_transfer_event(ControlTransfer& transfer, const EventInfo& event);
+bool valid_descriptor_header(const void* bytes, size_t actual, uint8_t type, uint8_t minimum);
+bool valid_configuration_descriptors(const void* bytes, size_t actual);
 
 struct PortStatus
 {
@@ -192,7 +252,8 @@ bool enqueue_command_trb(void* ring_base,
                          uint64_t ring_physical,
                          CommandRingInfo& ring,
                          const TrbFields& trb,
-                         uint64_t* trb_physical = nullptr);
+                         uint64_t* trb_physical = nullptr,
+                         bool publish = true);
 bool initialize_event_ring_segment_table(void* erst_base,
                                          size_t erst_bytes,
                                          uint64_t event_ring_physical,

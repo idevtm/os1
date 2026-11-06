@@ -485,6 +485,9 @@ A separate macOS helper provides arrow-key menus for image layout and the extern
 Selecting a write destination starts the writer without a typed confirmation.
 Menus use the alternate terminal screen; the helper restores the normal screen before displaying the sudo password guidance.
 Only raw-device snapshot, write, readback, and eject steps use sudo.
+The [keyboard diagnostic profile](hardware/usb-image-workflow.md#keyboard-independent-diagnostics) uses a separate build and an automatic capture boot.
+Its bounded xHCI observations are read-only.
+Both normal and diagnostic profiles use the shared firmware handoff and port-routing sequence.
 The replacement option retains the base image’s UEFI files and updates the kernel and initrd.
 Its BIOS payload remains historical; the fresh hybrid image supplies both current boot paths.
 
@@ -518,15 +521,15 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-793`: `kernel_bios.elf`
-- LBA `794-1168`: `initrd.cpio`
+- LBA `65-809`: `kernel_bios.elf`
+- LBA `810-1184`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
 The core ELF uses 256-byte file alignment while kernel memory boundaries remain page-aligned.
 BIOS packaging removes unused section metadata; the diagnostic kernel ELF retains symbols.
-The BIOS loader stages the stripped kernel in `[0x10000,0x6b200)` (364.5 KiB).
+The BIOS loader stages the stripped kernel in `[0xE000,0x6b200)` (372.5 KiB).
 It stages the plain initrd in `[0x6b200,0x9A000)` (187.5 KiB).
 The ext2 slice moves 12 KiB of staging capacity from initrd to the kernel.
 Compact non-reflective executables keep the initrd within its new bound.
@@ -589,8 +592,8 @@ Key addresses:
 | `0x6000` | `BootMemoryRegion[]` buffer |
 | `0x7000` | `BootModuleInfo[]` buffer |
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
-| `0x0A000` | temporary page-table scratch used by the BIOS long-mode transition |
-| `0x10000` | BIOS kernel-image load buffer |
+| `0x09000` | BIOS disk scratch, then temporary page tables after firmware disk I/O completes |
+| `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
 | `0x6b200` | BIOS initrd load buffer (187.5 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x20000-0x5FFFF` | page-frame bitmap |
@@ -1403,6 +1406,25 @@ The [initrd VFS milestone](archive/native-api/2026-11-04-initrd-vfs-implementati
 - ACPICA upgrade/footprint policy, OSL feature boundaries, and broader real-hardware ACPI coverage when new hardware requires it
 
 The shared boot contract, driver resource records, event ring, and dual-frontend QEMU coverage provide infrastructure for those steps. The review's source findings and physical-hardware evidence define what still needs to be established before claiming broader reliability or isolation.
+
+### USB firmware handoff and probe order
+
+Drivers marked `probe_early` finish before ordinary PCI probes, independent of PCI discovery order.
+xHCI uses this phase to request firmware ownership before reset and DMA setup.
+An ownership timeout leaves BIOS ownership intact and rejects that controller.
+After xHCI starts, Intel `8086:8c31` routing enables supported SuperSpeed ports before switching supported USB 2.0 ports.
+A 100 ms settling delay follows changed routing; device enumeration then precedes EHCI probing.
+Other PCI IDs receive no Intel routing-register writes.
+See the [hardware evidence and validation plan](hardware/2026-11-06-usb-keyboard-handoff.md).
+
+### USB control-transfer stages
+
+Endpoint zero uses separate setup, optional data, and status transfer descriptors.
+The driver publishes setup after all stages and completion fields are ready.
+A short data event records its residual length; only status success completes the request successfully.
+An error at any stage fails the request and retains device DMA quarantine.
+Descriptor headers and complete configuration chains pass bounds checks before field use.
+See the [control-transfer correction](hardware/2026-11-06-xhci-control-transfers.md) for evidence and validation.
 
 ### USB controller-independent storage
 

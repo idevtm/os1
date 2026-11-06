@@ -36,7 +36,8 @@ constexpr size_t kBootMemoryRegionCapacity = 128;
 
 // The temporary real-mode page tables only exist long enough to enter long
 // mode. The kernel later replaces them with its own page tables.
-constexpr uint64_t kEarlyLongModePageTablesAddress = 0xA000;
+// BIOS disk and boot-log scratch in the first page is dead before table construction.
+constexpr uint64_t kEarlyLongModePageTablesAddress = 0x9000;
 
 // The BIOS loader expands the kernel ELF from this low-memory image buffer.
 // The generated kernel_layout.hpp contract keeps this staging address aligned

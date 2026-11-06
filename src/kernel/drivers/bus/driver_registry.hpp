@@ -37,6 +37,7 @@ struct PciDriver
     void (*remove)(DeviceId id) = nullptr;
     bool (*suspend)(DeviceId id) = nullptr;
     bool (*resume)(DeviceId id) = nullptr;
+    bool probe_early = false;  // Finish shared-controller routing before ordinary probes.
 };
 
 void driver_registry_reset();

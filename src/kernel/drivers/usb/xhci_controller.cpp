@@ -89,6 +89,93 @@ void set_slot_context(uint32_t* words, uint8_t speed, uint8_t port, uint8_t cont
     words[1] = uint32_t(port) << 16;
 }
 
+LegacySupportResult read_legacy_support(const ControllerLayout& layout, LegacySupport& out)
+{
+    out = {};
+    if(!layout.mmio_base || layout.mmio_size < 0x14u)
+        return LegacySupportResult::Invalid;
+    size_t offset = static_cast<size_t>(read32(layout.mmio_base, 0x10u) >> 16) * 4u;
+    // Next pointers are forward DWORD offsets. Limit reads even in hostile tables.
+    for(unsigned visited = 0; offset && visited < 256u; ++visited)
+    {
+        if(offset < 0x20u || offset > layout.mmio_size || layout.mmio_size - offset < 4u)
+            return LegacySupportResult::Invalid;
+        const uint32_t header = read32(layout.mmio_base, offset);
+        if((header & 0xffu) == 1u)
+        {
+            if(layout.mmio_size - offset < 8u)
+                return LegacySupportResult::Invalid;
+            out = {static_cast<uint32_t>(offset), header, read32(layout.mmio_base, offset + 4u)};
+            return LegacySupportResult::Present;
+        }
+        const size_t next = ((header >> 8) & 0xffu) * 4u;
+        if(!next)
+            return LegacySupportResult::Absent;
+        offset += next;
+    }
+    return offset ? LegacySupportResult::Invalid : LegacySupportResult::Absent;
+}
+
+bool acquire_legacy_ownership(const ControllerLayout& layout,
+                              void (*delay)(uint32_t, void*),
+                              void* context)
+{
+    LegacySupport legacy{};
+    const auto found = read_legacy_support(layout, legacy);
+    if(found == LegacySupportResult::Absent)
+        return true;
+    if(found == LegacySupportResult::Invalid || !delay)
+        return false;
+    constexpr uint32_t bios_owned = 1u << 16;
+    constexpr uint32_t os_owned = 1u << 24;
+    write32(layout.mmio_base, legacy.offset, legacy.support | os_owned);
+    for(unsigned wait = 0;; ++wait)
+    {
+        const uint32_t support = read32(layout.mmio_base, legacy.offset);
+        if(!(support & bios_owned) && (support & os_owned))
+            break;
+        if(wait == 1000u)
+            return false;
+        delay(1000u, context);
+    }
+    // xHCI 7.1.2: clear only SMI enables and acknowledge W1C events.
+    // Read-only event/error status can remain set after this write.
+    constexpr uint32_t enables = (1u << 0) | (1u << 4) | (7u << 13);
+    constexpr uint32_t events = 7u << 29;
+    const uint32_t control = read32(layout.mmio_base, legacy.offset + 4u);
+    write32(layout.mmio_base, legacy.offset + 4u, (control & ~enables) | events);
+    return !(read32(layout.mmio_base, legacy.offset + 4u) & enables);
+}
+
+RoutingResult route_intel_ports(uint16_t vendor, uint16_t device, const RoutingIo& io)
+{
+    // The returned H81M-S1 log qualifies these PCI register offsets for this ID.
+    if(vendor != 0x8086u || device != 0x8c31u)
+        return RoutingResult::NotApplicable;
+    if(!io.read || !io.write)
+        return RoutingResult::Failed;
+    const uint32_t usb2 = io.read(io.context, 0xd0);
+    const uint32_t mask2 = io.read(io.context, 0xd4);
+    const uint32_t usb3 = io.read(io.context, 0xd8);
+    const uint32_t mask3 = io.read(io.context, 0xdc);
+    if(usb2 == 0xffffffffu || usb3 == 0xffffffffu || mask2 == 0xffffffffu || mask3 == 0xffffffffu)
+        return RoutingResult::Failed;
+    if((usb2 & mask2) == mask2 && (usb3 & mask3) == mask3)
+        return RoutingResult::Unchanged;
+    io.write(io.context, 0xd8, usb3 | mask3);
+    if((io.read(io.context, 0xd8) & mask3) == mask3)
+    {
+        io.write(io.context, 0xd0, usb2 | mask2);
+        if((io.read(io.context, 0xd0) & mask2) == mask2)
+            return RoutingResult::Changed;
+    }
+    // No device has been enumerated on this controller yet. Restore routing
+    // before EHCI probes, so a partial switchover cannot publish stale storage.
+    io.write(io.context, 0xd0, usb2);
+    io.write(io.context, 0xd8, usb3);
+    return RoutingResult::Failed;
+}
+
 bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayout& out)
 {
     out = {};
@@ -192,7 +279,8 @@ bool enqueue_command_trb(void* ring_base,
                          uint64_t ring_physical,
                          CommandRingInfo& ring,
                          const TrbFields& trb,
-                         uint64_t* trb_physical)
+                         uint64_t* trb_physical,
+                         bool publish)
 {
     if((nullptr == ring_base) || (ring.trb_count < 2u) ||
        (ring_bytes != (static_cast<size_t>(ring.trb_count) * kTrbBytes)) ||
@@ -206,7 +294,8 @@ bool enqueue_command_trb(void* ring_base,
     entry.parameter_low = static_cast<uint32_t>(trb.parameter & 0xFFFFFFFFull);
     entry.parameter_high = static_cast<uint32_t>(trb.parameter >> 32);
     entry.status = trb.status;
-    entry.control = (trb.control & ~kTrbCycleBit) | (ring.cycle_state ? kTrbCycleBit : 0u);
+    entry.control =
+        (trb.control & ~kTrbCycleBit) | ((ring.cycle_state == publish) ? kTrbCycleBit : 0u);
 
     if(nullptr != trb_physical)
     {
@@ -222,6 +311,108 @@ bool enqueue_command_trb(void* ring_base,
         ring.cycle_state = !ring.cycle_state;
     }
 
+    return true;
+}
+
+bool queue_control_transfer(void* ring_base,
+                            size_t ring_bytes,
+                            uint64_t ring_physical,
+                            CommandRingInfo& ring,
+                            uint64_t setup,
+                            uint64_t buffer,
+                            ControlTransfer& transfer)
+{
+    transfer = {};
+    const uint32_t length = setup >> 48;
+    const bool in = setup & 0x80u;
+    // This profile uses one bounded, physically contiguous data TRB.
+    if(!ring_base || !ring_physical || length > 4096u ||
+       (length && (!buffer || (buffer & 0xffffu) + length > 65536u)) ||
+       ring.trb_count < (length ? 4u : 3u) || ring_bytes != size_t(ring.trb_count) * kTrbBytes ||
+       ring.enqueue_index >= ring.trb_count - 1u)
+        return false;
+    const TrbFields stages[3]{
+        {setup,
+         8u,
+         (kTrbTypeSetupStage << 10) | (1u << 6) | (length ? ((in ? 3u : 2u) << 16) : 0u)},
+        {buffer, length, (kTrbTypeDataStage << 10) | (in ? ((1u << 16) | (1u << 2)) : 0u)},
+        {0, 0, (kTrbTypeStatusStage << 10) | (1u << 5) | ((!length || !in) ? (1u << 16) : 0u)}};
+    transfer.requested = length;
+    transfer.direction_in = in;
+    for(unsigned i = 0; i < 3; ++i)
+    {
+        if(i == 1 && !length)
+            continue;
+        // Setup remains unowned until every stage and completion field is ready.
+        if(!enqueue_command_trb(
+               ring_base, ring_bytes, ring_physical, ring, stages[i], &transfer.stages[i], i != 0))
+            return false;
+    }
+    return true;
+}
+
+void publish_control_transfer(void* ring_base,
+                              uint64_t ring_physical,
+                              const ControlTransfer& transfer)
+{
+    auto* control = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ring_base) +
+                                                transfer.stages[0] - ring_physical + 12u);
+    __atomic_store_n(control, *control ^ kTrbCycleBit, __ATOMIC_RELEASE);
+}
+
+bool control_transfer_event(ControlTransfer& transfer, const EventInfo& event)
+{
+    if(transfer.done || !event.parameter || !transfer.stages[0])
+        return false;
+    unsigned stage = 0;
+    while(stage < 3 && transfer.stages[stage] != event.parameter)
+        ++stage;
+    if(stage == 3)
+        return false;
+    if(stage == 1 && transfer.direction_in && event.completion_code == 13u &&
+       event.transfer_length <= transfer.requested)
+    {
+        transfer.residual = event.transfer_length;
+        return true;  // Short data is not completion of the status stage.
+    }
+    transfer.done = true;
+    if(stage == 2 && event.completion_code == 1u && !event.transfer_length)
+        transfer.completion = 1u;
+    else
+    {
+        transfer.completion = (event.completion_code == 0u || event.completion_code == 1u ||
+                               event.completion_code == 13u)
+                                  ? 5u
+                                  : event.completion_code;
+        transfer.residual = transfer.requested;
+    }
+    return true;
+}
+
+bool valid_descriptor_header(const void* bytes, size_t actual, uint8_t type, uint8_t minimum)
+{
+    const auto* header = static_cast<const uint8_t*>(bytes);
+    return header && actual >= minimum && minimum >= 2 && header[0] >= minimum &&
+           header[0] <= actual && header[1] == type;
+}
+
+bool valid_configuration_descriptors(const void* bytes, size_t actual)
+{
+    if(!valid_descriptor_header(bytes, actual, 2, 9))
+        return false;
+    const auto* data = static_cast<const uint8_t*>(bytes);
+    if((uint32_t(data[2]) | (uint32_t(data[3]) << 8)) != actual)
+        return false;
+    for(size_t offset = 0; offset < actual;)
+    {
+        if(actual - offset < 2)
+            return false;
+        const uint8_t type = data[offset + 1];
+        const uint8_t minimum = (type == 2 || type == 4) ? 9 : (type == 5 ? 7 : 2);
+        if(!valid_descriptor_header(data + offset, actual - offset, type, minimum))
+            return false;
+        offset += data[offset];
+    }
     return true;
 }
 
