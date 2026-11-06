@@ -5,6 +5,7 @@ Use the [documentation index](../../README.md) for current guidance.
 
 | Record | Document |
 | --- | --- |
+| 2026-11-03 | [os1 project review — 2026-11-03](2026-11-03-review.md) |
 | 2026-05-10 | [Unified OS API Architecture Review — 2026-05-10](2026-05-10-unified-os-api-architecture-review.md) |
 | 2026-05-10 | [os1 Project Review - 2026-05-10](2026-05-10-review.md) |
 | 2026-05-05 | [SMP Enablement Implementation Review - 2026-05-05](2026-05-05-smp-enablement-review.md) |

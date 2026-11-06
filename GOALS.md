@@ -5,6 +5,23 @@ The [architecture](docs/ARCHITECTURE.md) describes current implementation, and t
 The [documentation index](docs/README.md) organizes topic guides, current API contracts, and historical records.
 Use the [latest review](docs/latest-review.md) for the most recent whole-project assessment and its follow-ups.
 
+## Current position — 2026-11-06
+
+Reviewed source: `535ee54951b68c9858bf32b7577d4f121a64ab57`, after PR 31 merged.
+The [dated review](docs/reviews/2026-11-06-review.md) records evidence, remaining risks, and qualification limits.
+
+| Milestone | Current status | Remaining goal |
+| --- | --- | --- |
+| A–C: boot, platform, protected shell | Implemented baseline with BIOS/UEFI and SMP checks | Broader hardware and lifetime qualification |
+| D: native services, storage, input, security | Console, File/Directory, `/tmp`, ext2, USB storage, and preserving deployment implemented | Input services, physical update acceptance, larger storage profiles, credentials |
+| E: networking | Virtio-net and ARP probe implemented | IPv4, UDP/TCP, sockets, addressing, DNS |
+| F: remote administration | Prerequisites incomplete | PTYs, sessions, authentication, secure SSH access |
+| G: desktop | Framebuffer text output exists | Optional terminal compositor after input and session contracts |
+
+The descriptor and IPC decisions no longer block these milestones at the foundation level.
+Additional services still need explicit authority, lifetime, and failure contracts.
+See [recommended sequencing](#recommended-sequencing) for the remaining priorities.
+
 ## Vision
 
 `os1` is a self-documented teaching and engineering operating system project.
@@ -164,21 +181,24 @@ Near-term development should optimize for:
 - clean serial-debug workflow
 - predictable virtual hardware targets
 
-QEMU remains the reproducible development baseline. Physical-machine bring-up now contributes concrete requirements too: the November work added UART-optional boot, bounded firmware waits, and device-probe failure isolation. The [2026-11-03 review](docs/reviews/2026-11-03-review.md) distinguishes that implementation from hardware qualification still needed.
+QEMU remains the reproducible development baseline. Physical-machine bring-up now contributes concrete requirements too: the November work added UART-optional boot, bounded firmware waits, and device-probe failure isolation. The [2026-11-03 review](docs/archive/reviews/2026-11-03-review.md) distinguishes that implementation from hardware qualification still needed.
 
 ### Real hardware enablement
 
 The ASUS laptop now has user-reported successful boot and repeated `buffercheck` runs from a fresh boot image.
 A preserved-layout update path also exists.
+The same laptop also has user-confirmed ext2 mounting and file persistence across reboot through an EHCI hub.
 These observations do not establish complete hardware qualification or explain the earlier layout failure.
+Physical boot/program update preservation and retesting of the scheduler correction remain pending.
 Record image identity, controller/input behavior, and sustained-runtime results for each tested machine.
 [Issue #27](https://github.com/idevtm/os1/issues/27) tracks a separate physical USB keyboard failure.
+The user reconfirms it on a desktop with a USB keyboard in a USB 2.0 port; controller identity remains unknown.
 
 Broader real-hardware goals remain:
 
 - extend the existing xHCI/HID keyboard path to more controllers and USB classes
 - GPT partition handling
-- USB mass storage as the next physical persistence target; NVMe and AHCI remain later options
+- extend the implemented USB storage profile beyond the tested Asus EHCI hub path; NVMe and AHCI remain later options
 - qualify MSI/MSI-X routing on additional physical devices
 - robust ACPI table handling
 - tolerance for real-firmware variation and partial firmware quality
@@ -266,15 +286,19 @@ Later modularization is acceptable where it clearly improves structure, but earl
 
 ### Kernel and userland separation
 
-The project has already crossed the first protected-userland threshold: it boots through a minimal `/bin/init` that immediately `exec`s `/bin/sh`, can load statically linked user ELF programs from an initrd, services a small but real syscall ABI, and has demonstrated killing and reaping a faulting child without panicking the kernel. The [console descriptor milestone](docs/archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) fixes the child-publication race and adds descriptor ownership and exec cleanup. The intermittent BIOS child-launch fault retained in the [project review](docs/reviews/2026-11-03-review.md) is not conclusively explained by passing regressions.
+The system boots `/bin/init`, which executes `/bin/sh`, and loads protected user programs from initrd or supported ext2 files.
+Descriptors, explicit launch grants, arguments/environment, and bounded hosted services are implemented.
+The [console milestone](docs/archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) corrected child publication and mapping-failure cleanup.
+The [interrupt-return investigation](docs/archive/kernel/2026-11-06-interrupt-return.md) reproduced and corrected the later BIOS scheduler-handoff fault.
+It does not establish a common cause for every earlier BIOS failure.
 
 Required eventual capabilities:
 
-- filesystem-backed executable loading and launch policy
+- extend implemented filesystem-backed loading with credential-aware launch policy
 - stronger process and thread lifecycle management
-- broader descriptor, IPC, and resource-access models
-- arguments, environment passing, and richer program-loading semantics
-- filesystem-backed program and data access
+- additional native service protocols and scoped discovery
+- richer program-loading policy beyond implemented arguments, environment, and explicit grants
+- broader filesystem operations and storage profiles beyond the implemented bounded access
 - a multiuser environment beyond the current initrd shell and companion programs
 
 Protected userland remains one of the most important architectural pillars in the project.
@@ -328,7 +352,8 @@ SMP should come early enough to shape:
 
 The implementation may still progress through simpler intermediate steps, but the architecture should not assume that single-core is the long-term model.
 
-That first SMP baseline now exists on `x86_64`: APs run per-CPU idle threads, take LAPIC timer ticks, use per-CPU run queues, accept remote wakeups via reschedule IPIs, and participate in load-balanced user-thread scheduling. The console milestone adds publication, retained-wait, and mapping-allocation rollback regressions. Shared-address-space reclamation and general invalidation completion remain prerequisites for wider concurrency. Device-IRQ steering, lock-order enforcement, and policy refinement remain follow-ups.
+That first SMP baseline now exists on `x86_64`: APs run per-CPU idle threads, take LAPIC timer ticks, use per-CPU run queues, accept remote wakeups via reschedule IPIs, and participate in load-balanced user-thread scheduling. The console milestone adds publication, retained-wait, and mapping-allocation rollback regressions. Exclusive Buffer loans already use acknowledged mapping retirement.
+Generic shared-address-space reclamation remains a prerequisite for wider concurrency. Device-IRQ steering, lock-order enforcement, and policy refinement remain follow-ups.
 
 ### Security model
 
@@ -419,7 +444,8 @@ Suggested goals:
 - failure-injection and lifecycle regressions that cover rollback and cross-CPU publication
 - smoke success only after the complete observation interval, retaining failures even when retries pass
 
-Integrate the reviewed unified verification harness after reconciling its document index and metadata. It is not part of the source snapshot reviewed on 2026-11-03.
+Current validation uses host tests, CTest scripts, and BIOS/UEFI QEMU checks.
+A unified verification entrypoint and structured result artifacts remain tooling follow-ups; they do not block input or storage work.
 
 ### Performance stance
 
@@ -460,22 +486,22 @@ The project is not trying to:
 
 ## Recommended sequencing
 
-The [Native API service roadmap](docs/native-api/roadmap.md) sets the next functional sequence:
+The [Native API service roadmap](docs/native-api/roadmap.md#remaining-priorities) defines the acceptance criteria for this sequence.
 
-1. Completed for Console: connect native IPC to a kernel service with explicit authority, bounded admission, and retained lifetime.
-2. Completed for bounded copied transfers: [writable `/tmp`](docs/native-api/abi/tmpfs-abi.md). Kernel Buffer transfers remain deferred.
-3. Qualify USB keyboard input and deliver mouse events through native input objects.
-4. Extend physical USB qualification beyond the successful Asus EHCI hub and persistence test.
-5. Verify that physical boot and program updates preserve an existing user file.
+1. Verify physical boot and program updates preserve an existing user file; retest the scheduler correction on hardware.
+2. Diagnose [USB keyboard issue #27](https://github.com/idevtm/os1/issues/27) on the affected computer.
+3. Expose native keyboard and mouse services with volatile events, unsubscribe, state recovery, and removal handling.
+4. Add scoped service discovery and lifecycle rules. Add kernel Buffer borrowing and BlockDevice methods when required by a concrete client.
+5. Expand storage capacity and filesystem operations beyond the bounded ext2 profile; qualify device failure and update recovery separately.
+6. Add pipe endpoints, readiness, and shell pipelines.
+7. Add credentials, ownership, and permissions before multiuser or remote service exposure.
+8. Build IPv4, UDP/TCP, sockets, addressing, and DNS; then add PTYs, authenticated sessions, and SSH.
 
-Keyboard hardware diagnosis can proceed independently of writable filesystem work.
-Keep physical results separate from emulator coverage.
-The [latest review](docs/latest-review.md) retains historical correctness findings and links completed reliability corrections.
-Credentials and access policy remain prerequisites for multiuser or network-exposed services.
-The [dependency map](docs/native-api/roadmap.md#other-goals-dependencies) covers networking, PTYs, SSH, pipelines, and the compositor.
-
-Protected userland, SMP lifetime rules, and runnable vertical slices remain priorities.
-Future accelerator interfaces must preserve explicit memory, scheduling, and device-authority boundaries.
+Hardware acceptance can proceed alongside code work; it is not a prerequisite for designing input objects.
+Keep hardware results separate from emulator coverage.
+Device IRQ affinity, lock-order checks, generic reclamation, and measured storage scheduling remain cross-cutting reliability work.
+The [latest review](docs/latest-review.md) separates completed corrections from these remaining boundaries.
+Generated bindings, a reflective shell, userspace drivers, and a compositor remain later extensions.
 
 The in-repo milestone designs (M1–M5) refine the coarser A–G map below into concrete engineering plans.
 
@@ -521,14 +547,14 @@ The shell also supports [interactive file creation, redirection, here-documents,
 Pipelines and full terminal editing remain separate work. QEMU persistence uses the ext2 profile.
 The [service roadmap](docs/native-api/roadmap.md) gives the detailed sequence and acceptance tests.
 
-| Next slice | Required outcome |
-| --- | --- |
-| Kernel services | Programs call kernel-hosted objects through the native IPC model while drivers remain in the kernel. |
-| Temporary storage | `/tmp` supports writable files and directories, bounded allocation, and defined mutation/lifetime behavior. |
-| Input | Qualify keyboard support and expose usable mouse events with unsubscribe and loss recovery. |
-| Persistent USB data | Define block durability, add mass storage and partitions, select a filesystem, and verify data after reboot. |
-| Safe updates | Routine kernel/initrd updates preserve the persistent data partition and its contents. |
-| Local security | Add credentials, ownership, and permission checks before multiuser or remote exposure. |
+| Area | Implemented | Remaining outcome |
+| --- | --- | --- |
+| Kernel services | Console and File/Directory native copied dispatch | Scoped discovery, broader lifecycle, kernel Buffer borrowing |
+| Temporary storage | Bounded writable `/tmp` and interactive file tools | Bulk Buffer methods when needed; public mount semantics |
+| Input | xHCI boot-keyboard characters reach the console | Physical keyboard qualification and native key/mouse events with loss recovery |
+| Persistent data | Virtio and USB ext2; disk execution and reboot persistence | Larger ext2 profile, broader device and failure qualification |
+| Updates | QEMU and managed USB preserving deployment tools | Physical sentinel-file acceptance through boot and program updates |
+| Local security | Capability rights and explicit launch grants | Credentials, ownership, permissions, and service access policy |
 
 Existing [virtio-blk](src/kernel/drivers/block/virtio_blk.cpp) requests support at most eight sectors, or 4 KiB, per request.
 Future direct device access to user Buffer pages requires explicit DMA ownership and quiescence.

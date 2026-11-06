@@ -1,5 +1,9 @@
 # Real-Hardware Boot Log Capture (USB stick)
 
+This guide preserves the earlier firmware experiments.
+For current fresh images and preserving updates, use the [USB workflow](usb-image-workflow.md).
+The [November 6 review](../reviews/2026-11-06-review.md) includes the later fresh-image and USB persistence evidence.
+
 Status: the user reports round 8 works on the physical ASUS G74SX (Sandy
 Bridge, HM65 PCH, UEFI-only firmware without CSM). Its image preserves the
 round-6 boot/filesystem layout and replaces only kernel file contents. The
@@ -11,7 +15,7 @@ active in every build.
 **2026-11-03 status update:** the bring-up changes are merged in `main` at
 `85ebb10` ([PR #26](https://github.com/idevtm/os1/pull/26)). The final early-buffer
 fix postdates the physical round-8 report; later QEMU checks do not qualify that
-kernel on the laptop. The [current project review](../reviews/2026-11-03-review.md) records
+kernel on the laptop. The [historical project review](../archive/reviews/2026-11-03-review.md) records
 the source findings and validation limits. The experiment history below remains
 the evidence for the reported hardware result.
 

@@ -13,8 +13,10 @@ synchronization; they are no longer collectively BSP-only.
 This is the live synchronization contract carried forward from the original
 pre-SMP plan. It records existing mechanisms and required ownership rules,
 not a proof that every path satisfies them. The
-[2026-11-03 review](../reviews/2026-11-03-review.md) identifies the outstanding child-thread
-publication defect and the limits of the current reclamation evidence.
+[2026-11-03 review](../archive/reviews/2026-11-03-review.md) records the earlier child-publication defect and reclamation limits.
+The [console milestone](../archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) corrected publication ordering.
+The [interrupt-return correction](../archive/kernel/2026-11-06-interrupt-return.md) masks local interrupts across direct scheduler handoff.
+Generic reclamation and future shared-address-space changes still require separate lifetime evidence.
 
 ## Kernel Primitives
 
@@ -117,11 +119,11 @@ that live runtime:
 
 1. Child descriptor grants and the complete entry frame now precede enqueueing
    and the reschedule IPI. The post-publication rewrite has been removed; see
-   [R1](../reviews/2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication).
+   [R1](../archive/reviews/2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication).
 2. Define address-space reclamation and invalidation completion before adding
-   shared address spaces, COW, or public mapping operations. The existing
-   broadcast TLB IPI has no address-space/range acknowledgement protocol;
-   having callers does not establish when frames are safe to reuse.
+   shared address spaces, COW, or public mapping operations.
+   Exclusive Buffer loans already use acknowledged mapping retirement, as defined by the [Buffer ABI](../native-api/abi/buffer-loans-abi.md).
+   That bounded protocol does not establish generic address-space reclamation for future concurrent VM operations.
 3. Establish actual ACPICA serialization before concurrent AML or SCI/GPE
    expansion. The OSL currently has dummy locks and nonblocking semaphores.
 4. Keep allocation and device operations outside incompatible locks; add

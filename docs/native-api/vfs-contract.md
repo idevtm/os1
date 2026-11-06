@@ -305,8 +305,8 @@ A passive snapshot must not reset, power-cycle, reconfigure, acknowledge
 destructive device status, or perform an active diagnostic. Such operations
 require explicit control authority and driver coordination. Getters may allocate
 or gather safe cached information; “read-only” is not permission to hide hardware
-changes. This distinction matters for the existing ACPI observation finding in
-the [project review](../reviews/2026-11-03-review.md).
+changes. This distinction explains the corrected ACPI observation finding in
+the [historical review](../archive/reviews/2026-11-03-review.md).
 
 The first profile exposes no user mapping interface. Later `MemoryObject` and
 address-space `Mapping` contracts must define bounds, backing kind, protection

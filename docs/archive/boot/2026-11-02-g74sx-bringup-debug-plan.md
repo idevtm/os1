@@ -14,7 +14,7 @@ Owner: whoever picks up the
 next stick round. Companion doc for the capture mechanism:
 [2026-11-02-real-hardware-bootlog.md](../../hardware/boot-log.md).
 
-**2026-11-03 status update:** the [project review](../../reviews/2026-11-03-review.md) covers
+**2026-11-03 status update:** the [project review](../reviews/2026-11-03-review.md) covers
 the merged runtime and its remaining source findings. The final early-buffer
 fix below postdates the physical round-8 report. No subsequent physical boot,
 ten-minute session, or detailed shell-command results are claimed here.
@@ -296,7 +296,7 @@ physical round-8 report, so no additional physical result is claimed.
    32 bytes). These detailed physical checks have not been established by
    the user's round-8 success report. Capture screen evidence because this
    preserved menu does not enable kernel RAM logging.
-3. Address the [2026-11-03 review findings](../../reviews/2026-11-03-review.md#4-priority-findings)
+3. Address the [2026-11-03 review findings](../reviews/2026-11-03-review.md#4-priority-findings)
    before expanding the affected runtime capabilities. The bring-up PR is
    already merged; preserve the failed round-7 evidence and the limits of
    round-8 success when qualifying subsequent kernels or packaging changes.
@@ -343,7 +343,7 @@ physical round-8 report, so no additional physical result is claimed.
 - `acpiprobe` is currently an active power diagnostic: its observation path
   attempts D3 then D0 on live devices without a driver-quiescence or recovery
   protocol. Keep this separate from passive hardware inspection; see
-  [review finding R2](../../reviews/2026-11-03-review.md#r2--p1-acpi-observation-performs-ungated-power-transitions).
+  [review finding R2](../reviews/2026-11-03-review.md#r2--p1-acpi-observation-performs-ungated-power-transitions).
 - xHCI BIOS→OS ownership handoff (USBLEGSUP) is still not implemented.
 - x2APIC mode is not detected; LAPIC is assumed to be in xAPIC MMIO mode.
 

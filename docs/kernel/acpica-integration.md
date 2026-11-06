@@ -24,7 +24,7 @@ The November 3 implementation performed D3/D0 transitions during observation.
 The [November 5 correction](../archive/kernel/2026-11-05-passive-acpi-observation.md) removes those calls and the live route-resolution fallback.
 Both observability smokes now require cached-route and passive-snapshot output.
 Power diagnostics remain deferred until authority, driver quiescence, and failure recovery have explicit contracts.
-The [historical review](../reviews/2026-11-03-review.md) retains the original findings and hardware-evidence limits.
+The [historical review](../archive/reviews/2026-11-03-review.md) retains the original findings and hardware-evidence limits.
 
 ## Source Inputs Reviewed
 

@@ -16,7 +16,7 @@ Scope: the [kernel contract](../../native-api/object-contract.md),
 [shell profile](../../shell/language-proposal.md),
 [C++ examples](../../native-api/cpp-bindings.md), and [draft index](../../native-api/README.md).
 Cross-checks: [project goals](../../../GOALS.md), [architecture](../../ARCHITECTURE.md),
-[November project review](../../reviews/2026-11-03-review.md), and the source paths below.
+[November project review](2026-11-03-review.md), and the source paths below.
 Independent reviews examined kernel lifetime/waiting, namespace/security, and
 loader/runtime boundaries. No runtime implementation is part of this refresh.
 
@@ -85,13 +85,13 @@ and shared memory are not implemented by it.
 | [Thread wait state](../../../src/kernel/proc/thread.hpp) and [wait queues](../../../src/kernel/sync/wait_queue.cpp) | Existing single-registration waits and completion state are useful foundations, not a generic wait-many/event API. |
 | [User startup](../../../src/user/lib/crt0.cpp) | Current startup calls `main(void)`; a bounded startup record requires coordinated loader and runtime changes. |
 
-The November review's [R1 publication defect](../../reviews/2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication)
-and [R5 mapping-failure leak](../../reviews/2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame)
+The November review's [R1 publication defect](2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication)
+and [R5 mapping-failure leak](2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame)
 were runtime work at that baseline and are fixed by the console milestone.
 The former published a child with an initialized entry
 frame, then rewrites that saved frame after another CPU may already be using it.
 Adding inherited capabilities to that path without correcting
-publication would make the ownership problem worse. The [R2 observation finding](../../reviews/2026-11-03-review.md#r2--p1-acpi-observation-performs-ungated-power-transitions)
+publication would make the ownership problem worse. The [R2 observation finding](2026-11-03-review.md#r2--p1-acpi-observation-performs-ungated-power-transitions)
 already matters in a single-user system: a supposedly observational request
 attempts device power transitions.
 

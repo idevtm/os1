@@ -25,7 +25,7 @@ Kernel directories separate these responsibilities:
 | `mm/` | Physical and virtual memory |
 | `proc/`, `sched/`, `sync/` | Process/thread lifetime, scheduling, and blocking primitives |
 | `console/`, `drivers/`, `platform/` | Terminal streams, hardware drivers, and machine discovery |
-| `vfs/` | Immutable initrd namespace and writable `/tmp` |
+| `vfs/`, `fs/` | Immutable initrd, writable `/tmp`, and persistent ext2 |
 | `storage/`, `security/` | Storage and security subsystem boundaries |
 
 The [architecture](docs/ARCHITECTURE.md) defines the full source structure.
@@ -33,9 +33,9 @@ The [architecture](docs/ARCHITECTURE.md) defines the full source structure.
 The November boot changes add operation without COM1, bounded serial waits,
 PIT-calibrated TSC firmware delays, per-CPU exception stacks, PCI probe failure
 isolation, and a kernel-only update path for the preserved G74SX USB layout.
-The [2026-11-03 review](docs/reviews/2026-11-03-review.md) records the validation and its
-limits, including an unresolved intermittent BIOS child-launch fault and
-source-confirmed lifecycle and allocation defects. ACPI observation now reads cached routes without executing firmware methods.
+The [2026-11-06 review](docs/reviews/2026-11-06-review.md) records current capabilities, corrected findings, and remaining priorities.
+It distinguishes the corrected BIOS scheduler-handoff fault from unrelated historical failures and physical qualification still needed.
+ACPI observation now reads cached routes without executing firmware methods.
 `/bin/acpiprobe` reports passive inventory and disabled power control.
 The [passive observation record](docs/archive/kernel/2026-11-05-passive-acpi-observation.md) documents this correction. The [console descriptor milestone](docs/native-api/abi/console-descriptor-abi.md) now provides real
 process entries, rights, duplication, close, flags, and retained I/O references.
