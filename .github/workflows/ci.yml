@@ -79,7 +79,7 @@ jobs:
       - name: Build
         run: |
           cmake --build --preset default
-          cmake --build build --target os1_bios_image
+          cmake --build build --target os1_bios_image os1_usb_image
 
       - name: Smoke test
         run: ctest --test-dir build --output-on-failure

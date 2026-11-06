@@ -113,7 +113,7 @@ ctest --test-dir build --output-on-failure -R '^os1_interrupt_handoff_contract$'
 ```
 
 Final logs are `host-tests.log`, `all-checks.log`, `corrected-repeat.log`, and `handoff-contract.log` under `build/iretq-evidence/`.
-The report's commit identifies the candidate correction; its parent is baseline `9344844`.
+Correction `030cb06` follows baseline `9344844`; subsequent CI workflow changes do not alter the kernel.
 The temporary timing experiment is absent from production assembly.
 
 ## Resource comparison
@@ -150,4 +150,13 @@ The normal kernel ELF retains its symbols for diagnosis. Neither change alters t
 A controlled local relink used the same object order and compared every PT_LOAD payload, address, permission, and size.
 All values matched. The BIOS file decreased from 373248 to 368896 bytes: 4352 bytes, or 1.17%.
 Loaded sections and allocation requirements remain unchanged. Both firmware loaders copy segments from their explicit ELF offsets.
-The expected CI file size is 372992 bytes; CI must verify that result before merge.
+CI run 177 passed the unchanged BIOS size guard with the compact image.
+
+## CI fixture dependency
+
+CI run 177 passed the image build, host suite, and interrupt-handoff regression.
+Four combined USB-data checks failed because `os1-usb.img` did not exist.
+The workflow built only ISO and BIOS images; local validation explicitly built the USB image too.
+The workflow now builds `os1_usb_image` before CTest.
+This adds the required host image-generation step without changing guest code, memory requirements, or firmware contracts.
+The image-size failure in run 176 previously prevented these tests from running.
