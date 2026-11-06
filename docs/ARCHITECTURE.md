@@ -27,6 +27,7 @@ The [service roadmap](native-api/roadmap.md) defines the next integration milest
 - an interrupt-driven modern `virtio-blk` path with reads and writes
 - a modern `virtio-net` path with ARP-level smoke coverage
 - an xHCI USB path with HID boot-keyboard input
+- an EHCI storage path with bounded high-speed hub discovery
 - a freestanding `C++20` kernel core with narrow assembly boundaries
 - per-CPU run queues, reschedule / TLB-shootdown IPIs, and load-balanced SMP scheduling
 - `WaitQueue` / `Completion` primitives wired through block-I/O, child-exit, and console-read waits
@@ -482,7 +483,7 @@ The [USB workflow](hardware/usb-image-workflow.md) builds current payloads throu
 A separate macOS helper provides arrow-key menus for image layout and the external physical USB write destination.
 Selecting a write destination starts the writer without a typed confirmation.
 Menus use the alternate terminal screen; the helper restores the normal screen before displaying the sudo password guidance.
-Only the write, readback, and eject stage uses sudo.
+Only raw-device snapshot, write, readback, and eject steps use sudo.
 The replacement option retains the base image’s UEFI files and updates the kernel and initrd.
 Its BIOS payload remains historical; the fresh hybrid image supplies both current boot paths.
 
@@ -516,14 +517,14 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-792`: `kernel_bios.elf`
-- LBA `793-1168`: `initrd.cpio`
+- LBA `65-793`: `kernel_bios.elf`
+- LBA `794-1168`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
-The BIOS loader stages the stripped kernel in `[0x10000,0x6b000)` (364 KiB).
-It stages the plain initrd in `[0x6b000,0x9A000)` (188 KiB).
+The BIOS loader stages the stripped kernel in `[0x10000,0x6b200)` (364.5 KiB).
+It stages the plain initrd in `[0x6b200,0x9A000)` (187.5 KiB).
 The ext2 slice moves 12 KiB of staging capacity from initrd to the kernel.
 Compact non-reflective executables keep the initrd within its new bound.
 The 2880-sector raw image, firmware ceiling, and boot-log placement remain unchanged.
@@ -587,7 +588,7 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x0A000` | temporary page-table scratch used by the BIOS long-mode transition |
 | `0x10000` | BIOS kernel-image load buffer |
-| `0x6b000` | BIOS initrd load buffer (188 KiB slot, ending at `0x9A000`) |
+| `0x6b200` | BIOS initrd load buffer (187.5 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x20000-0x5FFFF` | page-frame bitmap |
 
@@ -1098,12 +1099,16 @@ The [ext2 profile](filesystems/ext2.md) defines exact limits, sync authority, fa
 The namespace mounts `/disk` before publication when a supported partition exists.
 It tries the virtio device first, then published USB devices.
 [USB mass storage](hardware/usb-storage.md) adds bounded SCSI commands over xHCI bulk endpoints.
+An unsupported initialization flush can use confirmed write-through operation; unknown cache behavior still rejects writable storage admission.
 Shared IRQ/poll event consumption uses an event lock; a BSP input queue keeps HID console callbacks on the boot CPU.
 Failed USB devices retain DMA after hardware publication, and reconnect does not restore old handles.
 File contents remain on disk until read; the mount imports only bounded namespace and allocation metadata.
 Executable files are immutable in this profile. ELF loading owns and releases a stable image snapshot.
 [Offline deployment](filesystems/program-deployment.md) replaces selected programs between guest runs.
 The host validates filesystem consistency, supported limits, installed hashes, and preservation of unrelated files before publication.
+The [USB workflow](hardware/usb-image-workflow.md) adds a versioned ownership record and an ext2 partition after the existing ESP.
+Physical updates retain a local snapshot, stage changes without privileges, then validate disk identity and original bytes before bounded writes.
+Boot updates preserve every data byte. Program updates reuse the same filesystem validation and file-preservation checks.
 
 Filesystem admission uses an atomic guard; concurrent callers receive WOULD_BLOCK.
 The virtio queue has a separate IRQ-safe lock for publication and completion.
@@ -1388,3 +1393,11 @@ The [initrd VFS milestone](archive/native-api/2026-11-04-initrd-vfs-implementati
 - ACPICA upgrade/footprint policy, OSL feature boundaries, and broader real-hardware ACPI coverage when new hardware requires it
 
 The shared boot contract, driver resource records, event ring, and dual-frontend QEMU coverage provide infrastructure for those steps. The review's source findings and physical-hardware evidence define what still needs to be established before claiming broader reliability or isolation.
+
+### USB controller-independent storage
+
+The USB block-device list combines xHCI and EHCI devices before the filesystem mount probe.
+Both controllers reuse the SCSI and Bulk-Only Transport implementation.
+EHCI owns a serialized polling schedule and discovers high-speed hubs during boot.
+Hardware drivers remain in the kernel; the native File/Directory contract does not change.
+See [USB storage](hardware/usb-storage.md#ehci-and-high-speed-hubs) for limits and DMA lifetime rules.

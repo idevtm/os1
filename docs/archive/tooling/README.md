@@ -10,3 +10,5 @@ Use the [documentation index](../../README.md) for current guidance.
 | 2026-04-27 | [Modern C++ Source Reorganization Plan](2026-04-27-modern-cpp-source-reorganization-plan.md) |
 | 2026-04-27 | [Kernel Source Tree Reorganization Plan - 2026-04-27](2026-04-27-kernel-source-tree-reorganization-plan.md) |
 | 2026-04-26 | [os1 Source Tree Refactor - 2026-04-26](2026-04-26-source-tree-refactor.md) |
+
+- [2026-11-06 USB menu history](2026-11-06-usb-image-menu-history.md): earlier boot-only menus, measurements, and terminal corrections.

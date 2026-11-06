@@ -17,6 +17,7 @@ import types
 import unittest
 from unittest.mock import patch
 
+sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -34,7 +35,7 @@ updater = load("usb_payloads", "cmake/scripts/update_usb_payloads.py")
 def disk():
     return dict(DeviceIdentifier="disk13", DeviceNode="/dev/disk13", Internal=False,
                 WholeDisk=True, VirtualOrPhysical="Physical", BusProtocol="USB", DeviceBlockSize=512,
-                Writable=True, TotalSize=10000000, MediaName="Test USB")
+                Writable=True, TotalSize=200000000, MediaName="Test USB")
 
 
 class WriterTests(unittest.TestCase):
@@ -57,6 +58,18 @@ class WriterTests(unittest.TestCase):
             writer.copy_and_verify(io.BytesIO(data), target, len(data), expected)
             target.seek(0)
             self.assertEqual(target.read(), data + b"X" * 64)
+
+    def test_initial_managed_write_clears_only_old_partition_tail(self):
+        with tempfile.TemporaryFile() as target:
+            target.write(b'X' * 65536)
+            writer.clear_partition_tail(target, 32768, 65536, os.fsync)
+            target.seek(0)
+            self.assertEqual(target.read(), b'X' * (65536-33*512) + bytes(33*512))
+        with tempfile.TemporaryFile() as target:
+            target.write(b'X' * 65536)
+            writer.clear_partition_tail(target, 65024, 65536, os.fsync)
+            target.seek(0)
+            self.assertEqual(target.read(), b'X' * 65024 + bytes(512))
 
     def test_raw_device_sync_uses_macos_cache_command(self):
         with patch.object(writer.fcntl, "ioctl") as ioctl:
@@ -122,6 +135,18 @@ class WriterTests(unittest.TestCase):
                                         hashlib.sha256(b"image").hexdigest())
                 self.assertEqual(command.call_args.args[0], [writer.DISKUTIL, "unmountDisk", "/dev/disk13"])
                 self.assertEqual(command.call_count, 1)
+
+    def test_update_identity_change_after_unmount_never_opens_device(self):
+        changed = disk(); changed['TotalSize'] += 512
+        with patch.object(writer.os, 'geteuid', return_value=0), \
+             patch.object(writer, 'disk_info', side_effect=[disk(), changed]), \
+             patch.object(writer.subprocess, 'run') as command, \
+             patch.object(writer.os, 'open') as opened:
+            with self.assertRaisesRegex(ValueError, 'after unmount'):
+                with writer.raw_device('disk13', writer.identity(disk())):
+                    self.fail('changed disk accepted')
+            opened.assert_not_called()
+            self.assertEqual(command.call_count, 1)
 
     def test_cancel_does_not_elevate(self):
         with tempfile.NamedTemporaryFile() as image:
@@ -201,13 +226,21 @@ class MenuTests(unittest.TestCase):
     def test_layout_choices_describe_operation_without_machine_names(self):
         with tempfile.NamedTemporaryFile() as base:
             with patch.object(writer, "choose_menu", return_value="preserved") as menu:
-                self.assertEqual(writer.choose_layout(Path(base.name)), ("preserved", Path(base.name)))
+                self.assertEqual(writer.choose_boot_only_layout(Path(base.name)), ("preserved", Path(base.name)))
                 text = str(menu.call_args)
                 self.assertIn("Replace kernel and initrd", text)
                 self.assertNotIn("G74SX", text)
         with patch.object(writer, "choose_menu", return_value="fresh") as menu:
-            self.assertEqual(writer.choose_layout(Path("/missing-base-image")), ("fresh", None))
+            self.assertEqual(writer.choose_boot_only_layout(Path("/missing-base-image")), ("fresh", None))
             self.assertEqual(menu.call_args.args[1], [("fresh", "Create a fresh boot image (UEFI + BIOS)")])
+
+    def test_data_menu_separates_initialization_and_preserving_updates(self):
+        with patch.object(writer, "choose_menu", return_value="boot") as menu:
+            self.assertEqual(writer.choose_layout(Path("/missing")), ("boot", None))
+            keys = [item[0] for item in menu.call_args.args[1]]
+            self.assertEqual(keys, ["data", "boot", "programs", "all", "legacy"])
+        with patch.object(writer, "choose_menu", side_effect=["legacy", "fresh"]):
+            self.assertEqual(writer.choose_layout(Path("/missing")), ("fresh", None))
 
     def test_layout_cancel_never_builds(self):
         with patch.object(writer.os, "geteuid", return_value=501), \

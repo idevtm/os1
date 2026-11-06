@@ -514,6 +514,7 @@ Related references: [USB and xHCI specifications](REFERENCES.md#device-buses-dis
 | Control transfer | USB’s request/response transfer type, using setup, optional data, and status stages for operations such as device configuration. |
 | DCBAA | Device Context Base Address Array: the xHCI array locating device contexts; entry zero is used for scratchpad-buffer information when needed. |
 | Device context; endpoint context | xHCI memory structures describing an assigned device slot and its endpoint state. |
+| EHCI | Enhanced Host Controller Interface: the register and DMA schedule interface for USB 2 high-speed host controllers. |
 | Endpoint | A numbered USB data source or sink within a device; endpoint zero provides the default control interface. |
 | ERST | Event Ring Segment Table: xHCI metadata locating the memory segments making up an event ring. |
 | Event ring — xHCI | An xHCI queue where the controller reports completions, port changes, and other events to software. It is separate from the kernel diagnostic event ring. |
@@ -523,6 +524,9 @@ Related references: [USB and xHCI specifications](REFERENCES.md#device-buses-dis
 | Hub; root hub; root port | A hub adds downstream USB connections; the root hub/ports are supplied by the host controller itself. |
 | Interrupt transfer | USB’s periodically scheduled transfer type for timely small reports; it is not the same thing as a CPU interrupt. |
 | Interrupter | An xHCI event-delivery unit associating event-ring state with interrupt generation and moderation. |
+| Queue head (QH); qTD | EHCI endpoint scheduling structure and queued transfer descriptor. The controller reads and updates these DMA-visible records. |
+| Split transaction; transaction translator | A high-speed hub translates split transactions into low/full-speed transfers. High-speed downstream devices do not require this translation. |
+| UHCI; OHCI | Universal/Open Host Controller Interface: older USB controller interfaces commonly used for low/full-speed devices. |
 | Scratchpad buffer | Controller-requested memory supplied by the driver for an xHCI controller’s internal use. |
 | Setup, data, status stages | The three kinds of stage in a USB control transfer; the data stage is absent for requests with no payload. |
 | Slot; slot ID | An xHCI controller allocation identifying a device and its associated contexts. |

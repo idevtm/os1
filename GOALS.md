@@ -360,14 +360,15 @@ Selected progression:
 3. Completed for QEMU: block bounds, Flush, a partition view, and bounded ext2 persistence.
 4. Completed for QEMU: execute a disk-only utility and verify files after reboot.
 5. Completed for QEMU: deploy selected programs offline while preserving existing files.
-6. Completed in QEMU: bounded USB mass storage and removal failure. Physical qualification and broader filesystem recovery remain.
-7. Preserve the data partition across routine kernel/initrd image updates.
+6. USB mass storage and removal failure pass QEMU checks. Asus G74SX mounting and reboot persistence pass; broader physical failure qualification remains.
+7. Implemented tooling: managed boot/data images and preserving boot/program updates; dedicated physical update-preservation checks remain.
 
 Ext2 is selected and implemented for the first QEMU persistence profile.
 Bounded virtio block reads, writes, and Flush support native filesystem synchronization.
 A disk-only utility and files surviving reboot validate the first vertical slice.
 [USB mass storage](docs/hardware/usb-storage.md) now passes QEMU persistence and removal checks.
-Physical qualification and partition-preserving deployment remain planned.
+Managed USB deployment preserves the data layout and unlisted files in QEMU checks.
+The [Asus hardware record](docs/archive/filesystems/2026-11-06-usb-hardware-validation.md) confirms ext2 mounting and user-reported reboot persistence.
 The [storage roadmap](docs/native-api/roadmap.md#milestone-3-persistent-usb-data) defines the acceptance gates.
 
 ### Driver model
@@ -464,8 +465,8 @@ The [Native API service roadmap](docs/native-api/roadmap.md) sets the next funct
 1. Completed for Console: connect native IPC to a kernel service with explicit authority, bounded admission, and retained lifetime.
 2. Completed for bounded copied transfers: [writable `/tmp`](docs/native-api/abi/tmpfs-abi.md). Kernel Buffer transfers remain deferred.
 3. Qualify USB keyboard input and deliver mouse events through native input objects.
-4. Qualify USB mass storage on hardware and add partition-preserving physical updates.
-5. Preserve stored data during boot-image updates.
+4. Extend physical USB qualification beyond the successful Asus EHCI hub and persistence test.
+5. Verify that physical boot and program updates preserve an existing user file.
 
 Keyboard hardware diagnosis can proceed independently of writable filesystem work.
 Keep physical results separate from emulator coverage.
@@ -496,7 +497,7 @@ The in-repo milestone designs (M1–M5) refine the coarser A–G map below into 
 - PCIe enumeration, BAR ownership, MSI-X/MSI/INTx fallback, shared virtio transport, request-shaped block layer, and interrupt-driven `virtio-blk` reads + writes ([2026-04-30 pass](docs/archive/kernel/2026-04-29-driver-device-platform-implementation-plan.md) — implemented)
 - ACPI-first machine discovery now backed by upstream ACPICA: table discovery, namespace load, device enumeration, `_PRT`/resource resolution, and `_PS0`/`_PS3` power transitions are implemented through the ACPICA integration ([2026-05-06 design](docs/kernel/acpica-integration.md), [2026-05-10 review](docs/archive/reviews/2026-05-10-review.md)); broader real-hardware ACPI coverage is follow-on work
 - PCIe support expanding from enumeration into BAR/resource ownership, driver binding, bus mastering, MSI/MSI-X, and DMA-safe building blocks (implemented)
-- USB host-controller discovery through PCI, with xHCI as the first USB transport and HID keyboard as the first USB class target ([2026-04-30 pass](docs/archive/kernel/2026-04-29-driver-device-platform-implementation-plan.md) — implemented; HID mouse recognized but not yet routed; USB hub class remains follow-on work; bounded mass storage now passes QEMU checks)
+- USB host-controller discovery through PCI, with xHCI as the first USB transport and HID keyboard as the first USB class target ([2026-04-30 pass](docs/archive/kernel/2026-04-29-driver-device-platform-implementation-plan.md) — implemented; HID mouse recognized but not yet routed; xHCI hubs remain follow-on work; EHCI adds bounded high-speed hub discovery; mass storage has QEMU coverage)
 - HPET-calibrated LAPIC periodic timer with PIT fallback (implemented)
 - UART-optional boot, bounded serial polling, PIT-calibrated TSC firmware waits, and PCI probe failure isolation (implemented in the November runtime baseline; exact-kernel physical qualification remains pending)
 - early APIC / SMP-oriented platform groundwork plus the first operational SMP runtime (per-CPU `cpu` pages, TSS, ACPI-derived AP bring-up, per-CPU idle threads, per-CPU LAPIC timer ticks, reschedule IPIs, per-CPU run queues, load-balanced user-thread placement, `WaitQueue` / `Completion`-based blocking, `Spinlock`/`IrqGuard` synchronization vocabulary, and an `OS1_BSP_ONLY` annotation system are implemented; per-CPU device IRQ steering remains follow-on work)
@@ -533,7 +534,8 @@ Existing [virtio-blk](src/kernel/drivers/block/virtio_blk.cpp) requests support 
 Future direct device access to user Buffer pages requires explicit DMA ownership and quiescence.
 The kernel small-object allocator already has real consumers; extend that lifetime model to mutable filesystem state.
 Preserve existing descriptor rights, shared open cursors, explicit grants, and failure cleanup when adding service adapters.
-USB mass storage does not require AHCI, NVMe, or general hub support for an explicitly limited root-port target.
+USB mass storage does not require AHCI or NVMe.
+EHCI high-speed hub discovery extends the original root-port storage profile for older USB 2 platforms.
 
 ### Milestone E: Networking foundation *(driver and ARP probe implemented; IP/UDP/TCP and sockets remain)*
 

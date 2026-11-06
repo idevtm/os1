@@ -11,13 +11,17 @@ for name in ('qemu', 'image', 'disk'):
     p.add_argument('--'+name, required=True)
 p.add_argument('--code')
 p.add_argument('--vars')
+p.add_argument('--controller', choices=['xhci', 'ehci'], default='xhci')
 a = p.parse_args()
 with tempfile.TemporaryDirectory(prefix='os1-usb-run-') as temporary:
     command = [a.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M',
                '-drive', f'if=none,id=data,format=raw,file={a.disk},cache=writeback',
-               '-device', 'qemu-xhci,id=xhci',
-               '-device', 'usb-storage,bus=xhci.0,drive=data',
-               '-device', 'usb-kbd,bus=xhci.0', '-serial', 'stdio', '-monitor', 'none', '-no-reboot']
+               '-serial', 'stdio', '-monitor', 'none', '-no-reboot']
+    if a.controller == 'ehci':
+        command += ['-device', 'usb-ehci,id=ehci', '-device', 'usb-storage,bus=ehci.0,drive=data']
+    else:
+        command += ['-device', 'qemu-xhci,id=xhci', '-device', 'usb-storage,bus=xhci.0,drive=data',
+                    '-device', 'usb-kbd,bus=xhci.0']
     if a.code:
         variables = Path(temporary)/'vars.fd'
         shutil.copyfile(a.vars, variables)

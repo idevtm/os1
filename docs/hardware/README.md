@@ -19,5 +19,7 @@ Use the current USB workflow for ordinary image creation.
 Diagnostic boot logging remains a separate workflow with its own constraints.
 
 [Issue #27](https://github.com/idevtm/os1/issues/27) tracks a separate physical USB keyboard failure.
-USB mass storage and ext2 persistence pass QEMU checks. Physical qualification and data-partition deployment remain planned.
-Current full-image writing does not promise to preserve a future data partition.
+USB mass storage and ext2 persistence pass QEMU checks. The USB menu now creates managed boot/data images and stages preserving updates.
+Qualification of additional firmware paths, controllers, and physical failure cases remains pending.
+
+[Asus G74SX hardware validation](../archive/filesystems/2026-11-06-usb-hardware-validation.md) records EHCI hub traversal and USB ext2 reboot persistence.

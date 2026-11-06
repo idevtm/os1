@@ -1840,7 +1840,7 @@ const PciDriver& xhci_pci_driver()
     };
     return driver;
 }
-BlockDevice* usb_storage_block_device(size_t index)
+BlockDevice* xhci_storage_block_device(size_t index)
 {
     for(auto* controller : g_xhci_controllers)
     {

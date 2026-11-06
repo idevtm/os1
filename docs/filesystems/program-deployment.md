@@ -99,7 +99,8 @@ The tool does not promise recovery from every host filesystem or hardware failur
 
 Only regular image files with one hard link are accepted. Symbolic-link targets are rejected.
 The tool accepts the standalone QEMU layout: one Linux partition at sector 2048 and no other partitions.
-It does not accept physical devices or combined BIOS/UEFI USB images.
+It does not accept physical devices or combined BIOS/UEFI USB images directly.
+The [USB menu](../hardware/usb-image-workflow.md) stages the managed data partition through this validator before bounded physical writes.
 
 ## Bounds and limitations
 
@@ -120,7 +121,7 @@ Processes that ignore locks or disable QEMU locking are outside this contract.
 
 This operation does not erase unlisted files, uninstall programs, or migrate filesystem formats.
 A program removed from the manifest remains installed.
-Online installation, automatic program search paths, physical USB updates, and larger ext2 profiles remain separate work.
+Online installation, automatic program search paths, and larger ext2 profiles remain separate work.
 The initrd still contains the existing recovery and verification programs.
 
 ## Validation

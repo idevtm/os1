@@ -32,7 +32,7 @@ flowchart TD
 | Shared state | Independent sessions and bounded admission; class-controlled Counter singleton | Reusable service bootstrap and lifecycle beyond the scoped Counter example |
 | Typed metadata | Offline interfaces; bounded rich constructor/method inputs and CLI conversion | Stable service schemas; broader output/event descriptions and generated bindings later |
 | Bulk data | Exclusive zero-copy Buffer loans, returned input identity, distinct output objects | Kernel-service integration; separate DMA ownership and quiescence rules for devices |
-| Files | Immutable initrd, writable `/tmp`, native mutation, quotas, per-open cursors, capability-relative lookup | Kernel Buffer transfers, public mounts, and physical USB storage |
+| Files | Immutable initrd, writable `/tmp`, native mutation, quotas, per-open cursors, capability-relative lookup | Kernel Buffer transfers, public mounts, and physical USB qualification |
 | Devices | Internal block requests; xHCI boot-keyboard input | Native device endpoints, usable mouse events, broader USB hardware qualification |
 
 The descriptor decision no longer blocks VFS, sockets, PTYs, or redirection at the foundational level.
@@ -171,7 +171,9 @@ Controller and hub expansion depend on the identified hardware, not assumptions 
 A persistent writable data partition needs more than writable file methods.
 Ext2 is selected for the first persistence slice. The [QEMU profile](../filesystems/ext2.md) is implemented.
 [USB transport](../hardware/usb-storage.md) now passes QEMU persistence, deployment, and removal checks.
-Physical qualification and partition-preserving deployment remain planned.
+Managed boot/data creation and preserving updates are implemented in the [USB menu](../hardware/usb-image-workflow.md).
+One Asus EHCI hub path now has mounting and user-reported reboot-persistence evidence.
+Broader physical failure testing and update-preservation qualification remain pending.
 Choose a dedicated data partition; do not mount the boot filesystem writable by default.
 
 ```mermaid
@@ -180,7 +182,7 @@ flowchart LR
     B --> C[Bounded partition view]
     C --> D[BlockDevice interface]
     D --> E[USB mass-storage driver]
-    E --> F[xHCI bulk transfers]
+    E --> F[xHCI / EHCI bulk transfers]
     D --> G[virtio-blk reference tests]
 ```
 
@@ -206,13 +208,16 @@ Do not promise end-to-end zero-copy for hardware that cannot consume the supplie
 ### USB transport and partition access
 
 The implemented first scope uses Bulk-Only Transport with bounded bulk transfers and a SCSI command subset.
-It requires writable 512-byte media and successful cache synchronization.
+It requires writable 512-byte media and successful cache synchronization, or explicit write-through evidence after an unsupported initialization flush.
 Status validation, bounded recovery, and device retirement handle failed requests.
 Reconnect requires reboot and cannot restore old handles.
 A reconnected device must not silently inherit outstanding authority from a removed device.
 
 A direct root-port device can be the initial support target.
 General hubs, UAS, AHCI, and NVMe are not prerequisites for that limited milestone.
+EHCI now adds bounded high-speed hub discovery for USB 2 storage.
+Its [implementation record](../archive/filesystems/2026-11-06-ehci-storage.md) records host/QEMU coverage.
+The [Asus G74SX test](../archive/filesystems/2026-11-06-usb-hardware-validation.md) confirms one physical hub path and user-reported reboot persistence.
 Expand the controller or topology scope when actual hardware requires it.
 Select and validate the supported partition-table format before physical writes.
 Reject malformed, overlapping, overflowing, or boot-overlapping data ranges.
@@ -234,16 +239,16 @@ Verify bounds, full media, I/O errors, removal during I/O, and clean rollback be
 ### Preserve data during image updates
 
 [Offline QEMU deployment](../filesystems/program-deployment.md) updates listed programs while preserving other files.
-It requires a stopped guest and publishes a validated image copy. Physical partition updates remain separate work.
+It requires a stopped guest and publishes a validated image copy.
+The USB workflow uses the same validator on a snapshot before bounded physical writes.
 
-The current USB menu writes a complete boot image, including its partition table.
-Preserving the boot layout does not establish preservation of a future data partition.
+The USB menu separates initial creation from boot updates, program deployment, and combined updates.
+It accepts only its versioned managed layout and retains a backup before writing.
 
-Before storing valued data, add a partition-aware update mode.
-It must preserve data-partition entries and contents while replacing only supported boot payloads.
-Keep initial formatting separate from routine kernel/initrd updates.
-Test a sentinel file across updates and subsequent boots.
-Document which existing layouts support safe updates; reject incompatible layouts before writing.
+Boot updates preserve all data bytes. Program deployment preserves unlisted files and supported inode metadata.
+Tests verify sentinel files across updates and subsequent BIOS/UEFI boots.
+Foreign layouts are rejected; raw-device writes are not power-loss atomic.
+Qualify the workflow on physical devices before treating QEMU evidence as hardware validation.
 
 ## Other GOALS dependencies
 
@@ -281,7 +286,8 @@ The [temporary filesystem slice](abi/tmpfs-abi.md) now uses that boundary with m
 Next, qualify keyboard hardware and define input-service events and recovery snapshots.
 Add kernel Buffer borrowing when a concrete bulk-data method requires it.
 Keyboard diagnosis can proceed independently; input-service integration reuses the same adapter.
-Persistent USB data follows the block, partition, durability, and update-preservation contracts above.
+USB ext2 reboot persistence now has one physical-machine result.
+Next, verify physical program deployment and boot updates preserve an existing user file.
 
 ## Original roadmap impact assessment and evidence
 

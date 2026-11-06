@@ -51,7 +51,7 @@ constructor arguments and CLI conversion, volatile subscriptions, timed waits,
 and parent-owned private-provider supervision. The [shared activation phase](docs/native-api/abi/shared-activation-abi.md) adds
 bounded capability attachments and a scoped activation service whose Counter
 class selects singleton reuse; `activationcheck` demonstrates independent clients.
-Credentials, general service discovery, physical USB storage, and a general
+Credentials, general service discovery, physical USB qualification, and a general
 network stack remain future work.
 
 The [session and rich-parameter implementation](docs/archive/native-api/2026-11-05-client-sessions-and-parameters.md)
@@ -64,7 +64,7 @@ Inline control payloads remain bounded to 256 bytes. Live readers and shared rea
 
 The [temporary filesystem ABI](docs/native-api/abi/tmpfs-abi.md) adds native Directory/File methods, mutation rights, and bounded writable `/tmp`.
 Run `vfscheck` to check native clients, descriptor access, sparse files, and unlink lifetime.
-Kernel Buffer transfers and physical USB storage remain deferred.
+Kernel Buffer transfers remain deferred. Physical USB controller qualification remains in progress.
 [Persistent ext2 in QEMU](docs/filesystems/ext2.md) mounts `/disk`, runs a disk-only utility, and preserves synchronized files across reboot.
 
 The [kernel Console adapter](docs/native-api/abi/kernel-console-abi.md) adds copied IPC `write`, `try_read`, and the `info` property.
@@ -485,6 +485,17 @@ cmake --build build --target run_persistent
 Inside the guest, run `/disk/diskutil seed`, then `/disk/diskutil verify`.
 Run `/disk/diskutil sync` after shell writes and before stopping QEMU.
 Use `run_usb_storage` or `run_usb_storage_bios` to attach the same disk through xHCI USB mass storage.
+Use `run_ehci_storage_uefi` or `run_ehci_storage_bios` for EHCI USB 2 storage.
+The USB persistence checks cover both controllers; high-speed EHCI hubs still need physical qualification.
 Use `smoke_usb_storage` for persistence, deployment, removal, and keyboard checks.
 See the [USB storage guide](docs/hardware/usb-storage.md) and [ext2 guide](docs/filesystems/ext2.md) for supported profiles and recovery behavior.
 The two-boot smoke tests also use `e2fsck` when available (`brew install e2fsprogs` on macOS).
+
+
+### USB boot with persistent data
+
+Run `./os1.sh usb` and select **Create boot + ext2 data image (erase USB)**.
+This creates boot partitions and a preformatted 128 MiB data partition mounted at `/disk`.
+For later changes, select **Update boot files**, **Deploy programs**, or **Update boot and programs**.
+These actions retain a backup and preserve the existing data layout and unlisted files.
+See the [USB workflow](docs/hardware/usb-image-workflow.md) for requirements, preservation limits, and recovery notes.

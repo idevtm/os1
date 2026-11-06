@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <vector>
@@ -34,6 +35,7 @@ struct WireDevice
         ShortStatus,
         Residue,
         ShortData,
+        ConsistentShortData,
         FailedData,
         StallStatus,
         StallData,
@@ -43,6 +45,13 @@ struct WireDevice
     std::array<uint8_t, 4096> disk{};
     unsigned stage = 0, commands = 0, resets = 0, clears = 0;
     bool readonly = false, no_flush = false, unit_attention = false, sense_error = false;
+    bool no_mode = false;
+    uint8_t fail_data_opcode = 0xff;
+    uint8_t sense_key = 6, sense_asc = 0, sense_ascq = 0, sense_format = 0x70;
+    unsigned sense_bytes = 18, cache_bytes = 24;
+    bool cache_rejected = false, fail_flush_transport = false;
+    uint32_t response_residue = 0;
+    std::array<uint8_t, 64> cache_mode{};
     uint32_t sector_bytes = 512;
     std::vector<uint8_t> opcodes;
     static Transfer bulk(void* context, bool in, void* data, uint32_t size)
@@ -60,6 +69,9 @@ struct WireDevice
                       p[15] == 0x28 || p[15] == 0x2a || p[15] == 0x25 || p[15] == 0x35 ? 10 : 6);
             ++f.commands;
             f.opcodes.push_back(p[15]);
+            f.response_residue = 0;
+            if(f.fail_flush_transport && p[15] == 0x35)
+                return {TransferStatus::Failed, 0};
             f.stage = le32(p + 8) ? 1 : 2;
             return {TransferStatus::Ok, size};
         }
@@ -69,7 +81,7 @@ struct WireDevice
             f.stage = 2;
             EXPECT_EQ(size, le32(f.cbw.data() + 8));
             EXPECT_EQ(in, bool(f.cbw[12] & 0x80));
-            if(f.fault == FailedData)
+            if(f.fault == FailedData || op == f.fail_data_opcode)
                 return {TransferStatus::Failed, 0};
             if(f.fault == StallData)
                 return {TransferStatus::Stall, 0};
@@ -89,14 +101,39 @@ struct WireDevice
                 p[2] = f.readonly ? 0x80 : 0;
             if(op == 3)
             {
-                p[0] = 0x70;
-                p[2] = f.sense_error ? 3 : 6;
+                p[0] = f.sense_format;
+                if(f.sense_format == 0x72)
+                {
+                    p[1] = f.sense_key;
+                    p[2] = f.sense_asc;
+                    p[3] = f.sense_ascq;
+                }
+                else
+                {
+                    p[2] = f.sense_error ? 3 : f.sense_key;
+                    p[7] = 10;
+                    p[12] = f.sense_asc;
+                    p[13] = f.sense_ascq;
+                }
+                const auto actual = std::min<unsigned>(size, f.sense_bytes);
+                f.response_residue = size - actual;
+                return {TransferStatus::Ok, actual};
+            }
+            if(op == 0x1a && f.cbw[17] == 8)
+            {
+                const auto actual = std::min<unsigned>(size, f.cache_bytes);
+                std::memcpy(p, f.cache_mode.data(), actual);
+                f.response_residue = size - actual;
+                return {TransferStatus::Ok, actual};
             }
             if(op == 0x28)
                 std::memcpy(p, f.disk.data(), size);
             if(op == 0x2a)
                 std::memcpy(f.disk.data(), p, size);
-            return {TransferStatus::Ok, f.fault == ShortData ? size - 1 : size};
+            if(f.fault == ConsistentShortData)
+                f.response_residue = 1;
+            return {TransferStatus::Ok,
+                    f.fault == ShortData || f.fault == ConsistentShortData ? size - 1 : size};
         }
         EXPECT_TRUE(in);
         EXPECT_EQ(size, 13u);
@@ -109,10 +146,11 @@ struct WireDevice
         std::memset(p, 0, 13);
         le(p, f.fault == Signature ? 0 : 0x53425355);
         le(p + 4, le32(f.cbw.data() + 4) + (f.fault == Tag));
-        le(p + 8, f.fault == Residue ? le32(f.cbw.data() + 8) + 1 : 0);
+        le(p + 8, f.fault == Residue ? le32(f.cbw.data() + 8) + 1 : f.response_residue);
         p[12] = f.fault == Phase ? 2
                                  : (f.fault == CommandFailure || (f.no_flush && op == 0x35) ||
-                                    (f.unit_attention && op == 0));
+                                    (f.no_mode && op == 0x1a) || (f.unit_attention && op == 0) ||
+                                    (f.cache_rejected && op == 0x1a && f.cbw[17] == 8));
         if(f.unit_attention && op == 0)
             f.unit_attention = false;
         return {TransferStatus::Ok, f.fault == ShortStatus ? 12u : 13u};
@@ -139,6 +177,9 @@ TEST(UsbStorage, InitializesWritableGeometryAndRequiresFlush)
     WireDevice wire;
     Device device;
     ASSERT_TRUE(device.initialize(wire.transport()));
+    EXPECT_STREQ(device.probe_stage, "storage-ready");
+    EXPECT_EQ(device.probe_opcode, 0x35);
+    EXPECT_EQ(device.probe_result, Result::Ok);
     EXPECT_EQ(device.sectors, 65536u);
     EXPECT_EQ(wire.opcodes, (std::vector<uint8_t>{0x12, 0, 0x25, 0x1a, 0x35}));
     std::array<uint8_t, 4096> written{}, read{};
@@ -168,7 +209,201 @@ TEST(UsbStorage, RejectsUnsupportedGeometryReadonlyAndMissingDurability)
         wire.no_flush = scenario == 2;
         EXPECT_FALSE(device.initialize(wire.transport()));
         EXPECT_FALSE(device.alive);
+        EXPECT_STREQ(device.probe_stage,
+                     scenario == 0   ? "storage-capacity"
+                     : scenario == 1 ? "storage-write-protect"
+                                     : "storage-flush-rejected");
+        EXPECT_EQ(device.probe_result, Result::Ok);
+        EXPECT_EQ(device.probe_opcode, scenario == 0 ? 0x25 : scenario == 1 ? 0x1a : 3);
+        EXPECT_EQ(device.probe_mode, scenario == 1 ? 0x80 : 0);
     }
+}
+void write_through_device(WireDevice& wire)
+{
+    wire.no_flush = true;
+    wire.sense_key = 5;
+    wire.sense_asc = 0x20;
+    wire.cache_mode[0] = 23;
+    wire.cache_mode[4] = 8;
+    wire.cache_mode[5] = 18;
+}
+TEST(UsbStorage, UnsupportedFlushRequiresExplicitCurrentWriteThroughPolicy)
+{
+    for(bool descriptor : {false, true})
+    {
+        WireDevice wire;
+        write_through_device(wire);
+        wire.sense_format = descriptor ? 0x72 : 0x70;
+        wire.sense_bytes = descriptor ? 8 : 18;
+        Device device;
+        ASSERT_TRUE(device.initialize(wire.transport()));
+        EXPECT_TRUE(device.write_through);
+        EXPECT_STREQ(device.probe_stage, "storage-write-through");
+        EXPECT_EQ(wire.opcodes, (std::vector<uint8_t>{0x12, 0, 0x25, 0x1a, 0x35, 3, 0x1a}));
+        EXPECT_EQ(wire.cbw[16], 8);
+        EXPECT_EQ(wire.cbw[17], 8);
+        std::array<uint8_t, 512> bytes{}, read{};
+        bytes[17] = 0x45;
+        ASSERT_TRUE(device.read_write(true, 0, bytes.data(), 1));
+        const auto count = wire.commands;
+        ASSERT_TRUE(device.flush());
+        EXPECT_EQ(wire.commands, count);
+        ASSERT_TRUE(device.read_write(false, 0, read.data(), 1));
+        EXPECT_EQ(read, bytes);
+        device.invalidate();
+        EXPECT_FALSE(device.flush());
+        EXPECT_EQ(wire.resets, 0u);
+    }
+}
+TEST(UsbStorage, WriteThroughFallbackRejectsUnknownUnsafeOrMalformedMetadata)
+{
+    for(unsigned scenario = 0; scenario < 13; ++scenario)
+    {
+        WireDevice wire;
+        write_through_device(wire);
+        switch(scenario)
+        {
+            case 0:
+                wire.cache_mode[6] = 4;
+                break;  // WCE enabled.
+            case 1:
+                wire.cache_rejected = true;
+                break;
+            case 2:
+                wire.cache_mode[4] = 0;
+                break;
+            case 3:
+                wire.cache_mode[4] = 0x48;
+                break;  // Unsupported subpage format.
+            case 4:
+                wire.cache_mode[0] = 64;
+                break;
+            case 5:
+                wire.cache_mode[3] = 255;
+                break;
+            case 6:
+                wire.cache_bytes = 6;
+                break;
+            case 7:
+                wire.cache_mode[5] = 17;
+                break;
+            case 8:
+                wire.cache_mode[5] = 255;
+                break;
+            case 9:
+                wire.cache_mode[2] = 0x80;
+                break;
+            case 10:
+                wire.sense_format = 0x71;
+                break;  // Deferred error.
+            case 11:
+                wire.sense_bytes = 13;
+                break;
+            case 12:
+                wire.sense_asc = 0x24;
+                break;  // Invalid field, not invalid opcode.
+        }
+        Device device;
+        EXPECT_FALSE(device.initialize(wire.transport())) << scenario;
+        EXPECT_FALSE(device.alive) << scenario;
+        EXPECT_FALSE(device.write_through) << scenario;
+        EXPECT_FALSE(device.flush()) << scenario;
+        EXPECT_EQ(wire.commands, scenario >= 10 ? 6u : 7u) << scenario;
+    }
+}
+TEST(UsbStorage, FlushTransportFailureDoesNotAttemptCompatibilityFallback)
+{
+    WireDevice wire;
+    write_through_device(wire);
+    wire.fail_flush_transport = true;
+    Device device;
+    EXPECT_FALSE(device.initialize(wire.transport()));
+    EXPECT_FALSE(device.alive);
+    EXPECT_EQ(wire.opcodes, (std::vector<uint8_t>{0x12, 0, 0x25, 0x1a, 0x35}));
+    EXPECT_EQ(wire.resets, 1u);
+    EXPECT_STREQ(device.probe_stage, "storage-flush");
+    EXPECT_EQ(device.probe_result, Result::TransportFailed);
+}
+TEST(UsbStorage, ShortInputRequiresExplicitLengthAndMatchingResidue)
+{
+    for(unsigned scenario = 0; scenario < 4; ++scenario)
+    {
+        WireDevice wire;
+        Device device;
+        ASSERT_TRUE(device.initialize(wire.transport()));
+        wire.fault = scenario == 3 ? WireDevice::ShortData : WireDevice::ConsistentShortData;
+        uint8_t cdb[10]{}, data[32]{};
+        cdb[0] = scenario == 2 ? 0x2a : 0x28;
+        uint32_t actual = 99;
+        auto result = device.command(
+            cdb, 10, scenario != 2, data, sizeof(data), scenario == 0 ? nullptr : &actual);
+        EXPECT_EQ(result, scenario == 1 ? Result::Ok : Result::TransportFailed);
+        if(scenario != 0)
+            EXPECT_EQ(actual, scenario == 1 ? 31u : 0u);
+        EXPECT_EQ(wire.resets, scenario == 1 ? 0u : 1u);
+    }
+}
+TEST(UsbStorage, CachePolicyAcceptsBoundedBlockDescriptorsAndPageSaveFlag)
+{
+    WireDevice wire;
+    write_through_device(wire);
+    wire.cache_mode = {};
+    wire.cache_bytes = 32;
+    wire.cache_mode[0] = 31;
+    wire.cache_mode[3] = 8;
+    wire.cache_mode[12] = 0x88;
+    wire.cache_mode[13] = 18;
+    Device device;
+    ASSERT_TRUE(device.initialize(wire.transport()));
+    EXPECT_TRUE(device.write_through);
+}
+TEST(UsbStorage, CachePolicyRejectsMisalignedBlockDescriptorLength)
+{
+    WireDevice wire;
+    write_through_device(wire);
+    wire.cache_mode = {};
+    wire.cache_bytes = 25;
+    wire.cache_mode[0] = 24;
+    wire.cache_mode[3] = 1;
+    wire.cache_mode[5] = 8;
+    wire.cache_mode[6] = 18;
+    Device device;
+    EXPECT_FALSE(device.initialize(wire.transport()));
+    EXPECT_FALSE(device.write_through);
+    EXPECT_FALSE(device.alive);
+    EXPECT_FALSE(device.flush());
+    EXPECT_STREQ(device.probe_stage, "storage-cache-policy");
+}
+TEST(UsbStorage, BootProbeDistinguishesCommandRejectionFromTransportFailure)
+{
+    for(bool transport_failure : {false, true})
+    {
+        WireDevice wire;
+        Device device;
+        wire.no_mode = !transport_failure;
+        wire.fail_data_opcode = transport_failure ? 0x1a : 0xff;
+        EXPECT_FALSE(device.initialize(wire.transport()));
+        EXPECT_FALSE(device.alive);
+        EXPECT_EQ(device.sectors, 65536u);
+        EXPECT_STREQ(device.probe_stage, "storage-mode-sense");
+        EXPECT_EQ(device.probe_opcode, 0x1a);
+        EXPECT_EQ(device.probe_result,
+                  transport_failure ? Result::TransportFailed : Result::CommandFailed);
+        EXPECT_EQ(wire.resets, transport_failure ? 1u : 0u);
+        EXPECT_EQ(wire.opcodes, (std::vector<uint8_t>{0x12, 0, 0x25, 0x1a}));
+    }
+}
+TEST(UsbStorage, BootProbeEvidenceRemainsStableAfterRuntimeFailure)
+{
+    WireDevice wire;
+    Device device;
+    ASSERT_TRUE(device.initialize(wire.transport()));
+    wire.fault = WireDevice::CommandFailure;
+    EXPECT_FALSE(device.flush());
+    EXPECT_STREQ(device.probe_stage, "storage-ready");
+    EXPECT_EQ(device.probe_opcode, 0x35);
+    EXPECT_EQ(device.probe_result, Result::Ok);
+    EXPECT_EQ(device.probe_mode, 0);
 }
 TEST(UsbStorage, BoundedUnitAttentionUsesRequestSense)
 {

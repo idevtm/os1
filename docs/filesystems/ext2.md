@@ -70,7 +70,7 @@ Run it before stopping QEMU after shell writes.
 | Executable files | Execute bits identify immutable files; ordinary creates produce writable, nonexecutable files |
 | Rename | Same-directory, without replacement; the new name must fit its existing directory record |
 | Remove | Reject nonempty directories and objects retained by callers; return WOULD_BLOCK for retained objects |
-| Synchronization | Native File `sync` and Directory `sync`; completed writes followed by device cache synchronization |
+| Synchronization | Native File `sync` and Directory `sync`; completed writes followed by device cache synchronization or confirmed write-through completion |
 
 The profile validates allocation counts, metadata ranges, block ownership, directory records, and inode reachability before publication.
 It rejects dirty filesystems instead of mounting them writable.

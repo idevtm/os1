@@ -23,21 +23,30 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
         command += ['-S']
     if getattr(args, 'readonly', False):
         command[-1] += ',readonly=on'
+    if getattr(args, 'qtest', None):
+        command += ['-qtest', f'unix:{args.qtest},server=on,wait=off']
     if getattr(args, 'qmp', None):
         command += ['-qmp', f'unix:{args.qmp},server=on,wait=off']
     if getattr(args, 'transport', 'virtio') == 'usb':
         controller = 'qemu-xhci,id=xhci' + (',p3=0' if getattr(args, 'high_speed', False) else '')
         command += ['-device', controller,
-                    '-device', 'usb-storage,id=usbdata,bus=xhci.0,drive=data',
+                    '-device', 'usb-storage,id=usbdata,bus=xhci.0,drive=data' + (',bootindex=1' if getattr(args, 'combined', False) else ''),
                     '-device', 'usb-kbd,bus=xhci.0']
+    elif getattr(args, 'transport', '') == 'ehci':
+        command += ['-device', 'usb-ehci,id=ehci',
+                    '-device', 'usb-storage,id=usbdata,bus=ehci.0,drive=data' + (',bootindex=1' if getattr(args, 'combined', False) else '')]
+        if getattr(args, 'coexist', False):
+            command += ['-device', 'qemu-xhci,id=xhci', '-device', 'usb-kbd,bus=xhci.0']
     else:
         command += ['-device', 'virtio-blk-pci,drive=data,disable-legacy=on']
     if args.code:
         variables = log.with_suffix('.vars.fd')
         shutil.copyfile(args.vars, variables)
         command += ['-drive', f'if=pflash,format=raw,readonly=on,file={args.code}',
-                    '-drive', f'if=pflash,format=raw,file={variables}', '-cdrom', args.image]
-    else:
+                    '-drive', f'if=pflash,format=raw,file={variables}']
+        if not getattr(args, 'combined', False):
+            command += ['-cdrom', args.image]
+    elif not getattr(args, 'combined', False):
         command += ['-drive', f'format=raw,file={args.image}']
     child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     selector = selectors.DefaultSelector()
@@ -81,7 +90,10 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             before_boot()
         startup = expect()
         if getattr(args, 'readonly', False) or getattr(args, 'stall_init', False):
-            assert b'usb-storage: unsupported or failed device' in startup, startup[-4000:]
+            rejected = b'ehci: storage rejected' if args.transport == 'ehci' else b'usb-storage: unsupported or failed device'
+            if getattr(args, 'stall_init', False) and args.transport == 'ehci':
+                rejected = b'ehci: controller retired'
+            assert rejected in startup, startup[-4000:]
             assert b'ext2 mounted /disk' not in startup
         else:
             assert b'ext2 mounted /disk' in startup, startup[-2000:]
@@ -89,7 +101,29 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             assert b'xhci: HID keyboard ready' in startup, startup[-4000:]
             if not (getattr(args, 'readonly', False) or getattr(args, 'stall_init', False)):
                 assert b'usb-storage: ready' in startup, startup[-4000:]
+        if getattr(args, 'transport', '') == 'ehci' and not (getattr(args, 'readonly', False) or getattr(args, 'stall_init', False)):
+            assert b'ehci: storage ready' in startup, startup[-4000:]
+        if getattr(args, 'coexist', False):
+            assert b'xhci: HID keyboard ready' in startup, startup[-4000:]
         boot_seconds = time.monotonic() - started
+        if getattr(args, 'transport', '') == 'ehci':
+            snapshot = run('usb', b'USB boot snapshot: EHCI topology and USB mounts')
+            assert b'controller pci=' in snapshot and b'root pci=' in snapshot, snapshot
+            if not (getattr(args, 'readonly', False) or getattr(args, 'stall_init', False)):
+                assert b'storage-ready' in snapshot and b'mount mounted status=0x0' in snapshot, snapshot
+                ready = next(line for line in snapshot.splitlines() if b' storage-ready ' in line)
+                detail = int(ready.split(b'detail=')[1].split()[0], 16)
+                assert detail & 0xffffff80 == 0x35000000, snapshot
+            elif getattr(args, 'readonly', False):
+                protected = next(line for line in snapshot.splitlines() if b' storage-write-protect ' in line)
+                detail = int(protected.split(b'detail=')[1].split()[0], 16)
+                assert detail & 0xffffff80 == 0x1a000080, snapshot
+            run('usb > /tmp/usb')
+            captured = run('cat /tmp/usb')
+            assert b'USB boot snapshot:' in captured and b'controller pci=' in captured, captured
+            repeated = run('usb')
+            assert snapshot == repeated, 'USB boot diagnostics must be immutable'
+
         listed = run('ls /bin')
         assert b'diskutil' not in listed, 'utility must not be installed in initrd'
         if on_boot is not None:
@@ -130,7 +164,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ['qemu', 'image', 'utility', 'log']:
         p.add_argument('--' + name, required=True)
-    p.add_argument('--transport', choices=['virtio', 'usb'], default='virtio')
+    p.add_argument('--transport', choices=['virtio', 'usb', 'ehci'], default='virtio')
     p.add_argument('--e2fsck')
     p.add_argument('--code')
     p.add_argument('--vars')

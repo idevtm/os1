@@ -7,9 +7,10 @@
 #include "debug/event_ring.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/resource.hpp"
+#include "drivers/usb/diagnostics.hpp"
 #include "fs/initrd.hpp"
-#include "mm/kmem.hpp"
 #include "mm/dma.hpp"
+#include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "platform/platform.hpp"
 #include "platform/topology.hpp"
@@ -445,8 +446,9 @@ long sys_observe_devices(const ObserveContext& context,
         record.bus = static_cast<uint8_t>(bindings[i].id.bus);
         record.state = static_cast<uint8_t>(bindings[i].state);
         record.id = bindings[i].id.index;
-        record.pci_index = (DeviceBus::Pci == bindings[i].id.bus) ? bindings[i].pci_index
-                                                                  : static_cast<uint16_t>(OS1_OBSERVE_INDEX_NONE);
+        record.pci_index = (DeviceBus::Pci == bindings[i].id.bus)
+                               ? bindings[i].pci_index
+                               : static_cast<uint16_t>(OS1_OBSERVE_INDEX_NONE);
         copy_fixed_string(record.driver_name,
                           sizeof(record.driver_name),
                           (nullptr != bindings[i].driver_name) ? bindings[i].driver_name : "");
@@ -541,8 +543,8 @@ long sys_observe_resources(const ObserveContext& context,
         record.base = allocations[i].physical_base;
         record.size = allocations[i].size_bytes;
         record.flags = allocations[i].coherent
-                   ? static_cast<uint32_t>(OS1_OBSERVE_RESOURCE_FLAG_COHERENT)
-                   : 0u;
+                           ? static_cast<uint32_t>(OS1_OBSERVE_RESOURCE_FLAG_COHERENT)
+                           : 0u;
         record.page_count = allocations[i].page_count;
         record.owner_id = allocations[i].owner.index;
         record.reference_id = OS1_OBSERVE_INDEX_NONE;
@@ -740,6 +742,35 @@ long sys_observe_events(const ObserveContext& context,
     return result;
 }
 
+long sys_observe_usb(const ObserveContext& context,
+                     Thread* thread,
+                     uint64_t user_buffer,
+                     size_t length)
+{
+    const uint32_t count = static_cast<uint32_t>(usb::diagnostics::count());
+    size_t offset = 0;
+    long result = -1;
+    if(!begin_observe_transfer(context,
+                               thread,
+                               user_buffer,
+                               length,
+                               OS1_OBSERVE_USB,
+                               sizeof(Os1ObserveUsbRecord),
+                               count,
+                               offset,
+                               result))
+        return -1;
+    for(uint32_t i = 0; i < count; ++i)
+        if(!write_observe_record(context,
+                                 thread,
+                                 user_buffer,
+                                 offset,
+                                 usb::diagnostics::at(i),
+                                 sizeof(Os1ObserveUsbRecord)))
+            return -1;
+    return result;
+}
+
 long sys_observe_kmem(const ObserveContext& context,
                       Thread* thread,
                       uint64_t user_buffer,
@@ -888,6 +919,8 @@ long sys_observe(const ObserveContext& context, uint64_t kind, uint64_t user_buf
             return sys_observe_irqs(context, thread, user_buffer, length);
         case OS1_OBSERVE_KMEM:
             return sys_observe_kmem(context, thread, user_buffer, length);
+        case OS1_OBSERVE_USB:
+            return sys_observe_usb(context, thread, user_buffer, length);
         case OS1_OBSERVE_ACPI:
             return sys_observe_acpi(context, thread, user_buffer, length);
         default:

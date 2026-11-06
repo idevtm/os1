@@ -5,7 +5,7 @@
 
 const PciDriver& xhci_pci_driver();
 struct BlockDevice;
-BlockDevice* usb_storage_block_device(size_t index);
+BlockDevice* xhci_storage_block_device(size_t index);
 
 // Called on the BSP timer; dispatches input collected by IRQ or AP polling.
 void xhci_poll_input();

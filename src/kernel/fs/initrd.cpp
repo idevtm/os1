@@ -4,8 +4,11 @@
 
 #include "debug/debug.hpp"
 #include "drivers/block/virtio_blk.hpp"
-#include "drivers/usb/xhci.hpp"
+#include "drivers/usb/diagnostics.hpp"
+#include "drivers/usb/storage_devices.hpp"
 #include "handoff/memory_layout.h"
+#include "storage/block_device.hpp"
+#include "util/fixed_string.hpp"
 #include "vfs/ext2.hpp"
 #include "vfs/initrd.hpp"
 #include "vfs/tmpfs.hpp"
@@ -106,6 +109,19 @@ long initialize_initrd_namespace()
                 break;
             }
             long mounted = ext2_mount(root, *device);
+            if(candidate)
+            {
+                Os1ObserveUsbRecord record{};
+                record.kind = OS1_OBSERVE_USB_MOUNT;
+                record.pci_index = OS1_OBSERVE_INDEX_NONE;
+                record.status = static_cast<uint32_t>(mounted);
+                record.detail = static_cast<uint32_t>(candidate - 1);
+                record.sectors = device->sector_count;
+                copy_fixed_string(record.stage,
+                                  sizeof(record.stage),
+                                  mounted == 0 ? "mounted" : "mount-rejected");
+                usb::diagnostics::append(record);
+            }
             if(mounted == 0)
             {
                 debug("ext2 mounted /disk")();

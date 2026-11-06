@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Build a generic hybrid os1 USB stick image.
 
-Do not use this fresh-filesystem path for the ASUS G74SX: the round-7 rebuild
-was absent from its firmware menu. Use the g74sx CMake preset and pinned-image
-updater instead; see docs/archive/boot/2026-11-02-g74sx-bringup-debug-plan.md.
+This is the boot-only base. usb_data_image.py adds the managed ext2 partition.
 
 Layout:
   LBA 0            MBR from the BIOS raw image (boot code + active legacy partition)

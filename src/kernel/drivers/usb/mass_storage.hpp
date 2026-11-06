@@ -42,10 +42,24 @@ struct Device
     uint32_t tag{};
     uint64_t sectors{};
     bool alive{};
-    Result command(const uint8_t* cdb, uint8_t cdb_bytes, bool in, void*, uint32_t bytes);
+    // Boot probe evidence; runtime I/O does not modify these fields.
+    const char* probe_stage{};
+    Result probe_result = Result::TransportFailed;
+    uint8_t probe_opcode{}, probe_mode{};
+    uint32_t probe_sense = 0xffffffff;
+    bool write_through{};
+    Result command(const uint8_t* cdb,
+                   uint8_t cdb_bytes,
+                   bool in,
+                   void*,
+                   uint32_t bytes,
+                   uint32_t* actual = nullptr);
     bool initialize(Transport);
     bool read_write(bool write, uint64_t sector, void*, uint32_t count);
     bool flush();
     void invalidate();
+
+private:
+    bool probe_write_through();
 };
 }  // namespace usb::storage

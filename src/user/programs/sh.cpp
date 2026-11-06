@@ -439,7 +439,7 @@ void run_help()
     write_string("files: touch path; write [--append|--replace] path; edit path\n");
     write_string("streams: < file, > file, >> file, << delimiter; Ctrl-D ends input\n");
     write_string(
-        "help echo pid sys ps cpu pci initrd devices irqs resources kmem events exec exit\n");
+        "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit\n");
     write_string(
         "call <image> <method> [field:value | field.case | field:{...}]\nintf <image>: offline "
         "constructor/method parameter help\n");
@@ -663,6 +663,65 @@ void run_initrd()
         write_char('\n');
     }
     write_string("initrd complete\n");
+}
+
+void run_usb()
+{
+    const Os1ObserveUsbRecord* records = nullptr;
+    uint32_t count = 0;
+    if(!observe(OS1_OBSERVE_USB, records, count))
+    {
+        write_observe_failure("usb");
+        return;
+    }
+    write_string("USB boot snapshot: EHCI topology and USB mounts\n");
+    for(uint32_t i = 0; i < count; ++i)
+    {
+        const auto& r = records[i];
+        // Empty ports add little to the first screen; the binary snapshot retains them.
+        if(r.kind == OS1_OBSERVE_USB_ROOT_PORT && strings_equal(r.stage, "disconnected"))
+            continue;
+        write_string(r.kind == OS1_OBSERVE_USB_CONTROLLER  ? "controller"
+                     : r.kind == OS1_OBSERVE_USB_ROOT_PORT ? "root"
+                     : r.kind == OS1_OBSERVE_USB_DEVICE    ? "device"
+                                                           : "mount");
+        if(r.pci_index != OS1_OBSERVE_INDEX_NONE)
+        {
+            write_string(" pci=");
+            write_unsigned(r.pci_index);
+        }
+        if(r.root_port)
+        {
+            write_string(" root=");
+            write_unsigned(r.root_port);
+        }
+        if(r.port)
+        {
+            write_string(" port=");
+            write_unsigned(r.port);
+        }
+        if(r.kind == OS1_OBSERVE_USB_DEVICE)
+        {
+            write_string(" addr=");
+            write_unsigned(r.address);
+            write_string(" parent=");
+            write_unsigned(r.parent_address);
+        }
+        write_char(' ');
+        write_string(r.stage);
+        write_string(" status=0x");
+        write_hex(r.status, 1);
+        write_string(" detail=0x");
+        write_hex(r.detail, 1);
+        if(r.sectors)
+        {
+            write_string(" sectors=");
+            write_unsigned(r.sectors);
+        }
+        write_char('\n');
+    }
+    if(!count)
+        write_string("No captured EHCI topology or USB mount attempts\n");
 }
 
 void run_devices()
@@ -1238,6 +1297,8 @@ int main(int, char**)
         {
             run_initrd();
         }
+        else if(strings_equal(tokens[0], "usb"))
+            run_usb();
         else if(strings_equal(tokens[0], "devices"))
         {
             run_devices();
