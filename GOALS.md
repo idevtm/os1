@@ -191,12 +191,10 @@ The same laptop also has user-confirmed ext2 mounting and file persistence acros
 These observations do not establish complete hardware qualification or explain the earlier layout failure.
 Physical boot/program update preservation and retesting of the scheduler correction remain pending.
 Record image identity, controller/input behavior, and sustained-runtime results for each tested machine.
-[Issue #27](https://github.com/idevtm/os1/issues/27) tracks a separate physical USB keyboard failure.
-The affected desktop uses a Gigabyte H81M-S1 and Lenovo keyboard `17ef:6190` in a rear port.
-Linux routes it directly through Intel xHCI `8086:8c31`.
-The returned os1 log confirms absent xHCI routing and retained BIOS ownership.
-The [handoff correction](docs/hardware/2026-11-06-usb-keyboard-handoff.md) awaits physical keyboard and storage acceptance.
-The [diagnostic plan](docs/hardware/2026-11-06-keyboard-diagnostic-plan.md) records the next evidence collection.
+[Issue #27](https://github.com/idevtm/os1/issues/27) is closed after user-confirmed keyboard recovery on 2026-11-06.
+The Gigabyte H81M-S1 desktop uses a Lenovo keyboard `17ef:6190` in a rear port.
+PR 33 corrects firmware ownership, Intel xHCI routing, and control transfers.
+The [acceptance record](docs/archive/filesystems/2026-11-06-minimal-initrd.md#keyboard-hardware-acceptance) separates this result from broader qualification.
 
 Broader real-hardware goals remain:
 
@@ -493,7 +491,7 @@ The project is not trying to:
 The [Native API service roadmap](docs/native-api/roadmap.md#remaining-priorities) defines the acceptance criteria for this sequence.
 
 1. Verify physical boot and program updates preserve an existing user file; retest the scheduler correction on hardware.
-2. Diagnose [USB keyboard issue #27](https://github.com/idevtm/os1/issues/27) on the affected computer.
+2. Complete the [minimal-initrd deployment split](docs/archive/filesystems/2026-11-06-minimal-initrd.md), then qualify preserving updates on hardware.
 3. Expose native keyboard and mouse services with volatile events, unsubscribe, state recovery, and removal handling.
 4. Add scoped service discovery and lifecycle rules. Add kernel Buffer borrowing and BlockDevice methods when required by a concrete client.
 5. Expand storage capacity and filesystem operations beyond the bounded ext2 profile; qualify device failure and update recovery separately.

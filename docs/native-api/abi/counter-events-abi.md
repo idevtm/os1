@@ -10,7 +10,7 @@ This is an experimental ABI; rebuild user binaries for startup version 2.
 
 ```text
 counter --initial 10 --ceiling 100
-intf /bin/counter
+intf /disk/bin/counter
 countercheck
 ```
 
@@ -103,7 +103,7 @@ remain available through retained Operations.
 
 Launch mode PRIVATE_PROVIDER=2 requires a provider endpoint at fd 3 with
 READ|WRITE, no descriptor flags/descendant rights, and absent root/cwd. The
-[shared activation extension](shared-activation-abi.md#class-controlled-construction)
+[shared activation extension](shared-activation-abi.md#wire-records-and-identity)
 allows an optional matching client endpoint at fd 4 for class self-export;
 otherwise this is the original one-grant mode.
 The process may use IPC, exit, yield, getpid, and the five basic resource-control

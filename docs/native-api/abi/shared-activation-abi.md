@@ -8,16 +8,16 @@ Implemented 2026-11-05, extending [copied IPC](copied-ipc-abi.md) and
 
 ```text
 activationcheck
-intf /bin/counter
+intf /disk/bin/counter
 ```
 
-`activationcheck` starts `/bin/activation` with an explicit Counter executable
+`activationcheck` starts `/disk/bin/activation` with an explicit Counter executable
 reference, queues construction requests, and starts a second client process.
 Both clients obtain the same Counter, mutate/read its state, and independently
 subscribe to changed events. Closing one client's handles leaves the other usable.
 The check also rejects conflicting arguments and a deliberately incorrect
 provider interface, then ends its activation-service scope and reaps the manager.
-`/bin/activation` is a bootstrap-driven service, not a standalone CLI command.
+`/disk/bin/activation` is a bootstrap-driven service, not a standalone CLI command.
 
 ## Copied capability attachments
 
@@ -81,7 +81,7 @@ unknown-outcome classification is unchanged.
 
 ## Bootstrap
 
-The trusted bootstrap creates two ordinary IPC pairs and launches `/bin/activation` with exactly these authority-bearing grants:
+The trusted bootstrap creates two ordinary IPC pairs and launches `/disk/bin/activation` with exactly these authority-bearing grants:
 
 | Child fd | Grant | Rights |
 |---|---|---|

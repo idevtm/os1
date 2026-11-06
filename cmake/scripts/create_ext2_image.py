@@ -4,8 +4,12 @@ import argparse
 import fcntl
 import os
 import struct
+import sys
 import tempfile
 from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 BLOCK = 4096
 START = 2048
@@ -16,7 +20,7 @@ def put16(data, at, value):
 def put32(data, at, value):
     struct.pack_into('<I', data, at, value)
 
-def create(output, utility, mib=32, reset=False):
+def create(output, utility, mib=32, reset=False, manifest=None):
     output = Path(output)
     if output.exists() and not reset:
         print(f'Keeping persistent disk: {output}')
@@ -120,6 +124,9 @@ def create(output, utility, mib=32, reset=False):
                 disk.write(data)
             disk.flush()
             os.fsync(disk.fileno())
+        if manifest is not None:
+            from deploy_storage import deploy
+            deploy(Path(temporary), Path(manifest))
         if output.exists() and not reset:
             raise FileExistsError(output)
         if reset:
@@ -139,6 +146,7 @@ if __name__ == '__main__':
     p.add_argument('--output', required=True, type=Path)
     p.add_argument('--utility', required=True, type=Path)
     p.add_argument('--size-mib', type=int, default=32)
+    p.add_argument('--manifest', type=Path, help='seed programs only when creating an image')
     p.add_argument('--reset', action='store_true', help='replace this image and all of its files')
     args = p.parse_args()
-    create(args.output, args.utility, args.size_mib, args.reset)
+    create(args.output, args.utility, args.size_mib, args.reset, args.manifest)

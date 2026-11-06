@@ -176,7 +176,7 @@ Kernel Buffer borrowing remains the next bulk-transfer extension; this profile m
 [Handwritten helpers](../../../src/user/include/os1/tmpfs.hpp) provide `fs::bind`, `open`, `read`, `write`, `append`, `seek`, `truncate`, `next`, `rename`, and `remove`.
 `fs::open` optionally creates an entry and claims its returned resource capability.
 `fs::submit` exposes asynchronous calls; callers retain and close the returned Operation.
-The [compiled example](../../../src/user/programs/tmpfs_check.hpp) is part of `/bin/vfscheck`.
+The [compiled example](../../../src/user/programs/tmpfs_check.hpp) is part of `/disk/bin/vfscheck`.
 It covers native mutation, an independently authorized child, compatibility reads, unlink lifetime, and retained asynchronous completion.
 
 ```cpp

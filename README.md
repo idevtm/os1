@@ -10,11 +10,11 @@ For computer architecture and OS terminology, see the categorized
 [Glossary](docs/GLOSSARY.md), including TLB, IST, FADT, PCI, and the other terms
 used throughout the project documents.
 
-Today `os1` uses a shared-kernel, dual-entry boot architecture. The default path is a Limine-based UEFI ISO that enters a thin higher-half shim, normalizes bootloader state into `BootInfo`, then transfers control to the shared higher-half kernel core. The legacy BIOS raw image is still built and tested as a compatibility path, loading the same kernel physically before entering it at its higher-half virtual address. The kernel itself is freestanding `C++20`, runs protected user programs loaded from an initrd `cpio` archive, starts a small `/bin/init` that `exec`s `/bin/sh`, exposes `write`/`read`/`observe`/`spawn`/`waitpid`/`exec` through the x86_64 `SYSCALL`/`SYSRET` path, and can present the terminal either through VGA text mode or a minimal framebuffer text renderer. Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives.
+Today `os1` uses a shared-kernel, dual-entry boot architecture. The default path is a Limine-based UEFI ISO that enters a thin higher-half shim, normalizes bootloader state into `BootInfo`, then transfers control to the shared higher-half kernel core. The legacy BIOS raw image is still built and tested as a compatibility path, loading the same kernel physically before entering it at its higher-half virtual address. The kernel itself is freestanding `C++20`, runs protected user programs loaded from an initrd `cpio` archive or ext2 executable files, starts a small `/bin/init` that `exec`s `/bin/sh`, exposes `write`/`read`/`observe`/`spawn`/`waitpid`/`exec` through the x86_64 `SYSCALL`/`SYSRET` path, and can present the terminal either through VGA text mode or a minimal framebuffer text renderer. Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives.
 
 The 2026-05-10 integration replaced the previous AML interpreter with upstream ACPICA.
 ACPICA supports table discovery, namespace loading, device enumeration, `_PRT` routing, resource parsing, and device power transitions.
-`/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose cached route information through passive userland observation.
+`/disk/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose cached route information through passive userland observation.
 
 The boot frontends are peers: `src/boot/bios/` owns the legacy raw-image path, and `src/boot/limine/` owns the UEFI shim.
 Kernel directories separate these responsibilities:
@@ -36,7 +36,7 @@ isolation, and a kernel-only update path for the preserved G74SX USB layout.
 The [2026-11-06 review](docs/reviews/2026-11-06-review.md) records current capabilities, corrected findings, and remaining priorities.
 It distinguishes the corrected BIOS scheduler-handoff fault from unrelated historical failures and physical qualification still needed.
 ACPI observation now reads cached routes without executing firmware methods.
-`/bin/acpiprobe` reports passive inventory and disabled power control.
+`/disk/bin/acpiprobe` reports passive inventory and disabled power control.
 The [passive observation record](docs/archive/kernel/2026-11-05-passive-acpi-observation.md) documents this correction. The [console descriptor milestone](docs/native-api/abi/console-descriptor-abi.md) now provides real
 process entries, rights, duplication, close, flags, and retained I/O references.
 The [dated implementation plan](docs/archive/native-api/2026-11-04-console-descriptor-implementation-plan.md)
@@ -45,8 +45,14 @@ adds directory/file descriptors, `ls`, `cat`, bounded argv/environment handoff,
 explicit child grants, and executable-reference launch. The
 [copied IPC prototype](docs/native-api/abi/copied-ipc-abi.md) adds retained Operations and a private
 `textprocessor` with methods/properties, exercised by `ipccheck`.
-`intf /bin/textprocessor` prints interface records from the binary without running it.
-The [Counter/events phase](docs/native-api/abi/counter-events-abi.md) adds `/bin/counter`, typed
+The initrd contains `init`, `sh`, `ls`, `cat`, and `/etc/motd` for recovery without storage.
+Other bundled programs are installed under `/disk/bin`; the shell searches `/bin` first, then `/disk/bin`.
+For an existing QEMU disk, run `./os1.sh storage_deploy` after this upgrade.
+For an existing managed USB stick, select **Update boot and programs (preserve data)**.
+See the [deployment guide](docs/filesystems/program-deployment.md).
+
+`intf /disk/bin/textprocessor` prints interface records from the binary without running it.
+The [Counter/events phase](docs/native-api/abi/counter-events-abi.md) adds `/disk/bin/counter`, typed
 constructor arguments and CLI conversion, volatile subscriptions, timed waits,
 and parent-owned private-provider supervision. The [shared activation phase](docs/native-api/abi/shared-activation-abi.md) adds
 bounded capability attachments and a scoped activation service whose Counter
@@ -57,7 +63,7 @@ network stack remain future work.
 The [session and rich-parameter implementation](docs/archive/native-api/2026-11-05-client-sessions-and-parameters.md)
 adds independent budgeted Counter sessions, observer/mutable activation grants,
 and shared constructor/method codecs with typed defaults, descriptions and dot-based
-CLI conversion. Try `intf /bin/paramdemo`, `paramcheck`, and `activationcheck`.
+CLI conversion. Try `intf /disk/bin/paramdemo`, `paramcheck`, and `activationcheck`.
 The [exclusive Buffer ABI](docs/native-api/abi/buffer-loans-abi.md) adds Operation-scoped loans and distinct reply outputs.
 `buffercheck` exercises both TextProcessor paths. See the [implementation record](docs/archive/native-api/2026-11-05-exclusive-buffer-implementation.md) for validation and limits.
 Inline control payloads remain bounded to 256 bytes. Live readers and shared read/write remain deferred.
@@ -86,6 +92,7 @@ Required build tools:
 - `cpio`
 - `xorriso`
 - `python3` for image helpers and smoke/script tests
+- e2fsprogs (`debugfs`, `e2fsck`) for deployed programs and the verification data image
 
 Optional helper tools:
 
@@ -96,7 +103,7 @@ Optional helper tools:
 On macOS with Homebrew:
 
 ```sh
-brew install x86_64-elf-gcc nasm cpio xorriso qemu
+brew install x86_64-elf-gcc nasm cpio xorriso qemu e2fsprogs
 ```
 
 Homebrew `qemu` ships usable OVMF firmware files and the CMake build will auto-detect them. On Linux, install your distro's `ovmf` or `edk2-ovmf` package.
@@ -350,9 +357,10 @@ The build writes outputs under `build/artifacts/`:
 - `kernel.elf` — shared higher-half kernel core used by the BIOS path and loaded as a module by the Limine path
 - `kernel_limine.elf` — higher-half Limine frontend that normalizes boot state, loads the shared kernel by physical `PT_LOAD` ranges, and enters it through temporary transition mappings
 - `cpu_start.bin` — AP trampoline blob used for debugging / disassembly
-- `initrd.cpio` — `cpio newc` initrd archive containing `/bin/init`, `/bin/sh`, `/bin/yield`, `/bin/balanceworker`, `/bin/busyyield`, `/bin/balancecheck`, `/bin/smpcheck`, `/bin/fault`, `/bin/copycheck`, `/bin/ascii`, and `/bin/acpiprobe`
+- `initrd.cpio` — recovery archive containing `/bin/init`, `/bin/sh`, `/bin/ls`, `/bin/cat`, and `/etc/motd`
 - `virtio-test-disk.raw` — generated raw disk image used to validate the `virtio-blk` path during boot and smoke tests
-- `user/*.elf` — statically linked user-space ELF inputs used to build the initrd
+- `user/*.elf` — statically linked programs for recovery packaging or ext2 deployment
+- `program-test-disk.raw` — disposable ext2 program fixture; QEMU tests use private overlays
 - `os1.iso` — default UEFI-only Limine ISO
 - `os1.raw` — legacy BIOS raw disk image
 - `os1.log` — serial log from the last display-first UEFI `run`
@@ -369,7 +377,7 @@ For BIOS compatibility, `os1.raw` reserves fixed slots for `kernel16.bin`, `kern
 
 The smoke targets cover both boot paths, including the baseline shell, observability, SMP balance, `exec`, and `spawn` flows, so higher-half regressions are exercised on both UEFI and BIOS.
 
-`/bin/ascii` prints the `0x00..0x7F` ASCII table in 8 columns and exists mainly as a visual check that the framebuffer text backend is rendering the bundled 8x16 font correctly.
+`/disk/bin/ascii` prints the `0x00..0x7F` ASCII table in 8 columns and exists mainly as a visual check that the framebuffer text backend is rendering the bundled 8x16 font correctly.
 
 The helper wrapper scripts remain available as thin CMake frontends:
 

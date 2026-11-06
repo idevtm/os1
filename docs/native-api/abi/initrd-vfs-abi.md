@@ -144,6 +144,9 @@ Closing those entries loses that authority. Pathname spawn/exec compatibility
 calls resolve through the process's existing root/cwd; compatibility spawn passes
 existing standard streams and selected namespace roles, never the whole table.
 The shell uses native launch and forwards arguments through explicit grants.
+Bare shell command names search `/bin`, then `/disk/bin`, within existing namespace authority.
+Paths containing `/` bypass search. Only NOT_FOUND permits the next candidate.
+This shell policy also applies to `exec` and `call`; kernel launch does not add a search path.
 
 ## C++ use and remaining work
 

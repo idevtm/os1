@@ -68,6 +68,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/file_tools.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/line_editor.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/shell/command.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/shell/program_path.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/shell/text_buffer.hpp"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/ipc.h"
@@ -97,6 +98,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
     VERBATIM
   )
   set("${output_var}" "${output_path}" PARENT_SCOPE)
+  set(OS1_USER_PROGRAM_FILES ${OS1_USER_PROGRAM_FILES} "${output_path}" PARENT_SCOPE)
 endfunction()
 
 os1_add_user_cxx_program(sh "${CMAKE_CURRENT_SOURCE_DIR}/programs/sh.cpp" OS1_USER_SH_ELF)
@@ -134,114 +136,50 @@ os1_add_user_cxx_program(countercheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/coun
 os1_add_user_cxx_program(activation "${CMAKE_CURRENT_SOURCE_DIR}/programs/activation.cpp" OS1_USER_ACTIVATION_ELF)
 os1_add_user_cxx_program(activationcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/activationcheck.cpp" OS1_USER_ACTIVATIONCHECK_ELF)
 
+os1_add_user_cxx_program(diskutil "${CMAKE_CURRENT_SOURCE_DIR}/programs/diskutil.cpp" OS1_USER_DISKUTIL_ELF)
+add_custom_target(os1_diskutil ALL DEPENDS "${OS1_USER_DISKUTIL_ELF}")
+set(OS1_USER_DISKUTIL_ELF "${OS1_USER_DISKUTIL_ELF}" PARENT_SCOPE)
+
+# Keep the recovery set explicit. All other programs are deployed onto ext2.
+set(recovery_programs init sh ls cat)
+set(recovery_commands)
+set(recovery_files)
+set(program_manifest "{\"version\":1,\"programs\":[")
+set(separator "")
+foreach(program IN LISTS OS1_USER_PROGRAM_FILES)
+  get_filename_component(name "${program}" NAME_WE)
+  if(name IN_LIST recovery_programs)
+    list(APPEND recovery_commands COMMAND "${CMAKE_COMMAND}" -E copy "${program}" "${USER_STAGE_DIR}/bin/${name}")
+    list(APPEND recovery_files "${program}")
+  else()
+    string(APPEND program_manifest "${separator}{\"source\":\"${program}\",\"destination\":\"/disk/bin/${name}\"}")
+    set(separator ",")
+  endif()
+endforeach()
+# Retain the published path used by older images and deployment workflows.
+string(APPEND program_manifest ",{\"source\":\"${OS1_USER_DISKUTIL_ELF}\",\"destination\":\"/disk/diskutil\"}]}\n")
+file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json" CONTENT "${program_manifest}")
+set(OS1_USER_PROGRAM_FILES "${OS1_USER_PROGRAM_FILES}" PARENT_SCOPE)
+
 add_custom_command(
   OUTPUT "${OS1_INITRD_CPIO}"
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${USER_STAGE_DIR}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_STAGE_DIR}/bin" "${USER_STAGE_DIR}/etc"
   COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/data/motd" "${USER_STAGE_DIR}/etc/motd"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_FDCHECK_ELF}" "${USER_STAGE_DIR}/bin/fdcheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_FDEXEC_ELF}" "${USER_STAGE_DIR}/bin/fdexec"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_LS_ELF}" "${USER_STAGE_DIR}/bin/ls"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_VFSCHECK_ELF}" "${USER_STAGE_DIR}/bin/vfscheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_TEXTPROCESSOR_ELF}" "${USER_STAGE_DIR}/bin/textprocessor"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_BUFFERCHECK_ELF}" "${USER_STAGE_DIR}/bin/buffercheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_IPCCHECK_ELF}" "${USER_STAGE_DIR}/bin/ipccheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_ACTIVATION_ELF}" "${USER_STAGE_DIR}/bin/activation"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_ACTIVATIONCHECK_ELF}" "${USER_STAGE_DIR}/bin/activationcheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_COUNTER_ELF}" "${USER_STAGE_DIR}/bin/counter"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_COUNTERCHECK_ELF}" "${USER_STAGE_DIR}/bin/countercheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_PARAMDEMO_ELF}" "${USER_STAGE_DIR}/bin/paramdemo"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_PARAMCHECK_ELF}" "${USER_STAGE_DIR}/bin/paramcheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INTF_ELF}" "${USER_STAGE_DIR}/bin/intf"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_CAT_ELF}" "${USER_STAGE_DIR}/bin/cat"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_INIT_ELF}" "${USER_STAGE_DIR}/bin/init"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_SH_ELF}" "${USER_STAGE_DIR}/bin/sh"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_YIELD_ELF}" "${USER_STAGE_DIR}/bin/yield"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_BALANCEWORKER_ELF}" "${USER_STAGE_DIR}/bin/balanceworker"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_BUSYYIELD_ELF}" "${USER_STAGE_DIR}/bin/busyyield"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_BALANCECHECK_ELF}" "${USER_STAGE_DIR}/bin/balancecheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_FAULT_ELF}" "${USER_STAGE_DIR}/bin/fault"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_COPYCHECK_ELF}" "${USER_STAGE_DIR}/bin/copycheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_SMPCHECK_ELF}" "${USER_STAGE_DIR}/bin/smpcheck"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_ACPIPROBE_ELF}" "${USER_STAGE_DIR}/bin/acpiprobe"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_USER_ASCII_ELF}" "${USER_STAGE_DIR}/bin/ascii"
-  COMMAND
-    "${CMAKE_COMMAND}"
-    "-DSTAGE_DIR=${USER_STAGE_DIR}"
-    "-DOUTPUT_FILE=${OS1_INITRD_CPIO}"
-    "-DCPIO_EXECUTABLE=${OS1_CPIO_EXECUTABLE}"
-    "-DSTRIP_EXECUTABLE=${CMAKE_STRIP}"
+  ${recovery_commands}
+  COMMAND "${CMAKE_COMMAND}"
+    "-DSTAGE_DIR=${USER_STAGE_DIR}" "-DOUTPUT_FILE=${OS1_INITRD_CPIO}"
+    "-DCPIO_EXECUTABLE=${OS1_CPIO_EXECUTABLE}" "-DSTRIP_EXECUTABLE=${CMAKE_STRIP}"
     "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"
-    -P
-    "${PROJECT_SOURCE_DIR}/cmake/scripts/create_initrd.cmake"
-  DEPENDS
+    -P "${PROJECT_SOURCE_DIR}/cmake/scripts/create_initrd.cmake"
+  DEPENDS ${recovery_files} "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/motd"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/compact_user_elf.py"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/create_initrd.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/data/motd"
-    "${OS1_USER_FDCHECK_ELF}"
-    "${OS1_USER_FDEXEC_ELF}"
-    "${OS1_USER_LS_ELF}"
-    "${OS1_USER_TEXTPROCESSOR_ELF}"
-    "${OS1_USER_BUFFERCHECK_ELF}"
-    "${OS1_USER_IPCCHECK_ELF}"
-    "${OS1_USER_ACTIVATION_ELF}"
-    "${OS1_USER_ACTIVATIONCHECK_ELF}"
-    "${OS1_USER_COUNTER_ELF}"
-    "${OS1_USER_COUNTERCHECK_ELF}"
-    "${OS1_USER_PARAMDEMO_ELF}"
-    "${OS1_USER_PARAMCHECK_ELF}"
-    "${OS1_USER_INTF_ELF}"
-    "${OS1_USER_CAT_ELF}"
-    "${OS1_USER_VFSCHECK_ELF}"
-    "${OS1_USER_INIT_ELF}"
-    "${OS1_USER_SH_ELF}"
-    "${OS1_USER_YIELD_ELF}"
-    "${OS1_USER_BALANCEWORKER_ELF}"
-    "${OS1_USER_BUSYYIELD_ELF}"
-    "${OS1_USER_BALANCECHECK_ELF}"
-    "${OS1_USER_FAULT_ELF}"
-    "${OS1_USER_COPYCHECK_ELF}"
-    "${OS1_USER_SMPCHECK_ELF}"
-    "${OS1_USER_ACPIPROBE_ELF}"
-    "${OS1_USER_ASCII_ELF}"
   VERBATIM
 )
-
-add_custom_target(user_programs DEPENDS
-  "${OS1_USER_ACTIVATION_ELF}"
-  "${OS1_USER_ACTIVATIONCHECK_ELF}"
-  "${OS1_USER_COUNTER_ELF}"
-  "${OS1_USER_COUNTERCHECK_ELF}"
-  "${OS1_USER_TEXTPROCESSOR_ELF}"
-  "${OS1_USER_BUFFERCHECK_ELF}"
-  "${OS1_USER_IPCCHECK_ELF}"
-  "${OS1_USER_PARAMDEMO_ELF}"
-  "${OS1_USER_PARAMCHECK_ELF}"
-  "${OS1_USER_INTF_ELF}"
-  "${OS1_USER_VFSCHECK_ELF}"
-  "${OS1_USER_CAT_ELF}"
-  "${OS1_USER_LS_ELF}"
-  "${OS1_USER_FDEXEC_ELF}"
-  "${OS1_USER_FDCHECK_ELF}"
-  "${OS1_USER_INIT_ELF}"
-  "${OS1_USER_SH_ELF}"
-  "${OS1_USER_YIELD_ELF}"
-  "${OS1_USER_BALANCEWORKER_ELF}"
-  "${OS1_USER_BUSYYIELD_ELF}"
-  "${OS1_USER_BALANCECHECK_ELF}"
-  "${OS1_USER_FAULT_ELF}"
-  "${OS1_USER_COPYCHECK_ELF}"
-  "${OS1_USER_SMPCHECK_ELF}"
-  "${OS1_USER_ACPIPROBE_ELF}"
-  "${OS1_USER_ASCII_ELF}"
-)
-
+add_custom_target(user_programs DEPENDS ${OS1_USER_PROGRAM_FILES})
 add_custom_target(initrd_cpio DEPENDS "${OS1_INITRD_CPIO}")
-
-# The persistence utility is deliberately absent from the initrd staging tree.
-os1_add_user_cxx_program(diskutil "${CMAKE_CURRENT_SOURCE_DIR}/programs/diskutil.cpp" OS1_USER_DISKUTIL_ELF)
-add_custom_target(os1_diskutil ALL DEPENDS "${OS1_USER_DISKUTIL_ELF}")
-set(OS1_USER_DISKUTIL_ELF "${OS1_USER_DISKUTIL_ELF}" PARENT_SCOPE)
 
 # Disk-only deployment fixtures. Never stage these programs into the initrd.
 if(BUILD_TESTING)

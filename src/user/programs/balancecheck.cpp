@@ -6,7 +6,7 @@
 
 namespace
 {
-constexpr char kWorkerPath[] = "/bin/balanceworker";
+constexpr char kWorkerPath[] = "/disk/bin/balanceworker";
 constexpr uint32_t kWorkerCount = 16;
 constexpr uint32_t kMaxCpuRecords = 8;
 constexpr uint32_t kObserveAttempts = 4096;

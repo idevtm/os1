@@ -8,6 +8,7 @@
 #include <os1/vfs.hpp>
 
 #include "interface/parameter_demo.hpp"
+#include "shell/program_path.hpp"
 
 namespace
 {
@@ -953,57 +954,17 @@ void run_unknown(const char* command)
     write_char('\n');
 }
 
-bool copy_string(char* destination, size_t destination_size, const char* source)
-{
-    if((nullptr == destination) || (0 == destination_size) || (nullptr == source))
-    {
-        return false;
-    }
-
-    size_t index = 0;
-    while(source[index])
-    {
-        if((index + 1) >= destination_size)
-        {
-            return false;
-        }
-        destination[index] = source[index];
-        ++index;
-    }
-    destination[index] = 0;
-    return true;
-}
-
 bool resolve_command_path(const char* command, char* path, size_t path_size)
 {
-    if((nullptr == command) || (nullptr == path) || (0 == path_size))
-    {
-        return false;
-    }
-
-    if('/' == command[0])
-    {
-        return copy_string(path, path_size, command);
-    }
-
-    static constexpr char kBinPrefix[] = "/bin/";
-    const size_t prefix_length = sizeof(kBinPrefix) - 1;
-    const size_t command_length = string_length(command);
-    if((prefix_length + command_length + 1) > path_size)
-    {
-        return false;
-    }
-
-    for(size_t i = 0; i < prefix_length; ++i)
-    {
-        path[i] = kBinPrefix[i];
-    }
-    for(size_t i = 0; i < command_length; ++i)
-    {
-        path[prefix_length + i] = command[i];
-    }
-    path[prefix_length + command_length] = 0;
-    return true;
+    return os1::shell::resolve_program(command, path, path_size, [](const char* candidate) {
+               const long fd = os1::user::open(
+                   candidate,
+                   OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
+               if(fd < 0)
+                   return fd;
+               os1::user::close(fd);
+               return 0L;
+           }) == 0;
 }
 
 void write_child_failure(const char* command, int status)
@@ -1089,7 +1050,10 @@ void run_call(size_t argc, char** argv, const char* raw)
     }
     char path[OS1_OBSERVE_INITRD_PATH_BYTES];
     if(!resolve_command_path(argv[1], path, sizeof(path)))
+    {
+        write_string("call: cannot open image\n");
         return;
+    }
     long image = os1::user::open(
         path, OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
     if(image < 0)

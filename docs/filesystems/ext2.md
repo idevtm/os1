@@ -4,9 +4,9 @@ The QEMU storage profile mounts a persistent ext2 partition at `/disk`.
 It uses the native File and Directory interfaces and supports disk-backed executable loading.
 
 ```text
-initrd: /bin/init, /bin/sh, recovery and existing verification tools
+initrd: /bin/init, /bin/sh, /bin/ls, /bin/cat, /etc/motd
 /tmp:   volatile writable files
-/disk:  persistent ext2 files, readme, and disk-only diskutil
+/disk:  persistent files, readme, diskutil, and optional programs in bin/
            -> filesystem dispatch -> partition bounds -> virtio or USB block -> host raw file
 ```
 
@@ -22,7 +22,7 @@ The same targets are available through `cmake --build build --target TARGET`.
 | `run_persistent_bios` | Boot BIOS with the same persistent image. |
 | `run_usb_storage` / `run_usb_storage_bios` | Attach the same image through xHCI USB storage. |
 | `storage_deploy` | Install or update manifest programs. Preserve other existing files. |
-| `storage_reset` | Replace the image, erase its files, and reinstall the utility. |
+| `storage_reset` | Replace the image, erase its files, and reinstall bundled disk programs. |
 
 The default image is `build/artifacts/persistent-data.raw`.
 Set `OS1_PERSISTENT_DISK` during CMake configuration to select another file.

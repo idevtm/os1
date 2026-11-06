@@ -6,6 +6,7 @@ Temporary contents disappear on reboot. A bounded ext2 profile provides persiste
 | Document | Status |
 | --- | --- |
 | [USB mass storage](../hardware/usb-storage.md) | Current USB transport and failure behavior; physical qualification pending |
+| [Minimal initrd record](../archive/filesystems/2026-11-06-minimal-initrd.md) | Recovery packaging, disk program lookup, and validation |
 | [Program deployment](program-deployment.md) | Offline QEMU program updates, manifests, preservation, and menu navigation |
 | [Persistent ext2 storage](ext2.md) | Current disk profile, native sync, QEMU workflow, and limitations |
 | [Deployment implementation record](../archive/filesystems/2026-11-06-qemu-deployment.md) | Plan, preservation evidence, menu tests, and review |

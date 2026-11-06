@@ -259,7 +259,7 @@ For manual guest checks, enter these commands at the shell:
 ```text
 buffercheck
 ipccheck
-intf /bin/textprocessor
+intf /disk/bin/textprocessor
 ```
 
 `buffercheck` exercises synchronous same-buffer processing and asynchronous distinct-output processing.
