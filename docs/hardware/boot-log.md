@@ -133,7 +133,7 @@ no serial port. Normal and capture-only boots leave this mirror disabled.
 ## Why
 
 Real laptops have no serial port, and the BIOS path cannot write the USB stick
-after leaving real mode (no USB mass-storage driver). Photos of the screen lose
+after leaving real mode in those historical images (which had no USB mass-storage driver). Photos of the screen lose
 everything that scrolled away. This feature keeps the full debug stream in RAM
 and has the next boot's loader, while the BIOS still works, save it on the stick.
 

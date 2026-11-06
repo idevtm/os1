@@ -83,6 +83,12 @@ bool wait_for_mask(volatile uint8_t* operational,
 }
 }  // namespace
 
+void set_slot_context(uint32_t* words, uint8_t speed, uint8_t port, uint8_t context_entries)
+{
+    words[0] = (uint32_t(speed) << 20) | (uint32_t(context_entries) << 27);
+    words[1] = uint32_t(port) << 16;
+}
+
 bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayout& out)
 {
     out = {};
@@ -105,8 +111,8 @@ bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayo
     const uint32_t runtime_offset = read32(base, 0x18u) & ~0x1Fu;
     if((static_cast<size_t>(cap_length) + kOperationalConfig + sizeof(uint32_t) > mmio_size) ||
        (static_cast<size_t>(doorbell_offset) + sizeof(uint32_t) > mmio_size) ||
-       (static_cast<size_t>(runtime_offset) + kRuntimeInterrupter0 +
-            kInterrupterErdp + sizeof(uint64_t) >
+       (static_cast<size_t>(runtime_offset) + kRuntimeInterrupter0 + kInterrupterErdp +
+            sizeof(uint64_t) >
         mmio_size))
     {
         return false;
@@ -120,8 +126,8 @@ bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayo
     out.capability.max_interrupters = static_cast<uint16_t>((hcsp1 >> 8) & 0x7FFu);
     out.capability.max_ports = static_cast<uint8_t>((hcsp1 >> 24) & 0xFFu);
     out.capability.context_size_bytes = (0 != (hccparams1 & (1u << 2))) ? 64u : 32u;
-    out.capability.scratchpad_buffers = static_cast<uint16_t>(((hcsp2 >> 27) & 0x1Fu) |
-                                                              (((hcsp2 >> 21) & 0x1Fu) << 5));
+    out.capability.scratchpad_buffers =
+        static_cast<uint16_t>(((hcsp2 >> 27) & 0x1Fu) | (((hcsp2 >> 21) & 0x1Fu) << 5));
     out.capability.doorbell_offset = doorbell_offset;
     out.capability.runtime_offset = runtime_offset;
     out.operational = base + cap_length;
@@ -238,11 +244,8 @@ bool initialize_event_ring_segment_table(void* erst_base,
     return true;
 }
 
-bool dequeue_event_trb(void* ring_base,
-                       size_t ring_bytes,
-                       uint64_t ring_physical,
-                       EventRingInfo& ring,
-                       EventInfo& out)
+bool dequeue_event_trb(
+    void* ring_base, size_t ring_bytes, uint64_t ring_physical, EventRingInfo& ring, EventInfo& out)
 {
     out = {};
     if((nullptr == ring_base) || (0 == ring.trb_count) ||
@@ -269,22 +272,22 @@ bool dequeue_event_trb(void* ring_base,
 
     switch(out.trb_type)
     {
-    case kTrbTypeTransferEvent:
-        out.type = EventType::Transfer;
-        out.slot_id = static_cast<uint8_t>(entry.control >> 24);
-        out.endpoint_id = static_cast<uint8_t>((entry.control >> 16) & 0x1Fu);
-        break;
-    case kTrbTypeCommandCompletionEvent:
-        out.type = EventType::CommandCompletion;
-        out.slot_id = static_cast<uint8_t>(entry.control >> 24);
-        break;
-    case kTrbTypePortStatusChangeEvent:
-        out.type = EventType::PortStatusChange;
-        out.port_id = static_cast<uint8_t>(out.parameter >> 24);
-        break;
-    default:
-        out.type = EventType::Unknown;
-        break;
+        case kTrbTypeTransferEvent:
+            out.type = EventType::Transfer;
+            out.slot_id = static_cast<uint8_t>(entry.control >> 24);
+            out.endpoint_id = static_cast<uint8_t>((entry.control >> 16) & 0x1Fu);
+            break;
+        case kTrbTypeCommandCompletionEvent:
+            out.type = EventType::CommandCompletion;
+            out.slot_id = static_cast<uint8_t>(entry.control >> 24);
+            break;
+        case kTrbTypePortStatusChangeEvent:
+            out.type = EventType::PortStatusChange;
+            out.port_id = static_cast<uint8_t>(out.parameter >> 24);
+            break;
+        default:
+            out.type = EventType::Unknown;
+            break;
     }
 
     ++ring.dequeue_index;
@@ -322,8 +325,7 @@ bool read_port_status(const ControllerLayout& controller, uint8_t port_id, PortS
     }
 
     const size_t offset = kOperationalPortRegisterBase +
-                          (static_cast<size_t>(port_id) - 1u) * kPortRegisterStride +
-                          kPortSc;
+                          (static_cast<size_t>(port_id) - 1u) * kPortRegisterStride + kPortSc;
     if((static_cast<size_t>(controller.capability.cap_length) + offset + sizeof(uint32_t)) >
        controller.mmio_size)
     {
@@ -341,7 +343,9 @@ bool read_port_status(const ControllerLayout& controller, uint8_t port_id, PortS
     return true;
 }
 
-bool clear_port_change_bits(const ControllerLayout& controller, uint8_t port_id, uint32_t clear_mask)
+bool clear_port_change_bits(const ControllerLayout& controller,
+                            uint8_t port_id,
+                            uint32_t clear_mask)
 {
     PortStatus status{};
     if(!read_port_status(controller, port_id, status))
@@ -350,9 +354,10 @@ bool clear_port_change_bits(const ControllerLayout& controller, uint8_t port_id,
     }
 
     const size_t offset = kOperationalPortRegisterBase +
-                          (static_cast<size_t>(port_id) - 1u) * kPortRegisterStride +
-                          kPortSc;
-    write32(controller.operational, offset, status.raw | (clear_mask & kPortScChangeBits));
+                          (static_cast<size_t>(port_id) - 1u) * kPortRegisterStride + kPortSc;
+    write32(controller.operational,
+            offset,
+            (status.raw & kPortScPreservedBits) | (clear_mask & kPortScChangeBits));
     return true;
 }
 
@@ -365,9 +370,8 @@ bool power_on_port(const ControllerLayout& controller, uint8_t port_id)
     }
 
     const size_t offset = kOperationalPortRegisterBase +
-                          (static_cast<size_t>(port_id) - 1u) * kPortRegisterStride +
-                          kPortSc;
-    write32(controller.operational, offset, (status.raw & ~kPortScChangeBits) | kPortScPortPower);
+                          (static_cast<size_t>(port_id) - 1u) * kPortRegisterStride + kPortSc;
+    write32(controller.operational, offset, (status.raw & kPortScPreservedBits) | kPortScPortPower);
     return true;
 }
 
@@ -445,10 +449,10 @@ bool controller_program(const ControllerLayout& controller,
     }
 
     write32(controller.operational, kOperationalDnctrl, 0u);
-    write64(controller.operational,
-            kOperationalCrcr,
-            (rings.command_ring_physical & ~0x3Full) |
-                (rings.command_ring_cycle_state ? 1ull : 0ull));
+    write64(
+        controller.operational,
+        kOperationalCrcr,
+        (rings.command_ring_physical & ~0x3Full) | (rings.command_ring_cycle_state ? 1ull : 0ull));
     write64(controller.operational, kOperationalDcbaap, rings.dcbaa_physical);
     write32(controller.operational, kOperationalConfig, max_device_slots);
 
@@ -511,10 +515,9 @@ void acknowledge_interrupt(const ControllerLayout& controller, uint64_t event_ri
 
     volatile uint8_t* interrupter = controller.runtime + kRuntimeInterrupter0;
     const uint32_t iman = read32(interrupter, kInterrupterIman);
-    const uint32_t iman_value = static_cast<uint32_t>(kImanInterruptEnable |
-                                                      ((0 != (iman & kImanInterruptPending))
-                                                           ? kImanInterruptPending
-                                                           : 0u));
+    const uint32_t iman_value =
+        static_cast<uint32_t>(kImanInterruptEnable |
+                              ((0 != (iman & kImanInterruptPending)) ? kImanInterruptPending : 0u));
     write32(interrupter, kInterrupterIman, iman_value);
     if(0 != event_ring_dequeue_physical)
     {
@@ -524,3 +527,12 @@ void acknowledge_interrupt(const ControllerLayout& controller, uint64_t event_ri
     }
 }
 }  // namespace xhci
+void xhci::disable_interrupts(const ControllerLayout& controller)
+{
+    if(controller.operational)
+        write32(controller.operational,
+                kOperationalUsbcmd,
+                read32(controller.operational, kOperationalUsbcmd) & ~kUsbcmdInterrupterEnable);
+    if(controller.runtime)
+        write32(controller.runtime + kRuntimeInterrupter0, kInterrupterIman, kImanInterruptPending);
+}

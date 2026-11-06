@@ -7,7 +7,7 @@ It uses the native File and Directory interfaces and supports disk-backed execut
 initrd: /bin/init, /bin/sh, recovery and existing verification tools
 /tmp:   volatile writable files
 /disk:  persistent ext2 files, readme, and disk-only diskutil
-           -> filesystem dispatch -> partition bounds -> virtio block -> host raw file
+           -> filesystem dispatch -> partition bounds -> virtio or USB block -> host raw file
 ```
 
 ## Workflow
@@ -20,6 +20,7 @@ The same targets are available through `cmake --build build --target TARGET`.
 | `storage_create` | Create the data image if absent. Preserve an existing image. |
 | `run_persistent` | Boot UEFI with the persistent image attached. |
 | `run_persistent_bios` | Boot BIOS with the same persistent image. |
+| `run_usb_storage` / `run_usb_storage_bios` | Attach the same image through xHCI USB storage. |
 | `storage_deploy` | Install or update manifest programs. Preserve other existing files. |
 | `storage_reset` | Replace the image, erase its files, and reinstall the utility. |
 
@@ -69,7 +70,7 @@ Run it before stopping QEMU after shell writes.
 | Executable files | Execute bits identify immutable files; ordinary creates produce writable, nonexecutable files |
 | Rename | Same-directory, without replacement; the new name must fit its existing directory record |
 | Remove | Reject nonempty directories and objects retained by callers; return WOULD_BLOCK for retained objects |
-| Synchronization | Native File `sync` and Directory `sync`; completed writes followed by virtio Flush |
+| Synchronization | Native File `sync` and Directory `sync`; completed writes followed by device cache synchronization |
 
 The profile validates allocation counts, metadata ranges, block ownership, directory records, and inode reachability before publication.
 It rejects dirty filesystems instead of mounting them writable.
@@ -127,8 +128,8 @@ The persistence test uses two independent QEMU processes and one backing file.
 It checks disk-only execution, indirect blocks, exact bytes, shell-created files, and immutable executable contents.
 When available, `e2fsck -fn` checks the fresh image and both post-boot states.
 
-USB mass storage, multi-group ext2, multi-block directories, online installation, journal recovery, and loadable hardware drivers remain deferred.
-Physical disks are unchanged by this QEMU milestone.
+Multi-group ext2, multi-block directories, online installation, journal recovery, and loadable hardware drivers remain deferred.
+[USB mass storage](../hardware/usb-storage.md) uses the same profile. Physical controller qualification remains pending.
 
 ## References
 

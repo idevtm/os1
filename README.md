@@ -484,5 +484,7 @@ cmake --build build --target run_persistent
 
 Inside the guest, run `/disk/diskutil seed`, then `/disk/diskutil verify`.
 Run `/disk/diskutil sync` after shell writes and before stopping QEMU.
-See the [ext2 guide](docs/filesystems/ext2.md) for limits and recovery behavior.
+Use `run_usb_storage` or `run_usb_storage_bios` to attach the same disk through xHCI USB mass storage.
+Use `smoke_usb_storage` for persistence, deployment, removal, and keyboard checks.
+See the [USB storage guide](docs/hardware/usb-storage.md) and [ext2 guide](docs/filesystems/ext2.md) for supported profiles and recovery behavior.
 The two-boot smoke tests also use `e2fsck` when available (`brew install e2fsprogs` on macOS).

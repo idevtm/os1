@@ -1089,13 +1089,17 @@ Non-reflective staged programs omit unused section tables; class binaries retain
 
 ```text
 File/Directory IPC or descriptor I/O -> VfsOperations -> tmpfs or ext2
-ext2 -> MBR partition bounds -> virtio read/write/flush -> persistent raw image
+ext2 -> MBR partition bounds -> virtio or USB BOT read/write/flush -> persistent raw image
 Executable -> immutable disk snapshot -> ELF validation -> protected process
 Host manifest -> locked image copy -> debugfs -> validation -> atomic image replacement
 ```
 
 The [ext2 profile](filesystems/ext2.md) defines exact limits, sync authority, failure behavior, and deployment targets.
 The namespace mounts `/disk` before publication when a supported partition exists.
+It tries the virtio device first, then published USB devices.
+[USB mass storage](hardware/usb-storage.md) adds bounded SCSI commands over xHCI bulk endpoints.
+Shared IRQ/poll event consumption uses an event lock; a BSP input queue keeps HID console callbacks on the boot CPU.
+Failed USB devices retain DMA after hardware publication, and reconnect does not restore old handles.
 File contents remain on disk until read; the mount imports only bounded namespace and allocation metadata.
 Executable files are immutable in this profile. ELF loading owns and releases a stable image snapshot.
 [Offline deployment](filesystems/program-deployment.md) replaces selected programs between guest runs.
@@ -1367,7 +1371,7 @@ Major constraints that remain:
   or ACPI hotplug event sources yet
 - APs come up through ACPI-derived bring-up, install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, and participate in per-CPU scheduling; device IRQ steering is still BSP-first
 - the `virtio-net` driver includes ARP parsing, a cache, and a QEMU-oriented probe, but no general IP/UDP/TCP/ICMP/DHCP/DNS or socket stack
-- xHCI brings up HID boot keyboards but does not yet handle USB hubs, mice past recognition, or USB mass storage
+- xHCI supports HID boot keyboards and bounded USB mass storage; hubs and mouse input routing remain deferred
 - NVMe and AHCI are still follow-on work
 
 The [initrd VFS milestone](archive/native-api/2026-11-04-initrd-vfs-implementation-plan.md) now implements read-only namespace access and bounded argument/environment handoff. Bounded hosted IPC is also implemented; general kernel-service integration remains planned. Design work can proceed while reliability defects are isolated; expansion of concurrent ownership, writable storage, or hardware power operations depends on the respective lifetime and recovery contracts. Related design and implementation work includes:
@@ -1379,7 +1383,7 @@ The [initrd VFS milestone](archive/native-api/2026-11-04-initrd-vfs-implementati
 - additional filesystem providers once their block and persistence contracts are defined
 - a small multiuser/permissions foundation (uid/gid, file ownership, credentials field on `Process`) so Milestone F can meaningfully run SSH
 - packet ownership, receive buffering, monotonic deadlines, and cancellation before expanding the existing ARP slice into IPv4/UDP/TCP/ICMP, DHCP, and DNS
-- USB hub class, mouse routing past recognition, and USB mass storage as the next USB tier
+- USB hub class, mouse routing past recognition, and physical USB storage qualification as the next USB tier
 - per-CPU device IRQ steering plus lock-order / policy follow-through on top of the operational SMP runtime (the synchronization vocabulary already exists in [src/kernel/sync/smp.hpp](../src/kernel/sync/smp.hpp))
 - ACPICA upgrade/footprint policy, OSL feature boundaries, and broader real-hardware ACPI coverage when new hardware requires it
 

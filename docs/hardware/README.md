@@ -5,6 +5,7 @@ Keep physical observations separate from emulator validation.
 
 | Document | Use |
 | --- | --- |
+| [USB mass storage](usb-storage.md) | Current transport, QEMU checks, failure behavior, and physical limitations |
 | [USB image workflow](usb-image-workflow.md) | Build and write fresh or preserved-layout images through `os1.sh` |
 | [Boot log capture](boot-log.md) | Diagnostic image layouts, capture formats, and extraction procedures |
 | [UEFI layout investigation](uefi-layout-investigation.md) | Format audit, firmware evidence, and unresolved limits |
@@ -18,5 +19,5 @@ Use the current USB workflow for ordinary image creation.
 Diagnostic boot logging remains a separate workflow with its own constraints.
 
 [Issue #27](https://github.com/idevtm/os1/issues/27) tracks a separate physical USB keyboard failure.
-A persistent writable data partition remains planned, not implemented.
+USB mass storage and ext2 persistence pass QEMU checks. Physical qualification and data-partition deployment remain planned.
 Current full-image writing does not promise to preserve a future data partition.

@@ -115,6 +115,7 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/driver_registry.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/pci_bus.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/net/arp_cache.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/drivers/usb/mass_storage.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/usb/hid_keyboard.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/usb/xhci_controller.cpp"
   "${OS1_REPO_ROOT}/src/kernel/fs/cpio_newc.cpp"
@@ -189,6 +190,7 @@ add_executable(os1_host_tests
   kernel/pci_resource_tests.cpp
   kernel/wait_queue_tests.cpp
   kernel/arp_cache_tests.cpp
+  kernel/usb_storage_tests.cpp
   kernel/hid_keyboard_tests.cpp
   kernel/ext2_tests.cpp
   kernel/xhci_controller_tests.cpp

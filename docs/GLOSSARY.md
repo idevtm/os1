@@ -507,6 +507,9 @@ Related references: [USB and xHCI specifications](REFERENCES.md#device-buses-dis
 
 | Term | Meaning |
 | --- | --- |
+| CBW; CSW | Command Block Wrapper and Command Status Wrapper: BOT wire records for a command and its completion status. |
+| CDB | Command Descriptor Block: the SCSI command bytes carried inside a CBW. |
+| LUN | Logical Unit Number: identifies a storage unit within a device; the first USB profile uses LUN zero. |
 | Command ring | An xHCI queue through which software submits controller commands. |
 | Control transfer | USB’s request/response transfer type, using setup, optional data, and status stages for operations such as device configuration. |
 | DCBAA | Device Context Base Address Array: the xHCI array locating device contexts; entry zero is used for scratchpad-buffer information when needed. |

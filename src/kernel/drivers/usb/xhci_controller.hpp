@@ -14,7 +14,10 @@ constexpr uint32_t kTrbTypeSetupStage = 2u;
 constexpr uint32_t kTrbTypeDataStage = 3u;
 constexpr uint32_t kTrbTypeStatusStage = 4u;
 constexpr uint32_t kTrbTypeEnableSlotCommand = 9u;
+constexpr uint32_t kTrbTypeDisableSlotCommand = 10u;
 constexpr uint32_t kTrbTypeAddressDeviceCommand = 11u;
+constexpr uint32_t kTrbTypeResetEndpointCommand = 14u;
+constexpr uint32_t kTrbTypeSetTrDequeueCommand = 16u;
 constexpr uint32_t kTrbTypeConfigureEndpointCommand = 12u;
 constexpr uint32_t kTrbTypeEvaluateContextCommand = 13u;
 constexpr uint32_t kTrbTypeNoOpCommand = 23u;
@@ -40,12 +43,11 @@ constexpr uint32_t kPortScOverCurrentChange = 1u << 20;
 constexpr uint32_t kPortScPortResetChange = 1u << 21;
 constexpr uint32_t kPortScPortLinkStateChange = 1u << 22;
 constexpr uint32_t kPortScPortConfigErrorChange = 1u << 23;
-constexpr uint32_t kPortScChangeBits = kPortScConnectStatusChange |
-                                       kPortScPortEnableChange |
-                                       kPortScWarmPortResetChange |
-                                       kPortScOverCurrentChange |
-                                       kPortScPortResetChange |
-                                       kPortScPortLinkStateChange |
+// Preserve only PP, PIC and wake enables. Never replay RW1C/RW1S bits.
+constexpr uint32_t kPortScPreservedBits = (1u << 9) | (3u << 14) | (7u << 25);
+constexpr uint32_t kPortScChangeBits = kPortScConnectStatusChange | kPortScPortEnableChange |
+                                       kPortScWarmPortResetChange | kPortScOverCurrentChange |
+                                       kPortScPortResetChange | kPortScPortLinkStateChange |
                                        kPortScPortConfigErrorChange;
 
 constexpr size_t kOperationalUsbcmd = 0x00u;
@@ -175,6 +177,7 @@ struct RingSet
 
 using PollHook = void (*)(volatile uint8_t* operational, void* context, uint32_t iteration);
 
+void set_slot_context(uint32_t* words, uint8_t speed, uint8_t port, uint8_t context_entries);
 bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayout& out);
 uint32_t read_page_size_mask(const ControllerLayout& controller);
 bool initialize_command_ring(void* ring_base,
@@ -223,5 +226,10 @@ bool controller_run(const ControllerLayout& controller,
                     uint32_t timeout_spins,
                     PollHook poll_hook = nullptr,
                     void* poll_context = nullptr);
-void acknowledge_interrupt(const ControllerLayout& controller, uint64_t event_ring_dequeue_physical);
+void acknowledge_interrupt(const ControllerLayout& controller,
+                           uint64_t event_ring_dequeue_physical);
 }  // namespace xhci
+namespace xhci
+{
+void disable_interrupts(const ControllerLayout& controller);
+}

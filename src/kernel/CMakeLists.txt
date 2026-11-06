@@ -47,6 +47,7 @@ set(KERNEL_DRIVER_SOURCES
   drivers/timer/pit.cpp
   drivers/timer/tsc_clock.cpp
   drivers/watchdog/intel_tco.cpp
+  drivers/usb/mass_storage.cpp
   drivers/usb/hid_keyboard.cpp
   drivers/usb/xhci.cpp
   drivers/usb/xhci_controller.cpp

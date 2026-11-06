@@ -126,6 +126,7 @@ The initrd still contains the existing recovery and verification programs.
 ## Validation
 
 `smoke_storage` runs persistence and deployment tests under BIOS and UEFI.
+`smoke_usb_storage` repeats these checks with the data image attached through xHCI USB storage.
 Each deployment test uses a disposable image and two separately compiled program versions.
 It checks version 1, creates and synchronizes guest data, installs version 2, and verifies another two boots.
 The tests compare unchanged file hashes and inode metadata and run `e2fsck` after deployment and guest shutdown.

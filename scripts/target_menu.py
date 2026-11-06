@@ -18,7 +18,7 @@ def category(target):
     if target.startswith('smoke'):
         if target == 'smoke_all':
             return ('Checks',)
-        if target == 'smoke_storage':
+        if target in ('smoke_storage', 'smoke_usb_storage'):
             return ('Checks', 'Storage')
         return ('Checks', 'Legacy BIOS' if 'bios' in target else 'Modern UEFI')
     return ('Other',)

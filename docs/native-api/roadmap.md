@@ -33,7 +33,7 @@ flowchart TD
 | Typed metadata | Offline interfaces; bounded rich constructor/method inputs and CLI conversion | Stable service schemas; broader output/event descriptions and generated bindings later |
 | Bulk data | Exclusive zero-copy Buffer loans, returned input identity, distinct output objects | Kernel-service integration; separate DMA ownership and quiescence rules for devices |
 | Files | Immutable initrd, writable `/tmp`, native mutation, quotas, per-open cursors, capability-relative lookup | Kernel Buffer transfers, public mounts, and physical USB storage |
-| Devices | Internal block requests; xHCI boot-keyboard input | Native device endpoints, usable mouse events, USB storage, broader hardware qualification |
+| Devices | Internal block requests; xHCI boot-keyboard input | Native device endpoints, usable mouse events, broader USB hardware qualification |
 
 The descriptor decision no longer blocks VFS, sockets, PTYs, or redirection at the foundational level.
 Each subsystem still needs its own semantic contract and implementation.
@@ -170,7 +170,8 @@ Controller and hub expansion depend on the identified hardware, not assumptions 
 
 A persistent writable data partition needs more than writable file methods.
 Ext2 is selected for the first persistence slice. The [QEMU profile](../filesystems/ext2.md) is implemented.
-USB transport and partition-preserving physical deployment remain planned.
+[USB transport](../hardware/usb-storage.md) now passes QEMU persistence, deployment, and removal checks.
+Physical qualification and partition-preserving deployment remain planned.
 Choose a dedicated data partition; do not mount the boot filesystem writable by default.
 
 ```mermaid
@@ -189,7 +190,7 @@ Expose geometry, limits, Read, Write, and Flush through a native BlockDevice int
 Define alignment, bounds, partial progress, queue limits, write ordering, and durable completion.
 The internal [block facade](../../src/kernel/storage/block_device.hpp) supports bounded reads, writes, and Flush.
 The virtio reference driver implements Flush; native filesystem `sync` establishes durability.
-A public native BlockDevice interface and device-removal contract remain planned.
+A public native BlockDevice interface remains planned. USB removal retires the device until reboot.
 
 Use virtio-blk to validate the contract before physical USB tests.
 Keep raw write and partition-management authority separate from ordinary file access.
@@ -204,10 +205,10 @@ Do not promise end-to-end zero-copy for hardware that cannot consume the supplie
 
 ### USB transport and partition access
 
-Add bounded bulk transfers and a USB mass-storage class driver.
-Proposed first scope: Bulk-Only Transport with the required SCSI command subset.
-Include identification, capacity, reads, writes, cache synchronization where supported, and command-status validation.
-Define command recovery, unsupported capabilities, unplug behavior, and reconnect identity.
+The implemented first scope uses Bulk-Only Transport with bounded bulk transfers and a SCSI command subset.
+It requires writable 512-byte media and successful cache synchronization.
+Status validation, bounded recovery, and device retirement handle failed requests.
+Reconnect requires reboot and cannot restore old handles.
 A reconnected device must not silently inherit outstanding authority from a removed device.
 
 A direct root-port device can be the initial support target.
@@ -221,7 +222,8 @@ Reject malformed, overlapping, overflowing, or boot-overlapping data ranges.
 The implemented ext2 profile validates its supported format before mounting.
 It supports writable files, disk-backed executables, explicit synchronization, and clean reboot persistence.
 Its tests cover malformed media, allocation limits, I/O errors, and firmware-specific mappings.
-General ext2 layouts, journal recovery, and physical device removal remain outside this profile.
+General ext2 layouts and journal recovery remain outside this profile.
+USB removal tests pass in QEMU; physical failure qualification remains pending.
 Do not equate a successful filesystem call with durable storage unless the contract promises it.
 Do not format media automatically after a mount failure.
 
