@@ -1091,12 +1091,15 @@ Non-reflective staged programs omit unused section tables; class binaries retain
 File/Directory IPC or descriptor I/O -> VfsOperations -> tmpfs or ext2
 ext2 -> MBR partition bounds -> virtio read/write/flush -> persistent raw image
 Executable -> immutable disk snapshot -> ELF validation -> protected process
+Host manifest -> locked image copy -> debugfs -> validation -> atomic image replacement
 ```
 
 The [ext2 profile](filesystems/ext2.md) defines exact limits, sync authority, failure behavior, and deployment targets.
 The namespace mounts `/disk` before publication when a supported partition exists.
 File contents remain on disk until read; the mount imports only bounded namespace and allocation metadata.
 Executable files are immutable in this profile. ELF loading owns and releases a stable image snapshot.
+[Offline deployment](filesystems/program-deployment.md) replaces selected programs between guest runs.
+The host validates filesystem consistency, supported limits, installed hashes, and preservation of unrelated files before publication.
 
 Filesystem admission uses an atomic guard; concurrent callers receive WOULD_BLOCK.
 The virtio queue has a separate IRQ-safe lock for publication and completion.
@@ -1270,7 +1273,7 @@ The host support layer under `tests/host/support/` provides serial-debug stubs, 
 
 ### Smoke Tests
 
-With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers fifteen QEMU shell smokes:
+With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers seventeen QEMU shell smokes:
 
 - `os1_smoke`
 - `os1_smoke_observe`
@@ -1287,11 +1290,14 @@ With `BUILD_TESTING=ON`, QEMU and OVMF available, root `CTest` registers fifteen
 - `os1_smoke_files_uefi`
 - `os1_smoke_ext2_bios`
 - `os1_smoke_ext2_uefi`
+- `os1_smoke_deploy_bios`
+- `os1_smoke_deploy_uefi`
 
 `OS1_QEMU_DEBUGCON=ON` adds `os1_smoke_no_uart`, which tests debugcon output and PS/2 input without COM1.
-`BUILD_TESTING=ON` registers five script contracts: monitor exchange, smoke settling, USB kernel update, USB menu, and storage image handling.
-The complete CI configuration has 16 QEMU smokes and five contracts, for 21 root CTest cases.
-Without debugcon, the complete-tool configuration has 15 QEMU smokes and five contracts, for 20 root CTest cases.
+`BUILD_TESTING=ON` registers eight script contracts: monitor exchange, smoke settling, USB kernel update, USB menu, storage images, deployment, target navigation, and fresh build configuration.
+Two deployment smokes execute distinct program versions across three BIOS or UEFI boots.
+The complete CI configuration has 18 QEMU smokes and eight contracts, for 26 root CTest cases.
+Without debugcon, the complete-tool configuration has 17 QEMU smokes and eight contracts, for 25 root CTest cases.
 Missing emulator or firmware prerequisites can reduce registration.
 The separate host suite is not part of these totals.
 

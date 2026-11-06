@@ -13,7 +13,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 
-def boot(args, disk, phase):
+def boot(args, disk, phase, commands=None, on_boot=None):
     log = Path(args.log).with_suffix(f'.{phase}.log')
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
@@ -66,8 +66,14 @@ def boot(args, disk, phase):
         boot_seconds = time.monotonic() - started
         listed = run('ls /bin')
         assert b'diskutil' not in listed, 'utility must not be installed in initrd'
+        if on_boot is not None:
+            on_boot()
         operation = time.monotonic()
-        if phase == 'write':
+        if commands is not None:
+            for command, marker in commands:
+                out = run(command, marker)
+                assert b'unknown command:' not in out and b'redirection failed' not in out, out
+        elif phase == 'write':
             run('/disk/diskutil seed', b'diskutil seed ok')
             run('echo "persistent shell file" > /disk/note')
             run('echo appended >> /disk/note')

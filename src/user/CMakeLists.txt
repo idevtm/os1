@@ -15,6 +15,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
     COMMAND
       "${CMAKE_CXX_COMPILER}"
       -std=gnu++20
+      ${ARGN}
       -ffreestanding
       -fno-stack-protector
       -fno-asynchronous-unwind-tables
@@ -241,3 +242,13 @@ add_custom_target(initrd_cpio DEPENDS "${OS1_INITRD_CPIO}")
 os1_add_user_cxx_program(diskutil "${CMAKE_CURRENT_SOURCE_DIR}/programs/diskutil.cpp" OS1_USER_DISKUTIL_ELF)
 add_custom_target(os1_diskutil ALL DEPENDS "${OS1_USER_DISKUTIL_ELF}")
 set(OS1_USER_DISKUTIL_ELF "${OS1_USER_DISKUTIL_ELF}" PARENT_SCOPE)
+
+# Disk-only deployment fixtures. Never stage these programs into the initrd.
+if(BUILD_TESTING)
+  foreach(version IN ITEMS 1 2)
+    os1_add_user_cxx_program(deploy_probe_${version}
+      "${PROJECT_SOURCE_DIR}/tests/fixtures/deploy_probe.cpp" probe_elf "-DDEPLOY_VERSION=\"${version}\"")
+    add_custom_target(os1_deploy_probe_${version} DEPENDS "${probe_elf}")
+    set(OS1_DEPLOY_PROBE_${version} "${probe_elf}" PARENT_SCOPE)
+  endforeach()
+endif()

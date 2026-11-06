@@ -359,8 +359,9 @@ Selected progression:
 2. Completed for bounded copied transfers: [writable `/tmp`](docs/native-api/abi/tmpfs-abi.md), with an immutable initrd. Kernel Buffer transfers remain deferred.
 3. Completed for QEMU: block bounds, Flush, a partition view, and bounded ext2 persistence.
 4. Completed for QEMU: execute a disk-only utility and verify files after reboot.
-5. Add USB mass storage, physical device-removal behavior, and broader filesystem recovery.
-6. Preserve the data partition across routine kernel/initrd image updates.
+5. Completed for QEMU: deploy selected programs offline while preserving existing files.
+6. Add USB mass storage, physical device-removal behavior, and broader filesystem recovery.
+7. Preserve the data partition across routine kernel/initrd image updates.
 
 Ext2 is selected and implemented for the first QEMU persistence profile.
 Bounded virtio block reads, writes, and Flush support native filesystem synchronization.
