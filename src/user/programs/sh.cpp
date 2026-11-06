@@ -447,10 +447,10 @@ void run_help()
 
 void run_echo(size_t argc, char* argv[kShellMaxTokens])
 {
-    write_string("echo:");
     for(size_t i = 1; i < argc; ++i)
     {
-        write_char(' ');
+        if(i > 1)
+            write_char(' ');
         write_string(argv[i]);
     }
     write_char('\n');
@@ -947,16 +947,13 @@ bool resolve_command_path(const char* command, char* path, size_t path_size)
     return true;
 }
 
-void write_spawn_outcome(const char* command, long pid, int status)
+void write_child_failure(const char* command, int status)
 {
-    write_string("shell spawn ");
+    write_string("command failed: ");
     write_string(command);
-    write_string(" ok pid=");
-    write_signed(pid);
     write_string(" status=");
     write_signed(status);
     write_char('\n');
-    write_string("shell prompt resumed\n");
 }
 
 const char* raw_tail(const char* raw, unsigned words);
@@ -1144,7 +1141,8 @@ void run_external(size_t argc, char** argv, const char* raw)
         return;
     }
 
-    write_spawn_outcome(command, waited, status);
+    if(status != 0)
+        write_child_failure(command, status);
 }
 }  // namespace
 

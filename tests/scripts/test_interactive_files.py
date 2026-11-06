@@ -55,6 +55,8 @@ def main():
         result = bytes(pending[:at])
         del pending[:at]
         assert b'#GP general protection' not in result and b'PANIC' not in result, result
+        assert b'shell spawn ' not in result and b'shell prompt resumed' not in result, result
+        assert b'heredoc> ' not in result, result
         return result
 
     def run(text):
@@ -63,12 +65,12 @@ def main():
 
     def content(path, expected):
         result = run(f'cat "{path}"')
-        # Separate console input echo from the child's bytes and shell status.
+        # Separate console input echo from the child's bytes and the next prompt.
         start = result.index(b'\n') + 1
-        finish = result.index(b'shell spawn cat ok')
+        finish = len(result) - len(b'os1> ')
         actual = re.sub(rb"^root alloc 0x[0-9a-f]+\n", b"", result[start:finish], count=1)
         assert actual == expected.encode(), (path, actual, expected)
-        assert b'status=0' in result, result
+        assert b'command failed:' not in result, result
 
     def insertion(lines):
         expect(b'text> ')
@@ -81,20 +83,24 @@ def main():
     try:
         expect(b'shell prompt ready\n')
         expect()
+        for command, expected in [('echo', b'\n'), ('echo hello world', b'hello world\n'),
+                                  ('echo "a  b" c', b'a  b c\n')]:
+            result = run(command)
+            assert result.split(b'\n', 1)[1] == expected + b'os1> ', result
         assert b'failed' not in run('touch /tmp/empty')
         content('/tmp/empty', '')
         run('echo "A > B" > "/tmp/space name"')
-        content('/tmp/space name', 'echo: A > B\n')
+        content('/tmp/space name', 'A > B\n')
         run('echo second >> "/tmp/space name"')
-        content('/tmp/space name', 'echo: A > B\necho: second\n')
+        content('/tmp/space name', 'A > B\nsecond\n')
         run('cat < "/tmp/space name" > /tmp/copy')
-        content('/tmp/copy', 'echo: A > B\necho: second\n')
+        content('/tmp/copy', 'A > B\nsecond\n')
         run('touch /tmp/copy')
-        content('/tmp/copy', 'echo: A > B\necho: second\n')
+        content('/tmp/copy', 'A > B\nsecond\n')
         assert b'duplicate redirection' in run('echo damage > /tmp/copy > /tmp/other')
-        content('/tmp/copy', 'echo: A > B\necho: second\n')
+        content('/tmp/copy', 'A > B\nsecond\n')
         assert b'redirection failed' in run('echo damage > /etc/motd')
-        assert b'echo: restored\n' in run('echo restored')
+        assert b'restored\n' in run("echo re'stored'")
         send('cat > /tmp/eof\n')
         # cat has no prompt; its input echo provides a fresh synchronization point.
         expect(b'cat > /tmp/eof\n')
@@ -103,18 +109,16 @@ def main():
         send('from stdin\n')
         expect(b'from stdin\n')
         send(b'\x04')
-        assert b'status=0' in expect()
+        assert b'command failed:' not in expect()
         content('/tmp/eof', 'from stdin\n')
+        # Here-documents have no prompt. Each batch fits the eight-record input queue.
         send('cat << END > /tmp/here\n')
-        expect(b'heredoc> ')
         for line in ['first', '', 'literal > data']:
             send(line + '\n')
-            expect(b'heredoc> ')
         send('END\n')
-        assert b'status=0' in expect()
+        assert b'command failed:' not in expect()
         content('/tmp/here', 'first\n\nliteral > data\n')
         send('cat << STOP > /tmp/absent\n')
-        expect(b'heredoc> ')
         send(b'\x04')
         assert b'redirection failed' in expect()
         assert b'cannot open file' in run('cat /tmp/absent')
@@ -184,7 +188,7 @@ def main():
         content('/tmp/call-error', '')
         assert b'parameter error' in run('call paramdemo render unknown:1 > /tmp/param-error')
         content('/tmp/param-error', '')
-        assert b'status=0' in run('cat - < /tmp/writer > /tmp/dash')
+        assert b'command failed:' not in run('cat - < /tmp/writer > /tmp/dash')
         content('/tmp/dash', 'replaced\n')
         # Invalid writer input drains through the terminator and cannot become commands.
         send('write /tmp/long-writer\n')
@@ -197,11 +201,8 @@ def main():
         assert b'cannot open file' in run('cat /tmp/injected')
         # Invalid here-documents never open the target, and drain to their delimiter.
         send('cat << END > /tmp/long-here\n')
-        expect(b'heredoc> ')
         send('x' * 140 + '\n')
-        expect(b'heredoc> ')
         send('touch /tmp/injected\n')
-        expect(b'heredoc> ')
         send('END\n')
         assert b'redirection failed' in expect()
         assert b'cannot open file' in run('cat /tmp/long-here')
@@ -219,47 +220,41 @@ def main():
         content('/tmp/writer', 'replaced\n')
         # Finite redirected input must terminate even with unsaved changes.
         send('edit /tmp/unsaved << END\n')
-        expect(b'heredoc> ')
         for line in ['a', 'unsaved', '.']:
             send(line + '\n')
-            expect(b'heredoc> ')
         send('END\n')
         assert b'end of input; unsaved changes discarded' in expect()
         assert b'cannot open file' in run('cat /tmp/unsaved')
         send('cat << END > /tmp/editor-script\n')
-        expect(b'heredoc> ')
         for line in ['a', 'saved from file', '.', 'wq']:
             send(line + '\n')
-            expect(b'heredoc> ')
         send('END\n')
         expect()
         assert b'edit: saved' in run('edit /tmp/scripted < /tmp/editor-script')
         content('/tmp/scripted', 'saved from file\n')
         # Child shells terminate at finite EOF and keep prompts off stdout.
-        send('sh < /tmp/empty > /tmp/empty-shell\n')
-        expect(b'shell spawn sh ok')
-        assert b'status=0' in expect()
+        send("sh < /tmp/empty > /tmp/empty-shell\necho empty-shell-'complete'\n")
+        assert b'command failed:' not in expect(b'empty-shell-complete\n')
+        assert b'command failed:' not in expect()
         content('/tmp/empty-shell', '')
         send('cat << END > /tmp/shell-script\n')
-        expect(b'heredoc> ')
         for line in ['echo script-one', 'echo script-two']:
             send(line + '\n')
-            expect(b'heredoc> ')
         send('END\n')
         expect()
-        send('sh < /tmp/shell-script > /tmp/script-output\n')
-        expect(b'shell spawn sh ok')
-        assert b'status=0' in expect()
-        content('/tmp/script-output', 'echo: script-one\necho: script-two\n')
+        send("sh < /tmp/shell-script > /tmp/script-output\necho script-shell-'complete'\n")
+        assert b'command failed:' not in expect(b'script-shell-complete\n')
+        assert b'command failed:' not in expect()
+        content('/tmp/script-output', 'script-one\nscript-two\n')
         for _ in range(70):
             assert b'failed' not in run('echo stable > /tmp/repeat')
-        content('/tmp/repeat', 'echo: stable\n')
+        content('/tmp/repeat', 'stable\n')
         # Long input must not execute its truncated, potentially destructive prefix.
         run('echo dangerous > /tmp/overlong ' + 'x' * 130)
         assert b'cannot open file' in run('cat /tmp/overlong')
         listing = run('ls /tmp')
         assert b'.shell-' not in listing, listing
-        assert b'echo: interactive-complete\n' in run('echo interactive-complete')
+        assert b'interactive-complete\n' in run("echo interactive-'complete'")
         print('interactive files: redirection, EOF, heredoc, writer, editor, and cleanup passed')
     finally:
         child.terminate()

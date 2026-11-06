@@ -68,7 +68,9 @@ END
 
 Redirection works for built-ins and external commands.
 The shell restores its streams after the command returns or launch fails.
-Diagnostics, prompts, and child status messages use standard error.
+Diagnostics and prompts use standard error.
+Successful foreground commands return directly to the prompt, without spawn or resume messages.
+A nonzero child exit reports `command failed: <command> status=<value>`; launch and wait errors remain visible.
 A successful `exec` retains redirected streams in the replacement image.
 A shell reading a finite input file exits at EOF; an interactive console shell accepts new input after Ctrl-D.
 For example, `sh < /tmp/script > /tmp/output` writes command results without shell prompts or startup messages.
@@ -76,10 +78,11 @@ For example, `sh < /tmp/script > /tmp/output` writes command results without she
 Quote paths with spaces, for example `cat "/tmp/my note"`.
 Single and double quotes protect operators; backslash escapes outside single quotes.
 Typed constructor and method arguments retain their original syntax after redirection removal.
-The existing `echo` command includes the prefix `echo:` in its output, including redirected output.
-Use `write`, `cat`, or a here-document when that prefix is unwanted.
+The `echo` command prints its arguments separated by one space, followed by a newline, without a prefix.
+With no arguments, it prints one newline. Quoted spaces within an argument remain unchanged.
 
-Here-document content has no variable expansion, dot termination, or special operator interpretation.
+Here-document collection prints no additional prompt; console input echo remains active.
+Content has no variable expansion, dot termination, or special operator interpretation.
 The shell collects it in an unlinked `/tmp` file before opening the output file.
 Premature EOF or collection failure prevents output creation or truncation.
 After an overlong line or storage failure, collection drains to the marker or EOF.

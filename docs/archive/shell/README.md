@@ -6,3 +6,4 @@ Current behavior is maintained in the [shell guide](../../shell/interactive-file
 | Record | Scope |
 | --- | --- |
 | [2026-11-06 interactive files](2026-11-06-interactive-files.md) | File commands, redirection, EOF, append, and line editor |
+| [2026-11-06 quiet completion](2026-11-06-quiet-command-output.md) | Remove routine shell spawn/resume messages; retain failure diagnostics |

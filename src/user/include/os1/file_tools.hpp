@@ -237,7 +237,6 @@ inline long here_document(const char* marker)
     long failure = 0;
     for(;;)
     {
-        message("heredoc> ");
         long status = reader.line(line);
         if(status < 0)
         {
