@@ -2,7 +2,10 @@
 // future VFS can provide path lookup and filesystem-backed exec.
 #include "fs/initrd.hpp"
 
+#include "debug/debug.hpp"
+#include "drivers/block/virtio_blk.hpp"
 #include "handoff/memory_layout.h"
+#include "vfs/ext2.hpp"
 #include "vfs/initrd.hpp"
 #include "vfs/tmpfs.hpp"
 
@@ -89,6 +92,18 @@ long initialize_initrd_namespace()
     if(status < 0)
         return status;
     status = tmpfs_mount(root);
+    if(status == 0)
+    {
+        auto* device = const_cast<BlockDevice*>(virtio_blk_block_device());
+        if(device)
+        {
+            long mounted = ext2_mount(root, *device);
+            if(mounted == 0)
+                debug("ext2 mounted /disk")();
+            else if(mounted != OS1_ERR_NOT_FOUND)
+                debug("ext2 mount rejected ")(mounted)();
+        }
+    }
     if(status < 0)
         object_release(root);
     else

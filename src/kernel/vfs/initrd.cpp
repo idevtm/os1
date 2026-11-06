@@ -3,7 +3,7 @@
 #include "fs/cpio_newc.hpp"
 #include "mm/kmem.hpp"
 #include "util/memory.h"
-#include "vfs/tmpfs.hpp"
+#include "vfs/filesystem.hpp"
 
 namespace
 {
@@ -186,8 +186,8 @@ long vfs_resolve(NativeObject* directory, const char* path, size_t size, NativeO
             {
                 NativeObject* child = nullptr;
                 auto* node = static_cast<VfsNode*>(current);
-                if(node->filesystem)
-                    status = tmpfs_lookup(node, path + start, count, child);
+                if(node->operations)
+                    status = node->operations->lookup(node, path + start, count, child);
                 else
                 {
                     child = lookup(node, path + start, count);

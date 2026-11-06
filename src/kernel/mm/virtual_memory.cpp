@@ -356,8 +356,8 @@ bool VirtualMemory::translate(uint64_t virtual_address,
     if(0 != (pml2e & kEntryLargePage))
     {
         flags = pml2e & ~kLargePageAddressMask2MiB;
-        physical_address = (pml2e & kLargePageAddressMask2MiB) |
-                           (virtual_address & kLargePageOffsetMask2MiB);
+        physical_address =
+            (pml2e & kLargePageAddressMask2MiB) | (virtual_address & kLargePageOffsetMask2MiB);
         return true;
     }
     const uint64_t* pml1 = kernel_physical_pointer<const uint64_t>(pml2e & kEntryAddressMask);
@@ -381,8 +381,11 @@ bool VirtualMemory::clone_kernel_mappings(uint64_t source_root)
 
     uint64_t* target = kernel_physical_pointer<uint64_t>(root_);
     const uint64_t* source = kernel_physical_pointer<const uint64_t>(source_root);
-    target[kKernelPml4Index] = source[kKernelPml4Index];
-    target[kDirectMapPml4Index] = source[kDirectMapPml4Index];
+    // Firmware can place PCI BARs beyond the first 512 GiB direct-map slot.
+    // Share the complete supervisor half, including those device mappings.
+    // Keep the user half private and deny user access at the top level.
+    for(unsigned slot = 256; slot < 512; ++slot)
+        target[slot] = source[slot] & ~static_cast<uint64_t>(PageFlags::User);
     return true;
 }
 

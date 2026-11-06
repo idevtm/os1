@@ -1,0 +1,328 @@
+#include <gtest/gtest.h>
+
+#include <array>
+#include <cstring>
+#include <fstream>
+#include <iterator>
+#include <memory>
+#include <vector>
+
+#include "fs/ext2.hpp"
+#include "handoff/memory_layout.h"
+#include "mm/kmem.hpp"
+#include "storage/block_device.hpp"
+#include "support/physical_memory.hpp"
+#include "vfs/ext2.hpp"
+#include "vfs/filesystem.hpp"
+#ifdef assert
+#undef assert
+#endif
+namespace
+{
+constexpr size_t start = 2048 * 512;
+struct Disk
+{
+    std::vector<uint8_t> bytes;
+    int writes = -1;
+    bool fail_read = false, fail_flush = false;
+    unsigned flushes = 0;
+    Disk()
+    {
+        std::ifstream file(OS1_EXT2_FIXTURE, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(file), {});
+    }
+    static bool read(void* ctx, uint32_t block, void* out)
+    {
+        auto& d = *static_cast<Disk*>(ctx);
+        size_t at = start + size_t(block) * 4096;
+        if(d.fail_read || at + 4096 > d.bytes.size())
+            return false;
+        std::memcpy(out, d.bytes.data() + at, 4096);
+        return true;
+    }
+    static bool write(void* ctx, uint32_t block, const void* in)
+    {
+        auto& d = *static_cast<Disk*>(ctx);
+        size_t at = start + size_t(block) * 4096;
+        if(d.writes == 0 || at + 4096 > d.bytes.size())
+            return false;
+        if(d.writes > 0)
+            --d.writes;
+        std::memcpy(d.bytes.data() + at, in, 4096);
+        return true;
+    }
+    static bool flush(void* ctx)
+    {
+        auto& d = *static_cast<Disk*>(ctx);
+        ++d.flushes;
+        return !d.fail_flush;
+    }
+    ext2::Io io()
+    {
+        return {this, read, write, flush, uint32_t((bytes.size() - start) / 4096)};
+    }
+    static bool submit(BlockDevice& dev, BlockRequest& r)
+    {
+        auto& d = *static_cast<Disk*>(dev.driver_state);
+        size_t at = r.sector * 512, count = r.sector_count * 512;
+        bool ok = at <= d.bytes.size() && count <= d.bytes.size() - at;
+        if(ok && r.operation == BlockOperation::Read)
+            std::memcpy(r.buffer, d.bytes.data() + at, count);
+        else if(ok && r.operation == BlockOperation::Write)
+            std::memcpy(d.bytes.data() + at, r.buffer, count);
+        else
+            ok = r.operation == BlockOperation::Flush;
+        block_request_complete(
+            r, ok ? BlockRequestStatus::Success : BlockRequestStatus::Invalid, ok ? count : 0);
+        return ok;
+    }
+    BlockDevice device()
+    {
+        return {"memory", bytes.size() / 512, 512, 8, 1, this, submit, submit};
+    }
+};
+class Ext2 : public testing::Test
+{
+protected:
+    Disk disk;
+    std::unique_ptr<ext2::Volume> fs = std::make_unique<ext2::Volume>();
+    ext2::Inode root{};
+    void SetUp() override
+    {
+        ASSERT_GT(disk.bytes.size(), start);
+        ASSERT_EQ(fs->mount(disk.io()), 0);
+        ASSERT_EQ(fs->inode_read(2, root), 0);
+    }
+};
+TEST_F(Ext2, CreateIndirectSparseTruncateAndReload)
+{
+    uint32_t number = 0;
+    ext2::Inode file{};
+    ASSERT_EQ(fs->create(2, root, "test", 4, false, number, file), 0);
+    std::vector<uint8_t> pattern(131072);
+    for(size_t i = 0; i < pattern.size(); ++i)
+        pattern[i] = uint8_t(i * 37 + i / 251);
+    ASSERT_EQ(fs->write(number, file, 0, pattern.data(), pattern.size()), pattern.size());
+    ASSERT_EQ(fs->sync(), 0);
+    auto reboot = std::make_unique<ext2::Volume>();
+    ASSERT_EQ(reboot->mount(disk.io()), 0);
+    ASSERT_EQ(reboot->inode_read(number, file), 0);
+    ASSERT_EQ(reboot->validate_inode(number, file), 0);
+    std::vector<uint8_t> read(pattern.size());
+    ASSERT_EQ(reboot->read(file, 0, read.data(), read.size()), read.size());
+    EXPECT_EQ(read, pattern);
+    ASSERT_EQ(reboot->truncate(number, file, 5), 0);
+    ASSERT_EQ(reboot->truncate(number, file, 131072), 0);
+    ASSERT_EQ(reboot->read(file, 0, read.data(), read.size()), read.size());
+    for(size_t i = 0; i < read.size(); ++i)
+        ASSERT_EQ(read[i], i < 5 ? pattern[i] : 0) << i;
+    EXPECT_EQ(reboot->write(number, file, ext2::max_file_bytes, "x", 1), OS1_ERR_RANGE);
+    EXPECT_EQ(reboot->sync(), 0);
+}
+TEST_F(Ext2, RejectsFeaturesGeometryDirtyStateAndBitmapCounters)
+{
+    const auto original = disk.bytes;
+    for(auto [offset, value] : std::vector<std::pair<unsigned, unsigned>>{
+            {96, 0x42}, {92, 4}, {100, 4}, {24, 3}, {4, UINT32_MAX}, {40, 0}, {58, 2}, {12, 1}})
+    {
+        disk.bytes = original;
+        ext2::put32(disk.bytes.data() + start + 1024 + offset, value);
+        auto v = std::make_unique<ext2::Volume>();
+        EXPECT_EQ(v->mount(disk.io()), OS1_ERR_BAD_IMAGE) << offset;
+    }
+}
+TEST_F(Ext2, RejectsMetadataAndDuplicateBlockReferences)
+{
+    ext2::Inode file{};
+    ASSERT_EQ(fs->inode_read(11, file), 0);
+    ext2::put32(file.bytes + 40, 2);
+    EXPECT_EQ(fs->validate_inode(11, file), OS1_ERR_BAD_IMAGE);
+    fs = std::make_unique<ext2::Volume>();
+    ASSERT_EQ(fs->mount(disk.io()), 0);
+    ASSERT_EQ(fs->inode_read(11, file), 0);
+    ASSERT_EQ(fs->validate_inode(11, file), 0);
+    EXPECT_EQ(fs->validate_inode(12, file), OS1_ERR_BAD_IMAGE);
+}
+TEST_F(Ext2, FailedWriteAndFlushPoisonVolumeAndDoNotReportSyncSuccess)
+{
+    uint32_t number = 0;
+    ext2::Inode file{};
+    ASSERT_EQ(fs->create(2, root, "test", 4, false, number, file), 0);
+    disk.writes = 0;
+    EXPECT_EQ(fs->write(number, file, 0, "abc", 3), OS1_ERR_IO);
+    EXPECT_EQ(fs->sync(), OS1_ERR_IO);
+    disk.writes = -1;
+    auto reboot = std::make_unique<ext2::Volume>();
+    EXPECT_EQ(reboot->mount(disk.io()), OS1_ERR_BAD_IMAGE);
+}
+TEST_F(Ext2, FlushFailureBeforeFirstMutationPreservesNamespace)
+{
+    disk.fail_flush = true;
+    uint32_t number = 0;
+    ext2::Inode file{};
+    EXPECT_EQ(fs->create(2, root, "test", 4, false, number, file), OS1_ERR_IO);
+    EXPECT_TRUE(fs->failed);
+    EXPECT_EQ(fs->sync(), OS1_ERR_IO);
+}
+TEST_F(Ext2, DirectoryMutationAndCapacity)
+{
+    uint32_t number = 0;
+    ext2::Inode directory{};
+    ASSERT_EQ(fs->create(2, root, "sub", 3, true, number, directory), 0);
+    EXPECT_EQ(ext2::u16(root.bytes + 26), 3);
+    ASSERT_EQ(fs->rename(root, "sub", 3, "renamed", 7), 0);
+    ASSERT_EQ(fs->remove(2, root, "renamed", 7, number, directory), 0);
+    EXPECT_EQ(ext2::u16(root.bytes + 26), 2);
+    ASSERT_EQ(fs->sync(), 0);
+    auto reload = std::make_unique<ext2::Volume>();
+    ASSERT_EQ(reload->mount(disk.io()), 0);
+    ASSERT_EQ(reload->inode_read(2, root), 0);
+    unsigned count = 0;
+    for(unsigned i = 0; i < 200; ++i)
+    {
+        char name[16];
+        auto len = snprintf(name, sizeof(name), "f%u", i);
+        ext2::Inode f{};
+        long r = reload->create(2, root, name, len, false, number, f);
+        if(r == OS1_ERR_LIMIT)
+            break;
+        ASSERT_EQ(r, 0);
+        ++count;
+    }
+    EXPECT_EQ(count, 116u);  // 128 inodes minus 10 reserved and two seed files.
+}
+TEST_F(Ext2, DiskFullRejectsWriteWithoutChangingSize)
+{
+    uint32_t n = 0;
+    ext2::Inode f{};
+    ASSERT_EQ(fs->create(2, root, "full", 4, false, n, f), 0);
+    std::array<uint8_t, 4096> bytes{};
+    uint32_t at = 0;
+    for(;;)
+    {
+        long r = fs->write(n, f, at, bytes.data(), bytes.size());
+        if(r == OS1_ERR_LIMIT)
+            break;
+        ASSERT_EQ(r, 4096);
+        at += 4096;
+        ASSERT_LT(at, ext2::max_file_bytes);
+    }
+    EXPECT_EQ(ext2::size(f), at);
+    EXPECT_EQ(fs->sync(), 0);
+}
+TEST_F(Ext2, MalformedDirectoryRecordsFail)
+{
+    uint32_t b = ext2::u32(root.bytes + 40);
+    ext2::put16(disk.bytes.data() + start + b * 4096 + 4, 0);
+    ext2::Entry entry{};
+    uint64_t next = 0;
+    EXPECT_EQ(fs->next(root, 0, entry, next), OS1_ERR_BAD_IMAGE);
+}
+TEST_F(Ext2, BlockFacadeRejectsOverflowAndPartitionEscape)
+{
+    auto device = disk.device();
+    std::array<uint8_t, 512> bytes{};
+    EXPECT_FALSE(block_read_sync(device, UINT64_MAX, bytes.data(), 1));
+    EXPECT_FALSE(block_write_sync(device, device.sector_count, bytes.data(), 1));
+    EXPECT_TRUE(block_flush_sync(device));
+}
+TEST_F(Ext2, VfsMountAuthoritySnapshotAndUnlinkPolicy)
+{
+    os1::host_test::PhysicalMemoryArena arena{16 * 1024 * 1024};
+    PageFrameContainer frames;
+    std::array<BootMemoryRegion, 1> regions{{{0, arena.size(), BootMemoryType::Usable, 0}}};
+    ASSERT_TRUE(frames.initialize(regions, 0x300000, kPageFrameBitmapQwordLimit));
+    kmem_init(frames);
+    VfsNode root_node{};
+    root_node.kind = OS1_OBJECT_DIRECTORY;
+    auto device = disk.device();
+    ASSERT_EQ(ext2_mount(&root_node, device), 0);
+    auto* mount = root_node.children;
+    ASSERT_NE(mount, nullptr);
+    NativeObject* object = nullptr;
+    ASSERT_EQ(mount->operations->lookup(mount, "diskutil", 8, object), 0);
+    auto* executable = static_cast<VfsNode*>(object);
+    EXPECT_TRUE(object->allowed_rights & OS1_RIGHT_EXECUTE);
+    EXPECT_FALSE(object->allowed_rights & OS1_RIGHT_WRITE);
+    uint8_t* snapshot = nullptr;
+    uint64_t length = 0;
+    ASSERT_EQ(executable->operations->snapshot(executable, snapshot, length), 0);
+    EXPECT_GT(length, 0u);
+    kfree(snapshot);
+    object_release(object);
+    OpenInstance* opened = nullptr;
+    ASSERT_EQ(mount->operations->create(mount, "new", 3, OS1_OBJECT_FILE, opened), 0);
+    EXPECT_FALSE(opened->object->allowed_rights & OS1_RIGHT_EXECUTE);
+    EXPECT_EQ(mount->operations->remove(mount, "new", 3), OS1_ERR_WOULD_BLOCK);
+    instance_release(opened);
+    EXPECT_EQ(mount->operations->remove(mount, "new", 3), 0);
+    EXPECT_EQ(mount->operations->sync(mount), 0);
+    object_release(mount);
+    root_node.children = nullptr;
+    ext2::put32(disk.bytes.data() + 454, UINT32_MAX);
+    EXPECT_EQ(ext2_mount(&root_node, device), OS1_ERR_BAD_IMAGE);
+}
+}  // namespace
+
+TEST_F(Ext2, GrowthClearsForeignNonzeroTail)
+{
+    ext2::Inode file{};
+    ASSERT_EQ(fs->inode_read(12, file), 0);
+    const uint32_t old = ext2::size(file), b = ext2::u32(file.bytes + 40);
+    std::memset(disk.bytes.data() + start + b * 4096 + old, 0xa5, 4096 - old);
+    ASSERT_EQ(fs->write(12, file, old + 100, "x", 1), 1);
+    std::array<uint8_t, 101> out{};
+    ASSERT_EQ(fs->read(file, old, out.data(), out.size()), 101);
+    for(unsigned i = 0; i < 100; ++i)
+        EXPECT_EQ(out[i], 0);
+    EXPECT_EQ(out[100], 'x');
+    const uint32_t after = ext2::size(file);
+    std::memset(disk.bytes.data() + start + b * 4096 + after, 0x5a, 4096 - after);
+    ASSERT_EQ(fs->truncate(12, file, after + 100), 0);
+    ASSERT_EQ(fs->read(file, after, out.data(), 100), 100);
+    for(unsigned i = 0; i < 100; ++i)
+        EXPECT_EQ(out[i], 0);
+}
+
+#include "drivers/block/completion.hpp"
+TEST(BlockCompletion, BoundaryCompletionWinsOverDeviceReset)
+{
+    BlockRequest request{};
+    bool reset = false;
+    EXPECT_TRUE(finish_block_poll(
+        request,
+        [&] { block_request_complete(request, BlockRequestStatus::Success); },
+        [&] { reset = true; }));
+    EXPECT_FALSE(reset);
+    EXPECT_TRUE(block_request_succeeded(request));
+    BlockRequest pending{};
+    EXPECT_FALSE(finish_block_poll(pending, [] {}, [&] { reset = true; }));
+    EXPECT_TRUE(reset);
+}
+
+TEST_F(Ext2, MountRejectsReachableReservedInode)
+{
+    // Move the seed utility into reserved inode 3 and repair all allocation counts.
+    // The shape was previously accepted despite inode 3 being reserved by ext2.
+    auto* table = disk.bytes.data() + start + 4 * 4096;
+    std::memcpy(table + 2 * 128, table + 10 * 128, 128);
+    std::memset(table + 10 * 128, 0, 128);
+    auto* bits = disk.bytes.data() + start + 3 * 4096;
+    bits[10 / 8] &= ~(1u << (10 % 8));
+    auto* super = disk.bytes.data() + start + 1024;
+    auto* group = disk.bytes.data() + start + 4096;
+    ext2::put32(super + 16, ext2::u32(super + 16) + 1);
+    ext2::put16(group + 14, ext2::u16(group + 14) + 1);
+    const uint32_t root_block = ext2::u32(table + 128 + 40);
+    ext2::put32(disk.bytes.data() + start + root_block * 4096 + 24, 3);
+    os1::host_test::PhysicalMemoryArena arena{16 * 1024 * 1024};
+    PageFrameContainer frames;
+    std::array<BootMemoryRegion, 1> regions{{{0, arena.size(), BootMemoryType::Usable, 0}}};
+    ASSERT_TRUE(frames.initialize(regions, 0x300000, kPageFrameBitmapQwordLimit));
+    kmem_init(frames);
+    VfsNode root_node{};
+    root_node.kind = OS1_OBJECT_DIRECTORY;
+    auto device = disk.device();
+    EXPECT_EQ(ext2_mount(&root_node, device), OS1_ERR_BAD_IMAGE);
+    EXPECT_EQ(root_node.children, nullptr);
+}

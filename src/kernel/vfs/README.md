@@ -18,4 +18,10 @@ Native Directory/File methods live in `ipc/kernel_provider.cpp` and return capab
 Authorized launch/startup lives in `proc/startup.*`; `/tmp` cannot provide executable images.
 
 See the [initrd ABI](../../../docs/native-api/abi/initrd-vfs-abi.md) and [temporary filesystem ABI](../../../docs/native-api/abi/tmpfs-abi.md).
-Persistent filesystems, public mounts, links, and kernel Buffer borrowing remain future work.
+Public mounts, links, and kernel Buffer borrowing remain future work.
+
+## Disk backend
+
+`VfsOperations` dispatches native and descriptor file operations to tmpfs or ext2.
+The [ext2 profile](../../../docs/filesystems/ext2.md) defines partition validation, limits, synchronization, and executable snapshots.
+Disk failures propagate as negative results without advancing cursors or publishing invalid payload lengths.

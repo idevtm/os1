@@ -54,9 +54,8 @@ TEST(VirtualMemory, MapsProtectsAndTranslatesPages)
     EXPECT_EQ(static_cast<uint64_t>(PageFlags::Present | PageFlags::User | PageFlags::Write),
               flags);
 
-    ASSERT_TRUE(vm.protect(0x0000008000400000ull,
-                           1,
-                           PageFlags::Present | PageFlags::User | PageFlags::NoExecute));
+    ASSERT_TRUE(vm.protect(
+        0x0000008000400000ull, 1, PageFlags::Present | PageFlags::User | PageFlags::NoExecute));
     ASSERT_TRUE(vm.translate(0x0000008000400000ull, physical, flags));
     EXPECT_EQ(0x00500000ull, physical);
     EXPECT_EQ(static_cast<uint64_t>(PageFlags::Present | PageFlags::User | PageFlags::NoExecute),
@@ -71,14 +70,11 @@ TEST(VirtualMemory, ProtectingUserMappingsTriggersTlbShootdown)
 
     ASSERT_TRUE(ipi_initialize());
     lapic_stub_reset();
-    ASSERT_TRUE(vm.map_physical(kUserImageBase,
-                                0x00500000,
-                                1,
-                                PageFlags::Present | PageFlags::User | PageFlags::Write));
+    ASSERT_TRUE(vm.map_physical(
+        kUserImageBase, 0x00500000, 1, PageFlags::Present | PageFlags::User | PageFlags::Write));
 
-    ASSERT_TRUE(vm.protect(kUserImageBase,
-                           1,
-                           PageFlags::Present | PageFlags::User | PageFlags::NoExecute));
+    ASSERT_TRUE(
+        vm.protect(kUserImageBase, 1, PageFlags::Present | PageFlags::User | PageFlags::NoExecute));
     EXPECT_EQ(1u, lapic_stub_icr_send_count());
     EXPECT_EQ(ipi_tlb_shootdown_vector(), static_cast<uint8_t>(lapic_stub_last_icr_low()));
 }
@@ -115,10 +111,8 @@ TEST(VirtualMemory, ClonesKernelAndDirectMapSlots)
     VirtualMemory target(frames);
 
     ASSERT_TRUE(source.map_physical(kKernelVirtualBase, 0x100000, 1, PageFlags::Present));
-    ASSERT_TRUE(source.map_physical(phys_to_virt(0x700000),
-                                    0x700000,
-                                    1,
-                                    PageFlags::Present | PageFlags::Write));
+    ASSERT_TRUE(source.map_physical(
+        phys_to_virt(0x700000), 0x700000, 1, PageFlags::Present | PageFlags::Write));
     ASSERT_TRUE(target.clone_kernel_mappings(source.root()));
 
     uint64_t physical = 0;
@@ -142,7 +136,8 @@ TEST(VirtualMemory, FailedMappingReturnsUnlinkedDataFrame)
     ASSERT_EQ(1u, frames.free_page_count());
     EXPECT_FALSE(vm.allocate_and_map(kUserImageBase, 1, PageFlags::User | PageFlags::Write));
     EXPECT_EQ(1u, frames.free_page_count());
-    while(count) EXPECT_TRUE(frames.free(held[--count]));
+    while(count)
+        EXPECT_TRUE(frames.free(held[--count]));
 }
 
 TEST(VirtualMemory, TeardownNeverInterpretsUserBytesAsPageTableEntries)
@@ -179,4 +174,22 @@ TEST(VirtualMemory, SharedBackingSurvivesAddressSpaceDestruction)
     EXPECT_EQ(baseline, frames.free_page_count());
     ASSERT_TRUE(frames.free(backing));
     EXPECT_EQ(baseline + 1, frames.free_page_count());
+}
+
+TEST(VirtualMemory, InheritsHighPciMappingsWithoutSharingUserSlot)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames(arena);
+    VirtualMemory source(frames), target(frames);
+    constexpr uint64_t physical_bar = 0xc000000000ull;
+    constexpr uint64_t virtual_bar = 0xffff80c000000000ull;
+    ASSERT_TRUE(source.map_physical(virtual_bar, physical_bar, 1, PageFlags::Write));
+    ASSERT_TRUE(source.map_physical(kUserImageBase, 0x700000, 1, PageFlags::User));
+    ASSERT_TRUE(target.clone_kernel_mappings(source.root()));
+    uint64_t physical = 0, flags = 0;
+    ASSERT_TRUE(target.translate(virtual_bar + 0x16, physical, flags));
+    EXPECT_EQ(physical, physical_bar + 0x16);
+    auto* top = kernel_physical_pointer<const uint64_t>(target.root());
+    EXPECT_EQ(top[(virtual_bar >> 39) & 511] & uint64_t(PageFlags::User), 0u);
+    EXPECT_FALSE(target.translate(kUserImageBase, physical, flags));
 }

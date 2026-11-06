@@ -1,7 +1,7 @@
+#include "mm/kmem.hpp"
+#include "vfs/filesystem.hpp"
 // Initrd-backed ELF64 user-program loader. It owns user address-space creation,
 // segment permission mapping, initial stack setup, and exec image replacement.
-#include "proc/user_program.hpp"
-
 #include "debug/debug.hpp"
 #include "elf/elf64.hpp"
 #include "fs/initrd.hpp"
@@ -10,6 +10,7 @@
 #include "mm/virtual_memory.hpp"
 #include "proc/startup.hpp"
 #include "proc/user_elf.hpp"
+#include "proc/user_program.hpp"
 #include "util/memory.h"
 #include "vfs/initrd.hpp"
 
@@ -64,10 +65,9 @@ long load_user_elf(PageFrameContainer& frames,
             return OS1_ERR_BAD_IMAGE;
         }
 
-        if(!vm.allocate_and_map(
-               segment.segment_start,
-               (segment.segment_end - segment.segment_start) / kPageSize,
-               segment.page_flags))
+        if(!vm.allocate_and_map(segment.segment_start,
+                                (segment.segment_end - segment.segment_start) / kPageSize,
+                                segment.page_flags))
         {
             destroy_user_address_space(frames, vm.root());
             return OS1_ERR_NO_MEMORY;
@@ -129,7 +129,20 @@ long load_user_object_image(PageFrameContainer& frames,
         return OS1_ERR_UNSUPPORTED;
     if(!(instance->object->allowed_rights & OS1_RIGHT_EXECUTE))
         return OS1_ERR_ACCESS;
-    const auto* file = static_cast<VfsNode*>(instance->object);
+    auto* file = static_cast<VfsNode*>(instance->object);
+    if(file->operations)
+    {
+        if(!file->operations->snapshot)
+            return OS1_ERR_ACCESS;
+        uint8_t* bytes = nullptr;
+        uint64_t length = 0;
+        long status = file->operations->snapshot(file, bytes, length);
+        if(status < 0)
+            return status;
+        status = load_user_elf(frames, kernel_root_cr3, bytes, length, user_cr3, entry, user_rsp);
+        kfree(bytes);
+        return status;
+    }
     return load_user_elf(
         frames, kernel_root_cr3, file->bytes, file->byte_size, user_cr3, entry, user_rsp);
 }

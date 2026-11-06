@@ -169,8 +169,13 @@ int read_section(
     elf::Elf64Header h{};
     if(!range(0, sizeof(h)) || !read(0, &h, sizeof(h)) || h.magic != elf::kMagic ||
        h.ident[0] != 2 || h.ident[1] != 1 || h.ident[2] != 1 || h.type != elf::kTypeExec ||
-       h.machine != elf::kMachineX86_64 || h.version != 1 || h.ehsize != sizeof(h) ||
-       h.shentsize != sizeof(Section) || !h.shnum || h.shnum > 128 || h.shstrndx >= h.shnum ||
+       h.machine != elf::kMachineX86_64 || h.version != 1 || h.ehsize != sizeof(h))
+        return -1;
+    // ELF section tables are optional for execution. A compact non-reflective
+    // executable has no metadata; partially absent tables remain malformed.
+    if(!h.shoff && !h.shnum && !h.shstrndx && !h.shentsize)
+        return 0;
+    if(h.shentsize != sizeof(Section) || !h.shnum || h.shnum > 128 || h.shstrndx >= h.shnum ||
        !range(h.shoff, uint64_t(h.shnum) * sizeof(Section)))
         return -1;
     Section strings{};

@@ -11,7 +11,7 @@ if(NOT DEFINED CPIO_EXECUTABLE)
 endif()
 
 # Keep full ELF artifacts for debugging, but omit symbol tables from the fixed
-# BIOS initrd slot. Allocated interface metadata and section headers survive.
+# BIOS initrd slot. Reflective classes retain their section headers.
 if(NOT DEFINED STRIP_EXECUTABLE)
   message(FATAL_ERROR "STRIP_EXECUTABLE must be set")
 endif()
@@ -21,6 +21,11 @@ foreach(program IN LISTS initrd_programs)
     RESULT_VARIABLE strip_result)
   if(NOT strip_result EQUAL 0)
     message(FATAL_ERROR "Failed to strip initrd program ${program}")
+  endif()
+  execute_process(COMMAND "${PYTHON_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/compact_user_elf.py" "${program}"
+    RESULT_VARIABLE compact_result)
+  if(NOT compact_result EQUAL 0)
+    message(FATAL_ERROR "Failed to compact initrd program ${program}")
   endif()
 endforeach()
 

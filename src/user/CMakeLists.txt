@@ -170,9 +170,11 @@ add_custom_command(
     "-DOUTPUT_FILE=${OS1_INITRD_CPIO}"
     "-DCPIO_EXECUTABLE=${OS1_CPIO_EXECUTABLE}"
     "-DSTRIP_EXECUTABLE=${CMAKE_STRIP}"
+    "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"
     -P
     "${PROJECT_SOURCE_DIR}/cmake/scripts/create_initrd.cmake"
   DEPENDS
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/compact_user_elf.py"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/create_initrd.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/data/motd"
     "${OS1_USER_FDCHECK_ELF}"
@@ -234,3 +236,8 @@ add_custom_target(user_programs DEPENDS
 )
 
 add_custom_target(initrd_cpio DEPENDS "${OS1_INITRD_CPIO}")
+
+# The persistence utility is deliberately absent from the initrd staging tree.
+os1_add_user_cxx_program(diskutil "${CMAKE_CURRENT_SOURCE_DIR}/programs/diskutil.cpp" OS1_USER_DISKUTIL_ELF)
+add_custom_target(os1_diskutil ALL DEPENDS "${OS1_USER_DISKUTIL_ELF}")
+set(OS1_USER_DISKUTIL_ELF "${OS1_USER_DISKUTIL_ELF}" PARENT_SCOPE)

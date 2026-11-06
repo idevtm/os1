@@ -5,7 +5,7 @@
 #include "mm/kmem.hpp"
 #include "sync/atomic.hpp"
 #include "util/memory.h"
-#include "vfs/tmpfs.hpp"
+#include "vfs/filesystem.hpp"
 
 namespace
 {
@@ -280,7 +280,7 @@ long descriptor_set_status(DescriptorTable& table, int fd, uint32_t flags)
             return OS1_ERR_UNSUPPORTED;
         required = OS1_RIGHT_READ;
     }
-    else if(tmpfs_node(instance->object) && instance->object->kind == OS1_OBJECT_FILE)
+    else if(vfs_backed(instance->object) && instance->object->kind == OS1_OBJECT_FILE)
     {
         if(flags & ~OS1_STATUS_APPEND)
             return OS1_ERR_UNSUPPORTED;

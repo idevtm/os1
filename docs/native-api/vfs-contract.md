@@ -22,7 +22,8 @@ The shell and POSIX bindings use these same contracts.
 The first profile contains descriptor-backed console streams, a read-only initrd
 namespace, regular-file reads, bounded metadata, and explicit root/cwd handles.
 The temporary filesystem extension adds writable nodes, mutation rights, quotas, and native kernel providers.
-Public mutable mounts, persistent filesystems, links, general file mappings, device control, and the broad `/os` tree remain later profiles. Appendix A preserves
+A [bounded ext2 profile](../filesystems/ext2.md) now provides QEMU persistence and disk-backed execution.
+Public mount control, links, general file mappings, device control, and the broad `/os` tree remain later profiles. Appendix A preserves
 the larger object catalog as illustrative design material.
 
 ## 1. Objects, names, open instances, and descriptors

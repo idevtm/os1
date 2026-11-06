@@ -23,7 +23,7 @@ docs/
   latest-review.md         Stable review entry point
   native-api/             Object model, roadmap, and design profiles
     abi/                  Implemented records and behavior
-  filesystems/            Temporary filesystem contracts and validation
+  filesystems/            Temporary and persistent filesystem contracts
   kernel/                 Synchronization, ACPI, and measurement clock
   hardware/               USB images, boot logs, and firmware investigation
   shell/                  Interactive files, editor, and language proposal
@@ -41,7 +41,7 @@ docs/
 | Topic | Entry point |
 | --- | --- |
 | Native API | [Contracts, profiles, and ABI index](native-api/README.md) |
-| Filesystems | [Writable temporary storage](filesystems/README.md) |
+| Filesystems | [Temporary and persistent storage](filesystems/README.md) |
 | Kernel | [Kernel contracts](kernel/README.md) |
 | Hardware and boot media | [Hardware guides](hardware/README.md) |
 | Shell | [Current shell and language proposal](shell/README.md) |
