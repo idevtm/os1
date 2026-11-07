@@ -1,4 +1,4 @@
-# Scheduler handoff migration correction
+# Pager merge-blocker investigation
 
 PR 38 CI found a kernel page fault during a UEFI file-copy check.
 This plan investigates the failure before the authorized merge and timestamp implementation.
@@ -56,3 +56,37 @@ An independent correction review found no remaining defects in locking, handoff 
 Further firmware checks, runtime comparisons, and final CI results are recorded in [PR 38](https://github.com/idevtm/os1/pull/38).
 Physical-hardware validation remains pending.
 The complete ASD-STE100 dictionary was unavailable; manual prose review does not certify full compliance.
+
+## Additional request-lifetime investigation
+
+Longer UEFI repetitions still hang after the scheduler correction.
+A separate run leaves an invalid ext2 inode block after successful command completion.
+These results keep PR 38 blocked.
+
+```text
+IRQ holds queue lock -> publish done -> finish request wait-queue access -> release queue lock
+Caller observes done ----------------------------------------------------> may release request
+```
+
+The captured hang has two CPUs blocked on locks.
+The IRQ holds the virtio queue lock and waits for a request-owned wait-queue lock.
+The caller has reused that request's stack storage and waits for the virtio queue lock.
+`completion_signal` publishes completion before its final access to the request's wait queue.
+The driver's unlocked completion check lets the caller return before that final access.
+
+The additional correction must check completion under the virtio queue lock.
+Keep the existing timeout and DMA quarantine behavior.
+Add a concurrent host regression for callback retirement before request release.
+Repeat both firmware checks and persistent image validation before merge.
+
+This extends the memory and concurrency impact to stack-owned block requests and cross-CPU IRQ completion.
+Storage interfaces and disk formats remain unchanged.
+The captured state is `build/pager-ci-evidence/repro/capture2.first.memory` with its corresponding register log.
+The original CI write address equals its invalid thread pointer plus the offset of `Thread::wait_link`.
+That offset supports the request-reuse diagnosis without assuming identical compiler output.
+
+The concurrent host regression fails with the old unlocked completion check.
+It passes when the poller acquires the queue lock before accepting completion.
+All 488 host tests pass in 11.16 seconds.
+EHCI and xHCI complete their stack-owned block requests synchronously before returning.
+Their interrupt handlers do not retain these request pointers.

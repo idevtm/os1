@@ -116,7 +116,9 @@ Use `e2fsck` on an extracted partition while QEMU is stopped.
 Do not pass the partitioned raw disk directly to a tool that expects a filesystem image.
 
 Virtio requests use interrupt completion plus bounded polling from syscall and boot contexts.
-Queue locks protect publication and used-ring consumption; polling does not hold the queue lock.
+Queue locks protect publication, used-ring consumption, and completion checks; polling releases the lock between iterations.
+The caller retains each stack-owned request until the completing callback releases the queue lock.
+The completion flag alone does not establish that lifetime boundary.
 A timeout quarantines DMA buffers and disables further submissions.
 Completion observed under the queue lock wins over timeout reset.
 The poll bound counts iterations; a monotonic deadline and sleeping storage worker remain follow-ups.
