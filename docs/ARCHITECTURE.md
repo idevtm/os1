@@ -1475,3 +1475,23 @@ Rooted lookup and namespace mutations use one nonblocking admission guard before
 Content I/O keeps the existing backend locking and failure rules.
 Same-filesystem moves publish one namespace change; ext2 retains its existing dirty-volume failure policy.
 The BIOS staging split reserves 400 KiB for the kernel and 160 KiB for the minimal initrd.
+
+
+## Filesystem metadata and user traversal
+
+The [metadata ABI](native-api/abi/filesystem-metadata-abi.md) supplies common identity and storage accounting.
+The [user walker](shell/filesystem-tools.md) implements recursive copy/removal, name search, and usage accounting.
+
+```mermaid
+flowchart LR
+    A[Shell aliases] --> B[Bounded user walker]
+    B --> C[Native metadata and guarded namespace steps]
+    C --> D[initrd / tmpfs / ext2]
+```
+
+Each step validates handle rights, object identity, and the expected namespace generation.
+The kernel holds the namespace guard only during that step.
+Own mutations advance the generation; other namespace changes stop traversal.
+Content operations retain ordinary backend locking and do not form a whole-tree snapshot.
+Boot-local identity tokens remain separate from descriptor authority and persistent inode numbers.
+Recursive policy stays outside the kernel.

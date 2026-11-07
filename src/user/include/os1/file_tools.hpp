@@ -357,7 +357,10 @@ struct Streams
         saved[i].reset(duplicate(i, info.rights));
         return saved[i].fd >= 0;
     }
-    bool apply(shell::Command& command, Reader& command_reader, int copy_source = -2)
+    bool apply(shell::Command& command,
+               Reader& command_reader,
+               int copy_source = -2,
+               bool recursive = false)
     {
         bool input = command.input != shell::Input::None,
              output = command.output != shell::Output::None;
@@ -385,6 +388,19 @@ struct Streams
                     os1_syscall3(os1_sys_resource, source, OS1_RESOURCE_SAME_OBJECT, out.fd);
                 if(same != 0)
                     return false;
+                if(recursive)
+                {
+                    os1_tree_step check{};
+                    check.version = OS1_VFS_ABI_VERSION;
+                    check.size = sizeof(check);
+                    check.action = OS1_TREE_CHECK;
+                    check.excluded_fd = source;
+                    if(os1_syscall3(os1_sys_resource,
+                                    out.fd,
+                                    OS1_RESOURCE_TREE_STEP,
+                                    reinterpret_cast<uint64_t>(&check)) < 0)
+                        return false;
+                }
             }
             if(command.output == shell::Output::Append)
             {

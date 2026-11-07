@@ -9,7 +9,7 @@ struct Tmpfs
     Spinlock lock;
     volatile uint32_t references;
     uint32_t nodes, opens, pages;
-    uint64_t next_cookie;
+    uint64_t next_cookie, identity;
 };
 #ifdef OS1_HOST_TEST
 int host_tmpfs_allocation_budget = -1;
@@ -118,6 +118,8 @@ long allocate_node(Tmpfs* fs, uint32_t kind, TmpNode*& node)
         return OS1_ERR_NO_MEMORY;
     }
     (void)atomic_fetch_add(&fs->references, 1u);
+    node->object_id = vfs_identity();
+    node->filesystem_id = fs->identity;
     node->filesystem = fs;
     node->operations = &tmpfs_operations;
     node->references = 1;
@@ -151,11 +153,13 @@ long tmpfs_mount(NativeObject* object)
     fs->lock.reset("tmpfs");
     fs->references = 1;
     fs->next_cookie = 1;
+    fs->identity = vfs_identity();
     TmpNode* mount = nullptr;
     long status = allocate_node(fs, OS1_OBJECT_DIRECTORY, mount);
     release_fs(fs);
     if(status < 0)
         return status;
+    mount->mount_root = true;
     mount->name_size = 3;
     memcpy(mount->name, "tmp", 3);
     mount->linked = true;
@@ -178,12 +182,9 @@ long tmpfs_lookup(VfsNode* directory, const char* name, size_t size, NativeObjec
     result = node;
     return 0;
 }
-long tmpfs_create(
+static long create_locked(
     VfsNode* directory, const char* name, size_t size, uint32_t kind, OpenInstance*& result)
 {
-    NamespaceGuard namespace_guard;
-    if(!namespace_guard.held)
-        return OS1_ERR_WOULD_BLOCK;
     result = nullptr;
     if(!valid_name(name, size) || (kind != OS1_OBJECT_DIRECTORY && kind != OS1_OBJECT_FILE))
         return OS1_ERR_INVALID;
@@ -213,6 +214,7 @@ long tmpfs_create(
             node->linked = true;
             node->next = directory->children;
             directory->children = node;
+            vfs_changed();
             result = instance.take();
             return 0;
         }
@@ -220,11 +222,14 @@ long tmpfs_create(
     object_release(node);
     return status;
 }
-long tmpfs_remove(VfsNode* directory, const char* name, size_t size, uint32_t kind)
+long tmpfs_create(VfsNode* p, const char* n, size_t s, uint32_t k, OpenInstance*& out)
 {
-    NamespaceGuard namespace_guard;
-    if(!namespace_guard.held)
-        return OS1_ERR_WOULD_BLOCK;
+    NamespaceGuard guard;
+    return guard.held ? create_locked(p, n, s, k, out) : OS1_ERR_WOULD_BLOCK;
+}
+
+static long remove_locked(VfsNode* directory, const char* name, size_t size, uint32_t kind)
+{
     if(!valid_name(name, size))
         return OS1_ERR_INVALID;
     VfsNode* removed = nullptr;
@@ -246,9 +251,16 @@ long tmpfs_remove(VfsNode* directory, const char* name, size_t size, uint32_t ki
         removed->next = nullptr;
         removed->linked = false;
     }
+    vfs_changed();
     object_release(removed);
     return 0;
 }
+long tmpfs_remove(VfsNode* p, const char* n, size_t s, uint32_t k)
+{
+    NamespaceGuard guard;
+    return guard.held ? remove_locked(p, n, s, k) : OS1_ERR_WOULD_BLOCK;
+}
+
 long tmpfs_rename(VfsNode* directory,
                   const char* source,
                   size_t source_size,
@@ -278,6 +290,7 @@ long tmpfs_rename(VfsNode* directory,
     memcpy(node->name, destination, destination_size);
     node->name_size = destination_size;
     node->cookie = fs->next_cookie++;
+    vfs_changed();
     return 0;
 }
 
@@ -341,6 +354,7 @@ long move(VfsNode* from,
         node->next = to->children;
         to->children = node;
     }
+    vfs_changed();
     object_release(target);
     return 0;
 }
@@ -476,6 +490,26 @@ os1_filesystem_info tmpfs_info(VfsNode* node)
     return {node->byte_size, node->kind, fs->nodes, fs->opens, fs->pages, OS1_TMPFS_PAGE_LIMIT, 0};
 }
 
+static long metadata(VfsNode* base, os1_metadata& out)
+{
+    auto* n = static_cast<TmpNode*>(base);
+    IrqSpinGuard guard(n->filesystem->lock);
+    out.filesystem_kind = OS1_FILESYSTEM_TMPFS;
+    out.valid |= OS1_METADATA_ALLOCATED;
+    out.logical_bytes = n->byte_size;
+    for(auto* page : n->pages)
+        if(page)
+            out.allocated_bytes += page_bytes;
+    return 0;
+}
+static long space(VfsNode* n, os1_space& out)
+{
+    IrqSpinGuard guard(n->filesystem->lock);
+    out.filesystem_kind = OS1_FILESYSTEM_TMPFS;
+    out.total_bytes = uint64_t(OS1_TMPFS_PAGE_LIMIT) * page_bytes;
+    out.free_bytes = out.available_bytes = out.total_bytes - n->filesystem->pages * page_bytes;
+    return 0;
+}
 const VfsOperations tmpfs_operations{tmpfs_lookup,
                                      tmpfs_create,
                                      tmpfs_remove,
@@ -488,7 +522,11 @@ const VfsOperations tmpfs_operations{tmpfs_lookup,
                                      tmpfs_info,
                                      [](VfsNode*) -> long { return 0; },
                                      nullptr,
-                                     move};
+                                     move,
+                                     metadata,
+                                     space,
+                                     create_locked,
+                                     remove_locked};
 bool vfs_backed(const NativeObject* object)
 {
     return object && (object->kind == OS1_OBJECT_FILE || object->kind == OS1_OBJECT_DIRECTORY) &&

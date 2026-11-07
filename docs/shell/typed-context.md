@@ -129,6 +129,7 @@ This stage does not claim that all legacy commands use reflective argument bindi
 | Native mutation names | 63 bytes |
 | Tmpfs tree | Maximum depth 32; existing node/page quotas remain |
 
-The broader [utility profile](file-utilities.md) remains accepted future work.
-Recursion, search utilities, metadata/timestamps, and paging are subsequent stages.
+The [metadata and traversal extension](filesystem-tools.md) implements recursive commands, `find`, `du`, `stat`, and `df`.
+The remaining [utility profile](file-utilities.md) remains accepted future work.
+Text utilities, timestamp mutation, and paging remain subsequent stages.
 Permissions and links remain deferred. General OS service discovery and generated bindings are separate Native API work.

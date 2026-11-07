@@ -214,3 +214,8 @@ The [ext2 profile](../../filesystems/ext2.md) uses the same File and Directory i
 Its limits, executable policy, removal behavior, and durability rules differ from tmpfs.
 The new `sync` members complete without disk I/O on tmpfs.
 Ext2 reports IO (-23) for device failures and refuses further disk operations after failure.
+
+## Metadata extension
+
+The [metadata ABI](filesystem-metadata-abi.md) adds File and Directory `metadata` and `space` methods.
+Existing `info` layouts and method IDs remain unchanged.

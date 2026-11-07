@@ -40,6 +40,7 @@ Documents can contain proposals after promotion, provided their scope and status
 
 | Capability | Current contract |
 | --- | --- |
+| Filesystem metadata, space accounting, and guarded traversal | [Metadata and traversal ABI](abi/filesystem-metadata-abi.md) |
 | Typed environment, rooted navigation, and same-filesystem moves | [Startup and namespace extension](abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension) |
 | Kernel-hosted Console methods, information property, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |
 | Persistent ext2 over virtio/USB, disk executables, File/Directory `sync` | [Ext2 storage profile](../filesystems/ext2.md) |
@@ -58,6 +59,8 @@ The [approved object-handle model](object-contract.md#object-handles-and-interop
 The current encoding remains `fd`; general typed owning/borrowed C++ wrappers remain SDK work.
 
 ## Latest implementation
+
+The [filesystem traversal record](../archive/shell/2026-11-07-filesystem-traversal.md) covers metadata, recursive commands, `find`, and `du`.
 
 The [typed shell record](../shell/typed-context-plan.md) covers the first object-command stage and namespace extensions.
 

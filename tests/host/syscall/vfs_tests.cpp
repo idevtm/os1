@@ -1614,3 +1614,182 @@ TEST_F(TmpfsContract, ConcurrentRenameAndRootedDescribeNeverExposePartialNames)
     }
     writer.join();
 }
+
+namespace
+{
+os1_tree_step tree_request(unsigned action, uint64_t generation = 0, const char* name = "")
+{
+    os1_tree_step step{};
+    step.version = 1;
+    step.size = sizeof(step);
+    step.action = action;
+    step.generation = generation;
+    step.excluded_fd = -1;
+    step.name_bytes = std::strlen(name);
+    std::memcpy(step.name, name, step.name_bytes);
+    return step;
+}
+}  // namespace
+TEST_F(TmpfsContract, MetadataAccountsSparsePagesAndRetainsIdentityAcrossRenameAndUnlink)
+{
+    int fd = create("sparse");
+    ASSERT_GE(fd, 0);
+    auto* file = static_cast<VfsNode*>(table().entries[fd].instance->object);
+    ASSERT_EQ(1, tmpfs_write(file, 10000, "x", 1));
+    os1_metadata before{};
+    {
+        NamespaceGuard guard;
+        ASSERT_TRUE(guard.held);
+        ASSERT_EQ(0, vfs_metadata(file, before));
+    }
+    EXPECT_EQ(before.logical_bytes, 10001u);
+    EXPECT_EQ(before.allocated_bytes, 4096u);
+    EXPECT_EQ(before.valid, OS1_METADATA_LOGICAL | OS1_METADATA_ALLOCATED);
+    EXPECT_NE(before.object_id, 0u);
+    EXPECT_EQ(before.filesystem_id, node->filesystem_id);
+    ASSERT_EQ(0, rename("sparse", "renamed"));
+    ASSERT_EQ(0, remove("renamed"));
+    os1_metadata after{};
+    {
+        NamespaceGuard guard;
+        ASSERT_EQ(0, vfs_metadata(file, after));
+    }
+    EXPECT_EQ(before.object_id, after.object_id);
+    EXPECT_GT(after.generation, before.generation);
+    int replacement = create("renamed");
+    ASSERT_GE(replacement, 0);
+    EXPECT_NE(before.object_id,
+              static_cast<VfsNode*>(table().entries[replacement].instance->object)->object_id);
+    auto reply = invoke(client, OS1_DIRECTORY_INTERFACE_ID, OS1_DIRECTORY_SPACE);
+    ASSERT_EQ(0, reply.application_status);
+    ASSERT_EQ(sizeof(os1_space), reply.payload_bytes);
+    os1_space space{};
+    std::memcpy(&space, reply.payload, sizeof(space));
+    EXPECT_EQ(space.total_bytes, 64u * 4096);
+    EXPECT_EQ(space.free_bytes, 63u * 4096);
+    int observer = bind(fd, OS1_FILE_INTERFACE_ID, OS1_RIGHT_READ);
+    EXPECT_EQ(OS1_ERR_ACCESS,
+              invoke(observer, OS1_FILE_INTERFACE_ID, OS1_FILE_METADATA).application_status);
+}
+TEST_F(TmpfsContract, TreeRejectsStaleNamesReplacementAndAuthorityAmplification)
+{
+    int fd = create("first");
+    ASSERT_GE(fd, 0);
+    auto check = tree_request(OS1_TREE_CHECK);
+    ASSERT_EQ(0, vfs_tree_step(table(), directory, check));
+    auto next = tree_request(OS1_TREE_NEXT, check.generation);
+    ASSERT_EQ(1, vfs_tree_step(table(), directory, next));
+    EXPECT_STREQ("first", next.name);
+    auto opened = tree_request(OS1_TREE_OPEN, next.generation, "first");
+    opened.object_id = next.object_id;
+    opened.kind = OS1_OBJECT_FILE;
+    opened.rights = OS1_RIGHT_READ;
+    ASSERT_EQ(0, rename("first", "moved"));
+    EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table(), directory, opened));
+    ASSERT_GE(create("first"), 0);
+    check = tree_request(OS1_TREE_CHECK);
+    ASSERT_EQ(0, vfs_tree_step(table(), directory, check));
+    opened.generation = check.generation;
+    EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table(), directory, opened));
+    opened.object_id = 0;
+    opened.rights = OS1_RIGHT_EXECUTE;
+    EXPECT_EQ(OS1_ERR_ACCESS, vfs_tree_step(table(), directory, opened));
+    int restricted = duplicate(directory, kDirectoryRights, OS1_RIGHT_READ);
+    next = tree_request(OS1_TREE_NEXT, check.generation);
+    EXPECT_EQ(OS1_ERR_ACCESS, vfs_tree_step(table(), restricted, next));
+}
+TEST_F(TmpfsContract, TreeOwnMutationsAdvanceGenerationAndExcludeSourceSubtrees)
+{
+    auto check = tree_request(OS1_TREE_CHECK);
+    ASSERT_EQ(0, vfs_tree_step(table(), directory, check));
+    auto create = tree_request(OS1_TREE_CREATE, check.generation, "child");
+    create.kind = OS1_OBJECT_DIRECTORY;
+    create.rights = kTmpDirectoryRights;
+    create.descendant_rights = kNamespaceCeiling;
+    int child = vfs_tree_step(table(), directory, create);
+    ASSERT_GE(child, 0);
+    EXPECT_GT(create.generation, check.generation);
+    auto denied = tree_request(OS1_TREE_CREATE, create.generation, "nested");
+    denied.kind = OS1_OBJECT_FILE;
+    denied.excluded_fd = child;
+    EXPECT_EQ(OS1_ERR_INVALID, vfs_tree_step(table(), child, denied));
+    auto self = tree_request(OS1_TREE_OPEN, create.generation, "child");
+    self.excluded_fd = child;
+    EXPECT_EQ(OS1_ERR_INVALID, vfs_tree_step(table(), directory, self));
+    auto removal = tree_request(OS1_TREE_REMOVE, create.generation, "child");
+    removal.kind = OS1_OBJECT_DIRECTORY;
+    removal.object_id = create.metadata.object_id;
+    descriptor_close(table(), child);
+    EXPECT_EQ(0, vfs_tree_step(table(), directory, removal));
+    EXPECT_GT(removal.generation, create.generation);
+    EXPECT_EQ(OS1_ERR_NOT_FOUND, open("tmp/child", OS1_RIGHT_INSPECT));
+}
+TEST_F(TmpfsContract, TreePrunesMountsAndRejectsMutationOfMountNames)
+{
+    auto check = tree_request(OS1_TREE_CHECK);
+    ASSERT_EQ(0, vfs_tree_step(table(), 62, check));
+    auto next = tree_request(OS1_TREE_NEXT, check.generation);
+    for(;;)
+    {
+        long r = vfs_tree_step(table(), 62, next);
+        ASSERT_GE(r, 0);
+        if(!r)
+            break;
+        EXPECT_STRNE(next.name, "tmp");
+        EXPECT_EQ(next.metadata.filesystem_id, check.metadata.filesystem_id);
+    }
+    auto removal = tree_request(OS1_TREE_REMOVE, check.generation, "tmp");
+    removal.kind = OS1_OBJECT_DIRECTORY;
+    removal.object_id = node->object_id;
+    EXPECT_EQ(OS1_ERR_ACCESS, vfs_tree_step(table(), 62, removal));
+}
+TEST_F(TmpfsContract, TreeUserCopyFaultClosesUndeliveredHandleAndRejectsMalformedInput)
+{
+    ASSERT_GE(create("file"), 0);
+    auto check = tree_request(OS1_TREE_CHECK);
+    ASSERT_EQ(0, vfs_tree_step(table(), directory, check));
+    auto request = tree_request(OS1_TREE_OPEN, check.generation, "file");
+    request.rights = OS1_RIGHT_READ;
+    EXPECT_EQ(OS1_ERR_FAULT, sys_resource(frames, thread, directory, OS1_RESOURCE_TREE_STEP, 0));
+    ASSERT_TRUE(copy_to_user(frames, thread, kRequest, &request, sizeof(request)));
+    VirtualMemory vm(frames, process->address_space.cr3);
+    ASSERT_TRUE(vm.protect(kRequest, 1, PageFlags::User));
+    const auto opens = tmpfs_info(node).open_instances;
+    EXPECT_EQ(OS1_ERR_FAULT,
+              sys_resource(frames, thread, directory, OS1_RESOURCE_TREE_STEP, kRequest));
+    EXPECT_EQ(opens, tmpfs_info(node).open_instances);
+    ASSERT_TRUE(vm.protect(kRequest, 1, PageFlags::User | PageFlags::Write));
+    request.size--;
+    EXPECT_EQ(OS1_ERR_INVALID, vfs_tree_step(table(), directory, request));
+    request.size++;
+    request.name[10] = 'x';
+    EXPECT_EQ(OS1_ERR_INVALID, vfs_tree_step(table(), directory, request));
+    request.name[10] = 0;
+    request.excluded_fd = 100;
+    EXPECT_EQ(OS1_ERR_BAD_DESCRIPTOR, vfs_tree_step(table(), directory, request));
+    EXPECT_EQ(OS1_ERR_FAULT, sys_resource(frames, thread, directory, OS1_RESOURCE_METADATA, 0));
+}
+
+TEST_F(TmpfsContract, MetadataSerializesWithSparseWritesAndTruncation)
+{
+    int fd = create("concurrent");
+    ASSERT_GE(fd, 0);
+    auto* file = static_cast<VfsNode*>(table().entries[fd].instance->object);
+    std::thread writer([&] {
+        for(unsigned i = 0; i < 1000; ++i)
+        {
+            EXPECT_EQ(1, tmpfs_write(file, 8192, "x", 1));
+            EXPECT_EQ(0, tmpfs_truncate(file, 0));
+        }
+    });
+    for(unsigned i = 0; i < 1000; ++i)
+    {
+        NamespaceGuard guard;
+        ASSERT_TRUE(guard.held);
+        os1_metadata metadata{};
+        EXPECT_EQ(0, vfs_metadata(file, metadata));
+        EXPECT_TRUE((metadata.logical_bytes == 0 && metadata.allocated_bytes == 0) ||
+                    (metadata.logical_bytes == 8193 && metadata.allocated_bytes == 4096));
+    }
+    writer.join();
+}

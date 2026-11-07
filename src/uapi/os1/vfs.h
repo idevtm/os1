@@ -88,3 +88,39 @@ struct os1_move_request
     uint32_t source_bytes, destination_bytes;
     char source[64], destination[64];
 };
+
+// Metadata and guarded traversal extension. Tokens are boot-local, never authority.
+#define OS1_RESOURCE_METADATA 24u
+#define OS1_RESOURCE_SPACE 25u
+#define OS1_RESOURCE_TREE_STEP 26u
+#define OS1_ERR_CHANGED (-24L)
+#define OS1_METADATA_LOGICAL 1u
+#define OS1_METADATA_ALLOCATED 2u
+#define OS1_METADATA_MOUNT 1u
+#define OS1_FILESYSTEM_INITRD 1u
+#define OS1_FILESYSTEM_TMPFS 2u
+#define OS1_FILESYSTEM_EXT2 3u
+struct os1_metadata
+{
+    uint32_t version, size, kind, valid, filesystem_kind, flags;
+    uint64_t filesystem_id, object_id, logical_bytes, allocated_bytes, generation;
+};
+struct os1_space
+{
+    uint32_t version, size, filesystem_kind, valid;
+    uint64_t filesystem_id, total_bytes, free_bytes, available_bytes;
+};
+#define OS1_TREE_NEXT 1u
+#define OS1_TREE_OPEN 2u
+#define OS1_TREE_CREATE 3u
+#define OS1_TREE_REMOVE 4u
+#define OS1_TREE_CHECK 5u
+struct os1_tree_step
+{
+    uint32_t version, size, action, kind;
+    uint64_t generation, cursor, object_id, filesystem_id;
+    int32_t excluded_fd;
+    uint32_t rights, descendant_rights, name_bytes;
+    char name[256];
+    struct os1_metadata metadata;
+};
