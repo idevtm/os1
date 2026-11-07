@@ -17,6 +17,10 @@
 
 OS1_BSP_ONLY extern Terminal* active_terminal;
 
+#ifdef OS1_HOST_TEST
+void (*host_console_after_ready)() = nullptr;
+#endif
+
 Spinlock g_console_input_lock{"console-input"};
 
 namespace
@@ -40,6 +44,10 @@ OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_count = 0;
 OS1_LOCKED_BY(g_console_input_lock) bool g_read_reserved = false;
 OS1_LOCKED_BY(g_console_input_lock) size_t g_reserved_bytes = 0;
 WaitQueue g_console_read_waiters{"console-read"};
+OS1_LOCKED_BY(g_console_input_lock) const void* g_input_owner = nullptr;
+OS1_LOCKED_BY(g_console_input_lock) unsigned char g_keys[64]{};
+OS1_LOCKED_BY(g_console_input_lock) size_t g_key_head = 0, g_key_count = 0;
+OS1_LOCKED_BY(g_console_input_lock) bool g_key_overflow = false;
 
 void echo_byte(char c)
 {
@@ -89,6 +97,17 @@ void commit_pending_line(bool newline = true)
 
 void handle_input_char(char ascii)
 {
+    if(g_input_owner)
+    {
+        if(g_key_count == sizeof(g_keys))
+            g_key_overflow = true;
+        else
+        {
+            g_keys[(g_key_head + g_key_count) % sizeof(g_keys)] = static_cast<unsigned char>(ascii);
+            ++g_key_count;
+        }
+        return;
+    }
     if('\r' == ascii)
     {
         ascii = '\n';
@@ -156,6 +175,9 @@ void console_input_initialize()
     g_completed_head = 0;
     g_completed_tail = 0;
     g_completed_count = 0;
+    g_input_owner = nullptr;
+    g_key_head = g_key_count = 0;
+    g_key_overflow = false;
     g_console_read_waiters.lock.reset("console-read");
     g_console_read_waiters.head = nullptr;
     g_console_read_waiters.name = "console-read";
@@ -191,7 +213,7 @@ void console_input_poll_serial()
 bool console_input_has_line()
 {
     IrqSpinGuard guard(g_console_input_lock);
-    return g_completed_count > 0 && !g_read_reserved;
+    return !g_input_owner && g_completed_count > 0 && !g_read_reserved;
 }
 
 WaitQueue& console_input_read_wait_queue()
@@ -205,7 +227,8 @@ bool console_input_reserve(char* buffer, size_t capacity, size_t& count, long* s
     count = 0;
     if(status)
         *status = 0;
-    if(!buffer || !capacity || !g_completed_count || g_read_reserved) return false;
+    if(g_input_owner || !buffer || !capacity || !g_completed_count || g_read_reserved)
+        return false;
     if(status)
         *status = g_completed_status[g_completed_head];
     count = g_completed_lengths[g_completed_head];
@@ -214,6 +237,58 @@ bool console_input_reserve(char* buffer, size_t capacity, size_t& count, long* s
     g_read_reserved = true;
     g_reserved_bytes = count;
     return true;
+}
+
+long console_input_acquire(const void* owner)
+{
+    IrqSpinGuard guard(g_console_input_lock);
+    if(!owner)
+        return OS1_ERR_INVALID;
+    if(g_input_owner || g_read_reserved || g_pending_length || g_pending_overflow ||
+       g_completed_count)
+        return OS1_ERR_WOULD_BLOCK;
+    g_input_owner = owner;
+    g_key_head = g_key_count = 0;
+    g_key_overflow = false;
+    return 0;
+}
+void console_input_release(const void* owner)
+{
+    IrqSpinGuard guard(g_console_input_lock);
+    if(g_input_owner != owner)
+        return;
+    g_input_owner = nullptr;
+    g_key_head = g_key_count = 0;
+    g_key_overflow = false;
+}
+long console_input_key(const void* owner, unsigned& byte)
+{
+    IrqSpinGuard guard(g_console_input_lock);
+    if(g_input_owner != owner)
+        return OS1_ERR_CLOSED;
+    if(g_key_overflow)
+    {
+        g_key_overflow = false;
+        return OS1_ERR_RANGE;
+    }
+    if(!g_key_count)
+        return OS1_ERR_WOULD_BLOCK;
+    byte = g_keys[g_key_head];
+    g_key_head = (g_key_head + 1) % sizeof(g_keys);
+    --g_key_count;
+    return 0;
+}
+bool console_input_ready(const void* owner)
+{
+    bool ready;
+    {
+        IrqSpinGuard guard(g_console_input_lock);
+        ready = g_input_owner != owner || g_key_count || g_key_overflow;
+    }
+#ifdef OS1_HOST_TEST
+    if(host_console_after_ready) host_console_after_ready();
+#endif
+    return ready;
 }
 
 void console_input_finish(size_t delivered, bool commit)

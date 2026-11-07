@@ -168,7 +168,7 @@ Pattern matching belongs to `find`; no general shell glob expansion is implied.
 The pager needs terminal dimensions and explicit ownership of interactive input.
 Initially, reject noninteractive use instead of consuming redirected file data as pager commands.
 Implement bounded reads and navigation state.
-Pager controls, terminal-state restoration, and text-display escaping require an implementation specification.
+The [pager profile](pager.md) defines implemented controls, input restoration, and text-display escaping.
 Other text helpers must process bounded chunks rather than assume every file fits in memory.
 
 ## Deferred permissions and links
@@ -210,7 +210,8 @@ See the [tmpfs ABI](../native-api/abi/tmpfs-abi.md) and [ext2 profile](../filesy
 The minimal feature choices are settled.
 The [traversal profile](filesystem-tools.md) specifies implemented command behavior and resource bounds.
 The [text profile](text-utilities.md) specifies implemented streaming behavior and limits.
-Timestamps and paging need their own implementation specifications.
+The [pager profile](pager.md) specifies implemented paging.
+Timestamp mutation remains the next implementation stage.
 These specifications must preserve the accepted behavior; they are not permission to expand the feature set.
 Custom configuration, user-defined aliases, String output methods, general expression operators, and a full scripting language can remain deferred.
 

@@ -53,4 +53,84 @@ inline long console_write(int client, const void* bytes, unsigned count)
         output[i] = result.payload[i];
     return written.bytes <= count ? written.bytes : OS1_ERR_INVALID;
 }
+inline long console_call(int client, uint64_t interface_id, unsigned member, os1_ipc_result& result)
+{
+    auto request = console_request(member);
+    request.interface_id = interface_id;
+    long status = ipc_call(client, request, result);
+    return status < 0                ? status
+           : result.transport_status ? result.transport_status
+                                     : result.application_status;
+}
+inline long console_geometry(int client, os1_console_geometry& geometry)
+{
+    os1_ipc_result result{};
+    long status = console_call(client, OS1_CONSOLE_INTERFACE_ID, OS1_CONSOLE_GET_GEOMETRY, result);
+    if(status < 0)
+        return status;
+    if(result.payload_bytes != sizeof(geometry))
+        return OS1_ERR_INVALID;
+    for(unsigned i = 0; i < sizeof(geometry); ++i)
+        reinterpret_cast<uint8_t*>(&geometry)[i] = result.payload[i];
+    return 0;
+}
+inline long console_clear(int client)
+{
+    os1_ipc_result result{};
+    return console_call(client, OS1_CONSOLE_INTERFACE_ID, OS1_CONSOLE_CLEAR, result);
+}
+inline long console_acquire_input(int client)
+{
+    auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
+    long operation = ipc(OS1_IPC_SUBMIT, client, &request);
+    if(operation < 0)
+        return operation;
+    os1_ipc_result result{};
+    long status = ipc_result(operation, result);
+    if(!status)
+        status = result.transport_status ? result.transport_status : result.application_status;
+    os1_ipc_result_caps caps{};
+    if(!status)
+        status = ipc(OS1_IPC_RESULT_CAPS, operation, &caps);
+    close(operation);
+    if(status < 0 || caps.capabilities.count != 1)
+    {
+        ipc_close_caps(caps.capabilities);
+        return status < 0 ? status : OS1_ERR_INVALID;
+    }
+    return caps.capabilities.entries[0].fd;
+}
+inline long console_input_bind(int session)
+{
+    os1_ipc_kernel_binding binding{
+        1, sizeof(binding), OS1_CONSOLE_INPUT_INTERFACE_ID, 1, OS1_RIGHT_READ};
+    return ipc(OS1_IPC_BIND_KERNEL, session, &binding);
+}
+inline long console_read_key(int session, int client, unsigned& byte)
+{
+    for(;;)
+    {
+        os1_ipc_result result{};
+        long status = console_call(
+            client, OS1_CONSOLE_INPUT_INTERFACE_ID, OS1_CONSOLE_INPUT_TRY_READ_KEY, result);
+        if(status == OS1_ERR_WOULD_BLOCK)
+        {
+            status = ipc_wait(session);
+            if(status < 0)
+                return status;
+            continue;
+        }
+        if(status < 0)
+            return status;
+        if(result.payload_bytes != sizeof(os1_console_key))
+            return OS1_ERR_INVALID;
+        os1_console_key key{};
+        for(unsigned i = 0; i < sizeof(key); ++i)
+            reinterpret_cast<uint8_t*>(&key)[i] = result.payload[i];
+        if(key.byte > 255)
+            return OS1_ERR_INVALID;
+        byte = key.byte;
+        return 0;
+    }
+}
 }  // namespace os1::user

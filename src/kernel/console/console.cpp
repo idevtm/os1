@@ -11,6 +11,23 @@ namespace
 Spinlock g_console_output_lock{"console-output"};
 }
 
+os1_console_geometry console_geometry()
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    return active_terminal
+               ? os1_console_geometry{active_terminal->columns(), active_terminal->rows()}
+               : os1_console_geometry{80, 25};
+}
+void clear_console()
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    for(char c : "\033[2J\033[H")
+        if(c)
+            debug.write_unmirrored(c);
+    if(active_terminal)
+        active_terminal->clear();
+}
+
 void write_console_bytes(const char* data, size_t length)
 {
     if(nullptr == data)

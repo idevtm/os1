@@ -34,21 +34,71 @@ Account capability transfers use existing SUBMIT_CAPS/REPLY_CAPS rights attenuat
 
 ## Bounded wait-many
 
+WAIT_MANY selects the lowest ready input index from at most eight retained resources.
+A readiness result does not reserve data for the caller.
+
+```text
+validate descriptors -> pin instances -> check readiness -> register wait
+                                         |                    |
+                                         +-> ready index <----+ timer / producer / cancellation
+```
+
 ```cpp
 int candidates[5] = {control_provider_fd, session_a, session_b, session_c, session_d};
-long selected = ipc_wait_many(candidates, count); // UINT64_MAX = infinite
-// or ipc_wait_many(candidates, count, absolute_clock_nanoseconds)
+long selected = ipc_wait_many(candidates, count); // UINT64_MAX means no deadline.
 if (selected >= 0) {
     int ready_fd = candidates[selected];
-    // Attempt RECEIVE; readiness is an indication, not a reservation.
+    // A concurrent consumer can require another receive/wait cycle.
 }
 ```
 
-`OS1_IPC_WAIT_MANY = 20` requires syscall fd=0. The 56-byte input layout is uint32 version=1, size=56, count=1..8, reserved=0; uint64 nanoseconds; int32 fds[8]. Unused entries must be zero. Deadline is absolute IPC CLOCK time in 0..INT64_MAX, or UINT64_MAX for no deadline. Every member requires READ and must be a client endpoint, provider endpoint, Operation or subscription. Repeated fds and aliases of the same object are INVALID; malformed records/tail entries are INVALID, invalid fds BAD_DESCRIPTOR, denied rights ACCESS, unsupported kinds UNSUPPORTED, input faults FAULT. The entire selection is validated before reporting readiness.
+`OS1_IPC_WAIT_MANY = 20` requires syscall fd=0.
+The input record occupies 56 bytes.
 
-Returns the **lowest ready input index**, TIMED_OUT, or CANCELLED. At evaluation, stop wins over readiness and readiness wins over deadline. A result already selected for deferred waking remains that selected result. The wake path writes only the saved syscall return register, never user memory. Provider readiness includes queued work and final client closure; subscription readiness includes events, unsubscribe and provider closure. Client readiness includes READY and provider closure; Operation readiness means completion. As with single WAIT, readiness does not consume data. A concurrent consumer can leave RECEIVE/EVENT_READ returning WOULD_BLOCK.
+| Offset | Type and field | Requirement |
+| --- | --- | --- |
+| 0 | `u32 version` | 1 |
+| 4 | `u32 size` | 56 |
+| 8 | `u32 count` | 1–8 |
+| 12 | `u32 reserved` | Zero |
+| 16 | `u64 nanoseconds` | Absolute IPC CLOCK deadline, 0–INT64_MAX; UINT64_MAX disables the deadline |
+| 24 | `i32 fds[8]` | READ authority; unused entries are zero |
 
-The kernel pins exact OpenInstances before checking/registering under the IPC state lock. Closing/reusing a descriptor does not retarget or cancel a wait. Peer closure still wakes it; unsubscribing a retained subscription wakes it. Deadline/cancellation/stop release all pins. Registration is atomic with state changes: a racing producer either precedes the readiness check or signals the registered waiter. Existing scheduler off-CPU deferral is preserved. Per-provider fair dispatch is userspace policy: rotate the candidate order/start index after a bounded number of requests and remove closed endpoints (which otherwise remain permanently ready).
+Supported kinds are client endpoints, provider endpoints, Operations, subscriptions, and [ConsoleInputSession](kernel-console-abi.md#interactive-input-session).
+Repeated descriptors or aliases of the same object return INVALID.
+Malformed records and nonzero unused entries return INVALID.
+Invalid descriptors return BAD_DESCRIPTOR; denied rights return ACCESS.
+Unsupported kinds return UNSUPPORTED; inaccessible input returns FAULT.
+The kernel validates the complete selection before it reports readiness.
+
+The result is the lowest ready index, TIMED_OUT, or CANCELLED.
+At evaluation, stop takes precedence over readiness; readiness takes precedence over the deadline.
+Deferred waking preserves the selected result and writes only the saved syscall return register.
+It does not write user memory.
+
+| Resource | Ready condition |
+| --- | --- |
+| Provider endpoint | Queued work or final client closure |
+| Client endpoint | READY or provider closure |
+| Operation | Completion |
+| Subscription | Events, unsubscribe, or provider closure |
+| ConsoleInputSession | A key, overflow, or release |
+
+Readiness does not consume data.
+A competing consumer can cause the subsequent RECEIVE, EVENT_READ, or `try_read_key` to return WOULD_BLOCK.
+The caller must then repeat its read/wait cycle.
+
+The kernel pins exact OpenInstances before checking or registering under the IPC lock.
+Closing or reusing a descriptor does not retarget or cancel the wait.
+Peer closure wakes a wait; unsubscribing a retained subscription also wakes it.
+Deadline, cancellation, and stop release all pins.
+Existing scheduler deferral preserves the blocked thread until its context is saved.
+
+IPC producers serialize registration and signaling under the IPC lock.
+Console input has a separate lock; periodic IPC readiness checks observe its key queue.
+Wake selection evaluates that queue once and retains the selected index.
+Provider dispatch fairness remains user-space policy.
+Rotate candidate order after bounded work and remove closed endpoints, which otherwise remain ready.
 
 ## Lock order, memory and checks
 

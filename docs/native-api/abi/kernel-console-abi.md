@@ -1,7 +1,7 @@
 # Kernel console IPC ABI
 
 Console v1 exposes the existing console through native copied IPC requests.
-It adds a kernel provider adapter without changing descriptor I/O or the shared input queue.
+The kernel provider adapter preserves descriptor I/O and adds an exclusive interactive input session.
 
 ```text
 Console descriptor + selected rights
@@ -40,8 +40,8 @@ Attenuating endpoint transport rights does not change those captured rights.
 Create a separate binding with reduced service rights before delegation when that reduction is required.
 
 No ambient service lookup, provider descriptor, registration syscall, or class activation is exposed.
-The fixed internal provider table contains Console v1 and the [Directory/File v1 providers](tmpfs-abi.md).
-The limits below apply across all three providers.
+The fixed provider table contains Console, ConsoleInputSession, and the [Directory/File v1 providers](tmpfs-abi.md).
+The limits below apply across these providers.
 Separate console bindings share the existing underlying console state.
 
 ## Members and records
@@ -55,6 +55,9 @@ All fields use the current x86-64 little-endian ABI.
 | Method `write` | 1 | WRITE | 0–256 raw bytes | `os1_console_written`: `u32 bytes` |
 | Method `try_read` | 2 | READ | `os1_console_read`: `u32 capacity` | 0–capacity raw bytes |
 | Read-only property `info` | 3 | INSPECT | Empty | `os1_console_info`, 16 bytes |
+| Read-only property `geometry` | 4 | INSPECT | Empty | `os1_console_geometry`, 8 bytes |
+| Method `clear` | 5 | WRITE | Empty | Empty |
+| Method `acquire_input` | 6 | READ | Empty | One owned ConsoleInputSession through RESULT_CAPS |
 
 `info` contains four `u32` fields: `rights`, `max_write_bytes`, `max_read_bytes`, and `flags`.
 `rights` reports captured service rights.
@@ -82,6 +85,63 @@ Missing method authority produces application status ACCESS.
 Malformed method input produces application status INVALID.
 These errors appear in a successfully completed Operation with transport status zero.
 Envelope errors, descriptor errors, and admission failures occur before acceptance.
+
+## Interactive input session
+
+The extension preserves Console v1 member IDs 1–3 and their records.
+`geometry` and `clear` require an output console; an input-only console returns UNSUPPORTED.
+Geometry contains `u32 columns` at offset 0 and `u32 rows` at offset 4.
+Dimensions remain fixed during a boot.
+Clear resets the local terminal and emits the serial clear/home sequence.
+It does not change input ownership.
+
+```text
+Console input -> acquire_input Operation -> RESULT_CAPS -> ConsoleInputSession
+                                                       -> BIND_KERNEL -> try_read_key / release
+                                                       -> WAIT / WAIT_UNTIL / WAIT_MANY
+```
+
+Only the canonical input console supports `acquire_input`.
+The returned object kind is 10; its descriptor has READ, INSPECT, and CLOEXEC, without DELEGATE.
+The result capability follows the existing single-claim and failed-delivery retry rules.
+An abandoned result releases its owned session when its final reference closes.
+Allocation failures return NO_MEMORY and release any acquired ownership.
+
+Bind interface ID `0x434f4e494e505431`, version 1, with a nonzero subset of the session rights.
+Binding does not restore DELEGATE authority.
+Both members require captured READ authority and empty input.
+
+| Session member | ID | Successful output |
+| --- | --- | --- |
+| Method `try_read_key` | 1 | `os1_console_key`: `u32 byte`, values 0–255 |
+| Method `release` | 2 | Empty |
+
+One session owns input at a time.
+Acquisition returns WOULD_BLOCK while another owner, pending canonical text, completed input, or a read reservation exists.
+While owned, the shared keyboard/serial path queues raw decoded bytes without echo or canonical delivery.
+This is a byte interface, not a physical key-event interface.
+
+The queue holds 64 bytes.
+Overflow drops new bytes and sets an error flag.
+The next read returns RANGE and clears that flag; earlier queued bytes remain available.
+An empty owned queue returns WOULD_BLOCK.
+A released session returns CLOSED on reads; repeated release succeeds without affecting another owner.
+Key consumption occurs once into the retained Operation; failed RESULT copies do not consume another key.
+
+WAIT, WAIT_UNTIL, and WAIT_MANY accept the session resource.
+Key availability, overflow, or release makes it ready.
+Readiness does not reserve a byte; a competing consumer can require another read/wait cycle.
+INFO, SUBMIT, RECEIVE, and RESULT on the session resource return UNSUPPORTED.
+Use BIND_KERNEL to invoke its methods.
+Native wait rights, deadlines, cancellation, and lifetime pins retain their existing rules.
+The kernel worker never blocks on a key; timer readiness checks use the existing deferred SMP wake path.
+Input producers hold the input lock only and never acquire the IPC lock.
+
+Explicit release or final resource destruction restores canonical input and discards session keys.
+Bindings, Operations, and wait pins retain resource lifetime; closing one descriptor alone may not release ownership.
+Existing process cleanup cancels waits and closes descriptors.
+No session pointer or ownership token crosses the ABI.
+The [pager](../../shell/pager.md) uses this contract; it adds no console event subscription or exclusive display lease.
 
 ## Dispatch, bounds, and lifetime
 

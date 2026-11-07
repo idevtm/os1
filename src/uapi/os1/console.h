@@ -6,6 +6,13 @@
 #define OS1_CONSOLE_WRITE 1u
 #define OS1_CONSOLE_TRY_READ 2u
 #define OS1_CONSOLE_GET_INFO 3u
+#define OS1_CONSOLE_GET_GEOMETRY 4u
+#define OS1_CONSOLE_CLEAR 5u
+#define OS1_CONSOLE_ACQUIRE_INPUT 6u
+#define OS1_OBJECT_CONSOLE_INPUT_SESSION 10u
+#define OS1_CONSOLE_INPUT_INTERFACE_ID 0x434f4e494e505431ull
+#define OS1_CONSOLE_INPUT_TRY_READ_KEY 1u
+#define OS1_CONSOLE_INPUT_RELEASE 2u
 #define OS1_CONSOLE_MAX_BYTES 256u
 #define OS1_CONSOLE_CANONICAL_INPUT 1u
 #define OS1_CONSOLE_EOF_INPUT 2u
@@ -24,4 +31,12 @@ struct os1_console_read
 struct os1_console_info
 {
     uint32_t rights, max_write_bytes, max_read_bytes, flags;
+};
+struct os1_console_geometry
+{
+    uint32_t columns, rows;
+};
+struct os1_console_key
+{
+    uint32_t byte;
 };

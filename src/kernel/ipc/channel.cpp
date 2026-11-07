@@ -1,8 +1,11 @@
 #include "ipc/channel.hpp"
 
+#include <os1/console.h>
+
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "buffer/buffer.hpp"
+#include "console/console_input.hpp"
 #include "ipc/kernel_provider.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
@@ -112,6 +115,8 @@ void release(Connection* c)
 }
 bool ready_locked(NativeObject* object)
 {
+    if(object->kind == OS1_OBJECT_CONSOLE_INPUT_SESSION)
+        return console_input_ready(object);
     if(object->kind == OS1_OBJECT_OPERATION)
         return static_cast<Operation*>(object)->complete;
     if(object->kind == OS1_OBJECT_SUBSCRIPTION)
@@ -151,10 +156,11 @@ void signal_locked()
     while(*link)
     {
         Thread* t = *link;
+        long selected;
         if(ipc_stop_requested(t))
             t->wait.ipc.result = OS1_ERR_CANCELLED;
-        else if(ready_selection_locked(t->wait.ipc) >= 0)
-            t->wait.ipc.result = ready_selection_locked(t->wait.ipc);
+        else if((selected = ready_selection_locked(t->wait.ipc)) >= 0)
+            t->wait.ipc.result = selected;
         else if(t->wait.ipc.deadline_ns <= monotonic_ns)
             t->wait.ipc.result = OS1_ERR_TIMED_OUT;
         else
@@ -727,7 +733,9 @@ long wait_many(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
         if(status < 0)
             return status;
         pins.value.instances[pins.value.count++] = raw;
-        if(raw->object->kind < OS1_OBJECT_IPC_CLIENT || raw->object->kind > OS1_OBJECT_SUBSCRIPTION)
+        if(raw->object->kind != OS1_OBJECT_CONSOLE_INPUT_SESSION &&
+           (raw->object->kind < OS1_OBJECT_IPC_CLIENT ||
+            raw->object->kind > OS1_OBJECT_SUBSCRIPTION))
             return OS1_ERR_UNSUPPORTED;
         for(unsigned j = 0; j < i; ++j)
             if(pins.value.instances[j]->object == raw->object)
@@ -1228,7 +1236,8 @@ long sys_ipc(
         return kind == OS1_OBJECT_IPC_ACCOUNT
                    ? create_pair(frames, thread, argument, static_cast<Account*>(object))
                    : OS1_ERR_UNSUPPORTED;
-    if(kind < OS1_OBJECT_IPC_CLIENT || kind > OS1_OBJECT_SUBSCRIPTION)
+    if(kind != OS1_OBJECT_CONSOLE_INPUT_SESSION &&
+       (kind < OS1_OBJECT_IPC_CLIENT || kind > OS1_OBJECT_SUBSCRIPTION))
         return OS1_ERR_UNSUPPORTED;
     if(operation == OS1_IPC_WAIT || operation == OS1_IPC_WAIT_UNTIL)
     {
@@ -1263,6 +1272,8 @@ long sys_ipc(
         wait_queue_enqueue_locked(waiters, thread);
         return kIpcBlocked;
     }
+    if(kind == OS1_OBJECT_CONSOLE_INPUT_SESSION)
+        return OS1_ERR_UNSUPPORTED;
     if(kind == OS1_OBJECT_SUBSCRIPTION)
     {
         auto* sub = static_cast<Subscription*>(object);

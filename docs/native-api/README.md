@@ -42,7 +42,7 @@ Documents can contain proposals after promotion, provided their scope and status
 | --- | --- |
 | Filesystem metadata, space accounting, and guarded traversal | [Metadata and traversal ABI](abi/filesystem-metadata-abi.md) |
 | Typed environment, rooted navigation, and same-filesystem moves | [Startup and namespace extension](abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension) |
-| Kernel-hosted Console methods, information property, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |
+| Kernel-hosted Console methods, geometry, exclusive input sessions, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |
 | Persistent ext2 over virtio/USB, disk executables, File/Directory `sync` | [Ext2 storage profile](../filesystems/ext2.md) |
 | Kernel-hosted writable `/tmp`, mutation rights, resource results, quotas | [Temporary filesystem ABI](abi/tmpfs-abi.md) |
 | Descriptors, rights, lifetime, console | [Console descriptor ABI](abi/console-descriptor-abi.md) |

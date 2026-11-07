@@ -95,3 +95,18 @@ Bounded IPC [wait-many](client-sessions-abi.md#bounded-wait-many) and hosted ser
 General reflection and file/device polling remain future work.
 [Console IPC](kernel-console-abi.md) adapts the internal console callbacks to its versioned request protocol.
 The callbacks themselves are not a userspace wire interface.
+
+## Interactive input ownership
+
+The [ConsoleInputSession extension](kernel-console-abi.md#interactive-input-session) provides exclusive byte input through native IPC.
+
+```text
+no session -> canonical descriptor reads
+owned session -> bounded key queue -> native session reads
+release -> discard session keys -> canonical descriptor reads
+```
+
+A live owner suppresses canonical delivery and echo.
+Canonical descriptor readers wait until the session releases input and new canonical data becomes available.
+Acquisition cannot displace pending canonical data or an active read reservation.
+Existing descriptor rights and read records remain unchanged.

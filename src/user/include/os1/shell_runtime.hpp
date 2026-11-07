@@ -1,6 +1,7 @@
 #pragma once
 #include <os1/context.hpp>
 #include <os1/file_tools.hpp>
+#include <os1/pager.hpp>
 #include <os1/text_tools.hpp>
 #include <os1/tree.hpp>
 
@@ -38,14 +39,17 @@ enum class Method
     Tail,
     Search,
     Count,
-    Identify
+    Identify,
+    Pager
 };
 struct Binding
 {
     const char* name;
     Method method;
 };
-constexpr Binding bindings[] = {{"head", Method::Head},
+constexpr Binding bindings[] = {{"less", Method::Pager},
+                                {"pager.show", Method::Pager},
+                                {"head", Method::Head},
                                 {"text.head", Method::Head},
                                 {"tail", Method::Tail},
                                 {"text.tail", Method::Tail},
@@ -438,6 +442,20 @@ struct Call
                     return false;
                 }
             }
+        if(method == Method::Pager)
+        {
+            os1_resource_info input{}, output{};
+            if(strict || command.input != shell::Input::None ||
+               command.output != shell::Output::None || query(0, &input) < 0 ||
+               query(1, &output) < 0 || input.kind != OS1_OBJECT_CONSOLE ||
+               output.kind != OS1_OBJECT_CONSOLE || !(input.rights & OS1_RIGHT_READ) ||
+               (output.rights & (OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT)) !=
+                   (OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT))
+            {
+                error = "pager requires interactive console input and output without redirection";
+                return false;
+            }
+        }
         if(method == Method::Search)
         {
             char pattern[os1::text::pattern_max + 1];
@@ -1002,6 +1020,8 @@ inline long execute(Call& call)
         return OS1_ERR_RANGE;
     switch(call.method)
     {
+        case Method::Pager:
+            return pager::show(a);
         case Method::Print:
             return files::put(1, a, files::length(a)) && files::put(1, "\n", 1) ? 0 : OS1_ERR_IO;
         case Method::Cwd: {

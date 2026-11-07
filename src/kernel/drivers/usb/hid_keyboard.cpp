@@ -55,6 +55,8 @@ char boot_key_usage_to_ascii(uint8_t usage, bool shift)
         return shift ? ')' : '0';
     case 0x28u:
         return '\n';
+    case 0x29u:
+        return 27;
     case 0x2au:
         return '\b';
     case 0x2bu:
@@ -118,8 +120,14 @@ bool boot_keyboard_apply_report(BootKeyboardState& state,
             return false;
         }
 
-        const char ascii =
-            (modifiers & 0x11u) && usage == 0x07u ? 4 : boot_key_usage_to_ascii(usage, shift);
+        char ascii = boot_key_usage_to_ascii(usage, shift);
+        if(modifiers & 0x11u)
+        {
+            if(usage == 0x06u)
+                ascii = 3;
+            if(usage == 0x07u)
+                ascii = 4;
+        }
         if(0 != ascii)
         {
             output[output_count++] = ascii;

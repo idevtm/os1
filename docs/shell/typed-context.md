@@ -131,5 +131,6 @@ This stage does not claim that all legacy commands use reflective argument bindi
 
 The [metadata and traversal extension](filesystem-tools.md) implements recursive commands, `find`, `du`, `stat`, and `df`.
 The remaining [utility profile](file-utilities.md) remains accepted future work.
-Text utilities, timestamp mutation, and paging remain subsequent stages.
+The [text utilities](text-utilities.md) and [pager](pager.md) are implemented.
+Timestamp mutation remains a subsequent stage.
 Permissions and links remain deferred. General OS service discovery and generated bindings are separate Native API work.

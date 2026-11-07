@@ -1854,6 +1854,25 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --log "${OS1_ARTIFACT_DIR}/smoke-text-tools-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_text_tools_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_text_tools_${boot})
+    add_test(NAME os1_smoke_pager_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_pager.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-pager-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_pager_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_pager_${boot})
+    if(boot STREQUAL "bios")
+      set(pager_keyboard ps2)
+    else()
+      set(pager_keyboard usb)
+    endif()
+    add_test(NAME os1_smoke_pager_keyboard_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_pager.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --keyboard "${pager_keyboard}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-pager-keyboard-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_pager_keyboard_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_pager_keyboard_${boot})
     add_test(NAME os1_smoke_tree_tools_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_tree_tools.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"

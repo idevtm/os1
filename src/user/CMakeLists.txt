@@ -75,6 +75,8 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/shell_runtime.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/text_tools.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/text/tools.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/pager/render.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/pager.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/shell/program_path.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/shell/text_buffer.hpp"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
