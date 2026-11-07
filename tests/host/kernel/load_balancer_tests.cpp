@@ -302,3 +302,37 @@ TEST(LoadBalancer, IdleTickPathTriggersForcedBalance)
     EXPECT_EQ(1u, cpu_run_queue_length(&ap_cpu));
     EXPECT_EQ(1u, g_cpu_boot->migrate_in);
 }
+
+TEST(LoadBalancer, DoesNotStealStackBeforeDonorHandoff)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = initialized_frames();
+    kmem_init(frames);
+    cpu donor{};
+    donor.self = &donor;
+    donor.id = 1;
+    donor.booted = 1;
+    donor.magic = CPU_MAGIC;
+    HostCpuChainScope cpu_scope(&donor, nullptr);
+    ASSERT_TRUE(init_tasks(frames));
+    Process* process = create_user_process("handoff", 0);
+    ASSERT_NE(nullptr, process);
+    Thread* parked = make_blocked_user_thread(process, frames);
+    Thread* outgoing = make_blocked_user_thread(process, frames);
+    ASSERT_NE(nullptr, parked);
+    ASSERT_NE(nullptr, outgoing);
+    mark_thread_ready(parked, &donor);
+    mark_thread_ready(outgoing, &donor);
+    // schedule_next has requeued its current thread, but assembly has not left its stack.
+    parked->affinity_mask = 1ull << donor.id;
+    donor.current_thread = outgoing;
+    EXPECT_FALSE(scheduler_balance_cpu(g_cpu_boot, 64, true));
+    EXPECT_EQ(&donor, outgoing->run_queue_cpu);
+    EXPECT_EQ(2u, donor.runq.length);
+    EXPECT_EQ(0u, g_cpu_boot->runq.length);
+    // Publication occurs only after restore_thread leaves the outgoing stack and CR3.
+    donor.current_thread = nullptr;
+    ASSERT_TRUE(scheduler_balance_cpu(g_cpu_boot, 128, true));
+    EXPECT_EQ(outgoing, next_runnable_thread(nullptr));
+    EXPECT_EQ(&donor, parked->run_queue_cpu);
+}

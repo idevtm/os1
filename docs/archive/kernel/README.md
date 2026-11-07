@@ -5,6 +5,7 @@ Use the [documentation index](../../README.md) for current guidance.
 
 | Record | Document |
 | --- | --- |
+| 2026-11-07 | [Scheduler migration during handoff](2026-11-07-scheduler-migration.md) |
 | 2026-11-06 | [Interrupt-return fault investigation](2026-11-06-interrupt-return.md) |
 | 2026-11-05 | [Exception stacks, smoke settling, and measurement clock](2026-11-05-reliability-and-clock-plan.md) |
 | 2026-11-05 | [Passive ACPI observation](2026-11-05-passive-acpi-observation.md) |

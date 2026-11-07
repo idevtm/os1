@@ -1029,6 +1029,9 @@ There is still no priority or nice model, no user-visible affinity control, and 
 
 Child image, standard-stream grants, and entry frame now precede scheduler publication; spawn captures the PID before making the child runnable. The post-publication frame rewrite identified in [review R1](archive/reviews/2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication) is removed. Context switching leaves the outgoing stack and CR3 before publishing the next current thread. The [implementation record](archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) distinguishes regression coverage from the earlier unexplained BIOS failure.
 
+The load balancer excludes the donor's current thread while it holds the donor queue lock.
+A queued thread becomes eligible for migration only after assembly leaves its stack and publishes the successor.
+
 Reaping can complete the current thread's child-exit wait before a CPU handoff.
 The scheduler keeps that awakened thread runnable.
 A deterministic host regression and guest state capture verify this correction.

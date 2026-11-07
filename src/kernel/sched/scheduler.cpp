@@ -92,7 +92,11 @@ Thread* detach_last_migratable_thread_locked(cpu* donor, const cpu* receiver, ui
     Thread* candidate = nullptr;
     for(Thread* thread = donor->runq.head; nullptr != thread; thread = thread->next)
     {
-        if(thread_is_migratable(thread, receiver, now))
+        // schedule_next queues its current thread before assembly leaves its stack.
+        // The donor lock prevents a new dequeue while we inspect that publication.
+        // restore_thread publishes the successor only after leaving the old stack/CR3.
+        if(thread != __atomic_load_n(&donor->current_thread, __ATOMIC_ACQUIRE) &&
+           thread_is_migratable(thread, receiver, now))
         {
             candidate_previous = previous;
             candidate = thread;
