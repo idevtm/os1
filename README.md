@@ -306,6 +306,7 @@ Historical BIOS failures remain separate evidence.
 
 The shell provides typed navigation, aliases, basic file operations, interactive `write`, and the line editor `edit`.
 See [typed context and basic commands](docs/shell/typed-context.md) for cwd, path configuration, strict scripts, and same-filesystem moves.
+See [metadata and recursive tools](docs/shell/filesystem-tools.md) for `stat`, `df`, `find`, `du`, `cp -r`, and `rm -r`.
 Files under `/tmp` disappear on reboot.
 
 ```text

@@ -186,3 +186,43 @@ TEST(ProgramPath, ExplicitPathsNeverSearchAndBoundsRejectTruncation)
     EXPECT_EQ(os1::shell::resolve_program("", path, sizeof(path), probe), OS1_ERR_INVALID);
     EXPECT_EQ(os1::shell::resolve_program(nullptr, path, sizeof(path), probe), OS1_ERR_INVALID);
 }
+
+#include "fs/name_pattern.hpp"
+#include "shell/values.hpp"
+TEST(ShellArguments, DeclaredBooleanOptionsMixWithNamesAndPositions)
+{
+    Parameter parameters[] = {
+        {"source", true, true}, {"destination", true, true}, {"recursive", false, false, 'r'}};
+    Command c;
+    int slots[3];
+    size_t starts[3];
+    const char* error = nullptr;
+    ASSERT_TRUE(parse("cp destination:'b' -r 'a'", c));
+    ASSERT_TRUE(bind_arguments(c, parameters, 3, slots, starts, error));
+    EXPECT_EQ(slots[0], 3);
+    EXPECT_EQ(slots[1], 1);
+    EXPECT_EQ(slots[2], 2);
+    EXPECT_EQ(starts[2], SIZE_MAX);
+    for(auto text : {"cp -r 'a' 'b' recursive:true",
+                     "cp recursive:false -r 'a' 'b'",
+                     "cp -r -r 'a' 'b'",
+                     "cp -z 'a' 'b'"})
+    {
+        ASSERT_TRUE(parse(text, c));
+        EXPECT_FALSE(bind_arguments(c, parameters, 3, slots, starts, error)) << text;
+    }
+    ASSERT_TRUE(parse("cp -- -r 'b'", c));
+    EXPECT_TRUE(bind_arguments(c, parameters, 3, slots, starts, error));
+    EXPECT_EQ(slots[2], -1);
+}
+TEST(FilePatterns, WildcardsAreBoundedAndCaseSensitive)
+{
+    using os1::fs::name_matches;
+    EXPECT_TRUE(name_matches("*", ""));
+    EXPECT_TRUE(name_matches("a?*.txt", "abc.txt"));
+    EXPECT_TRUE(name_matches("**a*b*c", "aaabbbc"));
+    EXPECT_FALSE(name_matches("*.txt", "a.TXT"));
+    EXPECT_FALSE(name_matches("?", ""));
+    EXPECT_FALSE(name_matches("a*b*c", "abbd"));
+    EXPECT_TRUE(name_matches("a[b]", "a[b]"));
+}

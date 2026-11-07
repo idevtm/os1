@@ -14,6 +14,8 @@ struct VfsNode : NativeObject
     Tmpfs* filesystem;
     const VfsOperations* operations;
     uint64_t cookie;
+    uint64_t object_id, filesystem_id, archive_bytes;
+    bool mount_root;
     bool linked;
     VfsNode* children;
     VfsNode* next;

@@ -229,6 +229,49 @@ long sys_vfs(
     PageFrameContainer& frames, Thread* thread, int fd, uint64_t operation, uint64_t argument)
 {
     auto& table = thread->process->descriptors;
+    if(operation == OS1_RESOURCE_TREE_STEP)
+    {
+        os1_tree_step step{};
+        if(!copy_from_user(frames, thread, argument, &step, sizeof(step)))
+            return OS1_ERR_FAULT;
+        long r = vfs_tree_step(table, fd, step);
+        if(!copy_to_user(frames, thread, argument, &step, sizeof(step)))
+        {
+            if(r >= 0 && (step.action == OS1_TREE_OPEN || step.action == OS1_TREE_CREATE))
+                descriptor_close(table, r);
+            return OS1_ERR_FAULT;
+        }
+        return r;
+    }
+    if(operation == OS1_RESOURCE_METADATA || operation == OS1_RESOURCE_SPACE)
+    {
+        OpenInstance* instance = nullptr;
+        long r = descriptor_acquire(table, fd, OS1_RIGHT_INSPECT, instance);
+        if(r < 0)
+            return r;
+        InstanceRef pin(instance);
+        if(instance->object->kind != OS1_OBJECT_FILE &&
+           instance->object->kind != OS1_OBJECT_DIRECTORY)
+            return OS1_ERR_UNSUPPORTED;
+        NamespaceGuard guard;
+        if(!guard.held)
+            return OS1_ERR_WOULD_BLOCK;
+        auto* node = static_cast<VfsNode*>(instance->object);
+        if(operation == OS1_RESOURCE_METADATA)
+        {
+            os1_metadata result{};
+            r = vfs_metadata(node, result);
+            return r < 0 ? r
+                   : copy_to_user(frames, thread, argument, &result, sizeof(result))
+                       ? 0
+                       : OS1_ERR_FAULT;
+        }
+        os1_space result{};
+        r = vfs_space(node, result);
+        return r < 0                                                             ? r
+               : copy_to_user(frames, thread, argument, &result, sizeof(result)) ? 0
+                                                                                 : OS1_ERR_FAULT;
+    }
     if(operation == OS1_RESOURCE_SAME_OBJECT)
         return argument < OS1_DESCRIPTOR_LIMIT ? vfs_same_object(table, fd, argument)
                                                : OS1_ERR_BAD_DESCRIPTOR;

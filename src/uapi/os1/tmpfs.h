@@ -70,3 +70,8 @@ struct os1_filesystem_info
     uint64_t byte_size;
     uint32_t kind, nodes, open_instances, data_pages, max_pages, reserved;
 };
+
+#define OS1_DIRECTORY_METADATA 10u
+#define OS1_DIRECTORY_SPACE 11u
+#define OS1_FILE_METADATA 8u
+#define OS1_FILE_SPACE 9u
