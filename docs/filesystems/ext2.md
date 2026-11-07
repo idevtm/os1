@@ -121,6 +121,23 @@ A timeout quarantines DMA buffers and disables further submissions.
 Completion observed under the queue lock wins over timeout reset.
 The poll bound counts iterations; a monotonic deadline and sleeping storage worker remain follow-ups.
 
+## Same-filesystem moves
+
+The [namespace extension](../native-api/abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension) supports moves within this mount.
+
+| Case | Behavior |
+| --- | --- |
+| Different parents | Update both directory blocks and the moved directory's `..` entry |
+| Replacement | Require compatible kinds and an empty destination directory; retained targets return WOULD_BLOCK |
+| Directory links | Update both parent link counts, including replacement |
+| Cross-filesystem move | Return UNSUPPORTED; do not emulate copy followed by deletion |
+| Failure | Preflight capacity and scratch allocation; poison the volume after disk I/O failure |
+
+The implementation allocates 8192 scratch bytes before changing directory blocks.
+One namespace admission guard and the filesystem operation guard cover publication.
+Successful moves preserve the source identity and persist through `sync` and reboot.
+This is runtime namespace atomicity, not crash-atomic journaling.
+
 ## Validation and deferred work
 
 The [implementation record](../archive/filesystems/2026-11-06-ext2-implementation.md) contains results, limitations, and review dispositions.

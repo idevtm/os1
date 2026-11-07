@@ -253,9 +253,9 @@ TEST_F(Ext2, VfsMountAuthoritySnapshotAndUnlinkPolicy)
     OpenInstance* opened = nullptr;
     ASSERT_EQ(mount->operations->create(mount, "new", 3, OS1_OBJECT_FILE, opened), 0);
     EXPECT_FALSE(opened->object->allowed_rights & OS1_RIGHT_EXECUTE);
-    EXPECT_EQ(mount->operations->remove(mount, "new", 3), OS1_ERR_WOULD_BLOCK);
+    EXPECT_EQ(mount->operations->remove(mount, "new", 3, 0), OS1_ERR_WOULD_BLOCK);
     instance_release(opened);
-    EXPECT_EQ(mount->operations->remove(mount, "new", 3), 0);
+    EXPECT_EQ(mount->operations->remove(mount, "new", 3, 0), 0);
     EXPECT_EQ(mount->operations->sync(mount), 0);
     object_release(mount);
     root_node.children = nullptr;
@@ -325,4 +325,121 @@ TEST_F(Ext2, MountRejectsReachableReservedInode)
     auto device = disk.device();
     EXPECT_EQ(ext2_mount(&root_node, device), OS1_ERR_BAD_IMAGE);
     EXPECT_EQ(root_node.children, nullptr);
+}
+
+TEST_F(Ext2, MoveAcrossParentsReplacesAndPersistsDirectoryParentLinks)
+{
+    uint32_t left_id, right_id, file_id, target_id, sub_id;
+    ext2::Inode left{}, right{}, file{}, target{}, sub{};
+    ASSERT_EQ(fs->create(2, root, "left", 4, true, left_id, left), 0);
+    ASSERT_EQ(fs->create(2, root, "right", 5, true, right_id, right), 0);
+    ASSERT_EQ(fs->create(left_id, left, "file", 4, false, file_id, file), 0);
+    ASSERT_EQ(fs->write(file_id, file, 0, "kept", 4), 4);
+    ASSERT_EQ(fs->create(right_id, right, "target", 6, false, target_id, target), 0);
+    ASSERT_EQ(fs->write(target_id, target, 0, "old", 3), 3);
+    std::array<uint8_t, 8192> scratch{};
+    ASSERT_EQ(fs->move(left_id,
+                       left,
+                       "file",
+                       4,
+                       right_id,
+                       right,
+                       "target",
+                       6,
+                       file_id,
+                       file,
+                       target_id,
+                       &target,
+                       scratch.data()),
+              0);
+    ASSERT_EQ(fs->create(left_id, left, "sub", 3, true, sub_id, sub), 0);
+    auto old_left_links = ext2::u16(left.bytes + 26), old_right_links = ext2::u16(right.bytes + 26);
+    ASSERT_EQ(fs->move(left_id,
+                       left,
+                       "sub",
+                       3,
+                       right_id,
+                       right,
+                       "sub",
+                       3,
+                       sub_id,
+                       sub,
+                       0,
+                       nullptr,
+                       scratch.data()),
+              0);
+    EXPECT_EQ(ext2::u16(left.bytes + 26), old_left_links - 1);
+    EXPECT_EQ(ext2::u16(right.bytes + 26), old_right_links + 1);
+    ASSERT_EQ(fs->sync(), 0);
+    auto reboot = std::make_unique<ext2::Volume>();
+    ASSERT_EQ(reboot->mount(disk.io()), 0);
+    ASSERT_EQ(reboot->inode_read(file_id, file), 0);
+    char bytes[4];
+    EXPECT_EQ(reboot->read(file, 0, bytes, 4), 4);
+    EXPECT_EQ(std::string(bytes, 4), "kept");
+    uint32_t block = 0;
+    ASSERT_EQ(reboot->get_block(sub, 0, block), 0);
+    std::array<uint8_t, 4096> directory{};
+    ASSERT_TRUE(Disk::read(&disk, block, directory.data()));
+    uint32_t parent = 0;
+    memcpy(&parent, directory.data() + 12, 4);
+    EXPECT_EQ(parent, right_id);
+    ASSERT_EQ(reboot->validate_inode(sub_id, sub), 0);
+}
+TEST_F(Ext2, MoveIoFailurePoisonsVolumeInsteadOfReportingSuccess)
+{
+    uint32_t file_id;
+    ext2::Inode file{};
+    ASSERT_EQ(fs->create(2, root, "source", 6, false, file_id, file), 0);
+    std::array<uint8_t, 8192> scratch{};
+    disk.writes = 0;
+    EXPECT_LT(
+        fs->move(
+            2, root, "source", 6, 2, root, "target", 6, file_id, file, 0, nullptr, scratch.data()),
+        0);
+    EXPECT_LT(fs->sync(), 0);
+}
+
+TEST_F(Ext2, EmptyDirectoryReplacementUpdatesParentLinksInBothMoveForms)
+{
+    for(bool same_parent : {true, false})
+    {
+        Disk fixture;
+        auto volume = std::make_unique<ext2::Volume>();
+        ASSERT_EQ(volume->mount(fixture.io()), 0);
+        ext2::Inode root_node{}, left{}, right{}, source{}, target{};
+        uint32_t l, r, s, t;
+        ASSERT_EQ(volume->inode_read(2, root_node), 0);
+        ASSERT_EQ(volume->create(2, root_node, "left", 4, true, l, left), 0);
+        ASSERT_EQ(volume->create(2, root_node, "right", 5, true, r, right), 0);
+        auto& destination = same_parent ? left : right;
+        uint32_t dest_id = same_parent ? l : r;
+        ASSERT_EQ(volume->create(l, left, "source", 6, true, s, source), 0);
+        ASSERT_EQ(volume->create(dest_id, destination, "target", 6, true, t, target), 0);
+        auto before_left = ext2::u16(left.bytes + 26), before_right = ext2::u16(right.bytes + 26);
+        std::array<uint8_t, 8192> scratch{};
+        ASSERT_EQ(volume->move(l,
+                               left,
+                               "source",
+                               6,
+                               dest_id,
+                               destination,
+                               "target",
+                               6,
+                               s,
+                               source,
+                               t,
+                               &target,
+                               scratch.data()),
+                  0);
+        EXPECT_EQ(ext2::u16(left.bytes + 26), before_left - 1);
+        EXPECT_EQ(ext2::u16(right.bytes + 26), before_right);
+        ASSERT_EQ(volume->sync(), 0);
+        auto reboot = std::make_unique<ext2::Volume>();
+        ASSERT_EQ(reboot->mount(fixture.io()), 0);
+        ext2::Inode loaded{};
+        ASSERT_EQ(reboot->inode_read(l, loaded), 0);
+        EXPECT_EQ(ext2::u16(loaded.bytes + 26), before_left - 1);
+        ASSERT_EQ(reboot->validate_inode(s, source), 0);
+    }
 }

@@ -155,6 +155,7 @@ void invoke_directory(OpenInstance& source,
             required = OS1_RIGHT_LOOKUP | OS1_RIGHT_CREATE;
             break;
         case OS1_DIRECTORY_REMOVE:
+        case OS1_DIRECTORY_REMOVE_TYPED:
             required = OS1_RIGHT_LOOKUP | OS1_RIGHT_REMOVE;
             break;
         case OS1_DIRECTORY_RENAME:
@@ -235,7 +236,15 @@ void invoke_directory(OpenInstance& source,
     {
         os1_directory_name args{};
         if(decode(request, args) && !args.reserved && name_record(args.name, args.name_bytes))
-            status = node->operations->remove(node, args.name, args.name_bytes);
+            status = node->operations->remove(node, args.name, args.name_bytes, 0);
+    }
+    else if(request.member == OS1_DIRECTORY_REMOVE_TYPED)
+    {
+        os1_directory_remove_typed args{};
+        if(decode(request, args) &&
+           (args.kind == OS1_OBJECT_FILE || args.kind == OS1_OBJECT_DIRECTORY) &&
+           name_record(args.name, args.name_bytes))
+            status = node->operations->remove(node, args.name, args.name_bytes, args.kind);
     }
     else if(request.member == OS1_DIRECTORY_RENAME)
     {

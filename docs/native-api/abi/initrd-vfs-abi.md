@@ -45,8 +45,9 @@ Paths at OPEN_AT are length-delimited relative byte strings, 1–4096 bytes, wit
 components of at most 255 bytes. Embedded NUL, absolute paths, and any `..`
 component are invalid. Repeated separators and `.` are accepted; a trailing
 separator requires a directory. Names are byte strings, not required UTF-8.
-The C++ wrapper interprets leading `/` relative to the startup root descriptor;
-other paths use cwd. It never expands their authority. `ls` escapes unsafe name
+The current C++ wrapper uses CONTEXT_OPEN when root and cwd grants are present.
+Its compatibility fallback retains OPEN_AT behavior when either grant is absent.
+Neither path expands authority. `ls` escapes unsafe name
 bytes as `\xHH`.
 
 ## Resource operations
@@ -109,15 +110,15 @@ Loading uses that immutable object's bytes, independent of its shared cursor.
 Disk-backed executable files use a stable snapshot; see the [ext2 profile](../../filesystems/ext2.md).
 There is no secondary privileged pathname lookup.
 
-Startup ABI version 2 uses a 2880-byte launch request containing a 16-byte envelope, a 2480-byte startup
-record, and sixteen 24-byte grant slots. Limits: 16 argv strings, 16 environment
+Startup ABI version 3 uses a 6096-byte launch request.
+It contains a 16-byte envelope, a 5696-byte startup record, and sixteen 24-byte grant slots. Limits: 16 argv strings, 16 environment
 strings, 2048 aggregate string bytes including terminators, and 16 child grants.
 A 272-byte constructor envelope extends startup with schema ID/version, size, and
 256 bounded payload bytes. See [typed startup](counter-events-abi.md#typed-constructor-metadata-and-startup-version-2).
 Unused offsets, grant slots, string/payload tails, and reserved fields must be zero.
 Strings are packed argv first, then environment, with canonical offsets relative
-to the string array. Environment values are bytes, not capabilities; `KEY=value`
-is a user convention. Root and cwd are descriptor indices or -1, independently.
+to the string array. Legacy environment strings remain bytes, not capabilities; `KEY=value` is a user convention.
+The shell uses the separate typed environment below and does not maintain a text PATH mirror. Root and cwd are descriptor indices or -1, independently.
 
 SPAWN grants explicitly map source to target, with attenuated direct rights,
 entry flags, and directory ceiling. Each source needs DELEGATE; targets are
@@ -165,3 +166,58 @@ are implemented; [scoped shared Counter activation](shared-activation-abi.md) ad
 prototype surface; in particular ACPI power effects must be gated before exposing
 the system to less-trusted or network-facing applications. These are not closed
 by restricting VFS descriptors.
+
+## Typed environment and namespace extension
+
+Startup version 3 appends a validated data bag and requires rebuilt programs.
+The namespace extension adds rooted lookup and same-filesystem move operations.
+
+| Data layout | Bytes | Fields |
+| --- | ---: | --- |
+| `os1_context_node` | 24 | Six `u16` kind/parent/name/text fields, zero `u32`, signed `i64` value |
+| `os1_context_data` | 3216 | Four `u32` header fields, 48 nodes, 2048 counted text bytes |
+| `os1_context_open_request` | 40 | Version, size, cwd descriptor, path length/pointer, rights, ceiling, flags, reserved |
+| `os1_path_request` | 24 | Version, size, object descriptor, capacity, output pointer |
+| `os1_move_request` | 152 | Version, size, destination descriptor, replace flag, two lengths, two 64-byte names |
+
+Data version 1 supports Record, List, String, signed 64-bit Integer, and Boolean.
+Node zero is an unnamed Record. Every parent index precedes its children.
+Record keys are unique lowercase identifiers of at most 63 bytes; list elements have no names.
+Depth is at most eight edges from the root.
+Names and strings use counted offsets into the text array.
+Strings can contain NUL bytes; path and argv conversion reject embedded NUL.
+Unknown kinds, invalid bounds, cycles, duplicate keys, noncanonical booleans, and nonzero unused fields fail validation.
+The all-zero bag means absent context for older launch helpers using the rebuilt ABI.
+The runtime supplies default cwd and path data for that case.
+
+Children receive independent data copies; resource grants remain separate.
+The bag contains no pointers or capabilities. Integers cannot confer resource authority.
+The runtime refreshes the cwd text from its retained directory before ordinary program launch.
+The shell validates path updates as at most eight absolute strings, each at most 255 bytes.
+No separate service process executes these value operations.
+
+| Resource operation | Authority | Result |
+| --- | --- | --- |
+| 20: CONTEXT_OPEN | Root LOOKUP; relative lookup also needs cwd LOOKUP | Independent open instance |
+| 21: DESCRIBE_PATH | Root LOOKUP and target INSPECT | Root-relative path length, excluding the copied NUL |
+| 22: MOVE_AT | Source LOOKUP/RENAME; destination LOOKUP/CREATE/RENAME; REMOVE when replacement is enabled | Zero after publication |
+| 23: SAME_OBJECT | INSPECT on both descriptors | One for identical objects, otherwise zero |
+
+CONTEXT_OPEN accepts absolute paths relative to the supplied root and relative paths from the supplied cwd.
+It accepts `.` and clamps `..` at that root. A non-directory intermediate or trailing separator fails.
+Relative lookup requires the retained cwd to remain reachable from the root.
+Relative opens intersect root and cwd descendant ceilings; absolute opens use the root ceiling.
+A source without DELEGATE cannot recover it through lookup.
+DESCRIBE_PATH follows current object identity after rename and returns NOT_FOUND for an unreachable object.
+Namespace walks allow at most 64 path components and 8192 examined nodes.
+
+Namespace mutation and rooted traversal use nonblocking admission before backend locks.
+Contention returns WOULD_BLOCK; admission never spins while disk I/O runs.
+Old OPEN_AT and native Directory `rename` retain their previous contracts.
+MOVE_AT extends both writable backends with cross-directory moves and permitted replacement.
+It rejects cross-filesystem moves, subtree cycles, incompatible kinds, and nonempty directory replacement.
+An identical source and destination succeeds without mutation.
+Successful publication preserves the source object identity and assigns a new enumeration cookie.
+Tmpfs retains replaced open files; ext2 rejects replacement while the target has external references.
+Allocation and capacity failures precede publication. Ext2 I/O failure poisons the volume; moves are not crash transactions.
+Process-local descriptor numbers occur only in these resource requests, not as transferable capabilities inside IPC payloads.

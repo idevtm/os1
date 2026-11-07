@@ -62,6 +62,27 @@ Internal filesystem-to-driver work can retain one top-level loan until all acces
 Do not add hidden payload copies to work around unsupported forwarding.
 Use dedicated Buffers when a smaller authorized data range must remain isolated from unrelated bytes.
 
+## Reflective hierarchy and shell context
+
+Option B was selected on 2026-11-07.
+The [hierarchy proposal](object-hierarchy.md) records roots, environment inheritance, discovery, and remaining decisions.
+The [shell command proposal](../shell/object-commands.md) records separate syntax choices and short bindings.
+The accepted [file utility profile](../shell/file-utilities.md) stages basic tools, recursive/search/metadata tools, then deferred permissions and links.
+The [first stage](../shell/typed-context.md) implements native rooted lookup, retained cwd, and same-filesystem moves.
+Recursive helpers and metadata extensions remain later work.
+
+| Stage | Scope |
+| --- | --- |
+| First context slice, implemented | Typed path, validated cwd, explicit stream grants, independent child state, and fixed filesystem bindings |
+| Reflection, proposed | Bounded type descriptions, child enumeration, explicit acquisition, and output schemas |
+| Broader services, proposed | Dynamic registration, device interfaces, and application resource contexts |
+
+The minimal initrd and disk-program split is implemented; see its [record](../archive/filesystems/2026-11-06-minimal-initrd.md).
+Current search defaults to `/bin`, then `/disk/bin`; local typed path operations can change the inherited list.
+Startup ABI version 3 carries the typed context; no text `PATH` mirror is introduced.
+The selected environment contains inherited plain data; capabilities remain separate explicit grants.
+Existing service and hardware work does not require a complete reflective shell.
+
 ## Shared service foundation
 
 The first kernel-hosted adapter now exposes [Console v1](abi/kernel-console-abi.md).
@@ -291,7 +312,7 @@ This table records priority, acceptance, and dependencies without assigning new 
 | Order | Work | Acceptance | Dependency |
 | --- | --- | --- | --- |
 | 1 | Physical update preservation | An existing user file survives boot-only and program-only updates, synchronization, and reboot; updated code also runs | Existing managed USB tooling; record image hash, disk identity, commands, and results |
-| 2 | Minimal initrd and disk programs | Keep recovery without storage; verify lookup, providers, and preserving deployment | Ext2 and offline deployment implemented; hardware update acceptance remains |
+| 2 | Minimal initrd and disk programs: implemented | Recovery and disk lookup checks passed; retain physical update acceptance | Typed context and configurable search are implemented; broader utility stages remain |
 | 3 | Native keyboard/mouse objects | Two clients receive future events; unsubscribe, overflow recovery, removal, and console typing work | Input protocol and kernel adapter event support; controller additions follow observed hardware needs |
 | 4 | Service discovery and lifecycle | Startup grants a scoped service directory; lookup attenuates authority; shutdown/restart outcomes remain explicit | Existing capabilities and sessions; prove supported connection topology |
 | 5 | Kernel bulk I/O and BlockDevice | A real file/block client uses retained Buffer ranges; failure ends access before ownership returns | Internal kernel borrower lifetime; DMA pinning/quiescence only where device access requires it |

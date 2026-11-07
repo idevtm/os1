@@ -4,19 +4,22 @@
 
 #include <os1/syscall.hpp>
 
+#include "context/data.hpp"
 #include "interface/constructor.hpp"
 #include "interface/parameter_binding.hpp"
 #include "interface/parameters.hpp"
 namespace os1::user
 {
 extern const os1_startup_record* startup_record;
+extern os1::context::Data environment_data;
+extern int current_cwd;
 inline int root()
 {
     return startup_record ? startup_record->root_fd : -1;
 }
 inline int cwd()
 {
-    return startup_record ? startup_record->cwd_fd : -1;
+    return current_cwd;
 }
 inline long open_at(int directory,
                     const char* path,
@@ -49,6 +52,22 @@ inline long open(const char* path,
         ++size;
     if(!size || size > OS1_PATH_MAX)
         return OS1_ERR_INVALID;
+    if(root() >= 0 && cwd() >= 0)
+    {
+        os1_context_open_request request{OS1_VFS_ABI_VERSION,
+                                         sizeof(request),
+                                         cwd(),
+                                         static_cast<uint32_t>(size),
+                                         reinterpret_cast<uint64_t>(path),
+                                         rights,
+                                         ceiling,
+                                         flags,
+                                         0};
+        return os1_syscall3(os1_sys_resource,
+                            root(),
+                            OS1_RESOURCE_CONTEXT_OPEN,
+                            reinterpret_cast<uint64_t>(&request));
+    }
     int directory = cwd();
     if(*path == '/')
     {
@@ -215,6 +234,40 @@ inline bool parameter_arguments(const parameters::Metadata& schema,
         out.payload[i] = wire.data[i];
     return true;
 }
+// Validate constructor metadata before command redirection. The executable stays retained.
+inline long prepare_constructor(int executable,
+                                size_t argc,
+                                const char* const* argv,
+                                const char* raw_parameters,
+                                os1_constructor_args& out,
+                                parameters::Diagnostic* diagnostic = nullptr,
+                                bool* is_rich = nullptr,
+                                bool rich_only = false)
+{
+    out = {};
+    static parameters::Metadata rich, scratch;
+    parameters::Diagnostic local_diagnostic{};
+    auto& d = diagnostic ? *diagnostic : local_diagnostic;
+    int rich_found = parameter_metadata(executable, rich, scratch);
+    bool valid = rich_found >= 0;
+    if(is_rich)
+        *is_rich = rich_found == 1;
+    if(rich_found == 1)
+    {
+        parameters::Binding binding{};
+        valid = parameter_binding(executable, rich, binding) && binding.constructor &&
+                (raw_parameters || argc <= 1) && parameter_arguments(rich, raw_parameters, out, d);
+    }
+    else if(valid && !rich_only)
+    {
+        constructor::Metadata schema{};
+        int found = constructor_metadata(executable, schema);
+        valid = found >= 0 &&
+                (!found ||
+                 constructor::parse(schema, argc ? argc - 1 : 0, argc ? argv + 1 : nullptr, out));
+    }
+    return valid ? 0 : OS1_ERR_INVALID;
+}
 // Shell convenience: build an explicit map of present standard streams/root/cwd.
 // Applications needing other grants or rights use launch() directly.
 inline long run_program(const char* path,
@@ -224,11 +277,23 @@ inline long run_program(const char* path,
                         size_t envc = 0,
                         const char* const* envp = nullptr,
                         const char* raw_parameters = nullptr,
-                        parameters::Diagnostic* diagnostic = nullptr)
+                        parameters::Diagnostic* diagnostic = nullptr,
+                        int retained_executable = -1,
+                        const os1_constructor_args* prepared_constructor = nullptr)
 {
+    struct ExecutableOwner
+    {
+        int fd;
+        ~ExecutableOwner()
+        {
+            if(fd >= 0)
+                close(fd);
+        }
+    } owner{retained_executable};
     if(argc > OS1_ARGUMENT_LIMIT || envc > OS1_ENVIRONMENT_LIMIT)
         return OS1_ERR_INVALID;
-    os1_launch_request request{};
+    static os1_launch_request request;
+    request = {};
     request.version = OS1_STARTUP_VERSION;
     request.size = sizeof(request);
     auto& startup = request.startup;
@@ -238,6 +303,22 @@ inline long run_program(const char* path,
     startup.cwd_fd = cwd();
     startup.argc = argc;
     startup.envc = envc;
+    startup.environment = environment_data;
+    if(root() >= 0 && cwd() >= 0)
+    {
+        char path[OS1_PATH_MAX + 1]{};
+        os1_path_request r{
+            OS1_VFS_ABI_VERSION, sizeof(r), cwd(), sizeof(path), reinterpret_cast<uint64_t>(path)};
+        long status = os1_syscall3(
+            os1_sys_resource, root(), OS1_RESOURCE_DESCRIBE_PATH, reinterpret_cast<uint64_t>(&r));
+        if(status < 0)
+            return status;
+        int old = os1::context::child(environment_data, 0, "cwd");
+        if(old >= 0 && !os1::context::without(environment_data, old, startup.environment))
+            return OS1_ERR_INVALID;
+        if(os1::context::add(startup.environment, 0, "cwd", 3, OS1_VALUE_STRING, path, status) < 0)
+            return OS1_ERR_LIMIT;
+    }
     for(unsigned group = 0; group < 2; ++group)
     {
         size_t count = group ? envc : argc;
@@ -291,38 +372,24 @@ inline long run_program(const char* path,
             request.grants[request.grant_count++] = {fd, fd, info.rights, 0, ceiling, 0};
         }
     }
+    // Ownership of a retained search result enters this helper and is released below.
     const long executable =
-        open(path, OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
+        retained_executable >= 0
+            ? retained_executable
+            : open(path, OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
     if(executable < 0)
         return executable;
-    static parameters::Metadata rich, scratch;
-    parameters::Diagnostic local_diagnostic{};
-    auto& d = diagnostic ? *diagnostic : local_diagnostic;
-    int rich_found = parameter_metadata(executable, rich, scratch);
-    bool valid = rich_found >= 0;
-    if(rich_found == 1)
+    owner.fd = executable;
+    if(prepared_constructor)
+        request.startup.constructor = *prepared_constructor;
+    else
     {
-        parameters::Binding binding{};
-        valid = parameter_binding(executable, rich, binding) && binding.constructor &&
-                (raw_parameters || argc <= 1) &&
-                parameter_arguments(rich, raw_parameters, request.startup.constructor, d);
-    }
-    else if(valid)
-    {
-        constructor::Metadata schema{};
-        int found = constructor_metadata(executable, schema);
-        valid = found >= 0 && (!found || constructor::parse(schema,
-                                                            argc ? argc - 1 : 0,
-                                                            argc ? argv + 1 : nullptr,
-                                                            request.startup.constructor));
-    }
-    if(!valid)
-    {
-        close(executable);
-        return OS1_ERR_INVALID;
+        long status = prepare_constructor(
+            executable, argc, argv, raw_parameters, request.startup.constructor, diagnostic);
+        if(status < 0)
+            return status;
     }
     const long result = launch(executable, replace ? OS1_LAUNCH_EXEC : OS1_LAUNCH_SPAWN, request);
-    close(executable);
     return result;
 }
 }  // namespace os1::user

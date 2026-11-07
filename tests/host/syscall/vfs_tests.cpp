@@ -12,6 +12,7 @@
 #include "syscall/vfs.hpp"
 #include "vfs/filesystem.hpp"
 #include "vfs/initrd.hpp"
+#include "vfs/namespace.hpp"
 #include "vfs/tmpfs.hpp"
 #ifdef assert
 #undef assert
@@ -29,7 +30,7 @@
 namespace
 {
 constexpr uint64_t kBuffer = kUserImageBase;
-constexpr uint64_t kRequest = kUserImageBase + 4096;
+constexpr uint64_t kRequest = kUserImageBase + 0x10000;
 class Vfs : public ::testing::Test
 {
 protected:
@@ -54,6 +55,7 @@ protected:
         ASSERT_EQ(0, vfs_import_initrd(archive.bytes.data(), archive.bytes.size(), root));
         VirtualMemory vm(frames);
         ASSERT_TRUE(vm.allocate_and_map(kBuffer, 2, PageFlags::User | PageFlags::Write));
+        ASSERT_TRUE(vm.allocate_and_map(kRequest, 2, PageFlags::User | PageFlags::Write));
         process = create_user_process("vfs-test", vm.root());
         ASSERT_NE(nullptr, process);
         ASSERT_EQ(0, descriptor_bootstrap_console(process->descriptors));
@@ -152,8 +154,8 @@ TEST(VfsAbi, LayoutsAndBounds)
     EXPECT_EQ(24u, sizeof(os1_seek_request));
     EXPECT_EQ(32u, sizeof(os1_file_info));
     EXPECT_EQ(32u, sizeof(os1_scoped_duplicate_request));
-    EXPECT_EQ(2480u, sizeof(os1_startup_record));
-    EXPECT_EQ(2880u, sizeof(os1_launch_request));
+    EXPECT_EQ(5696u, sizeof(os1_startup_record));
+    EXPECT_EQ(6096u, sizeof(os1_launch_request));
     EXPECT_EQ(16u, offsetof(os1_launch_request, startup));
     EXPECT_EQ(272u, OS1_DIRECTORY_RECORD_MAX);
 }
@@ -1264,8 +1266,9 @@ TEST_F(TmpfsContract, ConcurrentExclusiveCreateHasOneWinnerAndNoQuotaLeak)
         [&] { status[1] = tmpfs_create(node, "same", 4, OS1_OBJECT_FILE, instances[1]); });
     a.join();
     b.join();
-    EXPECT_TRUE((status[0] == 0 && status[1] == OS1_ERR_EXISTS) ||
-                (status[1] == 0 && status[0] == OS1_ERR_EXISTS));
+    EXPECT_TRUE(
+        (status[0] == 0 && (status[1] == OS1_ERR_EXISTS || status[1] == OS1_ERR_WOULD_BLOCK)) ||
+        (status[1] == 0 && (status[0] == OS1_ERR_EXISTS || status[0] == OS1_ERR_WOULD_BLOCK)));
     for(auto* instance : instances)
         instance_release(instance);
     EXPECT_EQ(2u, tmpfs_info(node).nodes);
@@ -1328,7 +1331,7 @@ TEST_F(TmpfsContract, CompatibilityPartialCopyFaultCommitsOnlyDeliveredChunks)
     ASSERT_GE(fd, 0);
     std::array<char, 256> data;
     data.fill('x');
-    const auto boundary = kRequest + 4096 - data.size();
+    const auto boundary = kRequest + 8192 - data.size();
     ASSERT_TRUE(copy_to_user(frames, thread, boundary, data.data(), data.size()));
     EXPECT_EQ(256, sys_write({.frames = &frames}, fd, boundary, 512));
     EXPECT_EQ(256u, table().entries[fd].instance->cursor);
@@ -1476,4 +1479,138 @@ TEST_F(TmpfsContract, SyncValidatesCapturedAuthorityAndEmptyPayload)
     EXPECT_EQ(file_call(read, OS1_FILE_SYNC), OS1_ERR_ACCESS);
     EXPECT_EQ(file_call(write, OS1_FILE_SYNC, "x", 1), OS1_ERR_INVALID);
     EXPECT_EQ(invoke(client, OS1_DIRECTORY_INTERFACE_ID, OS1_DIRECTORY_SYNC).application_status, 0);
+}
+
+TEST_F(TmpfsContract, ContextTraversalClampsAtRootAndRejectsDetachedCwd)
+{
+    int a = create("a", OS1_OBJECT_DIRECTORY, kTmpDirectoryRights, kNamespaceCeiling);
+    ASSERT_GE(a, 0);
+    auto rooted = [&](int root_fd, int cwd_fd, const char* path, uint32_t rights) {
+        os1_context_open_request r{
+            1, sizeof(r), cwd_fd, uint32_t(strlen(path)), 0, rights, 0, 0, 0};
+        return vfs_context_open(table(), root_fd, r, path);
+    };
+    long parent = rooted(directory, a, "../../..", OS1_RIGHT_INSPECT);
+    ASSERT_GE(parent, 0);
+    EXPECT_EQ(vfs_same_object(table(), parent, directory), 1);
+    char path[64];
+    EXPECT_EQ(vfs_describe_path(table(), directory, a, path, sizeof(path)), 2);
+    EXPECT_STREQ("/a", path);
+    EXPECT_EQ(rooted(directory, a, "../../etc", OS1_RIGHT_READ), OS1_ERR_NOT_FOUND);
+    long restricted = duplicate(directory, OS1_RIGHT_LOOKUP, OS1_RIGHT_READ);
+    ASSERT_GE(restricted, 0);
+    EXPECT_EQ(rooted(restricted, a, ".", OS1_RIGHT_CREATE), OS1_ERR_ACCESS);
+    ASSERT_EQ(remove("a"), 0);
+    EXPECT_EQ(vfs_describe_path(table(), directory, a, path, sizeof(path)), OS1_ERR_NOT_FOUND);
+    EXPECT_EQ(rooted(directory, a, "..", OS1_RIGHT_INSPECT), OS1_ERR_NOT_FOUND);
+}
+TEST_F(TmpfsContract, CrossDirectoryMoveReplacesAtomicallyAndPreservesRetainedObjects)
+{
+    int a = create("a", OS1_OBJECT_DIRECTORY, kTmpDirectoryRights, kNamespaceCeiling);
+    int b = create("b", OS1_OBJECT_DIRECTORY, kTmpDirectoryRights, kNamespaceCeiling);
+    ASSERT_GE(a, 0);
+    ASSERT_GE(b, 0);
+    auto* from = static_cast<VfsNode*>(table().entries[a].instance->object);
+    auto* to = static_cast<VfsNode*>(table().entries[b].instance->object);
+    OpenInstance *source_open = nullptr, *target_open = nullptr;
+    ASSERT_EQ(tmpfs_create(from, "x", 1, OS1_OBJECT_FILE, source_open), 0);
+    ASSERT_EQ(tmpfs_create(to, "y", 1, OS1_OBJECT_FILE, target_open), 0);
+    InstanceRef source_ref(source_open), target_ref(target_open);
+    auto* source = static_cast<VfsNode*>(source_open->object);
+    auto* target = static_cast<VfsNode*>(target_open->object);
+    os1_move_request r{1, sizeof(r), b, 1, 1, 1, {'x'}, {'y'}};
+    ASSERT_EQ(vfs_move_at(table(), a, r), 0);
+    EXPECT_EQ(from->children, nullptr);
+    EXPECT_EQ(to->children, source);
+    EXPECT_FALSE(target->linked);
+    EXPECT_TRUE(source->linked);
+    EXPECT_EQ(vfs_move_at(table(), a, r), OS1_ERR_NOT_FOUND);
+    r.destination_fd = a;
+    r.source[0] = 'a';
+    r.destination[0] = 'z';
+    EXPECT_LT(vfs_move_at(table(), directory, r), 0);  // Cannot move a directory into itself.
+    EXPECT_EQ(node->children->name[0], 'b');
+    r.destination_fd = 62;
+    r.source[0] = 'y';
+    EXPECT_LT(vfs_move_at(table(), b, r), 0);  // Different immutable filesystem.
+    EXPECT_EQ(to->children, source);
+}
+TEST_F(TmpfsContract, TypedRemovalRejectsWrongKindWithoutMutation)
+{
+    int d = create("dir", OS1_OBJECT_DIRECTORY, kTmpDirectoryRights, kNamespaceCeiling);
+    ASSERT_GE(d, 0);
+    os1_directory_remove_typed request{3, OS1_OBJECT_FILE, {'d', 'i', 'r'}};
+    EXPECT_EQ(invoke(client,
+                     OS1_DIRECTORY_INTERFACE_ID,
+                     OS1_DIRECTORY_REMOVE_TYPED,
+                     &request,
+                     sizeof(request))
+                  .application_status,
+              OS1_ERR_INVALID);
+    EXPECT_GE(open("tmp/dir", OS1_RIGHT_INSPECT), 0);
+    request.kind = OS1_OBJECT_DIRECTORY;
+    EXPECT_EQ(invoke(client,
+                     OS1_DIRECTORY_INTERFACE_ID,
+                     OS1_DIRECTORY_REMOVE_TYPED,
+                     &request,
+                     sizeof(request))
+                  .application_status,
+              0);
+}
+
+TEST_F(TmpfsContract, NamespaceSyscallsRejectMalformedRecordsAndFaultsWithoutMutation)
+{
+    ASSERT_GE(create("a"), 0);
+    os1_move_request move{1, sizeof(move), directory, 1, 1, 1, {'a'}, {'b'}};
+    move.source[63] = 'x';
+    EXPECT_EQ(call(directory, OS1_RESOURCE_MOVE_AT, move), OS1_ERR_INVALID);
+    move.source[63] = 0;
+    move.replace = 2;
+    EXPECT_EQ(call(directory, OS1_RESOURCE_MOVE_AT, move), OS1_ERR_INVALID);
+    EXPECT_EQ(sys_resource(frames, thread, directory, OS1_RESOURCE_MOVE_AT, kRequest + 8190),
+              OS1_ERR_FAULT);
+    os1_context_open_request opened{
+        1, sizeof(opened), directory, 1, kBuffer, OS1_RIGHT_READ, 0, 0, 0};
+    opened.reserved = 1;
+    EXPECT_EQ(call(directory, OS1_RESOURCE_CONTEXT_OPEN, opened), OS1_ERR_INVALID);
+    opened.reserved = 0;
+    opened.path = kRequest + 8192;
+    EXPECT_EQ(call(directory, OS1_RESOURCE_CONTEXT_OPEN, opened), OS1_ERR_FAULT);
+    os1_path_request path{1, sizeof(path), directory, 64, kRequest + 8192};
+    EXPECT_EQ(call(directory, OS1_RESOURCE_DESCRIBE_PATH, path), OS1_ERR_FAULT);
+    path.capacity = 0;
+    EXPECT_EQ(call(directory, OS1_RESOURCE_DESCRIBE_PATH, path), OS1_ERR_INVALID);
+    EXPECT_GE(open("tmp/a", OS1_RIGHT_READ), 0);
+    EXPECT_EQ(open("tmp/b", OS1_RIGHT_READ), OS1_ERR_NOT_FOUND);
+}
+TEST_F(TmpfsContract, ConcurrentRenameAndRootedDescribeNeverExposePartialNames)
+{
+    int child = create("left", OS1_OBJECT_DIRECTORY, kTmpDirectoryRights, kNamespaceCeiling);
+    ASSERT_GE(child, 0);
+    std::thread writer([&] {
+        for(unsigned i = 0; i < 200; ++i)
+        {
+            long r;
+            do
+            {
+                r = tmpfs_rename(node, "left", 4, "right", 5);
+            } while(r == OS1_ERR_WOULD_BLOCK);
+            EXPECT_EQ(r, 0);
+            do
+            {
+                r = tmpfs_rename(node, "right", 5, "left", 4);
+            } while(r == OS1_ERR_WOULD_BLOCK);
+            EXPECT_EQ(r, 0);
+        }
+    });
+    for(unsigned i = 0; i < 500; ++i)
+    {
+        char path[64]{};
+        long r = vfs_describe_path(table(), directory, child, path, sizeof(path));
+        if(r == OS1_ERR_WOULD_BLOCK)
+            continue;
+        ASSERT_GE(r, 0);
+        EXPECT_TRUE(std::string(path) == "/left" || std::string(path) == "/right");
+    }
+    writer.join();
 }

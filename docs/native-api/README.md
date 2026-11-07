@@ -19,6 +19,7 @@ flowchart TD
 
 | Document | Authority and status |
 | --- | --- |
+| [Reflective OS hierarchy](object-hierarchy.md) | Option B selected on 2026-11-07; proposed service roots and discovery; bounded typed context is now implemented. |
 | [Native object contract](object-contract.md) | Shared semantic direction. Its approved decisions and implemented subsets are identified explicitly. |
 | [Service roadmap](roadmap.md) | Current gaps, dependencies, milestone acceptance, and deferred work. Proposed interfaces have no assigned ABI yet. |
 | Implemented ABI profiles below | Exact current records, rights, limits, operations, and failure rules. UAPI headers and tests establish implementation evidence. |
@@ -39,6 +40,7 @@ Documents can contain proposals after promotion, provided their scope and status
 
 | Capability | Current contract |
 | --- | --- |
+| Typed environment, rooted navigation, and same-filesystem moves | [Startup and namespace extension](abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension) |
 | Kernel-hosted Console methods, information property, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |
 | Persistent ext2 over virtio/USB, disk executables, File/Directory `sync` | [Ext2 storage profile](../filesystems/ext2.md) |
 | Kernel-hosted writable `/tmp`, mutation rights, resource results, quotas | [Temporary filesystem ABI](abi/tmpfs-abi.md) |
@@ -56,6 +58,8 @@ The [approved object-handle model](object-contract.md#object-handles-and-interop
 The current encoding remains `fd`; general typed owning/borrowed C++ wrappers remain SDK work.
 
 ## Latest implementation
+
+The [typed shell record](../shell/typed-context-plan.md) covers the first object-command stage and namespace extensions.
 
 The [project review](../reviews/2026-11-06-review.md) assesses the merged service and storage baseline.
 The [USB hardware record](../archive/filesystems/2026-11-06-usb-hardware-validation.md) records one physical persistence result.

@@ -46,7 +46,7 @@ explicit child grants, and executable-reference launch. The
 [copied IPC prototype](docs/native-api/abi/copied-ipc-abi.md) adds retained Operations and a private
 `textprocessor` with methods/properties, exercised by `ipccheck`.
 The initrd contains `init`, `sh`, `ls`, `cat`, and `/etc/motd` for recovery without storage.
-Other bundled programs are installed under `/disk/bin`; the shell searches `/bin` first, then `/disk/bin`.
+Other bundled programs are installed under `/disk/bin`; the shell initially searches `/bin`, then `/disk/bin`; typed path operations can change that list.
 For an existing QEMU disk, run `./os1.sh storage_deploy` after this upgrade.
 For an existing managed USB stick, select **Update boot and programs (preserve data)**.
 See the [deployment guide](docs/filesystems/program-deployment.md).
@@ -304,15 +304,16 @@ Historical BIOS failures remain separate evidence.
 
 ## Create and edit temporary files
 
-The shell provides `touch`, interactive `write`, and the line editor `edit`.
+The shell provides typed navigation, aliases, basic file operations, interactive `write`, and the line editor `edit`.
+See [typed context and basic commands](docs/shell/typed-context.md) for cwd, path configuration, strict scripts, and same-filesystem moves.
 Files under `/tmp` disappear on reboot.
 
 ```text
-touch /tmp/empty
+touch "/tmp/empty"
 write /tmp/note
 Hello from os1.
 .
-cat /tmp/note > /tmp/copy
+cat "/tmp/note" > "/tmp/copy"
 edit /tmp/copy
 p
 a

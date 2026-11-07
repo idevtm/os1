@@ -55,6 +55,19 @@ struct Volume
     long remove(
         uint32_t parent_number, Inode& parent, const char*, size_t, uint32_t number, Inode& inode);
     long rename(Inode& parent, const char*, size_t, const char*, size_t);
+    long move(uint32_t source_parent,
+              Inode& source_directory,
+              const char* source,
+              size_t source_bytes,
+              uint32_t destination_parent,
+              Inode& destination_directory,
+              const char* destination,
+              size_t destination_bytes,
+              uint32_t number,
+              Inode& inode,
+              uint32_t replaced,
+              Inode* replaced_inode,
+              uint8_t* scratch);
     long sync();
     long begin_write();
     long get_block(const Inode&, uint32_t index, uint32_t& result);

@@ -2,6 +2,7 @@
 #include "sync/atomic.hpp"
 #include "util/memory.h"
 #include "vfs/filesystem.hpp"
+#include "vfs/namespace.hpp"
 
 struct Tmpfs
 {
@@ -180,6 +181,9 @@ long tmpfs_lookup(VfsNode* directory, const char* name, size_t size, NativeObjec
 long tmpfs_create(
     VfsNode* directory, const char* name, size_t size, uint32_t kind, OpenInstance*& result)
 {
+    NamespaceGuard namespace_guard;
+    if(!namespace_guard.held)
+        return OS1_ERR_WOULD_BLOCK;
     result = nullptr;
     if(!valid_name(name, size) || (kind != OS1_OBJECT_DIRECTORY && kind != OS1_OBJECT_FILE))
         return OS1_ERR_INVALID;
@@ -216,8 +220,11 @@ long tmpfs_create(
     object_release(node);
     return status;
 }
-long tmpfs_remove(VfsNode* directory, const char* name, size_t size)
+long tmpfs_remove(VfsNode* directory, const char* name, size_t size, uint32_t kind)
 {
+    NamespaceGuard namespace_guard;
+    if(!namespace_guard.held)
+        return OS1_ERR_WOULD_BLOCK;
     if(!valid_name(name, size))
         return OS1_ERR_INVALID;
     VfsNode* removed = nullptr;
@@ -231,6 +238,8 @@ long tmpfs_remove(VfsNode* directory, const char* name, size_t size)
         if(!*link)
             return OS1_ERR_NOT_FOUND;
         removed = *link;
+        if(kind && removed->kind != kind)
+            return OS1_ERR_INVALID;
         if(removed->kind == OS1_OBJECT_DIRECTORY && removed->children)
             return OS1_ERR_NOT_EMPTY;
         *link = removed->next;
@@ -246,6 +255,9 @@ long tmpfs_rename(VfsNode* directory,
                   const char* destination,
                   size_t destination_size)
 {
+    NamespaceGuard namespace_guard;
+    if(!namespace_guard.held)
+        return OS1_ERR_WOULD_BLOCK;
     if(!valid_name(source, source_size) || !valid_name(destination, destination_size))
         return OS1_ERR_INVALID;
     auto* fs = directory->filesystem;
@@ -268,6 +280,71 @@ long tmpfs_rename(VfsNode* directory,
     node->cookie = fs->next_cookie++;
     return 0;
 }
+
+namespace
+{
+void update_depth(VfsNode* node, unsigned depth)
+{
+    static_cast<TmpNode*>(node)->depth = depth;
+    for(auto* child = node->children; child; child = child->next)
+        update_depth(child, depth + 1);
+}
+long move(VfsNode* from,
+          const char* source,
+          size_t a,
+          VfsNode* to,
+          const char* destination,
+          size_t b,
+          bool replace)
+{
+    if(!valid_name(source, a) || !valid_name(destination, b))
+        return OS1_ERR_INVALID;
+    if(from->filesystem != to->filesystem)
+        return OS1_ERR_UNSUPPORTED;
+    NamespaceGuard namespace_guard;
+    if(!namespace_guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    VfsNode* target = nullptr;
+    {
+        auto* fs = from->filesystem;
+        IrqSpinGuard guard(fs->lock);
+        if(!from->linked || !to->linked)
+            return OS1_ERR_CLOSED;
+        auto* node = lookup_locked(from, source, a);
+        if(!node)
+            return OS1_ERR_NOT_FOUND;
+        target = lookup_locked(to, destination, b);
+        if(node == target)
+            return 0;
+        if(vfs_contains(node, to))
+            return OS1_ERR_INVALID;
+        if(target && !replace)
+            return OS1_ERR_EXISTS;
+        if(target && target->kind != node->kind)
+            return OS1_ERR_INVALID;
+        if(target && target->children)
+            return OS1_ERR_NOT_EMPTY;
+        if(static_cast<TmpNode*>(to)->depth + 1 + vfs_height(node) > 32 ||
+           fs->next_cookie == UINT64_MAX)
+            return OS1_ERR_LIMIT;
+        if(target)
+        {
+            vfs_detach(to, target);
+            target->linked = false;
+        }
+        vfs_detach(from, node);
+        memset(node->name, 0, sizeof(node->name));
+        memcpy(node->name, destination, b);
+        node->name_size = b;
+        update_depth(node, static_cast<TmpNode*>(to)->depth + 1);
+        node->cookie = fs->next_cookie++;
+        node->next = to->children;
+        to->children = node;
+    }
+    object_release(target);
+    return 0;
+}
+}  // namespace
 long tmpfs_read(VfsNode* node, uint64_t offset, void* output, size_t size)
 {
     IrqSpinGuard guard(node->filesystem->lock);
@@ -410,7 +487,8 @@ const VfsOperations tmpfs_operations{tmpfs_lookup,
                                      tmpfs_next,
                                      tmpfs_info,
                                      [](VfsNode*) -> long { return 0; },
-                                     nullptr};
+                                     nullptr,
+                                     move};
 bool vfs_backed(const NativeObject* object)
 {
     return object && (object->kind == OS1_OBJECT_FILE || object->kind == OS1_OBJECT_DIRECTORY) &&

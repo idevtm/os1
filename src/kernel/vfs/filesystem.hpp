@@ -4,7 +4,7 @@ struct VfsOperations
 {
     long (*lookup)(VfsNode*, const char*, size_t, NativeObject*&);
     long (*create)(VfsNode*, const char*, size_t, uint32_t, OpenInstance*&);
-    long (*remove)(VfsNode*, const char*, size_t);
+    long (*remove)(VfsNode*, const char*, size_t, uint32_t);
     long (*rename)(VfsNode*, const char*, size_t, const char*, size_t);
     long (*read)(VfsNode*, uint64_t, void*, size_t);
     long (*write)(VfsNode*, uint64_t, const void*, size_t, bool, uint64_t*);
@@ -14,6 +14,7 @@ struct VfsOperations
     os1_filesystem_info (*info)(VfsNode*);
     long (*sync)(VfsNode*);
     long (*snapshot)(VfsNode*, uint8_t*&, uint64_t&);
+    long (*move)(VfsNode*, const char*, size_t, VfsNode*, const char*, size_t, bool);
 };
 bool vfs_backed(const NativeObject*);
 extern const VfsOperations tmpfs_operations;

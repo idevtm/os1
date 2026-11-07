@@ -87,6 +87,7 @@ The first correction reclaimed one unused page, but CI then measured the complet
 The final correction moves the five page tables to `[0x9000,0xE000)` and starts kernel staging at `0xE000`.
 The first table page reuses disk and journal scratch only after all BIOS disk I/O completes.
 Loader code ends at or below `0x9000`. An assembler assertion enforces that boundary.
+This is historical layout evidence. The [typed context stage](../shell/typed-context-plan.md) later changed the staging split.
 The new slot holds 381,440 bytes. The initrd retains `[0x6b200,0x9A000)` and 192,000 bytes.
 An assembler assertion rejects page-table overlap. Existing file-size and physical-load checks remain enabled.
 The initrd disk slot shifts by sixteen sectors; generated loader constants follow that shift.

@@ -22,6 +22,8 @@ struct Command
     char raw[line_capacity]{};
     char* argv[argument_limit]{};
     size_t argc = 0;
+    size_t begin[argument_limit]{}, end[argument_limit]{};
+    char input_raw[line_capacity]{}, output_raw[line_capacity]{};
     Input input = Input::None;
     Output output = Output::None;
     char input_name[line_capacity]{};
@@ -82,6 +84,7 @@ inline bool parse(const char* text, Command& out)
         const size_t start = pos, first = used;
         char quote = 0;
         unsigned depth = 0;
+        char groups[16]{};
         bool started = false;
         while(pos < length)
         {
@@ -118,10 +121,17 @@ inline bool parse(const char* text, Command& out)
                 continue;
             }
             else if(c == '{' || c == '[')
-                ++depth;
+            {
+                if(depth == sizeof(groups))
+                {
+                    out.error = "group depth exceeded";
+                    return false;
+                }
+                groups[depth++] = c;
+            }
             else if(c == '}' || c == ']')
             {
-                if(!depth)
+                if(!depth || (c == '}' ? groups[depth - 1] != '{' : groups[depth - 1] != '['))
                 {
                     out.error = "unmatched closing group";
                     return false;
@@ -151,6 +161,10 @@ inline bool parse(const char* text, Command& out)
             auto* destination = redirect <= 2 ? out.input_name : out.output_name;
             for(size_t i = 0; i < used - first; ++i)
                 destination[i] = out.words[first + i];
+            auto* raw_name = redirect <= 2 ? out.input_raw : out.output_raw;
+            for(size_t i = start; i < pos; ++i)
+                raw_name[i - start] = text[i];
+            raw_name[pos - start] = 0;
             used = first;
             if(redirect <= 2)
                 out.input = redirect == 1 ? Input::File : Input::Here;
@@ -167,8 +181,10 @@ inline bool parse(const char* text, Command& out)
             out.argv[out.argc++] = out.words + first;
             if(raw)
                 out.raw[raw++] = ' ';
+            out.begin[out.argc - 1] = raw;
             for(size_t i = start; i < pos; ++i)
                 out.raw[raw++] = text[i];
+            out.end[out.argc - 1] = raw;
             out.raw[raw] = 0;
         }
     }

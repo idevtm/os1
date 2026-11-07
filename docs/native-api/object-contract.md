@@ -17,6 +17,21 @@ Definitions also appear in the [glossary](../GLOSSARY.md#descriptors-native-obje
 Operation names and symbolic errors are semantic names unless an implemented ABI profile assigns their encoding.
 Reviewed UAPI headers define current syscall numbers, layouts, rights, and error values.
 
+## Reflective hierarchy direction — 2026-11-07
+
+Option B is selected: a reflective hierarchy of local values, resource objects, and service objects.
+The [hierarchy proposal](object-hierarchy.md) owns proposed roots, typed environment, and discovery boundaries.
+The [shell proposal](../shell/object-commands.md) owns command spellings and presentation.
+
+| Boundary | Direction |
+| --- | --- |
+| OS model | Language-independent typed interfaces, explicit grants, and bounded discovery |
+| Shell | One client of that model; short commands do not define kernel operations |
+| Implementation | Existing ABI profiles remain authoritative; no universal runtime or new record layout is implemented |
+
+This direction extends the fixed-interface foundation rather than replacing its authority and lifetime rules.
+It does not require one process per object or a universal kernel class hierarchy.
+
 ## Public interface names
 
 Methods, properties, and events use `snake_case`, such as `try_read`, `max_bytes`, and `state_changed`.

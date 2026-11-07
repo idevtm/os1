@@ -6,6 +6,7 @@
 #include "util/memory.h"
 #include "vfs/filesystem.hpp"
 #include "vfs/initrd.hpp"
+#include "vfs/namespace.hpp"
 
 namespace
 {
@@ -228,6 +229,60 @@ long sys_vfs(
     PageFrameContainer& frames, Thread* thread, int fd, uint64_t operation, uint64_t argument)
 {
     auto& table = thread->process->descriptors;
+    if(operation == OS1_RESOURCE_SAME_OBJECT)
+        return argument < OS1_DESCRIPTOR_LIMIT ? vfs_same_object(table, fd, argument)
+                                               : OS1_ERR_BAD_DESCRIPTOR;
+    if(operation == OS1_RESOURCE_MOVE_AT)
+    {
+        os1_move_request request{};
+        if(!copy_from_user(frames, thread, argument, &request, sizeof(request)))
+            return OS1_ERR_FAULT;
+        if(request.version != OS1_VFS_ABI_VERSION || request.size != sizeof(request) ||
+           request.replace > 1 || !request.source_bytes || request.source_bytes > 63 ||
+           !request.destination_bytes || request.destination_bytes > 63)
+            return OS1_ERR_INVALID;
+        for(unsigned i = request.source_bytes; i < sizeof(request.source); ++i)
+            if(request.source[i])
+                return OS1_ERR_INVALID;
+        for(unsigned i = request.destination_bytes; i < sizeof(request.destination); ++i)
+            if(request.destination[i])
+                return OS1_ERR_INVALID;
+        return vfs_move_at(table, fd, request);
+    }
+    if(operation == OS1_RESOURCE_CONTEXT_OPEN)
+    {
+        os1_context_open_request request{};
+        if(!copy_from_user(frames, thread, argument, &request, sizeof(request)))
+            return OS1_ERR_FAULT;
+        if(request.version != OS1_VFS_ABI_VERSION || request.size != sizeof(request) ||
+           request.reserved || !request.path_bytes || request.path_bytes > OS1_PATH_MAX)
+            return OS1_ERR_INVALID;
+        auto* path = static_cast<char*>(kmalloc(request.path_bytes));
+        if(!path)
+            return OS1_ERR_NO_MEMORY;
+        long r = copy_from_user(frames, thread, request.path, path, request.path_bytes)
+                     ? vfs_context_open(table, fd, request, path)
+                     : OS1_ERR_FAULT;
+        kfree(path);
+        return r;
+    }
+    if(operation == OS1_RESOURCE_DESCRIBE_PATH)
+    {
+        os1_path_request request{};
+        if(!copy_from_user(frames, thread, argument, &request, sizeof(request)))
+            return OS1_ERR_FAULT;
+        if(request.version != OS1_VFS_ABI_VERSION || request.size != sizeof(request) ||
+           !request.capacity || request.capacity > OS1_PATH_MAX + 1)
+            return OS1_ERR_INVALID;
+        auto* path = static_cast<char*>(kmalloc(request.capacity));
+        if(!path)
+            return OS1_ERR_NO_MEMORY;
+        long r = vfs_describe_path(table, fd, request.object_fd, path, request.capacity);
+        if(r >= 0 && !copy_to_user(frames, thread, request.buffer, path, r + 1))
+            r = OS1_ERR_FAULT;
+        kfree(path);
+        return r;
+    }
     if(operation == OS1_RESOURCE_DUPLICATE_SCOPED)
     {
         os1_scoped_duplicate_request request{};

@@ -81,6 +81,11 @@ A filesystem lock protects nodes, sparse pages, and quotas; open instances retai
 The mount rejects name collisions before publication. Unlinked nodes remain charged until final release.
 
 
+The selected [reflective hierarchy](native-api/object-hierarchy.md) organizes future OS services and typed process context.
+It separates local values, resource references, and service providers.
+The [shell command proposal](shell/object-commands.md) defines user-facing bindings separately.
+These proposals change no current ABI or runtime behavior.
+
 ## Glossary
 
 The [project glossary](GLOSSARY.md) defines the terms used here and throughout
@@ -452,7 +457,12 @@ The shell runs a line-buffered REPL:
 
 1. `write(1, "os1> ")` via `SYSCALL`.
 2. `read(0, buf, N)` blocks on the typed console-read wait state until enter commits a line.
-3. Tokens are dispatched: `help`, `echo`, `pid`, built-in observers (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`) each make one `observe(kind, buf, len)` call and render the resulting fixed-record table; `exec <path> [args...]` replaces the shell image through native `launch`; bare external commands search `/bin/<name>` then `/disk/bin/<name>` and use native `launch` + `waitpid`, forwarding bounded arguments and explicit stream/root/cwd grants.
+3. The shell binds aliases and arguments, validates values, and prepares stream redirection.
+   Local `path` and `fs` helpers use typed context and granted namespace resources.
+   Observer commands call `observe(kind, buf, len)` and render fixed-record tables.
+   External commands search the inherited path list, initially `/bin` then `/disk/bin`.
+   Native launch receives a copied environment and explicit stream/root/cwd grants; the shell waits for the child.
+   `exec` replaces the shell image instead of creating a child.
 4. User exceptions (e.g. `/disk/bin/fault`) are caught in `HandleException`, the thread is marked `Dying`, `ScheduleNext(false)` runs, and `reapDeadThreads` reclaims the thread stack and address space from a different stack on a later trap.
 
 ### Phase 6 — exec and in-place image replacement
@@ -529,8 +539,8 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
 The core ELF uses 256-byte file alignment while kernel memory boundaries remain page-aligned.
 BIOS packaging removes unused section metadata; the diagnostic kernel ELF retains symbols.
-The BIOS loader stages the stripped kernel in `[0xE000,0x6b200)` (372.5 KiB).
-It stages the plain initrd in `[0x6b200,0x9A000)` (187.5 KiB).
+The BIOS loader stages the stripped kernel in `[0xE000,0x72000)` (400 KiB).
+It stages the plain initrd in `[0x72000,0x9A000)` (160 KiB).
 The ext2 slice moves 12 KiB of staging capacity from initrd to the kernel.
 Compact non-reflective executables keep the initrd within its new bound.
 The 2880-sector raw image, firmware ceiling, and boot-log placement remain unchanged.
@@ -594,7 +604,7 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x09000` | BIOS disk scratch, then temporary page tables after firmware disk I/O completes |
 | `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
-| `0x6b200` | BIOS initrd load buffer (187.5 KiB slot, ending at `0x9A000`) |
+| `0x72000` | BIOS initrd load buffer (160 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x20000-0x5FFFF` | page-frame bitmap |
 
@@ -1447,3 +1457,21 @@ Both controllers reuse the SCSI and Bulk-Only Transport implementation.
 EHCI owns a serialized polling schedule and discovers high-speed hubs during boot.
 Hardware drivers remain in the kernel; the native File/Directory contract does not change.
 See [USB storage](hardware/usb-storage.md#ehci-and-high-speed-hubs) for limits and DMA lifetime rules.
+
+## Typed process context and shell bindings
+
+The [first shell stage](shell/typed-context.md) adds local context views and bounded native namespace operations.
+
+```text
+parent data snapshot + explicit resource grants
+  -> startup ABI v3
+  -> child data copy + local path/fs helpers
+  -> native Directory/File calls and rooted namespace operations
+```
+
+The kernel validates typed records but does not execute shell aliases or copy loops.
+The runtime stores path data and cwd text locally; directory descriptors retain authority and identity.
+Rooted lookup and namespace mutations use one nonblocking admission guard before backend locks.
+Content I/O keeps the existing backend locking and failure rules.
+Same-filesystem moves publish one namespace change; ext2 retains its existing dirty-volume failure policy.
+The BIOS staging split reserves 400 KiB for the kernel and 160 KiB for the minimal initrd.

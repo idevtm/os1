@@ -2,8 +2,10 @@
 
 #include "fs/cpio_newc.hpp"
 #include "mm/kmem.hpp"
+#include "sync/atomic.hpp"
 #include "util/memory.h"
 #include "vfs/filesystem.hpp"
+#include "vfs/namespace.hpp"
 
 namespace
 {
@@ -263,4 +265,218 @@ long vfs_open_descriptor(DescriptorTable& table,
         return status;
     InstanceRef pin(instance);
     return descriptor_install(table, instance, rights, flags, -1, ceiling);
+}
+
+namespace
+{
+volatile bool namespace_busy = false;
+// Caller retains root and holds NamespaceGuard. No publication can change child lists.
+bool ancestry(VfsNode* root, VfsNode* target, VfsNode** path, unsigned& depth)
+{
+    VfsNode* next[65]{};
+    path[0] = root;
+    next[0] = root->children;
+    depth = 0;
+    unsigned visited = 0;
+    for(;;)
+    {
+        if(path[depth] == target)
+            return true;
+        if(++visited > 8192)
+            return false;
+        if(next[depth])
+        {
+            auto* node = next[depth];
+            next[depth] = node->next;
+            if(depth == 64)
+                continue;
+            path[++depth] = node;
+            next[depth] = node->children;
+        }
+        else if(depth)
+            --depth;
+        else
+            return false;
+    }
+}
+}  // namespace
+NamespaceGuard::NamespaceGuard()
+{
+    bool expected = false;
+    held = atomic_compare_exchange_strong(&namespace_busy, &expected, true);
+}
+NamespaceGuard::~NamespaceGuard()
+{
+    if(held)
+        atomic_store_release(&namespace_busy, false);
+}
+long vfs_describe_path(DescriptorTable& table, int root_fd, int fd, char* out, size_t capacity)
+{
+    DescriptorEntry root{}, object{};
+    long r = descriptor_acquire_entry(table, root_fd, OS1_RIGHT_LOOKUP, root);
+    if(r < 0)
+        return r;
+    InstanceRef root_pin(root.instance);
+    r = descriptor_acquire_entry(table, fd, OS1_RIGHT_INSPECT, object);
+    if(r < 0)
+        return r;
+    InstanceRef object_pin(object.instance);
+    if(root.instance->object->kind != OS1_OBJECT_DIRECTORY)
+        return OS1_ERR_NOT_DIRECTORY;
+    if(object.instance->object->kind != OS1_OBJECT_DIRECTORY &&
+       object.instance->object->kind != OS1_OBJECT_FILE)
+        return OS1_ERR_UNSUPPORTED;
+    NamespaceGuard guard;
+    if(!guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    VfsNode* path[65]{};
+    unsigned depth = 0;
+    if(!ancestry(static_cast<VfsNode*>(root.instance->object),
+                 static_cast<VfsNode*>(object.instance->object),
+                 path,
+                 depth))
+        return OS1_ERR_NOT_FOUND;
+    size_t size = 1;
+    for(unsigned i = 1; i <= depth; ++i)
+        size += path[i]->name_size + (i > 1);
+    if(size >= capacity)
+        return OS1_ERR_BUFFER_TOO_SMALL;
+    size_t at = 0;
+    out[at++] = '/';
+    for(unsigned i = 1; i <= depth; ++i)
+    {
+        if(i > 1)
+            out[at++] = '/';
+        memcpy(out + at, path[i]->name, path[i]->name_size);
+        at += path[i]->name_size;
+    }
+    out[at] = 0;
+    return at;
+}
+long vfs_context_open(DescriptorTable& table,
+                      int root_fd,
+                      const os1_context_open_request& request,
+                      const char* text)
+{
+    if(!request.path_bytes || request.path_bytes > OS1_PATH_MAX ||
+       ((request.rights | request.descendant_rights) & ~OS1_RIGHT_ALL) ||
+       request.descriptor_flags & ~OS1_DESCRIPTOR_CLOEXEC)
+        return OS1_ERR_INVALID;
+    DescriptorEntry root{}, cwd{};
+    long r = descriptor_acquire_entry(table, root_fd, OS1_RIGHT_LOOKUP, root);
+    if(r < 0)
+        return r;
+    InstanceRef root_pin(root.instance);
+    const bool absolute = text[0] == '/';
+    r = descriptor_acquire_entry(table, absolute ? root_fd : request.cwd_fd, OS1_RIGHT_LOOKUP, cwd);
+    if(r < 0)
+        return r;
+    InstanceRef cwd_pin(cwd.instance);
+    if(root.instance->object->kind != OS1_OBJECT_DIRECTORY ||
+       cwd.instance->object->kind != OS1_OBJECT_DIRECTORY)
+        return OS1_ERR_NOT_DIRECTORY;
+    const uint32_t allowed =
+        root.descendant_rights & cwd.descendant_rights &
+        (((root.rights & cwd.rights) & OS1_RIGHT_DELEGATE) ? OS1_RIGHT_ALL : ~OS1_RIGHT_DELEGATE);
+    if((request.rights | request.descendant_rights) & ~allowed)
+        return OS1_ERR_ACCESS;
+    NamespaceGuard guard;
+    if(!guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    VfsNode* path[65]{};
+    unsigned depth = 0;
+    if(!ancestry(static_cast<VfsNode*>(root.instance->object),
+                 static_cast<VfsNode*>(cwd.instance->object),
+                 path,
+                 depth))
+        return OS1_ERR_NOT_FOUND;
+    size_t start = 0;
+    for(size_t i = 0; i <= request.path_bytes; ++i)
+    {
+        if(i < request.path_bytes && !text[i])
+            return OS1_ERR_INVALID;
+        if(i < request.path_bytes && text[i] != '/')
+            continue;
+        const size_t n = i - start;
+        if(n)
+        {
+            if(path[depth]->kind != OS1_OBJECT_DIRECTORY)
+                return OS1_ERR_NOT_DIRECTORY;
+            if(n > OS1_NAME_MAX)
+                return OS1_ERR_INVALID;
+            if(n == 2 && text[start] == '.' && text[start + 1] == '.')
+            {
+                if(depth)
+                    --depth;
+            }
+            else if(!(n == 1 && text[start] == '.'))
+            {
+                auto* child = lookup(path[depth], text + start, n);
+                if(!child)
+                    return OS1_ERR_NOT_FOUND;
+                if(depth == 64)
+                    return OS1_ERR_LIMIT;
+                path[++depth] = child;
+            }
+        }
+        start = i + 1;
+    }
+    auto* node = path[depth];
+    if(text[request.path_bytes - 1] == '/' && node->kind != OS1_OBJECT_DIRECTORY)
+        return OS1_ERR_NOT_DIRECTORY;
+    if(request.rights & ~node->allowed_rights)
+        return OS1_ERR_ACCESS;
+    if(request.descendant_rights && node->kind != OS1_OBJECT_DIRECTORY)
+        return OS1_ERR_INVALID;
+    InstanceRef instance(open_instance(node, &r));
+    if(!instance.get())
+        return r;
+    return descriptor_install(table,
+                              instance.get(),
+                              request.rights,
+                              request.descriptor_flags,
+                              -1,
+                              request.descendant_rights);
+}
+long vfs_move_at(DescriptorTable& table, int source_fd, const os1_move_request& request)
+{
+    DescriptorEntry source{}, destination{};
+    long r =
+        descriptor_acquire_entry(table, source_fd, OS1_RIGHT_LOOKUP | OS1_RIGHT_RENAME, source);
+    if(r < 0)
+        return r;
+    InstanceRef s(source.instance);
+    const uint32_t rights = OS1_RIGHT_LOOKUP | OS1_RIGHT_CREATE | OS1_RIGHT_RENAME |
+                            (request.replace ? OS1_RIGHT_REMOVE : 0);
+    r = descriptor_acquire_entry(table, request.destination_fd, rights, destination);
+    if(r < 0)
+        return r;
+    InstanceRef d(destination.instance);
+    if(s.get()->object->kind != OS1_OBJECT_DIRECTORY ||
+       d.get()->object->kind != OS1_OBJECT_DIRECTORY)
+        return OS1_ERR_NOT_DIRECTORY;
+    auto* from = static_cast<VfsNode*>(s.get()->object);
+    auto* to = static_cast<VfsNode*>(d.get()->object);
+    if(!from->operations || !from->operations->move || from->operations != to->operations)
+        return OS1_ERR_UNSUPPORTED;
+    return from->operations->move(from,
+                                  request.source,
+                                  request.source_bytes,
+                                  to,
+                                  request.destination,
+                                  request.destination_bytes,
+                                  request.replace);
+}
+long vfs_same_object(DescriptorTable& table, int left, int right)
+{
+    DescriptorEntry a{}, b{};
+    long r = descriptor_acquire_entry(table, left, OS1_RIGHT_INSPECT, a);
+    if(r < 0)
+        return r;
+    InstanceRef pa(a.instance);
+    r = descriptor_acquire_entry(table, right, OS1_RIGHT_INSPECT, b);
+    if(r < 0)
+        return r;
+    InstanceRef pb(b.instance);
+    return a.instance->object == b.instance->object;
 }

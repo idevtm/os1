@@ -11,6 +11,7 @@
 #define OS1_DIRECTORY_REWIND 6u
 #define OS1_DIRECTORY_INFO 7u
 #define OS1_DIRECTORY_SYNC 8u
+#define OS1_DIRECTORY_REMOVE_TYPED 9u
 #define OS1_FILE_READ 1u
 #define OS1_FILE_WRITE 2u
 #define OS1_FILE_SEEK 3u
@@ -35,6 +36,11 @@ struct os1_directory_open
 struct os1_directory_name
 {
     uint32_t name_bytes, reserved;
+    char name[64];
+};
+struct os1_directory_remove_typed
+{
+    uint32_t name_bytes, kind;
     char name[64];
 };
 struct os1_directory_rename

@@ -1,6 +1,7 @@
 #pragma once
+#include <os1/context.h>
 #include <stdint.h>
-#define OS1_STARTUP_VERSION 2u
+#define OS1_STARTUP_VERSION 3u
 #define OS1_ARGUMENT_LIMIT 16u
 #define OS1_ENVIRONMENT_LIMIT 16u
 #define OS1_STARTUP_STRING_BYTES 2048u
@@ -28,6 +29,7 @@ struct os1_startup_record
     uint32_t envp[OS1_ENVIRONMENT_LIMIT];
     char strings[OS1_STARTUP_STRING_BYTES];
     struct os1_constructor_args constructor;
+    struct os1_context_data environment;
 };
 struct os1_child_grant
 {

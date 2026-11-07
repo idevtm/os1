@@ -93,6 +93,16 @@ inline long remove(int client, const char* name)
     os1_ipc_result result{};
     return call(client, true, OS1_DIRECTORY_REMOVE, &a, sizeof(a), result);
 }
+inline long remove_typed(int client, const char* name, uint32_t kind)
+{
+    os1_directory_remove_typed a{name_bytes(name), kind, {}};
+    if(!a.name_bytes)
+        return OS1_ERR_INVALID;
+    for(unsigned i = 0; i < a.name_bytes; ++i)
+        a.name[i] = name[i];
+    os1_ipc_result result{};
+    return call(client, true, OS1_DIRECTORY_REMOVE_TYPED, &a, sizeof(a), result);
+}
 inline long rename(int client, const char* from, const char* to)
 {
     os1_directory_rename a{name_bytes(from), name_bytes(to), {}, {}};
