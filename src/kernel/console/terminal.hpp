@@ -10,6 +10,14 @@ class TextDisplayBackend;
 class Terminal
 {
 public:
+    uint16_t columns() const
+    {
+        return width_;
+    }
+    uint16_t rows() const
+    {
+        return height_;
+    }
     // clear the backing cell buffer and reset the cursor to the origin.
     void clear();
     // attach a page-backed text buffer owned by the caller.

@@ -14,7 +14,7 @@ extern Spinlock g_console_input_lock;
 
 // Reset input queues and current line state.
 void console_input_initialize();
-// Append one decoded keyboard character to the canonical line buffer.
+// Route one decoded keyboard byte to the canonical or owned input queue.
 void console_input_on_keyboard_char(char ascii);
 // Poll the serial port and feed any pending characters into console input.
 void console_input_poll_serial();
@@ -27,3 +27,9 @@ WaitQueue& console_input_read_wait_queue();
 // A successful reservation must be finished exactly once, committing only delivered bytes.
 bool console_input_reserve(char* buffer, size_t capacity, size_t& count, long* status = nullptr);
 void console_input_finish(size_t delivered, bool commit = true);
+
+// Identity is a retained kernel object, never a user-visible token.
+long console_input_acquire(const void* owner);
+void console_input_release(const void* owner);
+long console_input_key(const void* owner, unsigned& byte);
+bool console_input_ready(const void* owner);

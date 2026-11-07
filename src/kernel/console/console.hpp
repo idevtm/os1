@@ -2,7 +2,11 @@
 // the active logical terminal without exposing terminal internals to syscalls.
 #pragma once
 
+#include <os1/console.h>
 #include <stddef.h>
+
+os1_console_geometry console_geometry();
+void clear_console();
 
 // write exactly `length` bytes to the kernel console stream.
 void write_console_bytes(const char* data, size_t length);

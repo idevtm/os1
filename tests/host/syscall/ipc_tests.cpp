@@ -1,3 +1,5 @@
+extern void (*host_console_after_ready)();
+extern int host_console_session_allocation_budget;
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "buffer/buffer.hpp"
 #include "console/console_input.hpp"
@@ -1682,6 +1684,240 @@ protected:
         return result;
     }
 };
+class ConsoleSession : public KernelConsole
+{
+protected:
+    long acquire()
+    {
+        int input = bind(0, OS1_RIGHT_READ);
+        auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
+        int operation = call(OS1_IPC_SUBMIT, input, request);
+        descriptor_close(table(), input);
+        auto result = complete(operation);
+        os1_ipc_result_caps caps{};
+        long status = result.application_status;
+        if(!status)
+            status = call(OS1_IPC_RESULT_CAPS, operation, caps);
+        descriptor_close(table(), operation);
+        return status < 0                     ? status
+               : caps.capabilities.count == 1 ? caps.capabilities.entries[0].fd
+                                              : OS1_ERR_INVALID;
+    }
+    long session_bind(int session, uint32_t rights = OS1_RIGHT_READ)
+    {
+        os1_ipc_kernel_binding request{
+            1, sizeof(request), OS1_CONSOLE_INPUT_INTERFACE_ID, 1, rights};
+        return call(OS1_IPC_BIND_KERNEL, session, request);
+    }
+    os1_ipc_result action(int client, unsigned member, unsigned bytes = 0)
+    {
+        auto request = console_request(member);
+        request.interface_id = OS1_CONSOLE_INPUT_INTERFACE_ID;
+        std::memset(request.payload, 0, sizeof(request.payload));
+        request.payload_bytes = bytes;
+        int operation = call(OS1_IPC_SUBMIT, client, request);
+        auto result = complete(operation);
+        descriptor_close(table(), operation);
+        return result;
+    }
+};
+TEST_F(ConsoleSession, OwnershipRawKeysWaitAndRestoration)
+{
+    int session = acquire();
+    ASSERT_GE(session, 0);
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, acquire());
+    EXPECT_EQ(OS1_ERR_ACCESS, alias(session, OS1_RIGHT_READ));
+    int client = session_bind(session);
+    ASSERT_GE(client, 0);
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK,
+              action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY).application_status);
+    EXPECT_EQ(kIpcBlocked, sys_ipc(frames, thread, OS1_IPC_WAIT, session, 0));
+    console_input_on_keyboard_char('q');
+    EXPECT_FALSE(console_input_has_line());
+    ipc_timer_tick(1);
+    EXPECT_EQ(ThreadState::Blocked, thread->state);  // Wait for the saved context before waking.
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+    EXPECT_EQ(0u, thread->frame.rax);
+    set_current_thread(thread);
+    auto result = action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY);
+    ASSERT_EQ(0, result.application_status);
+    ASSERT_EQ(4u, result.payload_bytes);
+    EXPECT_EQ('q', result.payload[0]);
+    EXPECT_EQ(0, action(client, OS1_CONSOLE_INPUT_RELEASE).application_status);
+    EXPECT_EQ(0, sys_ipc(frames, thread, OS1_IPC_WAIT, session, 0));
+    EXPECT_EQ(OS1_ERR_CLOSED, action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY).application_status);
+    console_input_on_keyboard_char('x');
+    console_input_on_keyboard_char('\n');
+    EXPECT_TRUE(console_input_has_line());
+}
+TEST_F(ConsoleSession, LastBindingReleaseAndDiscardedResultRestoreInput)
+{
+    int session = acquire();
+    ASSERT_GE(session, 0);
+    int client = session_bind(session);
+    ASSERT_GE(client, 0);
+    descriptor_close(table(), session);
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, acquire());
+    console_input_on_keyboard_char('x');
+    descriptor_close(table(), client);
+    session = acquire();
+    ASSERT_GE(session, 0);  // Prior raw keys were discarded.
+    descriptor_close(table(), session);
+    int input = bind(0, OS1_RIGHT_READ);
+    auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
+    int operation = call(OS1_IPC_SUBMIT, input, request);
+    descriptor_close(table(), operation);
+    descriptor_close(table(), input);
+    ASSERT_TRUE(
+        ipc_run_kernel_request());  // Accepted but abandoned acquisition releases its result.
+    session = acquire();
+    ASSERT_GE(session, 0);
+    descriptor_close(table(), session);
+}
+TEST_F(ConsoleSession, PendingCanonicalInputAndReservationsPreventAcquisition)
+{
+    console_input_on_keyboard_char('x');
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, acquire());
+    console_input_on_keyboard_char('\n');
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, acquire());
+    char bytes[128];
+    size_t count;
+    long status;
+    ASSERT_TRUE(console_input_reserve(bytes, sizeof(bytes), count, &status));
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, acquire());
+    console_input_finish(count);
+    int session = acquire();
+    ASSERT_GE(session, 0);
+    descriptor_close(table(), session);
+}
+TEST_F(ConsoleSession, BoundsAuthorityShapeAndWaitMany)
+{
+    int session = acquire();
+    ASSERT_GE(session, 0);
+    int inspect = session_bind(session, OS1_RIGHT_INSPECT);
+    ASSERT_GE(inspect, 0);
+    EXPECT_EQ(OS1_ERR_ACCESS, action(inspect, OS1_CONSOLE_INPUT_TRY_READ_KEY).application_status);
+    int client = session_bind(session);
+    ASSERT_GE(client, 0);
+    EXPECT_EQ(OS1_ERR_INVALID, action(client, OS1_CONSOLE_INPUT_RELEASE, 1).application_status);
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, action(client, 99).application_status);
+    for(int i = 0; i < 65; ++i)
+        console_input_on_keyboard_char('a');
+    os1_ipc_wait_many wait{1, sizeof(wait), 1, 0, UINT64_MAX, {session}};
+    EXPECT_EQ(0, call(OS1_IPC_WAIT_MANY, 0, wait));
+    EXPECT_EQ(OS1_ERR_RANGE, action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY).application_status);
+    for(int i = 0; i < 64; ++i)
+        EXPECT_EQ(0, action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY).application_status);
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK,
+              action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY).application_status);
+    os1_ipc_info info{};
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(OS1_IPC_INFO, session, info));
+}
+TEST_F(ConsoleSession, ReadinessSelectionSurvivesConcurrentKeyConsumption)
+{
+    int session = acquire();
+    ASSERT_GE(session, 0);
+    ASSERT_EQ(kIpcBlocked, sys_ipc(frames, thread, OS1_IPC_WAIT, session, 0));
+    static NativeObject* owner;
+    owner = table().entries[session].instance->object;
+    console_input_on_keyboard_char('q');
+    host_console_after_ready = [] {
+        host_console_after_ready = nullptr;
+        unsigned byte = 0;
+        EXPECT_EQ(0, console_input_key(owner, byte));
+        EXPECT_EQ('q', byte);
+    };
+    ipc_timer_tick(1);
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    set_current_thread(thread);
+    EXPECT_EQ(0, static_cast<long>(thread->frame.rax));
+    unsigned byte = 0;
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, console_input_key(owner, byte));
+}
+TEST_F(ConsoleSession, AllocationFailureReleasesAcquiredOwnership)
+{
+    for(int budget : {0, 1})
+    {
+        host_console_session_allocation_budget = budget;
+        EXPECT_EQ(OS1_ERR_NO_MEMORY, acquire());
+        host_console_session_allocation_budget = -1;
+        int session = acquire();
+        ASSERT_GE(session, 0);
+        descriptor_close(table(), session);
+    }
+}
+TEST_F(ConsoleSession, ResultFaultRetainsSessionUntilClaimOrClose)
+{
+    int input = bind(0, OS1_RIGHT_READ);
+    auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
+    int operation = call(OS1_IPC_SUBMIT, input, request);
+    ASSERT_EQ(0, complete(operation).application_status);
+    EXPECT_EQ(OS1_ERR_FAULT, sys_ipc(frames, thread, OS1_IPC_RESULT_CAPS, operation, 0x1000));
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, acquire());
+    os1_ipc_result_caps caps{};
+    ASSERT_EQ(0, call(OS1_IPC_RESULT_CAPS, operation, caps));
+    ASSERT_EQ(1u, caps.capabilities.count);
+    int session = caps.capabilities.entries[0].fd;
+    descriptor_close(table(), operation);
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, acquire());
+    descriptor_close(table(), session);
+    session = acquire();
+    ASSERT_GE(session, 0);
+    descriptor_close(table(), session);
+}
+TEST_F(ConsoleSession, WaitDeadlineAndCancellationReleasePins)
+{
+    int session = acquire();
+    ASSERT_GE(session, 0);
+    long now = sys_ipc(frames, thread, OS1_IPC_CLOCK, 0, 0);
+    os1_ipc_deadline deadline{1, sizeof(deadline), static_cast<uint64_t>(now) + 100};
+    ASSERT_EQ(kIpcBlocked, call(OS1_IPC_WAIT_UNTIL, session, deadline));
+    descriptor_close(table(), session);
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, acquire());  // Wait pin retains ownership.
+    ipc_timer_tick(100);
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    set_current_thread(thread);
+    EXPECT_EQ(OS1_ERR_TIMED_OUT, static_cast<long>(thread->frame.rax));
+    session = acquire();
+    ASSERT_GE(session, 0);
+    ASSERT_EQ(kIpcBlocked, sys_ipc(frames, thread, OS1_IPC_WAIT, session, 0));
+    descriptor_close(table(), session);
+    cancel_ipc_wait(thread);
+    session = acquire();
+    ASSERT_GE(session, 0);
+    descriptor_close(table(), session);
+}
+TEST_F(KernelConsole, GeometryClearAndAcquisitionValidateAuthorityAndShape)
+{
+    for(auto member : {OS1_CONSOLE_GET_GEOMETRY, OS1_CONSOLE_CLEAR, OS1_CONSOLE_ACQUIRE_INPUT})
+    {
+        int client = bind(1, OS1_RIGHT_INSPECT);
+        auto request = console_request(member);
+        int operation = call(OS1_IPC_SUBMIT, client, request);
+        auto result = complete(operation);
+        EXPECT_EQ(member == OS1_CONSOLE_GET_GEOMETRY ? 0 : OS1_ERR_ACCESS,
+                  result.application_status);
+        if(member == OS1_CONSOLE_GET_GEOMETRY)
+        {
+            ASSERT_EQ(8u, result.payload_bytes);
+            os1_console_geometry g{};
+            std::memcpy(&g, result.payload, sizeof(g));
+            EXPECT_EQ(80u, g.columns);
+            EXPECT_EQ(25u, g.rows);
+        }
+        descriptor_close(table(), operation);
+        descriptor_close(table(), client);
+    }
+    int client = bind();
+    auto request = console_request(OS1_CONSOLE_CLEAR);
+    request.payload_bytes = 1;
+    int operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+}
 TEST_F(KernelConsole, BindingShapeRightsAndReadyIdentity)
 {
     EXPECT_EQ(24u, sizeof(os1_ipc_kernel_binding));

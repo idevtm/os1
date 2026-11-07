@@ -3,6 +3,7 @@
 #include <array>
 #include <cstring>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <vector>
@@ -285,6 +286,33 @@ TEST_F(Ext2, GrowthClearsForeignNonzeroTail)
 }
 
 #include "drivers/block/completion.hpp"
+TEST(BlockCompletion, ObservedDoneWaitsForCallbackRetirement)
+{
+    Spinlock queue_lock("completion-owner");
+    BlockRequest request{};
+    queue_lock.lock();
+    // The IRQ has published done but still owns the request's wait queue.
+    block_request_complete(request, BlockRequestStatus::Success, 4096);
+    std::promise<void> entered;
+    auto started = entered.get_future();
+    bool drained = false;
+    auto poller = std::async(std::launch::async, [&] {
+        entered.set_value();
+        return poll_block_completion(request, queue_lock, [&] {
+            EXPECT_TRUE(queue_lock.locked());
+            drained = true;
+        });
+    });
+    started.wait();
+    const auto before_retirement = poller.wait_for(std::chrono::milliseconds(50));
+    queue_lock.unlock();
+    EXPECT_EQ(before_retirement, std::future_status::timeout);
+    EXPECT_TRUE(poller.get());
+    EXPECT_TRUE(drained);
+    EXPECT_FALSE(queue_lock.locked());
+    EXPECT_EQ(request.bytes_transferred, 4096u);
+}
+
 TEST(BlockCompletion, BoundaryCompletionWinsOverDeviceReset)
 {
     BlockRequest request{};

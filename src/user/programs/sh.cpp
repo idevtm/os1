@@ -444,6 +444,7 @@ void run_help()
     write_string(
         "text: head source lines:10; tail source lines:10; grep pattern source; wc source; file "
         "path\n");
+    write_string("pager: less path; space/enter/f next page, b previous page, q quit\n");
     write_string("streams: < file, > file, >> file, << delimiter; Ctrl-D ends input\n");
     write_string(
         "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit\n");

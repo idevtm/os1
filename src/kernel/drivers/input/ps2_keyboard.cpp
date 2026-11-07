@@ -81,6 +81,10 @@ os1::input::Ps2Modifiers modifiers;
 
 char key_to_char(uint8_t key)
 {
+    if(modifiers.control && key == 0x2e)
+        return 3;
+    if(modifiers.control && key == 0x20)
+        return 4;
     if(key == 0x1c)
         return '\n';
     if(modifiers.keypad && key == 0x35)
@@ -112,7 +116,7 @@ void Keyboard::irq_handler(Keyboard* object)
     if(!modifiers.press(scancode, key))
         return;
     if(kernel_keyboard_hook(scancode))
-        console_input_on_keyboard_char(modifiers.control && key == 0x20 ? 4 : key_to_char(key));
+        console_input_on_keyboard_char(key_to_char(key));
 }
 
 bool Keyboard::initialize()

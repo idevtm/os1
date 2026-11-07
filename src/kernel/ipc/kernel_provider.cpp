@@ -2,31 +2,109 @@
 
 #include <os1/console.h>
 
+#include "console/console.hpp"
 #include "console/console_input.hpp"
+#include "mm/kmem.hpp"
 #include "sync/atomic.hpp"
 #include "util/memory.h"
 #include "vfs/filesystem.hpp"
 #include "vfs/namespace.hpp"
 
+#ifdef OS1_HOST_TEST
+int host_console_session_allocation_budget = -1;
+#endif
 namespace
 {
+bool session_allocation_allowed()
+{
+#ifdef OS1_HOST_TEST
+    if(host_console_session_allocation_budget == 0)
+        return false;
+    if(host_console_session_allocation_budget > 0)
+        --host_console_session_allocation_budget;
+#endif
+    return true;
+}
+void destroy_input_session(NativeObject* object)
+{
+    console_input_release(object);
+    kfree(object);
+}
+long acquire_input_session(DescriptorEntry& output)
+{
+    auto* object = session_allocation_allowed()
+                       ? static_cast<NativeObject*>(kcalloc(1, sizeof(NativeObject)))
+                       : nullptr;
+    if(!object)
+        return OS1_ERR_NO_MEMORY;
+    constexpr uint32_t rights = OS1_RIGHT_READ | OS1_RIGHT_INSPECT;
+    *object = {1, OS1_OBJECT_CONSOLE_INPUT_SESSION, 0, rights, destroy_input_session};
+    long status = console_input_acquire(object);
+    if(status < 0)
+    {
+        object_release(object);
+        return status;
+    }
+    auto* instance = session_allocation_allowed() ? open_instance(object) : nullptr;
+    object_release(object);
+    if(!instance)
+        return OS1_ERR_NO_MEMORY;
+    output = {instance, rights, OS1_DESCRIPTOR_CLOEXEC, 0};
+    return 0;
+}
+void invoke_input_session(OpenInstance& source,
+                          uint32_t rights,
+                          uint32_t,
+                          const os1_ipc_message& request,
+                          os1_ipc_result& result,
+                          DescriptorEntry&)
+{
+    if(!(rights & OS1_RIGHT_READ))
+    {
+        result.application_status = OS1_ERR_ACCESS;
+        return;
+    }
+    if(request.payload_bytes)
+    {
+        result.application_status = OS1_ERR_INVALID;
+        return;
+    }
+    if(request.member == OS1_CONSOLE_INPUT_RELEASE)
+        console_input_release(source.object);
+    else if(request.member == OS1_CONSOLE_INPUT_TRY_READ_KEY)
+    {
+        unsigned byte = 0;
+        result.application_status = console_input_key(source.object, byte);
+        if(!result.application_status)
+        {
+            os1_console_key key{byte};
+            memcpy(result.payload, &key, sizeof(key));
+            result.payload_bytes = sizeof(key);
+        }
+    }
+    else
+        result.application_status = OS1_ERR_UNSUPPORTED;
+}
 void invoke_console(OpenInstance& source,
                     uint32_t rights,
                     uint32_t,
                     const os1_ipc_message& request,
                     os1_ipc_result& result,
-                    DescriptorEntry&)
+                    DescriptorEntry& output)
 {
     auto* object = source.object;
     uint32_t required;
     switch(request.member)
     {
+        case OS1_CONSOLE_CLEAR:
         case OS1_CONSOLE_WRITE:
             required = OS1_RIGHT_WRITE;
             break;
+        case OS1_CONSOLE_ACQUIRE_INPUT:
         case OS1_CONSOLE_TRY_READ:
             required = OS1_RIGHT_READ;
             break;
+        case OS1_CONSOLE_GET_GEOMETRY:
         case OS1_CONSOLE_GET_INFO:
             required = OS1_RIGHT_INSPECT;
             break;
@@ -37,6 +115,29 @@ void invoke_console(OpenInstance& source,
     if(!(rights & required))
     {
         result.application_status = OS1_ERR_ACCESS;
+        return;
+    }
+    if(request.member >= OS1_CONSOLE_GET_GEOMETRY && request.member <= OS1_CONSOLE_ACQUIRE_INPUT)
+    {
+        if(request.payload_bytes)
+        {
+            result.application_status = OS1_ERR_INVALID;
+            return;
+        }
+        if(request.member == OS1_CONSOLE_ACQUIRE_INPUT)
+            result.application_status = object->reserve_read == console_input_reserve
+                                            ? acquire_input_session(output)
+                                            : OS1_ERR_UNSUPPORTED;
+        else if(!object->write_bytes)
+            result.application_status = OS1_ERR_UNSUPPORTED;
+        else if(request.member == OS1_CONSOLE_CLEAR)
+            clear_console();
+        else
+        {
+            auto geometry = console_geometry();
+            memcpy(result.payload, &geometry, sizeof(geometry));
+            result.payload_bytes = sizeof(geometry);
+        }
         return;
     }
     if(request.member == OS1_CONSOLE_WRITE)
@@ -447,6 +548,12 @@ const KernelProvider directory{OS1_DIRECTORY_INTERFACE_ID,
                                invoke_directory};
 const KernelProvider file{
     OS1_FILE_INTERFACE_ID, 1, OS1_OBJECT_FILE, kTmpFileRights, vfs_backed, invoke_file};
+const KernelProvider input_session{OS1_CONSOLE_INPUT_INTERFACE_ID,
+                                   1,
+                                   OS1_OBJECT_CONSOLE_INPUT_SESSION,
+                                   OS1_RIGHT_READ | OS1_RIGHT_INSPECT,
+                                   nullptr,
+                                   invoke_input_session};
 const KernelProvider console{OS1_CONSOLE_INTERFACE_ID,
                              OS1_CONSOLE_INTERFACE_VERSION,
                              OS1_OBJECT_CONSOLE,
@@ -456,7 +563,7 @@ const KernelProvider console{OS1_CONSOLE_INTERFACE_ID,
 }  // namespace
 const KernelProvider* kernel_provider(uint64_t id, uint32_t version)
 {
-    const KernelProvider* providers[] = {&console, &directory, &file};
+    const KernelProvider* providers[] = {&console, &input_session, &directory, &file};
     for(auto* provider : providers)
         if(id == provider->interface_id && version == provider->interface_version)
             return provider;

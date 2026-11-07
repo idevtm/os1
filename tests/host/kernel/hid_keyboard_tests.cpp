@@ -1,8 +1,8 @@
-#include "drivers/usb/hid_keyboard.hpp"
-
 #include <gtest/gtest.h>
 
 #include <array>
+
+#include "drivers/usb/hid_keyboard.hpp"
 
 TEST(HidKeyboard, ConvertsSingleKeyPressToAscii)
 {
@@ -95,4 +95,20 @@ TEST(HidKeyboard, LeftAndRightControlDProduceEof)
         ASSERT_TRUE(usb::hid::boot_keyboard_apply_report(state, report, 8, out, 6, count));
         EXPECT_EQ(0u, count);
     }
+}
+
+TEST(HidKeyboard, PagerQuitControlsReachConsole)
+{
+    for(uint8_t modifier : {0x01, 0x10, 0x03, 0x30})
+    {
+        usb::hid::BootKeyboardState state{};
+        uint8_t report[8]{modifier, 0, 0x06};
+        char out[6]{};
+        size_t count = 0;
+        ASSERT_TRUE(usb::hid::boot_keyboard_apply_report(state, report, 8, out, 6, count));
+        ASSERT_EQ(1u, count);
+        EXPECT_EQ(3, out[0]);
+    }
+    EXPECT_EQ(27, usb::hid::boot_key_usage_to_ascii(0x29, false));
+    EXPECT_EQ(27, usb::hid::boot_key_usage_to_ascii(0x29, true));
 }

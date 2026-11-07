@@ -784,6 +784,21 @@ The terminal remains fixed-size for the lifetime of a boot, but not across all b
 
 This keeps manual keyboard sessions and serial-driven automation on one kernel-visible console path instead of two separate control planes.
 
+### Interactive input ownership
+
+The [ConsoleInputSession contract](native-api/abi/kernel-console-abi.md#interactive-input-session) adds exclusive input ownership for the [pager](shell/pager.md).
+
+```text
+keyboard / serial -> input lock -> canonical queue OR owned 64-byte key queue
+owned key queue -> timer readiness -> native wait -> user-space pager
+```
+
+Canonical input retains its existing behavior when no session owns the input path.
+Acquisition requires empty canonical state and no read reservation.
+Session release discards raw keys and restores canonical input; retained bindings and waits extend resource lifetime.
+The kernel worker never blocks while waiting for a key.
+Geometry and clear use the console output lock; other display writers remain cooperative.
+
 ### Display Backends
 
 [../src/kernel/drivers/display/text_display.cpp](../src/kernel/drivers/display/text_display.cpp) adds two presentation backends:
@@ -1013,6 +1028,9 @@ Scheduling is intentionally simple in policy but no longer single-CPU in shape: 
 There is still no priority or nice model, no user-visible affinity control, and no AP-targeted device IRQ steering yet.
 
 Child image, standard-stream grants, and entry frame now precede scheduler publication; spawn captures the PID before making the child runnable. The post-publication frame rewrite identified in [review R1](archive/reviews/2026-11-03-review.md#r1--p1-child-entry-state-is-rewritten-after-scheduler-publication) is removed. Context switching leaves the outgoing stack and CR3 before publishing the next current thread. The [implementation record](archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) distinguishes regression coverage from the earlier unexplained BIOS failure.
+
+The load balancer excludes the donor's current thread while it holds the donor queue lock.
+A queued thread becomes eligible for migration only after assembly leaves its stack and publishes the successor.
 
 Reaping can complete the current thread's child-exit wait before a CPU handoff.
 The scheduler keeps that awakened thread runnable.

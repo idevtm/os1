@@ -265,21 +265,11 @@ bool virtio_blk_wait_for_boot_completion(VirtioBlkState& state, BlockRequest& re
 {
     for(uint32_t spin = 0; spin < 10000000u; ++spin)
     {
-        if(completion_done(request.completion))
+        if(poll_block_completion(request, queue_lock, [&] { virtio_blk_drain_used(state); }))
         {
             return true;
-        }
-
-        {
-            IrqSpinGuard guard(queue_lock);
-            virtio_blk_drain_used(state);
         }
         ipi_poll_tlb_shootdown();
-        if(completion_done(request.completion))
-        {
-            return true;
-        }
-
         pause();
     }
     return false;
