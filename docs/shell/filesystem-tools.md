@@ -104,5 +104,6 @@ The [implementation record](../archive/shell/2026-11-07-filesystem-traversal.md)
 Tests cover BIOS and UEFI, persistent files, partial quota failure, subtree rejection, and depth limits.
 Host tests cover authority, identity, stale names, sparse accounting, indirect blocks, and pointer faults.
 Hardware behavior remains unmeasured for this stage.
-Text tools, timestamps, and the pager remain in the [accepted utility plan](file-utilities.md).
+The [text tools](text-utilities.md) implement line selection, literal search, counts, and classification.
+Timestamps and the pager remain in the [accepted utility plan](file-utilities.md).
 Permissions and links remain deferred.

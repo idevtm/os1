@@ -416,7 +416,11 @@ struct Streams
         }
         if(input)
         {
-            if(duplicate(in.fd, OS1_RIGHT_READ | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE, 0, 0) < 0)
+            // File and here-document inputs retain seek authority for bounded text helpers.
+            if(duplicate(in.fd,
+                         OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE,
+                         0,
+                         0) < 0)
                 return false;
             active[0] = true;
         }

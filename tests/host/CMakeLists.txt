@@ -169,6 +169,7 @@ target_include_directories(os1_host_support SYSTEM PUBLIC
 add_executable(os1_host_tests
   common/context_tests.cpp
   common/shell_tests.cpp
+  common/text_tools_tests.cpp
   common/interface_tests.cpp
   common/parameter_runtime_tests.cpp
   common/elf64_tests.cpp

@@ -1,6 +1,7 @@
 #pragma once
 #include <os1/context.hpp>
 #include <os1/file_tools.hpp>
+#include <os1/text_tools.hpp>
 #include <os1/tree.hpp>
 
 #include "shell/values.hpp"
@@ -32,14 +33,29 @@ enum class Method
     Info,
     Space,
     Find,
-    Usage
+    Usage,
+    Head,
+    Tail,
+    Search,
+    Count,
+    Identify
 };
 struct Binding
 {
     const char* name;
     Method method;
 };
-constexpr Binding bindings[] = {{"stat", Method::Info},
+constexpr Binding bindings[] = {{"head", Method::Head},
+                                {"text.head", Method::Head},
+                                {"tail", Method::Tail},
+                                {"text.tail", Method::Tail},
+                                {"grep", Method::Search},
+                                {"text.search", Method::Search},
+                                {"wc", Method::Count},
+                                {"text.count", Method::Count},
+                                {"file", Method::Identify},
+                                {"fs.identify", Method::Identify},
+                                {"stat", Method::Info},
                                 {"fs.info", Method::Info},
                                 {"df", Method::Space},
                                 {"fs.space", Method::Space},
@@ -195,6 +211,15 @@ inline bool render(const Data& data, unsigned node, int fd = 1)
     }
     return files::put(fd, record ? "}" : "]", 1);
 }
+inline bool text_method(Method method)
+{
+    return method == Method::Head || method == Method::Tail || method == Method::Search ||
+           method == Method::Count || method == Method::Identify;
+}
+inline unsigned source_slot(Method method)
+{
+    return method == Method::Search ? 1 : 0;
+}
 struct Call
 {
     Method method = Method::Unknown;
@@ -204,6 +229,7 @@ struct Call
     const char* error = nullptr;
     char target[128]{};
     long status = 0;
+    uint64_t lines = 10;
     bool evaluate(const char* text, size_t size, unsigned slot, bool mode = false)
     {
         streams[slot] = stream(text, size);
@@ -290,6 +316,23 @@ struct Call
                                  method != Method::Usage && method != Method::Space};
             count = 1;
         }
+        if(text_method(method))
+        {
+            parameters[0] = {
+                method == Method::Identify ? "path" : "source", true, method == Method::Identify};
+            count = 1;
+            if(method == Method::Head || method == Method::Tail)
+            {
+                parameters[1] = {"lines", false, false};
+                count = 2;
+            }
+            if(method == Method::Search)
+            {
+                parameters[0] = {"pattern", true, true};
+                parameters[1] = {"source", true, false};
+                count = 2;
+            }
+        }
         int boolean_slot = -1;
         if(method == Method::Copy)
             boolean_slot = 3;
@@ -329,8 +372,12 @@ struct Call
                         if(nodes[p] < 0)
                             return false;
                     }
-                    else if(cat && p == 0 && shell::equal(command.argv[i], "-"))
-                        streams[0] = 0;
+                    else if(((cat && p == 0) ||
+                             (text_method(method) && method != Method::Identify &&
+                              p == source_slot(method))) &&
+                            shell::equal(command.argv[i], "-") &&
+                            command.raw[command.begin[i]] == '-')
+                        streams[p] = 0;
                     else if(!evaluate(command.raw + starts[p],
                                       command.end[i] - starts[p],
                                       p,
@@ -344,13 +391,31 @@ struct Call
             if(nodes[1] < 0 && streams[1] < 0)
                 streams[1] = 1;
         }
+        if(text_method(method) && method != Method::Identify && nodes[source_slot(method)] < 0 &&
+           streams[source_slot(method)] < 0)
+            streams[source_slot(method)] = 0;
         if(method != Method::SetEnvironment)
             for(size_t p = 0; p < count; ++p)
             {
-                if(streams[p] >= 0 && !(method == Method::Copy && p < 2))
+                if(streams[p] >= 0 && !(method == Method::Copy && p < 2) &&
+                   !(text_method(method) && method != Method::Identify && p == source_slot(method)))
                 {
                     error = "expected String, got stream";
                     return false;
+                }
+                if((method == Method::Head || method == Method::Tail) && p == 1)
+                {
+                    if(nodes[p] >= 0)
+                    {
+                        if(values.nodes[nodes[p]].kind != OS1_VALUE_INTEGER ||
+                           values.nodes[nodes[p]].integer < 0)
+                        {
+                            error = "lines requires a nonnegative Integer";
+                            return false;
+                        }
+                        lines = values.nodes[nodes[p]].integer;
+                    }
+                    continue;
                 }
                 if(int(p) == boolean_slot)
                 {
@@ -373,6 +438,32 @@ struct Call
                     return false;
                 }
             }
+        if(method == Method::Search)
+        {
+            char pattern[os1::text::pattern_max + 1];
+            if(!string(0, pattern, sizeof(pattern)))
+            {
+                error = "pattern too long";
+                return false;
+            }
+            for(size_t i = 0; pattern[i]; ++i)
+                if(pattern[i] == '\n')
+                {
+                    error = "pattern cannot contain LF";
+                    return false;
+                }
+        }
+        if(text_method(method) && streams[source_slot(method)] >= 0)
+        {
+            int fd = streams[source_slot(method)];
+            os1_resource_info info{};
+            if(!(fd == 0 && command.input != shell::Input::None) &&
+               (query(fd, &info) < 0 || !(info.rights & OS1_RIGHT_READ)))
+            {
+                error = "stream lacks required access";
+                return false;
+            }
+        }
         if(method == Method::Remove && recursive)
             method = Method::RemoveDirectory;
         if(method == Method::Find && nodes[2] >= 0)
@@ -410,7 +501,7 @@ struct Call
                 uint32_t rights = 0;
                 if(fd == 0 && command.input != shell::Input::None)
                     rights = OS1_RIGHT_READ;
-                else if(fd == 1 && command.output != shell::Output::None)
+                else if(slot == 1 && fd == 1 && command.output != shell::Output::None)
                     rights = OS1_RIGHT_WRITE;
                 else
                 {
@@ -442,6 +533,74 @@ struct Call
         return true;
     }
 };
+// Pre-open all file inputs before redirection can truncate an output. Retain identity through
+// execution.
+inline long prepare_input(Call& call, Handle& input, int& source)
+{
+    if(call.method != Method::Copy && !text_method(call.method))
+        return 0;
+    unsigned slot = source_slot(call.method);
+    source = call.streams[slot];
+    if(source >= 0)
+        return 0;
+    char path[257];
+    if(!call.string(slot, path, sizeof(path)))
+        return OS1_ERR_RANGE;
+    long fd;
+    if(call.method == Method::Copy)
+        fd = call.recursive ? open(path, OS1_RIGHT_INSPECT)
+                            : files::open_file(path, files::Mode::Existing);
+    else
+        fd = text_tools::open_source(path, call.method == Method::Identify);
+    if(fd < 0)
+        return fd;
+    input.reset(fd);
+    os1_file_info info{};
+    long r = file_info(fd, &info);
+    if(r < 0)
+        return r;
+    if(info.kind != OS1_OBJECT_FILE &&
+       !(info.kind == OS1_OBJECT_DIRECTORY && (call.recursive || call.method == Method::Identify)))
+        return OS1_ERR_UNSUPPORTED;
+    source = call.streams[slot] = fd;
+    return 0;
+}
+inline long run_text(Call& call)
+{
+    int fd = call.streams[source_slot(call.method)];
+    if(call.method == Method::Identify)
+        return text_tools::identify(fd);
+    os1_resource_info info{};
+    long r = query(fd, &info);
+    if(r < 0)
+        return r;
+    if(!(info.rights & OS1_RIGHT_READ))
+        return OS1_ERR_ACCESS;
+    text_tools::Stream stream{fd};
+    auto io = stream.io((info.rights & OS1_RIGHT_SEEK) && (info.interfaces & OS1_INTERFACE_SEEK));
+    if(call.method == Method::Head)
+        return os1::text::head(io, call.lines);
+    if(call.method == Method::Tail)
+        return os1::text::tail(
+            io, call.lines, text_tools::workspace, sizeof(text_tools::workspace));
+    if(call.method == Method::Search)
+    {
+        char pattern[os1::text::pattern_max + 1];
+        if(!call.string(0, pattern, sizeof(pattern)))
+            return OS1_ERR_RANGE;
+        uint64_t matches = 0;
+        r = os1::text::search(io,
+                              pattern,
+                              files::length(pattern),
+                              matches,
+                              text_tools::workspace,
+                              sizeof(text_tools::workspace));
+        return r < 0 ? r : matches ? 0 : 1;
+    }
+    os1::text::Counts counts{};
+    r = os1::text::count(io, counts);
+    return r < 0 ? r : text_tools::counts(counts);
+}
 inline bool redirect_value(char* raw, char* name, bool strict)
 {
     if(!*raw)
@@ -833,6 +992,8 @@ inline long set_environment(Call& call)
 }
 inline long execute(Call& call)
 {
+    if(text_method(call.method))
+        return run_text(call);
     char a[256]{}, b[256]{};
     if(call.method != Method::SetEnvironment &&
        (!call.string(0, a, sizeof(a)) ||

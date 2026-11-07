@@ -1495,3 +1495,19 @@ Own mutations advance the generation; other namespace changes stop traversal.
 Content operations retain ordinary backend locking and do not form a whole-tree snapshot.
 Boot-local identity tokens remain separate from descriptor authority and persistent inode numbers.
 Recursive policy stays outside the kernel.
+
+
+## User-space text helpers
+
+The [text utility profile](shell/text-utilities.md) adds local `text` methods and `fs.identify`.
+Aliases and canonical methods use the same typed binder.
+
+```text
+alias/method -> validate -> retain input -> apply redirection -> bounded algorithm -> native handle
+```
+
+The shared algorithms reside in `src/common/text/tools.hpp` and also run in host tests.
+The user adapter supplies native reads, writes, seeks, metadata, and access checks.
+File input is retained before redirection to prevent source truncation through the output path.
+Seekable files use bounded rereads; non-seekable inputs use one 64 KiB shell workspace with explicit limit errors.
+No new kernel service, syscall, IPC layout, or process is required.

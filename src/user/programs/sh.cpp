@@ -441,6 +441,9 @@ bool observe(uint32_t kind, const Record*& records, uint32_t& record_count)
 void run_help()
 {
     write_string("files: touch path; write [--append|--replace] path; edit path\n");
+    write_string(
+        "text: head source lines:10; tail source lines:10; grep pattern source; wc source; file "
+        "path\n");
     write_string("streams: < file, > file, >> file, << delimiter; Ctrl-D ends input\n");
     write_string(
         "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit\n");
@@ -1357,35 +1360,15 @@ int main(int argc_main, char** argv_main)
         }
         os1::user::files::Handle copy_input;
         int copy_source = -2;
-        if(call.method == os1::user::shell_runtime::Method::Copy)
+        if(os1::user::shell_runtime::prepare_input(call, copy_input, copy_source) < 0)
         {
-            copy_source = call.streams[0];
-            if(copy_source < 0)
-            {
-                char source[256];
-                long status = call.string(0, source, sizeof(source))
-                                  ? (call.recursive ? os1::user::open(source, OS1_RIGHT_INSPECT)
-                                                    : os1::user::files::open_file(
-                                                          source, os1::user::files::Mode::Existing))
-                                  : OS1_ERR_RANGE;
-                if(status >= 0)
-                {
-                    copy_input.reset(status);
-                    os1_file_info info{};
-                    status = os1::user::file_info(copy_input.fd, &info);
-                    if(status >= 0 && info.kind != OS1_OBJECT_FILE &&
-                       !(call.recursive && info.kind == OS1_OBJECT_DIRECTORY))
-                        status = OS1_ERR_UNSUPPORTED;
-                }
-                if(status < 0)
-                {
-                    os1::user::shell_runtime::diagnostic("cat/copy failed to open source");
-                    if(!console_input)
-                        return 1;
-                    continue;
-                }
-                copy_source = call.streams[0] = copy_input.fd;
-            }
+            os1::user::shell_runtime::diagnostic(call.method ==
+                                                         os1::user::shell_runtime::Method::Copy
+                                                     ? "cat/copy failed to open source"
+                                                     : "cannot open command input");
+            if(!console_input)
+                return 1;
+            continue;
         }
         os1::user::files::Streams streams;
         if(!streams.apply(parsed, reader, copy_source, call.recursive))
@@ -1395,6 +1378,9 @@ int main(int argc_main, char** argv_main)
                 return 1;
             continue;
         }
+        // Output redirection can replace a readable source in descriptor 1.
+        if(copy_source == 1 && streams.active[1])
+            call.streams[os1::user::shell_runtime::source_slot(call.method)] = streams.saved[1].fd;
         if(call.method != os1::user::shell_runtime::Method::Unknown)
         {
             long result = os1::user::shell_runtime::execute(call);
@@ -1408,6 +1394,8 @@ int main(int argc_main, char** argv_main)
                 write_char('\n');
                 command_failed = true;
             }
+            else if(result > 0)
+                command_failed = true;  // A search with no matches is not an I/O error.
         }
         else if(strings_equal(tokens[0], "write"))
         {

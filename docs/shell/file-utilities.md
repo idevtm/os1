@@ -4,7 +4,8 @@ The user accepted this minimal command profile on 2026-11-07.
 Permissions and links remain deferred to a later stage.
 The [first stage](typed-context.md) implements basic context, navigation, and file operations.
 The [second stage](filesystem-tools.md) implements metadata, traversal, recursive copy/removal, `find`, and `du`.
-Text utilities, timestamps, and paging remain accepted direction.
+The [text utility profile](text-utilities.md) implements line selection, literal search, counts, and bounded file classification.
+Timestamps and paging remain accepted direction.
 This profile does not claim complete POSIX compatibility.
 
 ```mermaid
@@ -208,7 +209,8 @@ See the [tmpfs ABI](../native-api/abi/tmpfs-abi.md) and [ext2 profile](../filesy
 
 The minimal feature choices are settled.
 The [traversal profile](filesystem-tools.md) specifies implemented command behavior and resource bounds.
-Remaining text utilities, timestamps, and paging need their own implementation specifications.
+The [text profile](text-utilities.md) specifies implemented streaming behavior and limits.
+Timestamps and paging need their own implementation specifications.
 These specifications must preserve the accepted behavior; they are not permission to expand the feature set.
 Custom configuration, user-defined aliases, String output methods, general expression operators, and a full scripting language can remain deferred.
 
