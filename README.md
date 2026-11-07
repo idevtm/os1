@@ -325,6 +325,9 @@ Another line.
 wq
 ```
 
+`touch` preserves contents and updates access and modification times.
+See the [timestamp ABI](docs/native-api/abi/filesystem-times-abi.md) for clock validity and native methods.
+
 Use `<`, `>`, `>>`, and `<< marker` to redirect command streams.
 See [interactive files and editor](docs/shell/interactive-files.md) for commands, EOF behavior, error handling, and limits.
 Run the UEFI and BIOS interactive checks with `ctest --test-dir build -R '^os1_smoke_files_' --output-on-failure`.

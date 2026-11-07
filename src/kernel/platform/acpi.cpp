@@ -3,11 +3,11 @@
 // definition block metadata into the kernel's local structs.
 #include "platform/acpi.hpp"
 
-#include "platform/acpica_integration.hpp"
 #include "debug/debug.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/boot_mapping.hpp"
 #include "mm/virtual_memory.hpp"
+#include "platform/acpica_integration.hpp"
 
 #if defined(OS1_HOST_TEST)
 #include <string.h>
@@ -261,6 +261,7 @@ template<typename T>
     output.acpi_fixed.preferred_pm_profile = fadt->preferred_pm_profile;
     output.acpi_fixed.sci_interrupt = fadt->sci_interrupt;
     output.acpi_fixed.boot_architecture_flags = fadt->boot_architecture_flags;
+    output.acpi_fixed.century = fadt->century;
     output.acpi_fixed.flags = fadt->flags;
     output.acpi_fixed.firmware_ctrl = firmware_ctrl;
     output.acpi_fixed.dsdt_physical = dsdt_physical;

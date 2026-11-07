@@ -1,12 +1,13 @@
 # Console descriptor ABI — 2026-11-04
 
-The first native-resource milestone is implemented for console objects. Its
-shared encoding is [resource.h](../../../src/uapi/os1/resource.h); it is experimental,
-not a promise of long-term binary compatibility. The broader
-[native contract](../object-contract.md) still specifies
-the broader native model. The subsequent [VFS/startup ABI](initrd-vfs-abi.md)
-extends this foundation. The [temporary filesystem ABI](tmpfs-abi.md) adds CREATE=256, REMOVE=512, and RENAME=1024; ALL is now 2047. [Copied IPC](copied-ipc-abi.md) implements hosted calls; [Console IPC](kernel-console-abi.md) adds kernel service dispatch. See the
-[implementation plan and validation](../../archive/native-api/2026-11-04-console-descriptor-implementation-plan.md).
+The first native-resource milestone implements console descriptors through the experimental [resource encoding](../../../src/uapi/os1/resource.h).
+The [native contract](../object-contract.md) defines the broader model.
+The [VFS/startup ABI](initrd-vfs-abi.md) extends this foundation.
+
+The [temporary filesystem ABI](tmpfs-abi.md) adds CREATE=256, REMOVE=512, and RENAME=1024.
+The [timestamp ABI](filesystem-times-abi.md) adds SET_TIMES=2048; ALL is 4095.
+[Copied IPC](copied-ipc-abi.md) implements hosted calls; [Console IPC](kernel-console-abi.md) adds kernel service dispatch.
+See the [implementation record](../../archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) for the original plan and validation.
 
 ## Representation and operations
 

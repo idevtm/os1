@@ -1,3 +1,4 @@
+#include "core/wall_clock.hpp"
 #include "mm/kmem.hpp"
 #include "sync/atomic.hpp"
 #include "util/memory.h"
@@ -21,7 +22,21 @@ struct TmpNode : VfsNode
 {
     uint8_t* pages[OS1_TMPFS_FILE_MAX / page_bytes];
     uint32_t depth;
+    os1_file_times times;
 };
+void stamp(VfsNode* base, uint32_t fields)
+{
+    uint64_t now = 0;
+    if(!wall_clock_now(now))
+        return;
+    auto& times = static_cast<TmpNode*>(base)->times;
+    if(fields & OS1_TIME_ACCESS)
+        times.access_ns = now;
+    if(fields & OS1_TIME_MODIFY)
+        times.modify_ns = now;
+    times.change_ns = now;
+    times.valid |= fields | OS1_TIME_CHANGE;
+}
 void* allocate(size_t bytes)
 {
 #ifdef OS1_HOST_TEST
@@ -118,6 +133,7 @@ long allocate_node(Tmpfs* fs, uint32_t kind, TmpNode*& node)
         return OS1_ERR_NO_MEMORY;
     }
     (void)atomic_fetch_add(&fs->references, 1u);
+    stamp(node, OS1_TIME_ACCESS | OS1_TIME_MODIFY);
     node->object_id = vfs_identity();
     node->filesystem_id = fs->identity;
     node->filesystem = fs;
@@ -214,6 +230,7 @@ static long create_locked(
             node->linked = true;
             node->next = directory->children;
             directory->children = node;
+            stamp(directory, OS1_TIME_MODIFY);
             vfs_changed();
             result = instance.take();
             return 0;
@@ -250,6 +267,8 @@ static long remove_locked(VfsNode* directory, const char* name, size_t size, uin
         *link = removed->next;
         removed->next = nullptr;
         removed->linked = false;
+        stamp(directory, OS1_TIME_MODIFY);
+        stamp(removed, 0);
     }
     vfs_changed();
     object_release(removed);
@@ -290,6 +309,8 @@ long tmpfs_rename(VfsNode* directory,
     memcpy(node->name, destination, destination_size);
     node->name_size = destination_size;
     node->cookie = fs->next_cookie++;
+    stamp(directory, OS1_TIME_MODIFY);
+    stamp(node, 0);
     vfs_changed();
     return 0;
 }
@@ -344,6 +365,7 @@ long move(VfsNode* from,
         {
             vfs_detach(to, target);
             target->linked = false;
+            stamp(target, 0);
         }
         vfs_detach(from, node);
         memset(node->name, 0, sizeof(node->name));
@@ -353,6 +375,9 @@ long move(VfsNode* from,
         node->cookie = fs->next_cookie++;
         node->next = to->children;
         to->children = node;
+        stamp(from, OS1_TIME_MODIFY);
+        stamp(to, OS1_TIME_MODIFY);
+        stamp(node, 0);
     }
     vfs_changed();
     object_release(target);
@@ -419,6 +444,7 @@ long tmpfs_write(
         file->pages[(offset + i) / page_bytes][(offset + i) % page_bytes] = bytes[i];
     if(offset + size > node->byte_size)
         node->byte_size = offset + size;
+    stamp(node, OS1_TIME_MODIFY);
     if(end)
         *end = offset + size;
     return size;
@@ -448,6 +474,7 @@ long tmpfs_truncate(VfsNode* node, uint64_t size)
                    page_bytes - size % page_bytes);
     }
     node->byte_size = size;
+    stamp(node, OS1_TIME_MODIFY);
     return 0;
 }
 long tmpfs_seek(VfsNode* node, uint64_t cursor, int64_t offset, uint32_t origin)
@@ -510,6 +537,24 @@ static long space(VfsNode* n, os1_space& out)
     out.free_bytes = out.available_bytes = out.total_bytes - n->filesystem->pages * page_bytes;
     return 0;
 }
+static long times(VfsNode* base, os1_file_times& out)
+{
+    IrqSpinGuard guard(base->filesystem->lock);
+    out = static_cast<TmpNode*>(base)->times;
+    out.version = OS1_VFS_ABI_VERSION;
+    out.size = sizeof(out);
+    out.resolution_ns = 1000000;
+    return 0;
+}
+static long set_times(VfsNode* base, uint32_t fields)
+{
+    IrqSpinGuard guard(base->filesystem->lock);
+    uint64_t now = 0;
+    if(!wall_clock_now(now))
+        return OS1_ERR_UNSUPPORTED;
+    stamp(base, fields);
+    return 0;
+}
 const VfsOperations tmpfs_operations{tmpfs_lookup,
                                      tmpfs_create,
                                      tmpfs_remove,
@@ -526,7 +571,9 @@ const VfsOperations tmpfs_operations{tmpfs_lookup,
                                      metadata,
                                      space,
                                      create_locked,
-                                     remove_locked};
+                                     remove_locked,
+                                     times,
+                                     set_times};
 bool vfs_backed(const NativeObject* object)
 {
     return object && (object->kind == OS1_OBJECT_FILE || object->kind == OS1_OBJECT_DIRECTORY) &&

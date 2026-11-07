@@ -243,6 +243,33 @@ long sys_vfs(
         }
         return r;
     }
+    if(operation == OS1_RESOURCE_TIMES || operation == OS1_RESOURCE_SET_TIMES)
+    {
+        const bool set = operation == OS1_RESOURCE_SET_TIMES;
+        OpenInstance* instance = nullptr;
+        long r =
+            descriptor_acquire(table, fd, set ? OS1_RIGHT_SET_TIMES : OS1_RIGHT_INSPECT, instance);
+        if(r < 0)
+            return r;
+        InstanceRef pin(instance);
+        if(instance->object->kind != OS1_OBJECT_FILE &&
+           instance->object->kind != OS1_OBJECT_DIRECTORY)
+            return OS1_ERR_UNSUPPORTED;
+        os1_set_times request{};
+        if(set && !copy_from_user(frames, thread, argument, &request, sizeof(request)))
+            return OS1_ERR_FAULT;
+        NamespaceGuard guard;
+        if(!guard.held)
+            return OS1_ERR_WOULD_BLOCK;
+        auto* node = static_cast<VfsNode*>(instance->object);
+        if(set)
+            return vfs_set_times(node, request);
+        os1_file_times result{};
+        r = vfs_times(node, result);
+        return r < 0                                                             ? r
+               : copy_to_user(frames, thread, argument, &result, sizeof(result)) ? 0
+                                                                                 : OS1_ERR_FAULT;
+    }
     if(operation == OS1_RESOURCE_METADATA || operation == OS1_RESOURCE_SPACE)
     {
         OpenInstance* instance = nullptr;

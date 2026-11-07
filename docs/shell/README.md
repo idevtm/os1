@@ -21,7 +21,7 @@ The richer language below remains a proposal.
 | [Build and run guide](../../README.md) | Current launcher and shell workflows |
 | [Rich parameter ABI](../native-api/abi/rich-parameters-abi.md) | Implemented constructor/method inputs and dot-based CLI values |
 | [Object commands and short bindings](object-commands.md) | Settled command direction: aliases, copy policies, mixed arguments, interactive text fallback, and strict scripts; first stage implemented |
-| [File utilities and filesystem extensions](file-utilities.md) | Basic, recursive, and text tools implemented; timestamps, permissions, and links remain |
+| [File utilities and filesystem extensions](file-utilities.md) | Basic, recursive, text, and timestamp tools implemented; permissions and links remain |
 | [Language and runtime proposal](language-proposal.md) | Future language, values, reflection, and event-dispatch model |
 | [Service roadmap](../native-api/roadmap.md#other-goals-dependencies) | Dependencies for pipelines, redirection, PTYs, and supervision |
 

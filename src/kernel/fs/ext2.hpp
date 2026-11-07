@@ -16,6 +16,7 @@ struct Io
     bool (*write)(void*, uint32_t, const void*);
     bool (*flush)(void*);
     uint32_t blocks;
+    bool (*clock)(void*, uint64_t&) = nullptr;
 };
 struct Inode
 {
@@ -54,7 +55,14 @@ struct Volume
                 Inode& inode);
     long remove(
         uint32_t parent_number, Inode& parent, const char*, size_t, uint32_t number, Inode& inode);
-    long rename(Inode& parent, const char*, size_t, const char*, size_t);
+    long rename(uint32_t parent_number,
+                Inode& parent,
+                uint32_t number,
+                Inode& inode,
+                const char*,
+                size_t,
+                const char*,
+                size_t);
     long move(uint32_t source_parent,
               Inode& source_directory,
               const char* source,
@@ -68,6 +76,8 @@ struct Volume
               uint32_t replaced,
               Inode* replaced_inode,
               uint8_t* scratch);
+    bool stamp(Inode&, uint32_t fields);
+    long set_times(uint32_t, Inode&, uint32_t fields);
     long sync();
     long begin_write();
     long get_block(const Inode&, uint32_t index, uint32_t& result);

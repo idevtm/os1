@@ -17,15 +17,17 @@ Descriptor read/write/seek/enumeration use the same nodes and open instances.
 [The records](../../../src/uapi/os1/tmpfs.h) use native x86-64 little-endian integers.
 Bindings use the 24-byte `os1_ipc_kernel_binding` record and `OS1_IPC_BIND_KERNEL` from the [kernel adapter](kernel-console-abi.md#binding-and-authority).
 Interface IDs are `Directory = 0x4449523030303031` and `File = 0x46494c4530303031`; both use version 1.
-Only `/tmp` resources support these bindings. Initrd resources continue to use descriptor operations.
+Both tmpfs and [ext2](../../filesystems/ext2.md) resources support these bindings. Initrd resources continue to use descriptor operations.
 Kernel interface descriptions are compiled contracts; no separate filesystem ELF class exists for `intf` inspection.
 
 | Resource | Supported direct rights |
 | --- | --- |
-| Directory | LOOKUP, ENUMERATE, INSPECT, DELEGATE, CREATE, REMOVE, RENAME |
-| File | READ, WRITE, SEEK, INSPECT, DELEGATE |
+| Directory | LOOKUP, ENUMERATE, INSPECT, DELEGATE, CREATE, REMOVE, RENAME, SET_TIMES |
+| File | READ, WRITE, SEEK, INSPECT, DELEGATE, SET_TIMES |
 
-New rights are CREATE=256, REMOVE=512, and RENAME=1024. `OS1_RIGHT_ALL` is now 2047.
+Mutation rights are CREATE=256, REMOVE=512, RENAME=1024, and SET_TIMES=2048.
+`OS1_RIGHT_ALL` is 4095.
+The [timestamp ABI](filesystem-times-abi.md) defines additional `times` and `set_times` members.
 Existing rights keep their values. Initrd objects do not gain mutation rights.
 Trusted root/cwd grants include writable rights in their descendant ceilings; their direct initrd rights remain unchanged.
 Restricted child grants retain their existing confinement rules.

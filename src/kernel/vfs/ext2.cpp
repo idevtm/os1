@@ -1,5 +1,6 @@
 #include "vfs/ext2.hpp"
 
+#include "core/wall_clock.hpp"
 #include "fs/ext2.hpp"
 #include "mm/kmem.hpp"
 #include "storage/block_device.hpp"
@@ -326,7 +327,14 @@ long rename(VfsNode* base, const char* from, size_t a, const char* to, size_t b)
         return 0;
     if(target)
         return OS1_ERR_EXISTS;
-    long r = fs.volume.rename(p->inode, from, a, to, b);
+    long r = fs.volume.rename(p->number,
+                              p->inode,
+                              static_cast<DiskNode*>(child)->number,
+                              static_cast<DiskNode*>(child)->inode,
+                              from,
+                              a,
+                              to,
+                              b);
     if(r < 0)
         return r;
     memset(child->name, 0, sizeof(child->name));
@@ -571,6 +579,31 @@ long space(VfsNode* base, os1_space& out)
     out.available_bytes = out.free_bytes;
     return 0;
 }
+long times(VfsNode* base, os1_file_times& out)
+{
+    auto* node = static_cast<DiskNode*>(base);
+    Guard guard(*node->disk);
+    if(!guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    const auto* bytes = node->inode.bytes;
+    const uint32_t access = ext2::u32(bytes + 8), change = ext2::u32(bytes + 12),
+                   modify = ext2::u32(bytes + 16);
+    out.valid = (access ? OS1_TIME_ACCESS : 0) | (modify ? OS1_TIME_MODIFY : 0) |
+                (change ? OS1_TIME_CHANGE : 0);
+    out.resolution_ns = 1000000000;
+    out.access_ns = uint64_t(access) * 1000000000;
+    out.modify_ns = uint64_t(modify) * 1000000000;
+    out.change_ns = uint64_t(change) * 1000000000;
+    return 0;
+}
+long set_times(VfsNode* base, uint32_t fields)
+{
+    auto* node = static_cast<DiskNode*>(base);
+    Guard guard(*node->disk);
+    if(!guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    return node->disk->volume.set_times(node->number, node->inode, fields);
+}
 const VfsOperations operations{lookup,
                                create,
                                remove,
@@ -587,7 +620,9 @@ const VfsOperations operations{lookup,
                                metadata,
                                space,
                                create_locked,
-                               remove_locked};
+                               remove_locked,
+                               times,
+                               set_times};
 }  // namespace
 long ext2_mount(NativeObject* root, BlockDevice& device)
 {
@@ -632,7 +667,10 @@ long ext2_mount(NativeObject* root, BlockDevice& device)
     fs->device = &device;
     fs->start = start;
     fs->sectors = count;
-    long r = fs->volume.mount({fs, read_block, write_block, flush, uint32_t(count / 8)});
+    long r = fs->volume.mount(
+        {fs, read_block, write_block, flush, uint32_t(count / 8), [](void*, uint64_t& now) {
+             return wall_clock_now(now);
+         }});
     ext2::Inode inode{};
     if(r == 0)
         r = fs->volume.inode_read(2, inode);

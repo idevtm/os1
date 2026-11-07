@@ -1,8 +1,9 @@
 # Typed context and first shell stage
 
 Implementation started on 2026-11-07 on `codex/typed-shell-context`.
-This plan implements the first stage of the accepted [utility profile](file-utilities.md).
-Permissions, links, recursion, search tools, timestamps, and the pager remain later stages.
+This historical plan records the first stage of the accepted [utility profile](file-utilities.md).
+Later stages now provide traversal, text tools, the pager, and [timestamps](../native-api/abi/filesystem-times-abi.md).
+Permissions and links remain deferred.
 
 ```mermaid
 flowchart LR
@@ -28,7 +29,7 @@ Use the selected `/bin`, `/disk/bin` initial search order without a text PATH mi
 Launch the retained executable selected by search instead of resolving its name twice.
 
 Implement pwd/cd/ls, touch, cp/cat, mv, rm, mkdir/rmdir and their canonical object spellings.
-Touch retains creation-only behavior until timestamp support exists.
+At this stage, `touch` retained creation-only behavior; the later timestamp profile replaces that limitation.
 Support scripts through the shell, strict expressions, mixed named/positional arguments, and interactive warned text fallback.
 Preserve the existing editor, redirection, diagnostics, and provider commands.
 

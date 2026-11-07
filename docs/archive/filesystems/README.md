@@ -5,6 +5,7 @@ The [current filesystem index](../../filesystems/README.md) links maintained con
 
 | Record | Scope |
 | --- | --- |
+| [2026-11-08 timestamps](2026-11-08-filesystem-timestamps.md) | RTC wall time, native timestamp methods, full touch behavior, validation, and review |
 | [2026-11-06 USB hardware validation](2026-11-06-usb-hardware-validation.md) | Asus G74SX EHCI hub traversal, ext2 mounting, and user-reported reboot persistence |
 | [2026-11-06 EHCI hardware diagnostics](2026-11-06-ehci-hardware-diagnostics.md) | Passive USB boot snapshots for physical enumeration failures |
 | [2026-11-06 EHCI storage](2026-11-06-ehci-storage.md) | EHCI transport, bounded high-speed hubs, and hardware qualification evidence |

@@ -684,3 +684,18 @@ long vfs_tree_step(DescriptorTable& table, int fd, os1_tree_step& request)
     return descriptor_install(
         table, opened, request.rights, OS1_DESCRIPTOR_CLOEXEC, -1, request.descendant_rights);
 }
+
+long vfs_times(VfsNode* node, os1_file_times& out)
+{
+    out = {OS1_VFS_ABI_VERSION, sizeof(out), 0, 0, 0, 0, 0};
+    return node->operations && node->operations->times ? node->operations->times(node, out) : 0;
+}
+long vfs_set_times(VfsNode* node, const os1_set_times& request)
+{
+    if(request.version != OS1_VFS_ABI_VERSION || request.size != sizeof(request) ||
+       request.reserved || !request.fields || request.fields & ~(OS1_TIME_ACCESS | OS1_TIME_MODIFY))
+        return OS1_ERR_INVALID;
+    return node->operations && node->operations->set_times
+               ? node->operations->set_times(node, request.fields)
+               : OS1_ERR_UNSUPPORTED;
+}

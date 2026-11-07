@@ -23,6 +23,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
         command += ['-S']
     if getattr(args, 'readonly', False):
         command[-1] += ',readonly=on'
+    if getattr(args, 'rtc', None):
+        command += ['-rtc', args.rtc]
     if getattr(args, 'qtest', None):
         command += ['-qtest', f'unix:{args.qtest},server=on,wait=off']
     if getattr(args, 'qmp', None):

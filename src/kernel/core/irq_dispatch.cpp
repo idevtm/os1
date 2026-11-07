@@ -9,6 +9,7 @@
 #include "console/console_input.hpp"
 #include "core/kernel_state.hpp"
 #include "core/timer_source.hpp"
+#include "core/wall_clock.hpp"
 #include "debug/event_ring.hpp"
 #include "drivers/usb/xhci.hpp"
 #include "ipc/channel.hpp"
@@ -88,6 +89,7 @@ Thread* handle_irq(TrapFrame* frame)
             const auto calibration = timer_source_lapic_calibration();
             const uint32_t hz = calibration.frequency_hz ? calibration.frequency_hz : 1000;
             ipc_timer_tick(1000000000ull / hz);
+            wall_clock_tick(1000000000ull / hz);
         }
         scheduler_handle_timer_tick();
         if(cpu_on_boot())

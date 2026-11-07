@@ -26,7 +26,7 @@ struct Disk
     std::vector<uint8_t> bytes;
     int writes = -1;
     bool fail_read = false, fail_flush = false;
-    unsigned flushes = 0;
+    unsigned flushes = 0, total_writes = 0;
     Disk()
     {
         std::ifstream file(OS1_EXT2_FIXTURE, std::ios::binary);
@@ -49,6 +49,7 @@ struct Disk
             return false;
         if(d.writes > 0)
             --d.writes;
+        ++d.total_writes;
         std::memcpy(d.bytes.data() + at, in, 4096);
         return true;
     }
@@ -171,7 +172,7 @@ TEST_F(Ext2, DirectoryMutationAndCapacity)
     ext2::Inode directory{};
     ASSERT_EQ(fs->create(2, root, "sub", 3, true, number, directory), 0);
     EXPECT_EQ(ext2::u16(root.bytes + 26), 3);
-    ASSERT_EQ(fs->rename(root, "sub", 3, "renamed", 7), 0);
+    ASSERT_EQ(fs->rename(2, root, number, directory, "sub", 3, "renamed", 7), 0);
     ASSERT_EQ(fs->remove(2, root, "renamed", 7, number, directory), 0);
     EXPECT_EQ(ext2::u16(root.bytes + 26), 2);
     ASSERT_EQ(fs->sync(), 0);
@@ -513,4 +514,165 @@ TEST_F(Ext2, MetadataCountsIndirectBlocksAndReportsAllocatorCapacity)
     instance_release(opened);
     ASSERT_EQ(0, mount->operations->remove(mount, "sparse", 6, OS1_OBJECT_FILE));
     object_release(mount);
+}
+
+TEST_F(Ext2, TimestampsPersistAndReadsDoNotWrite)
+{
+    uint64_t now = 1700000000123456789ull;
+    struct Clock
+    {
+        static uint64_t& value()
+        {
+            static uint64_t time;
+            return time;
+        }
+        static bool read(void*, uint64_t& out)
+        {
+            out = value();
+            return out != 0;
+        }
+    };
+    Clock::value() = now;
+    fs->io.clock = Clock::read;
+    uint32_t number = 0;
+    ext2::Inode inode{};
+    ASSERT_EQ(0, fs->create(2, root, "times", 5, false, number, inode));
+    EXPECT_EQ(ext2::u32(inode.bytes + 8), 1700000000u);
+    EXPECT_EQ(ext2::u32(inode.bytes + 12), 1700000000u);
+    EXPECT_EQ(ext2::u32(inode.bytes + 16), 1700000000u);
+    EXPECT_EQ(ext2::u32(root.bytes + 16), 1700000000u);
+    Clock::value() += 2000000000;
+    ASSERT_EQ(3, fs->write(number, inode, 0, "abc", 3));
+    EXPECT_EQ(ext2::u32(inode.bytes + 8), 1700000000u);
+    EXPECT_EQ(ext2::u32(inode.bytes + 16), 1700000002u);
+    disk.writes = 0;
+    char bytes[3]{};
+    EXPECT_EQ(3, fs->read(inode, 0, bytes, 3));
+    EXPECT_EQ(std::string(bytes, 3), "abc");
+    EXPECT_FALSE(fs->failed);
+    disk.writes = -1;
+    Clock::value() += 2000000000;
+    ASSERT_EQ(0, fs->set_times(number, inode, OS1_TIME_ACCESS));
+    EXPECT_EQ(ext2::u32(inode.bytes + 8), 1700000004u);
+    EXPECT_EQ(ext2::u32(inode.bytes + 16), 1700000002u);
+    EXPECT_EQ(ext2::u32(inode.bytes + 12), 1700000004u);
+    EXPECT_EQ(0, fs->sync());
+    auto reload = std::make_unique<ext2::Volume>();
+    ASSERT_EQ(0, reload->mount(disk.io()));
+    ext2::Inode persisted{};
+    ASSERT_EQ(0, reload->inode_read(number, persisted));
+    EXPECT_EQ(0, std::memcmp(&inode, &persisted, sizeof(inode)));
+    Clock::value() = 0;
+    const auto unchanged = inode;
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, fs->set_times(number, inode, 3));
+    EXPECT_EQ(0, std::memcmp(&inode, &unchanged, sizeof(inode)));
+    EXPECT_EQ(OS1_ERR_INVALID, fs->set_times(number, inode, OS1_TIME_CHANGE));
+    Clock::value() = (uint64_t(UINT32_MAX) + 1) * 1000000000;
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, fs->set_times(number, inode, 3));
+    Clock::value() = now;
+    disk.writes = 0;
+    EXPECT_EQ(OS1_ERR_IO, fs->set_times(number, inode, 3));
+    EXPECT_EQ(0, std::memcmp(&inode, &unchanged, sizeof(inode)));
+    EXPECT_TRUE(fs->failed);
+}
+
+TEST_F(Ext2, TimestampMutationAndWriteCost)
+{
+    auto workload = [](bool timed) {
+        Disk disk;
+        auto volume = std::make_unique<ext2::Volume>();
+        ASSERT_EQ(0, volume->mount(disk.io()));
+        if(timed)
+            volume->io.clock = [](void*, uint64_t& now) {
+                now = 1700000000000000000ull;
+                return true;
+            };
+        ext2::Inode root{}, inode{};
+        ASSERT_EQ(0, volume->inode_read(2, root));
+        uint32_t number = 0;
+        unsigned start_writes = disk.total_writes;
+        ASSERT_EQ(0, volume->create(2, root, "a", 1, false, number, inode));
+        const auto create_writes = disk.total_writes - start_writes;
+        start_writes = disk.total_writes;
+        ASSERT_EQ(1, volume->write(number, inode, 0, "x", 1));
+        const auto content_writes = disk.total_writes - start_writes;
+        start_writes = disk.total_writes;
+        ASSERT_EQ(0, volume->rename(2, root, number, inode, "a", 1, "b", 1));
+        const auto rename_writes = disk.total_writes - start_writes;
+        if(timed)
+        {
+            EXPECT_EQ(ext2::u32(root.bytes + 16), 1700000000u);
+            EXPECT_EQ(ext2::u32(inode.bytes + 12), 1700000000u);
+        }
+        start_writes = disk.total_writes;
+        ASSERT_EQ(0, volume->truncate(number, inode, 0));
+        const auto truncate_writes = disk.total_writes - start_writes;
+        start_writes = disk.total_writes;
+        ASSERT_EQ(0, volume->remove(2, root, "b", 1, number, inode));
+        const auto remove_writes = disk.total_writes - start_writes;
+        std::cout << "timestamp_io clock=" << timed << " create=" << create_writes
+                  << " write=" << content_writes << " rename=" << rename_writes
+                  << " truncate=" << truncate_writes << " remove=" << remove_writes << '\n';
+        ASSERT_EQ(0, volume->sync());
+    };
+    workload(false);
+    workload(true);
+}
+
+TEST_F(Ext2, NamespaceChangesAdvanceParentAndObjectTimes)
+{
+    struct Clock
+    {
+        static uint64_t& value()
+        {
+            static uint64_t time;
+            return time;
+        }
+        static bool read(void*, uint64_t& out)
+        {
+            out = value();
+            return true;
+        }
+    };
+    Clock::value() = 1700000000000000000ull;
+    fs->io.clock = Clock::read;
+    uint32_t file_number = 0, directory_number = 0;
+    ext2::Inode file{}, directory{};
+    ASSERT_EQ(0, fs->create(2, root, "a", 1, false, file_number, file));
+    Clock::value() += 1000000000;
+    ASSERT_EQ(0, fs->rename(2, root, file_number, file, "a", 1, "b", 1));
+    EXPECT_EQ(ext2::u32(root.bytes + 16), 1700000001u);
+    EXPECT_EQ(ext2::u32(file.bytes + 12), 1700000001u);
+    EXPECT_EQ(ext2::u32(file.bytes + 16), 1700000000u);
+    ASSERT_EQ(0, fs->create(2, root, "sub", 3, true, directory_number, directory));
+    Clock::value() += 1000000000;
+    std::array<uint8_t, 8192> scratch{};
+    ASSERT_EQ(0,
+              fs->move(2,
+                       root,
+                       "b",
+                       1,
+                       directory_number,
+                       directory,
+                       "c",
+                       1,
+                       file_number,
+                       file,
+                       0,
+                       nullptr,
+                       scratch.data()));
+    EXPECT_EQ(ext2::u32(root.bytes + 16), 1700000002u);
+    EXPECT_EQ(ext2::u32(directory.bytes + 16), 1700000002u);
+    EXPECT_EQ(ext2::u32(file.bytes + 12), 1700000002u);
+    EXPECT_EQ(ext2::u32(file.bytes + 16), 1700000000u);
+    Clock::value() += 1000000000;
+    ASSERT_EQ(0, fs->remove(directory_number, directory, "c", 1, file_number, file));
+    EXPECT_EQ(ext2::u32(directory.bytes + 16), 1700000003u);
+    EXPECT_EQ(ext2::u32(directory.bytes + 12), 1700000003u);
+    ASSERT_EQ(0, fs->sync());
+    auto reload = std::make_unique<ext2::Volume>();
+    ASSERT_EQ(0, reload->mount(disk.io()));
+    ext2::Inode persisted{};
+    ASSERT_EQ(0, reload->inode_read(directory_number, persisted));
+    EXPECT_EQ(ext2::u32(persisted.bytes + 16), 1700000003u);
 }

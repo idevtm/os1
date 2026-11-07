@@ -1,3 +1,4 @@
+#include <os1/file_tools.hpp>
 #include <os1/vfs.hpp>
 
 #include "tmpfs_check.hpp"
@@ -26,6 +27,33 @@ bool equal(const char* a, const char* b)
 
 int main(int argc, char** argv)
 {
+    if(argc == 2 && equal(argv[1], "times"))
+    {
+        // Exercise the real user helpers with the complete previous ceiling.
+        files::Handle limited(
+            open("/",
+                 OS1_RIGHT_LOOKUP | OS1_RIGHT_ENUMERATE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE,
+                 OS1_RIGHT_ALL & ~OS1_RIGHT_SET_TIMES));
+        CHECK(limited.fd >= 0, "time restricted root");
+        os1_startup_record context = *startup_record;
+        context.root_fd = limited.fd;
+        startup_record = &context;
+        current_cwd = limited.fd;
+        files::Handle directory(open("/tmp", fs::directory_rights, fs::descendant_rights));
+        CHECK(directory.fd >= 0, "time independent directory authority");
+        files::Handle keep(files::open_file("/tmp/rights-note", files::Mode::Keep));
+        CHECK(keep.fd >= 0, "time independent ensure authority");
+        CHECK(write(keep.fd, "abc", 3) == 3, "time independent write");
+        files::Handle append(files::open_file("/tmp/rights-note", files::Mode::Append));
+        CHECK(append.fd >= 0 && write(append.fd, "d", 1) == 1, "time independent append");
+        files::Handle replace(files::open_file("/tmp/rights-note", files::Mode::Replace));
+        CHECK(replace.fd >= 0, "time independent replacement");
+        CHECK(open("/tmp/rights-note", OS1_RIGHT_SET_TIMES) == OS1_ERR_ACCESS,
+              "time mutation denied");
+        constexpr char success[] = "[user/vfscheck] time authority ok\n";
+        write(1, success, sizeof(success) - 1);
+        return 0;
+    }
     if(argc == 2 && equal(argv[1], "tmpfs"))
         return os1::tmpfs_check::child();
     if(argc == 2)

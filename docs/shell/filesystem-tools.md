@@ -63,8 +63,8 @@ The [native metadata ABI](../native-api/abi/filesystem-metadata-abi.md) defines 
 Allocated usage includes ext2 directory and indirect blocks, but excludes tmpfs kernel-object overhead.
 Initrd allocated usage is unsupported; use `logical:true` to count its file lengths.
 Tmpfs `df` reports its data-page quota.
-Timestamps, permissions, and ownership remain unsupported.
-`touch` still only ensures that a file exists.
+The [timestamp ABI](../native-api/abi/filesystem-times-abi.md) adds times and complete create-or-update `touch` behavior.
+Permissions and ownership remain unsupported.
 
 ## Traversal and mutation limits
 
