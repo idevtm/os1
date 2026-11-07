@@ -3,7 +3,9 @@
 The user accepted this minimal command profile on 2026-11-07.
 Permissions and links remain deferred to a later stage.
 The [first stage](typed-context.md) implements basic context, navigation, and file operations.
-The remaining command set is accepted direction, not a complete POSIX compatibility claim.
+The [second stage](filesystem-tools.md) implements metadata, traversal, recursive copy/removal, `find`, and `du`.
+Text utilities, timestamps, and paging remain accepted direction.
+This profile does not claim complete POSIX compatibility.
 
 ```mermaid
 flowchart TD
@@ -198,14 +200,15 @@ Current ext2 rejects links; later support requires explicit format validation an
 | 2 | Recursive commands, search, metadata, and text utilities; timestamps and pager can proceed alongside |
 | Later | Credentials, permissions, and links |
 
-Current lookup rejects parent traversal.
-Current tmpfs and ext2 rename within one directory only, without replacement.
+Current rooted lookup supports parent traversal within granted authority.
+Tmpfs and ext2 support same-filesystem cross-directory moves with replacement.
 The ext2 profile rejects retained-object removal; tmpfs permits unlinked files to live through open references.
-These are current constraints, not evidence that the accepted extension already works.
+The implemented traversal extension preserves these retained-object rules.
 See the [tmpfs ABI](../native-api/abi/tmpfs-abi.md) and [ext2 profile](../filesystems/ext2.md).
 
 The minimal feature choices are settled.
-Before implementation, specify command status/error flow, script result presentation, grammar details, resource bounds, and protocol layouts.
+The [traversal profile](filesystem-tools.md) specifies implemented command behavior and resource bounds.
+Remaining text utilities, timestamps, and paging need their own implementation specifications.
 These specifications must preserve the accepted behavior; they are not permission to expand the feature set.
 Custom configuration, user-defined aliases, String output methods, general expression operators, and a full scripting language can remain deferred.
 

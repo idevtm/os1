@@ -64,3 +64,9 @@ A document's location does not establish implementation status or ABI stability.
 Keep implemented behavior, accepted direction, proposals, and historical evidence explicitly labeled.
 Preserve measurements, revision identities, and examples when reorganizing records.
 Update repository links and source comments whenever a document moves.
+
+## Filesystem utility extension
+
+- [Metadata and recursive commands](shell/filesystem-tools.md)
+- [Native metadata and traversal ABI](native-api/abi/filesystem-metadata-abi.md)
+- [Implementation and validation record](archive/shell/2026-11-07-filesystem-traversal.md)

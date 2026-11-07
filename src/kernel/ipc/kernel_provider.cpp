@@ -6,6 +6,7 @@
 #include "sync/atomic.hpp"
 #include "util/memory.h"
 #include "vfs/filesystem.hpp"
+#include "vfs/namespace.hpp"
 
 namespace
 {
@@ -138,6 +139,41 @@ struct CursorGuard
             atomic_store_release(&source.cursor_busy, false);
     }
 };
+bool inspect_metadata(OpenInstance& source,
+                      uint32_t rights,
+                      const os1_ipc_message& request,
+                      os1_ipc_result& result,
+                      bool directory)
+{
+    bool metadata = request.member == (directory ? OS1_DIRECTORY_METADATA : OS1_FILE_METADATA);
+    if(!metadata && request.member != (directory ? OS1_DIRECTORY_SPACE : OS1_FILE_SPACE))
+        return false;
+    if(!(rights & OS1_RIGHT_INSPECT))
+        result.application_status = OS1_ERR_ACCESS;
+    else if(request.payload_bytes)
+        result.application_status = OS1_ERR_INVALID;
+    else
+    {
+        NamespaceGuard guard;
+        if(!guard.held)
+            result.application_status = OS1_ERR_WOULD_BLOCK;
+        else if(metadata)
+        {
+            os1_metadata out{};
+            result.application_status = vfs_metadata(static_cast<VfsNode*>(source.object), out);
+            if(!result.application_status)
+                encode(result, out);
+        }
+        else
+        {
+            os1_space out{};
+            result.application_status = vfs_space(static_cast<VfsNode*>(source.object), out);
+            if(!result.application_status)
+                encode(result, out);
+        }
+    }
+    return true;
+}
 void invoke_directory(OpenInstance& source,
                       uint32_t rights,
                       uint32_t ceiling,
@@ -145,6 +181,8 @@ void invoke_directory(OpenInstance& source,
                       os1_ipc_result& result,
                       DescriptorEntry& output)
 {
+    if(inspect_metadata(source, rights, request, result, true))
+        return;
     uint32_t required;
     switch(request.member)
     {
@@ -296,6 +334,8 @@ void invoke_file(OpenInstance& source,
                  os1_ipc_result& result,
                  DescriptorEntry&)
 {
+    if(inspect_metadata(source, rights, request, result, false))
+        return;
     uint32_t required;
     switch(request.member)
     {

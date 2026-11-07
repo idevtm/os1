@@ -45,3 +45,10 @@ inline void vfs_detach(VfsNode* parent, VfsNode* node)
     *link = node->next;
     node->next = nullptr;
 }
+
+uint64_t vfs_identity();
+uint64_t vfs_generation();                   // NamespaceGuard required.
+void vfs_changed();                          // NamespaceGuard required, after publication.
+long vfs_metadata(VfsNode*, os1_metadata&);  // NamespaceGuard required.
+long vfs_space(VfsNode*, os1_space&);        // NamespaceGuard required.
+long vfs_tree_step(DescriptorTable&, int, os1_tree_step&);

@@ -1363,16 +1363,18 @@ int main(int argc_main, char** argv_main)
             if(copy_source < 0)
             {
                 char source[256];
-                long status =
-                    call.string(0, source, sizeof(source))
-                        ? os1::user::files::open_file(source, os1::user::files::Mode::Existing)
-                        : OS1_ERR_RANGE;
+                long status = call.string(0, source, sizeof(source))
+                                  ? (call.recursive ? os1::user::open(source, OS1_RIGHT_INSPECT)
+                                                    : os1::user::files::open_file(
+                                                          source, os1::user::files::Mode::Existing))
+                                  : OS1_ERR_RANGE;
                 if(status >= 0)
                 {
                     copy_input.reset(status);
                     os1_file_info info{};
                     status = os1::user::file_info(copy_input.fd, &info);
-                    if(status >= 0 && info.kind != OS1_OBJECT_FILE)
+                    if(status >= 0 && info.kind != OS1_OBJECT_FILE &&
+                       !(call.recursive && info.kind == OS1_OBJECT_DIRECTORY))
                         status = OS1_ERR_UNSUPPORTED;
                 }
                 if(status < 0)
@@ -1386,7 +1388,7 @@ int main(int argc_main, char** argv_main)
             }
         }
         os1::user::files::Streams streams;
-        if(!streams.apply(parsed, reader, copy_source))
+        if(!streams.apply(parsed, reader, copy_source, call.recursive))
         {
             os1::user::files::message("shell: redirection failed\n");
             if(!console_input)

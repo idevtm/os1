@@ -236,6 +236,7 @@ struct Parameter
     const char* name;
     bool positional;
     bool required;
+    char short_option = 0;
 };
 // Argument mapping is pure: callers validate it before evaluation/redirection effects.
 inline bool bind_arguments(const Command& command,
@@ -262,8 +263,24 @@ inline bool bind_arguments(const Command& command,
         if(options && command.raw[start] == '-' && end > start + 1 &&
            (command.raw[start + 1] < '0' || command.raw[start + 1] > '9'))
         {
-            error = "unsupported option";
-            return false;
+            int option = -1;
+            if(end - start == 2)
+                for(size_t p = 0; p < count; ++p)
+                    if(parameters[p].short_option == command.raw[start + 1])
+                        option = p;
+            if(option < 0)
+            {
+                error = "unsupported option";
+                return false;
+            }
+            if(slots[option] >= 0)
+            {
+                error = "duplicate parameter";
+                return false;
+            }
+            slots[option] = i;
+            values[option] = SIZE_MAX;  // Declared Boolean option assigns true.
+            continue;
         }
         while(colon < end && command.raw[colon] != ':' && command.raw[colon] != '"' &&
               command.raw[colon] != '\'' && command.raw[colon] != '{' && command.raw[colon] != '[')

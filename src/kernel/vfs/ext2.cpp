@@ -16,7 +16,7 @@ struct DiskFs
     uint64_t start, sectors;
     volatile bool busy;
     uint32_t references, nodes;
-    uint64_t cookie;
+    uint64_t cookie, identity;
     bool seen[ext2::max_inodes + 1];
 };
 struct DiskNode : VfsNode
@@ -107,6 +107,11 @@ DiskNode* node(DiskFs& fs,
         return nullptr;
     ++fs.references;
     __atomic_add_fetch(&fs.nodes, 1u, __ATOMIC_RELAXED);
+    if(!fs.identity)
+        fs.identity = vfs_identity();
+    n->object_id = vfs_identity();
+    n->filesystem_id = fs.identity;
+    n->mount_root = depth == 0;
     n->disk = &fs;
     n->number = number;
     n->inode = inode;
@@ -208,11 +213,8 @@ long lookup(VfsNode* base, const char* name, size_t size, NativeObject*& out)
     out = child;
     return 0;
 }
-long create(VfsNode* base, const char* name, size_t size, uint32_t kind, OpenInstance*& out)
+long create_locked(VfsNode* base, const char* name, size_t size, uint32_t kind, OpenInstance*& out)
 {
-    NamespaceGuard namespace_guard;
-    if(!namespace_guard.held)
-        return OS1_ERR_WOULD_BLOCK;
     out = nullptr;
     auto* p = static_cast<DiskNode*>(base);
     auto& fs = *p->disk;
@@ -251,14 +253,18 @@ long create(VfsNode* base, const char* name, size_t size, uint32_t kind, OpenIns
     }
     child->next = p->children;
     p->children = child;
+    vfs_changed();
     out = opened.take();
     return 0;
 }
-long remove(VfsNode* base, const char* name, size_t size, uint32_t kind)
+long create(VfsNode* p, const char* n, size_t s, uint32_t k, OpenInstance*& out)
 {
-    NamespaceGuard namespace_guard;
-    if(!namespace_guard.held)
-        return OS1_ERR_WOULD_BLOCK;
+    NamespaceGuard guard;
+    return guard.held ? create_locked(p, n, s, k, out) : OS1_ERR_WOULD_BLOCK;
+}
+
+long remove_locked(VfsNode* base, const char* name, size_t size, uint32_t kind)
+{
     auto* p = static_cast<DiskNode*>(base);
     auto& fs = *p->disk;
     Guard g(fs);
@@ -288,9 +294,16 @@ long remove(VfsNode* base, const char* name, size_t size, uint32_t kind)
     child->next = nullptr;
     child->linked = false;
     __atomic_sub_fetch(&fs.nodes, 1u, __ATOMIC_RELAXED);
+    vfs_changed();
     object_release(child);
     return 0;
 }
+long remove(VfsNode* p, const char* n, size_t s, uint32_t k)
+{
+    NamespaceGuard guard;
+    return guard.held ? remove_locked(p, n, s, k) : OS1_ERR_WOULD_BLOCK;
+}
+
 long rename(VfsNode* base, const char* from, size_t a, const char* to, size_t b)
 {
     NamespaceGuard namespace_guard;
@@ -320,6 +333,7 @@ long rename(VfsNode* base, const char* from, size_t a, const char* to, size_t b)
     memcpy(child->name, to, b);
     child->name_size = b;
     child->cookie = ++fs.cookie;
+    vfs_changed();
     return 0;
 }
 
@@ -404,6 +418,7 @@ long move(VfsNode* from,
     child->cookie = ++fs.cookie;
     child->next = q->children;
     q->children = child;
+    vfs_changed();
     return 0;
 }
 long read(VfsNode* base, uint64_t offset, void* out, size_t size)
@@ -529,8 +544,50 @@ long snapshot(VfsNode* base, uint8_t*& out, uint64_t& length)
     length = r;
     return 0;
 }
-const VfsOperations operations{
-    lookup, create, remove, rename, read, write, truncate, seek, next, info, sync, snapshot, move};
+long metadata(VfsNode* base, os1_metadata& out)
+{
+    auto* n = static_cast<DiskNode*>(base);
+    Guard guard(*n->disk);
+    if(!guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    out.filesystem_kind = OS1_FILESYSTEM_EXT2;
+    out.valid |= OS1_METADATA_ALLOCATED;
+    out.logical_bytes = ext2::size(n->inode);
+    out.allocated_bytes = uint64_t(ext2::u32(n->inode.bytes + 28)) * 512;
+    return 0;
+}
+long space(VfsNode* base, os1_space& out)
+{
+    auto* n = static_cast<DiskNode*>(base);
+    Guard guard(*n->disk);
+    if(!guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    auto& v = n->disk->volume;
+    out.filesystem_kind = OS1_FILESYSTEM_EXT2;
+    out.total_bytes = uint64_t(v.blocks) * 4096;
+    const auto free = ext2::u32(v.super + 12);
+    out.free_bytes = uint64_t(free) * 4096;
+    // This profile has no credential-based reserved-block policy.
+    out.available_bytes = out.free_bytes;
+    return 0;
+}
+const VfsOperations operations{lookup,
+                               create,
+                               remove,
+                               rename,
+                               read,
+                               write,
+                               truncate,
+                               seek,
+                               next,
+                               info,
+                               sync,
+                               snapshot,
+                               move,
+                               metadata,
+                               space,
+                               create_locked,
+                               remove_locked};
 }  // namespace
 long ext2_mount(NativeObject* root, BlockDevice& device)
 {

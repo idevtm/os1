@@ -1,6 +1,7 @@
 #pragma once
 #include <os1/context.hpp>
 #include <os1/file_tools.hpp>
+#include <os1/tree.hpp>
 
 #include "shell/values.hpp"
 namespace os1::user::shell_runtime
@@ -27,14 +28,26 @@ enum class Method
     PathRemove,
     PathSearch,
     Query,
-    SetEnvironment
+    SetEnvironment,
+    Info,
+    Space,
+    Find,
+    Usage
 };
 struct Binding
 {
     const char* name;
     Method method;
 };
-constexpr Binding bindings[] = {{"echo", Method::Print},
+constexpr Binding bindings[] = {{"stat", Method::Info},
+                                {"fs.info", Method::Info},
+                                {"df", Method::Space},
+                                {"fs.space", Method::Space},
+                                {"find", Method::Find},
+                                {"fs.find", Method::Find},
+                                {"du", Method::Usage},
+                                {"fs.usage", Method::Usage},
+                                {"echo", Method::Print},
                                 {"out.print", Method::Print},
                                 {"process.streams.output.print", Method::Print},
                                 {"pwd", Method::Cwd},
@@ -186,8 +199,8 @@ struct Call
 {
     Method method = Method::Unknown;
     Data values{};
-    int nodes[3]{-1, -1, -1}, streams[3]{-1, -1, -1};
-    bool strict = false, cat = false;
+    int nodes[4]{-1, -1, -1, -1}, streams[4]{-1, -1, -1, -1};
+    bool strict = false, cat = false, recursive = false, logical = false;
     const char* error = nullptr;
     char target[128]{};
     long status = 0;
@@ -198,7 +211,10 @@ struct Call
             return true;
         // Copy policy cases are declared schema symbols, not unresolved expressions.
         if(mode && (os1::context::same(text, size, "replace", 7) ||
-                    os1::context::same(text, size, "append", 6)))
+                    os1::context::same(text, size, "append", 6) ||
+                    os1::context::same(text, size, "file", 4) ||
+                    os1::context::same(text, size, "directory", 9) ||
+                    os1::context::same(text, size, "any", 3)))
         {
             nodes[slot] = os1::context::add(values,
                                             0,
@@ -209,7 +225,7 @@ struct Call
                                             size);
             return nodes[slot] >= 0;
         }
-        const char* names[] = {"first", "second", "third"};
+        const char* names[] = {"first", "second", "third", "fourth"};
         unsigned before = values.count;
         shell::ValueParser parser{text, size, 0, strict, resolve, warning};
         if(!parser.parse(values, 0, names[slot], files::length(names[slot])))
@@ -249,7 +265,7 @@ struct Call
         }
         for(size_t i = 0; name[i]; ++i)
             target[i] = name[i];
-        Parameter parameters[3]{};
+        Parameter parameters[4]{};
         size_t count = 0;
         if(method == Method::Print)
         {
@@ -261,18 +277,43 @@ struct Call
             parameters[0] = {"source", true, !cat};
             parameters[1] = {"destination", true, method == Method::Move};
             parameters[2] = {"mode", false, false};
-            count = method == Method::Copy ? 3 : 2;
+            parameters[3] = {"recursive", false, false, shell::equal(name, "cp") ? 'r' : char(0)};
+            count = method == Method::Copy ? 4 : 2;
         }
         else if(method == Method::Query || method == Method::Cwd || method == Method::PathList)
             count = 0;
         else
         {
-            parameters[0] = {
-                method == Method::SetEnvironment ? "value" : "path", true, method != Method::List};
+            parameters[0] = {method == Method::SetEnvironment ? "value" : "path",
+                             true,
+                             method != Method::List && method != Method::Find &&
+                                 method != Method::Usage && method != Method::Space};
             count = 1;
         }
-        int slots[3]{};
-        size_t starts[3]{};
+        int boolean_slot = -1;
+        if(method == Method::Copy)
+            boolean_slot = 3;
+        if((method == Method::RemoveDirectory && !shell::equal(name, "rmdir")) ||
+           (method == Method::Remove && shell::equal(name, "rm")))
+        {
+            parameters[1] = {"recursive", false, false, shell::equal(name, "rm") ? 'r' : char(0)};
+            boolean_slot = 1;
+            count = 2;
+        }
+        if(method == Method::Find)
+        {
+            parameters[1] = {"name", false, false};
+            parameters[2] = {"kind", false, false};
+            count = 3;
+        }
+        if(method == Method::Usage)
+        {
+            parameters[1] = {"logical", false, false};
+            boolean_slot = 1;
+            count = 2;
+        }
+        int slots[4]{};
+        size_t starts[4]{};
         if(!shell::bind_arguments(
                command, parameters, count, slots, starts, error, assignment ? 2 : 1))
             return false;
@@ -281,12 +322,19 @@ struct Call
             for(size_t p = 0; p < count; ++p)
                 if(slots[p] == static_cast<int>(i))
                 {
-                    if(cat && p == 0 && shell::equal(command.argv[i], "-"))
+                    if(starts[p] == SIZE_MAX)
+                    {
+                        nodes[p] =
+                            os1::context::add(values, 0, "option", 6, OS1_VALUE_BOOLEAN, "", 0, 1);
+                        if(nodes[p] < 0)
+                            return false;
+                    }
+                    else if(cat && p == 0 && shell::equal(command.argv[i], "-"))
                         streams[0] = 0;
                     else if(!evaluate(command.raw + starts[p],
                                       command.end[i] - starts[p],
                                       p,
-                                      method == Method::Copy && p == 2))
+                                      (method == Method::Copy || method == Method::Find) && p == 2))
                         return false;
                 }
         if(method == Method::Copy)
@@ -304,12 +352,45 @@ struct Call
                     error = "expected String, got stream";
                     return false;
                 }
+                if(int(p) == boolean_slot)
+                {
+                    if(streams[p] >= 0 ||
+                       (nodes[p] >= 0 && values.nodes[nodes[p]].kind != OS1_VALUE_BOOLEAN))
+                    {
+                        error = "expected Boolean";
+                        return false;
+                    }
+                    bool value = nodes[p] >= 0 && values.nodes[nodes[p]].integer;
+                    if(method == Method::Usage)
+                        logical = value;
+                    else
+                        recursive = value;
+                    continue;
+                }
                 if(nodes[p] >= 0 && values.nodes[nodes[p]].kind != OS1_VALUE_STRING)
                 {
                     error = "expected String";
                     return false;
                 }
             }
+        if(method == Method::Remove && recursive)
+            method = Method::RemoveDirectory;
+        if(method == Method::Find && nodes[2] >= 0)
+        {
+            char kind[16];
+            if(!string(2, kind, sizeof(kind)) ||
+               (!shell::equal(kind, "any") && !shell::equal(kind, "file") &&
+                !shell::equal(kind, "directory")))
+            {
+                error = "unknown file kind";
+                return false;
+            }
+        }
+        if(method == Method::Copy && recursive && (streams[0] >= 0 || streams[1] >= 0))
+        {
+            error = "recursive copy requires two paths";
+            return false;
+        }
         if(method == Method::Copy && nodes[2] >= 0)
         {
             char mode[16];
@@ -585,6 +666,77 @@ inline long move(const char* source, char* destination, size_t capacity)
         return b.fd;
     return context::move(a.fd, from, b.fd, to);
 }
+inline long traverse(Call& call)
+{
+    char path[256]{}, destination[OS1_PATH_MAX + 1]{}, pattern[256]{}, kind[16]{}, mode[16]{};
+    if(!call.string(0, path, sizeof(path), "."))
+        return OS1_ERR_RANGE;
+    tree::Mode operation = call.method == Method::Copy              ? tree::Mode::Copy
+                           : call.method == Method::RemoveDirectory ? tree::Mode::Remove
+                           : call.method == Method::Usage           ? tree::Mode::Usage
+                                                                    : tree::Mode::Find;
+    if(operation == tree::Mode::Find && (!call.string(1, pattern, sizeof(pattern), "*") ||
+                                         !call.string(2, kind, sizeof(kind), "any")))
+        return OS1_ERR_RANGE;
+    uint32_t filter = shell::equal(kind, "file")        ? OS1_OBJECT_FILE
+                      : shell::equal(kind, "directory") ? OS1_OBJECT_DIRECTORY
+                                                        : 0;
+    tree::Walk walk(operation, pattern, filter, call.logical, false);
+    Handle initial(open(path, OS1_RIGHT_INSPECT));
+    if(initial.fd < 0)
+        return initial.fd;
+    os1_metadata info{};
+    long r = tree::metadata(initial.fd, info);
+    if(r < 0)
+        return r;
+    bool directory = info.kind == OS1_OBJECT_DIRECTORY;
+    uint32_t rights =
+        directory ? operation == tree::Mode::Remove ? tree::directory_remove : tree::directory_read
+                  : tree::file_read;
+    uint32_t ceiling =
+        directory ? operation == tree::Mode::Remove ? tree::directory_remove : tree::read_ceiling
+                  : 0;
+    Handle source(open(path, rights, ceiling));
+    if(source.fd < 0)
+        return source.fd;
+    os1_metadata current{};
+    r = tree::metadata(source.fd, current);
+    if(r < 0)
+        return r;
+    if(current.object_id != info.object_id || current.generation != info.generation)
+        return OS1_ERR_CHANGED;
+    initial.reset();
+    Handle parent;
+    char leaf[64]{};
+    if(operation == tree::Mode::Copy)
+    {
+        if(!call.string(1, destination, sizeof(destination)) ||
+           !call.string(2, mode, sizeof(mode), call.cat ? "append" : "replace"))
+            return OS1_ERR_RANGE;
+        walk.append = shell::equal(mode, "append");
+        r = destination_path(path, destination, sizeof(destination));
+        if(r < 0)
+            return r;
+        parent.reset(directory_resource(destination, leaf, fs::directory_rights));
+    }
+    else if(operation == tree::Mode::Remove)
+        parent.reset(directory_resource(path, leaf, tree::directory_remove));
+    if((operation == tree::Mode::Copy || operation == tree::Mode::Remove) && parent.fd < 0)
+        return parent.fd;
+    r = walk.run(source.take(),
+                 info,
+                 path,
+                 operation == tree::Mode::Copy ? parent.fd : -1,
+                 leaf,
+                 operation == tree::Mode::Remove ? parent.fd : -1,
+                 leaf);
+    walk.failure(r);
+    if(r >= 0 && operation == tree::Mode::Usage)
+        if(!tree::number(walk.bytes) || !files::put(1, " bytes ", 7) || !tree::escaped(path) ||
+           !files::put(1, "\n", 1))
+            return OS1_ERR_IO;
+    return r;
+}
 inline bool valid_path_list(const Data& d)
 {
     int list = os1::context::child(d, 0, "path");
@@ -683,7 +835,9 @@ inline long execute(Call& call)
 {
     char a[256]{}, b[256]{};
     if(call.method != Method::SetEnvironment &&
-       (!call.string(0, a, sizeof(a)) || !call.string(1, b, sizeof(b))))
+       (!call.string(0, a, sizeof(a)) ||
+        ((call.method == Method::Copy || call.method == Method::Move) &&
+         !call.string(1, b, sizeof(b)))))
         return OS1_ERR_RANGE;
     switch(call.method)
     {
@@ -704,11 +858,20 @@ inline long execute(Call& call)
         case Method::Remove:
         case Method::MakeDirectory:
         case Method::RemoveDirectory:
+            if(call.method == Method::RemoveDirectory && call.recursive)
+                return traverse(call);
             return mutation(a, call.method);
         case Method::List:
             return list(*a ? a : ".");
+        case Method::Info:
+            return tree::info(a, false);
+        case Method::Space:
+            return tree::info(*a ? a : ".", true);
+        case Method::Find:
+        case Method::Usage:
+            return traverse(call);
         case Method::Copy:
-            return copy(call);
+            return call.recursive ? traverse(call) : copy(call);
         case Method::Move:
             return move(a, b, sizeof(b));
         case Method::PathAdd:

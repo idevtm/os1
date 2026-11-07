@@ -15,6 +15,11 @@ struct VfsOperations
     long (*sync)(VfsNode*);
     long (*snapshot)(VfsNode*, uint8_t*&, uint64_t&);
     long (*move)(VfsNode*, const char*, size_t, VfsNode*, const char*, size_t, bool);
+    long (*metadata)(VfsNode*, os1_metadata&) = nullptr;
+    long (*space)(VfsNode*, os1_space&) = nullptr;
+    // Internal entry points: caller holds NamespaceGuard.
+    long (*create_locked)(VfsNode*, const char*, size_t, uint32_t, OpenInstance*&) = nullptr;
+    long (*remove_locked)(VfsNode*, const char*, size_t, uint32_t) = nullptr;
 };
 bool vfs_backed(const NativeObject*);
 extern const VfsOperations tmpfs_operations;

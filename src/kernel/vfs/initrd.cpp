@@ -41,6 +41,11 @@ VfsNode* allocate_node(Import& import, const char* name, size_t length, bool dir
         return nullptr;
     }
     ++import.nodes;
+    node->object_id = vfs_identity();
+    node->filesystem_id = import.root ? import.root->filesystem_id : node->object_id;
+    node->mount_root = !import.root;
+    node->archive_bytes = import.root ? import.root->archive_bytes : 0;
+    node->linked = true;
     node->references = 1;
     node->kind = directory ? OS1_OBJECT_DIRECTORY : OS1_OBJECT_FILE;
     node->interfaces =
@@ -152,6 +157,7 @@ long vfs_import_initrd(const uint8_t* bytes, uint64_t size, NativeObject*& root)
     import.root = allocate_node(import, nullptr, 0, true);
     if(!import.root)
         return import.error;
+    import.root->archive_bytes = size;
     if(!for_each_cpio_newc_entry(bytes, size, import_entry, &import))
     {
         object_release(import.root);
@@ -479,4 +485,202 @@ long vfs_same_object(DescriptorTable& table, int left, int right)
         return r;
     InstanceRef pb(b.instance);
     return a.instance->object == b.instance->object;
+}
+
+namespace
+{
+volatile uint64_t identity_sequence = 0;
+uint64_t namespace_generation = 1;
+}  // namespace
+uint64_t vfs_identity()
+{
+    return __atomic_add_fetch(&identity_sequence, 1ull, __ATOMIC_RELAXED);
+}
+uint64_t vfs_generation()
+{
+    return namespace_generation;
+}
+void vfs_changed()
+{
+    ++namespace_generation;
+}
+long vfs_metadata(VfsNode* node, os1_metadata& result)
+{
+    result = {OS1_VFS_ABI_VERSION,
+              sizeof(result),
+              node->kind,
+              OS1_METADATA_LOGICAL,
+              OS1_FILESYSTEM_INITRD,
+              node->mount_root ? OS1_METADATA_MOUNT : 0u,
+              node->filesystem_id,
+              node->object_id,
+              node->operations ? 0 : node->byte_size,
+              0,
+              vfs_generation()};
+    return node->operations ? node->operations->metadata(node, result) : 0;
+}
+long vfs_space(VfsNode* node, os1_space& result)
+{
+    result = {OS1_VFS_ABI_VERSION,
+              sizeof(result),
+              OS1_FILESYSTEM_INITRD,
+              1,
+              node->filesystem_id,
+              node->archive_bytes,
+              0,
+              0};
+    return node->operations ? node->operations->space(node, result) : 0;
+}
+
+long vfs_tree_step(DescriptorTable& table, int fd, os1_tree_step& request)
+{
+    if(request.version != OS1_VFS_ABI_VERSION || request.size != sizeof(request) ||
+       request.action < OS1_TREE_NEXT || request.action > OS1_TREE_CHECK ||
+       request.name_bytes > OS1_NAME_MAX || request.excluded_fd < -1 ||
+       ((request.rights | request.descendant_rights) & ~OS1_RIGHT_ALL))
+        return OS1_ERR_INVALID;
+    const bool named = request.action != OS1_TREE_NEXT && request.action != OS1_TREE_CHECK;
+    if(named)
+    {
+        if(!request.name_bytes || (request.name_bytes == 1 && request.name[0] == '.') ||
+           (request.name_bytes == 2 && request.name[0] == '.' && request.name[1] == '.'))
+            return OS1_ERR_INVALID;
+        for(unsigned i = 0; i < sizeof(request.name); ++i)
+            if(i < request.name_bytes ? (!request.name[i] || request.name[i] == '/')
+                                      : request.name[i])
+                return OS1_ERR_INVALID;
+    }
+    uint32_t required = OS1_RIGHT_INSPECT;
+    if(request.action == OS1_TREE_NEXT)
+        required |= OS1_RIGHT_ENUMERATE | OS1_RIGHT_LOOKUP;
+    if(named)
+        required |= OS1_RIGHT_LOOKUP;
+    if(request.action == OS1_TREE_CREATE)
+        required |= OS1_RIGHT_CREATE;
+    if(request.action == OS1_TREE_REMOVE)
+        required |= OS1_RIGHT_REMOVE;
+    DescriptorEntry parent{};
+    long status = descriptor_acquire_entry(table, fd, required, parent);
+    if(status < 0)
+        return status;
+    InstanceRef pin(parent.instance);
+    auto* object = parent.instance->object;
+    if(object->kind != OS1_OBJECT_DIRECTORY &&
+       !(request.action == OS1_TREE_CHECK && object->kind == OS1_OBJECT_FILE))
+        return OS1_ERR_NOT_DIRECTORY;
+    auto* node = static_cast<VfsNode*>(object);
+    OpenInstance* excluded = nullptr;
+    if(request.excluded_fd >= 0)
+    {
+        status = descriptor_acquire(table, request.excluded_fd, OS1_RIGHT_INSPECT, excluded);
+        if(status < 0)
+            return status;
+    }
+    InstanceRef exclusion(excluded);
+    if(excluded && excluded->object->kind != OS1_OBJECT_DIRECTORY &&
+       excluded->object->kind != OS1_OBJECT_FILE)
+        return OS1_ERR_INVALID;
+    NamespaceGuard guard;
+    if(!guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    if(request.generation != vfs_generation() &&
+       !(request.action == OS1_TREE_CHECK && !request.generation))
+        return OS1_ERR_CHANGED;
+    if(!node->linked)
+        return OS1_ERR_CLOSED;
+    if(request.filesystem_id && request.filesystem_id != node->filesystem_id)
+        return OS1_ERR_ACCESS;
+    if(excluded && vfs_contains(static_cast<VfsNode*>(excluded->object), node))
+        return OS1_ERR_INVALID;
+    if(request.action == OS1_TREE_CHECK)
+    {
+        status = vfs_metadata(node, request.metadata);
+        request.generation = vfs_generation();
+        return status;
+    }
+    VfsNode* child = nullptr;
+    if(request.action == OS1_TREE_NEXT)
+    {
+        if(!(parent.descendant_rights & OS1_RIGHT_INSPECT))
+            return OS1_ERR_ACCESS;
+        for(auto* n = node->children; n; n = n->next)
+            if(n->filesystem_id == node->filesystem_id && n->object_id > request.cursor &&
+               (!child || n->object_id < child->object_id))
+                child = n;
+        if(!child)
+            return 0;
+        status = vfs_metadata(child, request.metadata);
+        if(status < 0)
+            return status;
+        memset(request.name, 0, sizeof(request.name));
+        memcpy(request.name, child->name, child->name_size);
+        request.name_bytes = child->name_size;
+        request.object_id = request.cursor = child->object_id;
+        request.kind = child->kind;
+        return 1;
+    }
+    child = lookup(node, request.name, request.name_bytes);
+    if(child && excluded && vfs_contains(static_cast<VfsNode*>(excluded->object), child))
+        return OS1_ERR_INVALID;
+    if(child && child->filesystem_id != node->filesystem_id)
+        return OS1_ERR_ACCESS;
+    if(request.object_id && (!child || child->object_id != request.object_id))
+        return OS1_ERR_CHANGED;
+    if(request.action == OS1_TREE_REMOVE)
+    {
+        if(!child)
+            return OS1_ERR_NOT_FOUND;
+        if(!request.object_id || child->mount_root || !node->operations)
+            return OS1_ERR_ACCESS;
+        status =
+            node->operations->remove_locked(node, request.name, request.name_bytes, request.kind);
+        request.generation = vfs_generation();
+        return status;
+    }
+    const uint32_t permitted =
+        parent.descendant_rights &
+        ((parent.rights & OS1_RIGHT_DELEGATE) ? OS1_RIGHT_ALL : ~OS1_RIGHT_DELEGATE);
+    if((request.rights | request.descendant_rights) & ~permitted)
+        return OS1_ERR_ACCESS;
+    OpenInstance* opened = nullptr;
+    if(request.action == OS1_TREE_CREATE)
+    {
+        if(child)
+            return OS1_ERR_EXISTS;
+        if(!node->operations)
+            return OS1_ERR_ACCESS;
+        if(request.kind != OS1_OBJECT_FILE && request.kind != OS1_OBJECT_DIRECTORY)
+            return OS1_ERR_INVALID;
+        if(request.rights &
+           ~(request.kind == OS1_OBJECT_FILE ? kTmpFileRights : kTmpDirectoryRights))
+            return OS1_ERR_ACCESS;
+        if(request.kind == OS1_OBJECT_FILE && request.descendant_rights)
+            return OS1_ERR_INVALID;
+        status = node->operations->create_locked(
+            node, request.name, request.name_bytes, request.kind, opened);
+        request.generation = vfs_generation();
+        if(status < 0)
+            return status;
+        child = static_cast<VfsNode*>(opened->object);
+    }
+    else
+    {
+        if(!child)
+            return OS1_ERR_NOT_FOUND;
+        if(request.kind && child->kind != request.kind)
+            return OS1_ERR_INVALID;
+        if(request.rights & ~child->allowed_rights)
+            return OS1_ERR_ACCESS;
+        if(child->kind != OS1_OBJECT_DIRECTORY && request.descendant_rights)
+            return OS1_ERR_INVALID;
+        opened = open_instance(child, &status);
+        if(!opened)
+            return status;
+    }
+    InstanceRef result(opened);
+    status = vfs_metadata(child, request.metadata);
+    if(status < 0)
+        return status;
+    return descriptor_install(
+        table, opened, request.rights, OS1_DESCRIPTOR_CLOEXEC, -1, request.descendant_rights);
 }

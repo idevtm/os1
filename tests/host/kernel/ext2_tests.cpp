@@ -443,3 +443,46 @@ TEST_F(Ext2, EmptyDirectoryReplacementUpdatesParentLinksInBothMoveForms)
         ASSERT_EQ(reboot->validate_inode(s, source), 0);
     }
 }
+
+#include "vfs/namespace.hpp"
+TEST_F(Ext2, MetadataCountsIndirectBlocksAndReportsAllocatorCapacity)
+{
+    os1::host_test::PhysicalMemoryArena arena{16 * 1024 * 1024};
+    PageFrameContainer frames;
+    std::array<BootMemoryRegion, 1> regions{{{0, arena.size(), BootMemoryType::Usable, 0}}};
+    ASSERT_TRUE(frames.initialize(regions, 0x300000, kPageFrameBitmapQwordLimit));
+    kmem_init(frames);
+    VfsNode root_node{};
+    root_node.kind = OS1_OBJECT_DIRECTORY;
+    auto device = disk.device();
+    ASSERT_EQ(0, ext2_mount(&root_node, device));
+    auto* mount = root_node.children;
+    os1_space before{}, after{};
+    {
+        NamespaceGuard guard;
+        ASSERT_EQ(0, vfs_space(mount, before));
+    }
+    OpenInstance* opened = nullptr;
+    ASSERT_EQ(0, mount->operations->create(mount, "sparse", 6, OS1_OBJECT_FILE, opened));
+    auto* file = static_cast<VfsNode*>(opened->object);
+    ASSERT_EQ(1, file->operations->write(file, 50000, "x", 1, false, nullptr));
+    os1_metadata metadata{};
+    {
+        NamespaceGuard guard;
+        ASSERT_EQ(0, vfs_metadata(file, metadata));
+        ASSERT_EQ(0, vfs_space(mount, after));
+    }
+    EXPECT_EQ(metadata.logical_bytes, 50001u);
+    EXPECT_EQ(metadata.allocated_bytes, 8192u);
+    EXPECT_EQ(before.free_bytes - after.free_bytes, 8192u);
+    EXPECT_EQ(after.available_bytes, after.free_bytes);
+    ASSERT_EQ(0, file->operations->truncate(file, 0));
+    {
+        NamespaceGuard guard;
+        ASSERT_EQ(0, vfs_metadata(file, metadata));
+    }
+    EXPECT_EQ(metadata.allocated_bytes, 0u);
+    instance_release(opened);
+    ASSERT_EQ(0, mount->operations->remove(mount, "sparse", 6, OS1_OBJECT_FILE));
+    object_release(mount);
+}
