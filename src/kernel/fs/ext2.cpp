@@ -645,6 +645,163 @@ long Volume::rename(Inode& parent, const char* from, size_t from_len, const char
     data[at + 6] = to_len;
     return write_block(b, data) ? 0 : OS1_ERR_IO;
 }
+
+namespace
+{
+bool erase_entry(uint8_t* block, const char* name, size_t bytes, uint32_t number)
+{
+    for(unsigned at = 0; at < block_bytes; at += u16(block + at + 4))
+        if(u32(block + at) == number && block[at + 6] == bytes &&
+           equal(reinterpret_cast<char*>(block + at + 8), name, bytes))
+        {
+            put32(block + at, 0);
+            return true;
+        }
+    return false;
+}
+// Validated directory records only. Compact in place; output never overtakes input.
+unsigned compact(uint8_t* block)
+{
+    unsigned output = 0, last = 0;
+    for(unsigned at = 0; at < block_bytes;)
+    {
+        const unsigned record = u16(block + at + 4);
+        if(u32(block + at))
+        {
+            const unsigned size = record_size(block[at + 6]);
+            for(unsigned i = 0; i < size; ++i)
+                block[output + i] = block[at + i];
+            put16(block + output + 4, size);
+            last = output;
+            output += size;
+        }
+        at += record;
+    }
+    if(output)
+        put16(block + last + 4, block_bytes - last);
+    else
+    {
+        memset(block, 0, block_bytes);
+        put16(block + 4, block_bytes);
+    }
+    return output;
+}
+bool insert_entry(uint8_t* block, const char* name, size_t bytes, uint32_t number, bool directory)
+{
+    const unsigned need = record_size(bytes);
+    for(unsigned at = 0; at < block_bytes; at += u16(block + at + 4))
+    {
+        unsigned record = u16(block + at + 4),
+                 used = u32(block + at) ? record_size(block[at + 6]) : 0;
+        if(record - used < need)
+            continue;
+        if(used)
+        {
+            put16(block + at + 4, used);
+            at += used;
+            record -= used;
+        }
+        memset(block + at, 0, record);
+        put32(block + at, number);
+        put16(block + at + 4, record);
+        block[at + 6] = bytes;
+        block[at + 7] = directory ? 2 : 1;
+        memcpy(block + at + 8, name, bytes);
+        return true;
+    }
+    return false;
+}
+}  // namespace
+long Volume::move(uint32_t source_parent,
+                  Inode& source_directory,
+                  const char* source,
+                  size_t a,
+                  uint32_t destination_parent,
+                  Inode& destination_directory,
+                  const char* destination,
+                  size_t b,
+                  uint32_t number,
+                  Inode& inode,
+                  uint32_t replaced,
+                  Inode* replaced_inode,
+                  uint8_t* scratch)
+{
+    uint32_t from_block = 0, to_block = 0;
+    long r = get_block(source_directory, 0, from_block);
+    if(r < 0)
+        return r;
+    r = get_block(destination_directory, 0, to_block);
+    if(r < 0)
+        return r;
+    auto* from = scratch;
+    auto* to = from_block == to_block ? scratch : scratch + block_bytes;
+    if(!read_block(from_block, from) || (to != from && !read_block(to_block, to)))
+        return OS1_ERR_IO;
+    if(!erase_entry(from, source, a, number) ||
+       (replaced && !erase_entry(to, destination, b, replaced)))
+        return OS1_ERR_NOT_FOUND;
+    compact(from);
+    if(to != from)
+        compact(to);
+    if(!insert_entry(to, destination, b, number, directory(inode)))
+        return OS1_ERR_LIMIT;
+    r = begin_write();
+    if(r < 0)
+        return r;
+    if(!write_block(from_block, from) || (to != from && !write_block(to_block, to)))
+        return OS1_ERR_IO;
+    if(directory(inode) && source_parent != destination_parent)
+    {
+        uint32_t block = 0;
+        if(get_block(inode, 0, block) < 0 || !read_block(block, data))
+        {
+            failed = true;
+            return OS1_ERR_IO;
+        }
+        bool found = false;
+        for(unsigned at = 0; at < block_bytes; at += u16(data + at + 4))
+            if(data[at + 6] == 2 && data[at + 8] == '.' && data[at + 9] == '.')
+            {
+                put32(data + at, destination_parent);
+                found = true;
+                break;
+            }
+        if(!found || !write_block(block, data))
+        {
+            failed = true;
+            return OS1_ERR_IO;
+        }
+        put16(source_directory.bytes + 26, u16(source_directory.bytes + 26) - 1);
+        put16(destination_directory.bytes + 26, u16(destination_directory.bytes + 26) + 1);
+    }
+    if(replaced)
+    {
+        const bool dir = directory(*replaced_inode);
+        if(truncate(replaced, *replaced_inode, 0) < 0)
+        {
+            failed = true;
+            return OS1_ERR_IO;
+        }
+        *replaced_inode = {};
+        if(inode_write(replaced, *replaced_inode) < 0)
+            return OS1_ERR_IO;
+        set(inode_bits, replaced - 1, false);
+        put32(super + 16, u32(super + 16) + 1);
+        put16(group + 14, u16(group + 14) + 1);
+        if(dir)
+        {
+            put16(group + 16, u16(group + 16) - 1);
+            put16(destination_directory.bytes + 26, u16(destination_directory.bytes + 26) - 1);
+        }
+        if(!write_block(inode_bitmap, inode_bits) || counters() < 0)
+            return OS1_ERR_IO;
+    }
+    if(inode_write(source_parent, source_directory) < 0 ||
+       (source_parent != destination_parent &&
+        inode_write(destination_parent, destination_directory) < 0))
+        return OS1_ERR_IO;
+    return 0;
+}
 long Volume::sync()
 {
     if(failed || !io.flush(io.context))

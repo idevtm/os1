@@ -26,6 +26,21 @@ A [bounded ext2 profile](../filesystems/ext2.md) now provides QEMU persistence a
 Public mount control, links, general file mappings, device control, and the broad `/os` tree remain later profiles. Appendix A preserves
 the larger object catalog as illustrative design material.
 
+## Accepted utility extensions — 2026-11-07
+
+The [file utility profile](../shell/file-utilities.md) records accepted extensions without changing the current ABI profiles.
+
+| Extension | Direction |
+| --- | --- |
+| Navigation | Authorized parent traversal, retained cwd identity, and explicit unreachable-path reporting |
+| Mutation | Atomic same-filesystem moves across directories with permitted replacement; bounded recursive helpers |
+| Observation | Common metadata, filesystem accounting, and timestamp support |
+| Later stage | Credentials, permissions, and links remain deferred |
+
+The current first-profile path rules below still reject `..`.
+The [namespace extension](abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension) implements root-confined traversal and same-filesystem MOVE_AT.
+Original Directory `rename` semantics remain unchanged; recursive helpers remain later work.
+
 ## 1. Objects, names, open instances, and descriptors
 
 These concepts have distinct identities and lifetimes:

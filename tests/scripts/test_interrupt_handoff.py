@@ -69,7 +69,7 @@ def main():
                        '--log', str(transcript), '--timeout', '20', '--settle-after-markers', '0.2',
                        '--marker', 'shell prompt ready', '--marker', 'handoff-test-ok\n',
                        '--reject-marker', '#GP', '--reject-marker', '#UD', '--reject-marker', '#PF',
-                       '--send-after', "shell prompt ready::echo handoff-test-'ok'\\n", '--',
+                       '--send-after', "shell prompt ready::echo 'handoff-test-ok'\\n", '--',
                        args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                        '-monitor', 'none', '-serial', 'stdio', '-no-reboot', '-no-shutdown',
                        '-drive', f'file={disk},format=raw,if=ide,snapshot=on']

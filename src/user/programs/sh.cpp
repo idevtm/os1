@@ -4,6 +4,7 @@
 
 #include <os1/line_editor.hpp>
 #include <os1/parameter_client.hpp>
+#include <os1/shell_runtime.hpp>
 #include <os1/syscall.hpp>
 #include <os1/vfs.hpp>
 
@@ -16,6 +17,7 @@ constexpr size_t kShellLineBytes = 128;
 constexpr size_t kShellMaxTokens = 16;
 int output_fd = 1;
 bool output_failed = false;
+bool command_failed = false;
 struct DiagnosticOutput
 {
     int saved = output_fd;
@@ -158,6 +160,7 @@ void write_prompt()
 
 void write_observe_failure(const char* command)
 {
+    command_failed = true;
     DiagnosticOutput diagnostic_output;
     write_string("observe failed: ");
     write_string(command);
@@ -444,17 +447,6 @@ void run_help()
     write_string(
         "call <image> <method> [field:value | field.case | field:{...}]\nintf <image>: offline "
         "constructor/method parameter help\n");
-}
-
-void run_echo(size_t argc, char* argv[kShellMaxTokens])
-{
-    for(size_t i = 1; i < argc; ++i)
-    {
-        if(i > 1)
-            write_char(' ');
-        write_string(argv[i]);
-    }
-    write_char('\n');
 }
 
 void run_pid()
@@ -948,27 +940,21 @@ void run_events()
 
 void run_unknown(const char* command)
 {
+    command_failed = true;
     DiagnosticOutput diagnostic_output;
     write_string("unknown command: ");
     write_string(command);
     write_char('\n');
 }
 
-bool resolve_command_path(const char* command, char* path, size_t path_size)
+long resolve_command_path(const char* command, char* path, size_t path_size)
 {
-    return os1::shell::resolve_program(command, path, path_size, [](const char* candidate) {
-               const long fd = os1::user::open(
-                   candidate,
-                   OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
-               if(fd < 0)
-                   return fd;
-               os1::user::close(fd);
-               return 0L;
-           }) == 0;
+    return os1::user::context::search(command, path, path_size);
 }
 
 void write_child_failure(const char* command, int status)
 {
+    command_failed = true;
     write_string("command failed: ");
     write_string(command);
     write_string(" status=");
@@ -980,6 +966,7 @@ const char* raw_tail(const char* raw, unsigned words);
 void parameter_diagnostic(const os1::parameters::Diagnostic& d);
 void run_exec(size_t argc, char* argv[kShellMaxTokens], const char* raw)
 {
+    command_failed = true;
     DiagnosticOutput diagnostic_output;
     if(argc < 2)
     {
@@ -987,8 +974,9 @@ void run_exec(size_t argc, char* argv[kShellMaxTokens], const char* raw)
         return;
     }
 
-    char path[OS1_OBSERVE_INITRD_PATH_BYTES];
-    if(!resolve_command_path(argv[1], path, sizeof(path)))
+    char path[OS1_PATH_MAX];
+    os1::user::files::Handle executable(resolve_command_path(argv[1], path, sizeof(path)));
+    if(executable.fd < 0)
     {
         write_string("exec failed: ");
         write_string(argv[1]);
@@ -1000,8 +988,15 @@ void run_exec(size_t argc, char* argv[kShellMaxTokens], const char* raw)
     write_string(path);
     write_char('\n');
     os1::parameters::Diagnostic diagnostic{};
-    const long result = os1::user::run_program(
-        path, argc - 1, argv + 1, true, 0, nullptr, raw_tail(raw, 2), &diagnostic);
+    const long result = os1::user::run_program(path,
+                                               argc - 1,
+                                               argv + 1,
+                                               true,
+                                               0,
+                                               nullptr,
+                                               raw_tail(raw, 2),
+                                               &diagnostic,
+                                               executable.take());
     if(diagnostic.code != os1::parameters::Error::None)
         parameter_diagnostic(diagnostic);
     write_string("shell exec returned ");
@@ -1011,6 +1006,7 @@ void run_exec(size_t argc, char* argv[kShellMaxTokens], const char* raw)
 
 void parameter_diagnostic(const os1::parameters::Diagnostic& d)
 {
+    command_failed = true;
     DiagnosticOutput diagnostic_output;
     write_string("parameter error code=");
     write_unsigned(static_cast<unsigned>(d.code));
@@ -1042,20 +1038,15 @@ const char* raw_tail(const char* raw, unsigned words)
 }
 void run_call(size_t argc, char** argv, const char* raw)
 {
+    command_failed = true;
     DiagnosticOutput diagnostic_output;
     if(argc < 3)
     {
         write_string("usage: call <image> <method> [raw named parameters]\n");
         return;
     }
-    char path[OS1_OBSERVE_INITRD_PATH_BYTES];
-    if(!resolve_command_path(argv[1], path, sizeof(path)))
-    {
-        write_string("call: cannot open image\n");
-        return;
-    }
-    long image = os1::user::open(
-        path, OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
+    char path[OS1_PATH_MAX];
+    long image = resolve_command_path(argv[1], path, sizeof(path));
     if(image < 0)
     {
         write_string("call: cannot open image\n");
@@ -1101,6 +1092,7 @@ void run_call(size_t argc, char** argv, const char* raw)
         write_char('\n');
         return;
     }
+    command_failed = false;
     output_fd = diagnostic_output.saved;
     if(client.interface.interface_id == os1::parameter_demo::interface_id &&
        member == os1::parameter_demo::Render && result.payload_bytes >= 8)
@@ -1122,20 +1114,29 @@ void run_call(size_t argc, char** argv, const char* raw)
     }
 }
 
-void run_external(size_t argc, char** argv, const char* raw)
+void run_external(size_t argc,
+                  char** argv,
+                  const char* raw,
+                  const char* path,
+                  int executable_fd,
+                  const os1_constructor_args& constructor)
 {
+    command_failed = true;
     DiagnosticOutput diagnostic_output;
     const char* command = argv[0];
-    char path[OS1_OBSERVE_INITRD_PATH_BYTES];
-    if(!resolve_command_path(command, path, sizeof(path)))
-    {
-        run_unknown(command);
-        return;
-    }
+    os1::user::files::Handle executable(executable_fd);
 
     os1::parameters::Diagnostic diagnostic{};
-    const long pid =
-        os1::user::run_program(path, argc, argv, false, 0, nullptr, raw_tail(raw, 1), &diagnostic);
+    const long pid = os1::user::run_program(path,
+                                            argc,
+                                            argv,
+                                            false,
+                                            0,
+                                            nullptr,
+                                            raw_tail(raw, 1),
+                                            &diagnostic,
+                                            executable.take(),
+                                            &constructor);
     if(pid < 0)
     {
         if(diagnostic.code != os1::parameters::Error::None)
@@ -1164,30 +1165,50 @@ void run_external(size_t argc, char** argv, const char* raw)
         return;
     }
 
+    command_failed = status != 0;
     if(status != 0)
         write_child_failure(command, status);
 }
 }  // namespace
 
-int main(int, char**)
+int main(int argc_main, char** argv_main)
 {
     char line[kShellLineBytes];
     os1::user::files::Reader reader;
+    os1::user::files::Handle script;
+    if(argc_main > 2)
+    {
+        os1::user::files::message("usage: sh [script]\n");
+        return 1;
+    }
+    if(argc_main == 2)
+    {
+        script.reset(os1::user::files::open_file(argv_main[1], os1::user::files::Mode::Existing));
+        if(script.fd < 0)
+        {
+            os1::user::files::message("shell: cannot open script\n");
+            return 1;
+        }
+        reader.fd = script.fd;
+    }
     os1::user::files::Line input;
 
     os1_resource_info input_info{};
-    const bool console_input =
-        os1::user::query(0, &input_info) >= 0 && input_info.kind == OS1_OBJECT_CONSOLE;
-    os1::user::files::message("shell prompt ready\n");
+    const bool console_input = argc_main != 2 && os1::user::query(0, &input_info) >= 0 &&
+                               input_info.kind == OS1_OBJECT_CONSOLE;
+    if(console_input)
+        os1::user::files::message("shell prompt ready\n");
     for(;;)
     {
         output_failed = false;
-        write_prompt();
+        command_failed = false;
+        if(console_input)
+            write_prompt();
         long input_status = reader.line(input);
         if(input_status < 0)
         {
             os1::user::files::message("shell read failed\n");
-            if(input_status != OS1_ERR_RANGE)
+            if(!console_input || input_status != OS1_ERR_RANGE)
                 return 1;
             continue;
         }
@@ -1207,6 +1228,8 @@ int main(int, char**)
         {
             os1::user::files::message(parsed.error);
             os1::user::files::message("\n");
+            if(!console_input)
+                return 1;
             continue;
         }
         const size_t argc = parsed.argc;
@@ -1217,25 +1240,196 @@ int main(int, char**)
             continue;
         }
 
-        os1::user::files::Streams streams;
-        if(!streams.apply(parsed))
+        static os1::user::shell_runtime::Call call;
+        if(!call.prepare(parsed, !console_input))
         {
-            os1::user::files::message("shell: redirection failed\n");
+            os1::user::shell_runtime::diagnostic(call.error ? call.error : "invalid arguments");
+            if(!console_input)
+                return 1;
             continue;
         }
-        if(strings_equal(tokens[0], "touch"))
-            os1::user::files::touch(argc, tokens);
+        // Here-document delimiters are syntax, not value expressions.
+        if((parsed.input == os1::shell::Input::File &&
+            !os1::user::shell_runtime::redirect_value(
+                parsed.input_raw, parsed.input_name, !console_input)) ||
+           !os1::user::shell_runtime::redirect_value(
+               parsed.output_raw, parsed.output_name, !console_input))
+        {
+            if(!console_input)
+                return 1;
+            continue;
+        }
+        bool external = call.method == os1::user::shell_runtime::Method::Unknown;
+        const char* builtins[] = {"write",
+                                  "edit",
+                                  "help",
+                                  "pid",
+                                  "sys",
+                                  "ps",
+                                  "cpu",
+                                  "pci",
+                                  "initrd",
+                                  "usb",
+                                  "devices",
+                                  "irqs",
+                                  "resources",
+                                  "kmem",
+                                  "events",
+                                  "call",
+                                  "exec",
+                                  "exit"};
+        for(const char* builtin : builtins)
+            if(strings_equal(tokens[0], builtin))
+                external = false;
+        os1::user::files::Handle executable;
+        char executable_path[OS1_PATH_MAX]{};
+        os1_constructor_args constructor{};
+        if(external)
+        {
+            executable.reset(
+                resolve_command_path(tokens[0], executable_path, sizeof(executable_path)));
+            if(executable.fd < 0)
+            {
+                run_unknown(tokens[0]);
+                if(!console_input)
+                    return 1;
+                continue;
+            }
+            bool rich = false;
+            os1::parameters::Diagnostic diagnostic{};
+            long preflight = os1::user::prepare_constructor(executable.fd,
+                                                            argc,
+                                                            tokens,
+                                                            raw_tail(raw, 1),
+                                                            constructor,
+                                                            &diagnostic,
+                                                            &rich,
+                                                            true);
+            if(preflight < 0)
+            {
+                if(diagnostic.code != os1::parameters::Error::None)
+                    parameter_diagnostic(diagnostic);
+                else
+                    os1::user::shell_runtime::diagnostic(
+                        "invalid constructor metadata or arguments");
+                if(!console_input)
+                    return 1;
+                continue;
+            }
+            // Legacy argv is a string adapter, not a second expression grammar.
+            static char arguments[os1::shell::argument_limit][os1::shell::line_capacity];
+            bool valid = true;
+            for(size_t i = 1; !rich && i < argc; ++i)
+            {
+                static os1::context::Data value;
+                os1::context::init(value);
+                os1::shell::ValueParser parser{parsed.raw + parsed.begin[i],
+                                               parsed.end[i] - parsed.begin[i],
+                                               0,
+                                               !console_input,
+                                               os1::user::shell_runtime::resolve,
+                                               os1::user::shell_runtime::warning};
+                if(!parser.parse(value, 0, "arg", 3) ||
+                   !os1::shell::argv_string(value, 1, arguments[i], sizeof(arguments[i])))
+                {
+                    os1::user::shell_runtime::diagnostic("invalid executable argument");
+                    valid = false;
+                    break;
+                }
+                tokens[i] = arguments[i];
+            }
+
+            if(valid && !rich)
+            {
+                valid =
+                    os1::user::prepare_constructor(
+                        executable.fd, argc, tokens, raw_tail(raw, 1), constructor, &diagnostic) >=
+                    0;
+                if(!valid)
+                    os1::user::shell_runtime::diagnostic("invalid constructor arguments");
+            }
+            if(!valid)
+            {
+                if(!console_input)
+                    return 1;
+                continue;
+            }
+        }
+        os1::user::files::Handle copy_input;
+        int copy_source = -2;
+        if(call.method == os1::user::shell_runtime::Method::Copy)
+        {
+            copy_source = call.streams[0];
+            if(copy_source < 0)
+            {
+                char source[256];
+                long status =
+                    call.string(0, source, sizeof(source))
+                        ? os1::user::files::open_file(source, os1::user::files::Mode::Existing)
+                        : OS1_ERR_RANGE;
+                if(status >= 0)
+                {
+                    copy_input.reset(status);
+                    os1_file_info info{};
+                    status = os1::user::file_info(copy_input.fd, &info);
+                    if(status >= 0 && info.kind != OS1_OBJECT_FILE)
+                        status = OS1_ERR_UNSUPPORTED;
+                }
+                if(status < 0)
+                {
+                    os1::user::shell_runtime::diagnostic("cat/copy failed to open source");
+                    if(!console_input)
+                        return 1;
+                    continue;
+                }
+                copy_source = call.streams[0] = copy_input.fd;
+            }
+        }
+        os1::user::files::Streams streams;
+        if(!streams.apply(parsed, reader, copy_source))
+        {
+            os1::user::files::message("shell: redirection failed\n");
+            if(!console_input)
+                return 1;
+            continue;
+        }
+        if(call.method != os1::user::shell_runtime::Method::Unknown)
+        {
+            long result = os1::user::shell_runtime::execute(call);
+            if(result < 0)
+            {
+                DiagnosticOutput error;
+                write_string("shell: ");
+                write_string(tokens[0]);
+                write_string(" failed status=");
+                write_signed(result);
+                write_char('\n');
+                command_failed = true;
+            }
+        }
         else if(strings_equal(tokens[0], "write"))
-            os1::user::files::write_command(argc, tokens);
+        {
+            if(!console_input)
+            {
+                os1::user::shell_runtime::diagnostic("write requires interactive input");
+                command_failed = true;
+            }
+            else
+                os1::user::files::write_command(argc, tokens);
+        }
         else if(strings_equal(tokens[0], "edit"))
-            os1::user::files::edit(argc, tokens);
+        {
+            if(!console_input)
+            {
+                os1::user::shell_runtime::diagnostic("edit requires interactive input");
+                command_failed = true;
+            }
+            else
+                os1::user::files::edit(argc, tokens);
+        }
         else if(strings_equal(tokens[0], "help"))
         {
             run_help();
-        }
-        else if(strings_equal(tokens[0], "echo"))
-        {
-            run_echo(argc, tokens);
         }
         else if(strings_equal(tokens[0], "pid"))
         {
@@ -1297,7 +1491,9 @@ int main(int, char**)
         }
         else
         {
-            run_external(argc, tokens, raw);
+            run_external(argc, tokens, raw, executable_path, executable.take(), constructor);
         }
+        if(!console_input && (command_failed || output_failed))
+            return 1;
     }
 }

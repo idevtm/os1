@@ -180,9 +180,9 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
-# Use the free page after the five early page tables: 372.5 KiB kernel, 187.5 KiB initrd.
+# Rebalance the existing low-memory window: 400 KiB kernel, 160 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x6b200)
+set(OS1_INITRD_LOAD_ADDRESS 0x72000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -205,7 +205,7 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 375)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 320)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
 set(OS1_INITRD_LOAD_LIMIT 0x9A000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
@@ -918,11 +918,11 @@ set(OS1_SMOKE_REJECT_MARKERS
 
 # The shell prompt does not terminate with a newline, so the line-buffered
 # smoke runner observes it when the following command output flushes.
-# Split quoted echo arguments distinguish output markers from echoed input.
+# Fully quoted echo arguments distinguish output markers from echoed input.
 set(OS1_SHELL_INPUT_EVENTS
   "shell prompt ready::help\\n"
-  "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit::echo shell-echo-'ok'\\n"
-  "shell-echo-ok::pid\\n"
+  "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit::echo 'shell-echo-ok'\\n"
+  "\nshell-echo-ok\n::pid\\n"
 )
 
 set(OS1_SHELL_OBSERVE_INPUT_EVENTS
@@ -946,8 +946,8 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "command failed: fault status=::nope\\n"
   "unknown command: nope::copycheck\\n"
   "[user/copycheck] ok::fdcheck\\n"
-  "[user/fdcheck] ok::ls /bin\\necho smoke-ls-'complete'\\n"
-  "smoke-ls-complete::cat /etc/motd\\n"
+  "[user/fdcheck] ok::ls /bin\\necho 'smoke-ls-complete'\\n"
+  "\nsmoke-ls-complete\n::cat /etc/motd\\n"
   "os1: native initrd file reads work.::vfscheck\\n"
   "[user/vfscheck] ok::ipccheck\\n"
   "[user/ipccheck] ok::buffercheck\\n"
@@ -968,7 +968,7 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
   "shell prompt ready::exec yield\\n"
-  "[user/yield] tick 2::echo after-'exec'\\n"
+  "[user/yield] tick 2::echo 'after-exec'\\n"
 )
 
 set(OS1_SHELL_BALANCE_INPUT_EVENTS
@@ -978,7 +978,7 @@ set(OS1_SHELL_BALANCE_INPUT_EVENTS
 set(OS1_EXEC_SMOKE_REJECT_MARKERS
   ${OS1_SMOKE_REJECT_MARKERS}
   "shell exec returned"
-  "after-exec"
+  "\nafter-exec\n"
 )
 
 # Preventive: if CI (or any caller) sets OS1_REQUIRE_UEFI_SMOKE=ON, a missing
@@ -1105,7 +1105,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "starting first user process"
     "shell prompt ready"
     "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit"
-    "shell-echo-ok"
+    "\nshell-echo-ok\n"
     "pid: "
     "idle thread online"
   )
@@ -1451,7 +1451,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "starting first user process"
     "shell prompt ready"
     "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit"
-    "shell-echo-ok"
+    "\nshell-echo-ok\n"
     "pid: "
     "idle thread online"
   )
@@ -1770,7 +1770,7 @@ os1_register_menu_target(
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE AND OS1_QEMU_DEBUGCON)
   # COM1 is absent; output uses debugcon and input uses the actual PS/2 path.
   set(OS1_NO_UART_INPUT_EVENTS
-    "shell prompt ready::sendkey e 1\\nsendkey c 1\\nsendkey h 1\\nsendkey o 1\\nsendkey spc 1\\nsendkey n 1\\nsendkey o 1\\nsendkey minus 1\\nsendkey apostrophe 1\\nsendkey u 1\\nsendkey a 1\\nsendkey r 1\\nsendkey t 1\\nsendkey apostrophe 1\\nsendkey ret 1"
+    "shell prompt ready::sendkey e 1\\nsendkey c 1\\nsendkey h 1\\nsendkey o 1\\nsendkey spc 1\\nsendkey apostrophe 1\\nsendkey n 1\\nsendkey o 1\\nsendkey minus 1\\nsendkey u 1\\nsendkey a 1\\nsendkey r 1\\nsendkey t 1\\nsendkey apostrophe 1\\nsendkey ret 1"
   )
   add_test(
     NAME os1_smoke_no_uart
@@ -1782,7 +1782,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DLOG_FILE=${OS1_ARTIFACT_DIR}/smoke-no-uart.log"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_UEFI_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DEXPECTED_MARKERS=shell prompt ready;no-uart"
+      "-DEXPECTED_MARKERS=shell prompt ready;\nno-uart\n"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DMONITOR_SOCKET=${OS1_ARTIFACT_DIR}/smoke-no-uart.sock"
       "-DMONITOR_SEND_EVENTS=${OS1_NO_UART_INPUT_EVENTS}"
@@ -1840,6 +1840,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
       set(file_test_image "${OS1_RAW_IMAGE}")
       set(file_test_firmware)
     endif()
+    add_test(NAME os1_smoke_typed_shell_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_typed_shell.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-typed-shell-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_typed_shell_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_typed_shell_${boot})
     add_test(NAME os1_smoke_files_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_interactive_files.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"

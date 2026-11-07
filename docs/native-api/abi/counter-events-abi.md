@@ -4,7 +4,7 @@ Implemented 2026-11-05, extending the [copied IPC ABI](copied-ipc-abi.md).
 [Plan and validation](../../archive/native-api/2026-11-05-counter-events-implementation-plan.md).
 The later [shared activation extension](shared-activation-abi.md) adds attachments,
 Counter construct, and an optional matching client grant for supervised providers.
-This is an experimental ABI; rebuild user binaries for startup version 2.
+This is an experimental ABI; rebuild user binaries for the current startup version 3.
 
 ## Commands and Counter
 
@@ -145,10 +145,11 @@ duplicate, missing, signed, or overflowing values are rejected. Defaults fill
 omitted fields. `intf` displays the constructor schema and mappings alongside
 interface members. Conversion never executes the binary.
 
-Startup version 2 extends the former record with a 272-byte constructor envelope:
+Startup version 2 introduced a 272-byte constructor envelope:
 u64 schema ID, u32 schema version, u32 payload size, and 256 bytes of copied data.
-Startup is now 2480 bytes and the launch request 2880 bytes. Zero schema/version/
-size denotes absent arguments; payload tails must be zero. The kernel validates
+Those historical records were 2480 and 2880 bytes.
+[Version 3](initrd-vfs-abi.md#typed-environment-and-namespace-extension) now extends them with typed environment data.
+Zero schema/version/size denotes absent arguments; payload tails must be zero. The kernel validates
 the transport envelope, not application field meanings. The provider validates
 schema identity/layout and its own semantic constraints before constructing.
 
@@ -156,7 +157,7 @@ crt0 calls the optional typed-entry adapter when present; Counter decodes fields
 into `Args` and invokes `os_main(StartupContext&, const Args&)`. No arbitrary C++
 layout becomes the wire ABI. Ordinary programs retain main(argc, argv), and
 reject unexpected typed constructor data. Absent typed arguments use declared
-provider defaults. All bundled programs are rebuilt with startup version 2.
+provider defaults. All bundled programs use startup version 3; the constructor envelope is unchanged.
 
 `StartupContext::environment(name)` reads the explicitly supplied KEY=value
 snapshot; it does not discover ambient process/global authority. Constructor data,

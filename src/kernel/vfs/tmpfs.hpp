@@ -12,7 +12,7 @@ long tmpfs_mount(NativeObject* root);
 bool tmpfs_node(const NativeObject*);
 long tmpfs_lookup(VfsNode*, const char*, size_t, NativeObject*&);
 long tmpfs_create(VfsNode*, const char*, size_t, uint32_t kind, OpenInstance*&);
-long tmpfs_remove(VfsNode*, const char*, size_t);
+long tmpfs_remove(VfsNode*, const char*, size_t, uint32_t kind = 0);
 long tmpfs_rename(VfsNode*, const char*, size_t, const char*, size_t);
 long tmpfs_read(VfsNode*, uint64_t offset, void*, size_t);
 long tmpfs_write(

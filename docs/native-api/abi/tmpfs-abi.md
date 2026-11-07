@@ -54,6 +54,7 @@ Reserved fields and unused name bytes must be zero.
 | `open` | 1 | LOOKUP | `os1_directory_open`, kind zero | One resource capability |
 | `create` | 2 | LOOKUP and CREATE | `os1_directory_open`, kind FILE=3 or DIRECTORY=2 | One resource capability |
 | `remove` | 3 | LOOKUP and REMOVE | `os1_directory_name` | Empty |
+| `remove_typed` | 9 | LOOKUP and REMOVE | `os1_directory_remove_typed` | Empty |
 | `rename` | 4 | LOOKUP and RENAME | `os1_directory_rename` | Empty |
 | `read_directory` | 5 | ENUMERATE | Empty | One `os1_directory_entry`, or empty at end |
 | `rewind` | 6 | ENUMERATE | Empty | Empty; reset cursor |
@@ -74,6 +75,7 @@ Reserved fields and unused name bytes must be zero.
 | --- | ---: | --- |
 | `os1_directory_open` | 80 | `u32 rights`, `descendant_rights`, `name_bytes`, `kind`; `char name[64]` |
 | `os1_directory_name` | 72 | `u32 name_bytes`, `reserved`; `char name[64]` |
+| `os1_directory_remove_typed` | 72 | `u32 name_bytes`, `kind`; `char name[64]` |
 | `os1_directory_rename` | 136 | `u32 source_bytes`, `destination_bytes`; `char source[64]`, `destination[64]` |
 | `os1_directory_entry` | 72 | `u32 kind`, `name_bytes`; `char name[64]` |
 | `os1_file_read` | 8 | `u32 capacity`, `reserved` |
@@ -93,7 +95,8 @@ Closing an unclaimed Operation releases that open instance; successful creation 
 Native names contain 1–63 counted bytes. NUL, slash, `.` and `..` are invalid; UTF-8 is not required.
 The remaining 64-byte name array must contain zeros.
 Native operations address one child of the bound directory.
-Existing capability-relative path lookup reaches nested directories; it cannot traverse parents or links.
+OPEN_AT reaches nested directories but rejects parent traversal.
+The [context extension](initrd-vfs-abi.md#typed-environment-and-namespace-extension) permits root-confined parent traversal; links remain unsupported.
 `/tmp` has depth zero; descendants may have depth at most 32.
 An initrd entry named `tmp` rejects mounting before namespace publication.
 
@@ -168,7 +171,10 @@ Transport validation, admission, and handle failures occur before acceptance.
 Method failures appear in `application_status` with transport status zero.
 Unknown members return UNSUPPORTED; malformed records return INVALID; missing authority returns ACCESS.
 This profile supports neither input capability attachments nor Buffer loans, events, public mounts, or persistence.
-Cross-directory rename and replacement rename remain future contracts.
+Resource MOVE_AT now supports same-filesystem cross-directory moves and replacement.
+Native Directory `rename` retains its original single-directory, no-replacement contract.
+`remove_typed` checks the expected File or Directory kind atomically with removal.
+Malformed kinds fail; this prevents `rm` from deleting an empty directory after a lookup race.
 Kernel Buffer borrowing remains the next bulk-transfer extension; this profile makes no zero-copy claim.
 
 ## C++ usage and validation

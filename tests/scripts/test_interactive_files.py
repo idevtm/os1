@@ -88,14 +88,14 @@ def main():
         expect(b'shell prompt ready\n')
         expect()
         assert (b'ext2 mounted /disk' in transcript) == bool(args.program_disk)
-        listed = run('ls /bin')
+        listed = run('ls "/bin"')
         lines = re.sub(rb'^root alloc 0x[0-9a-f]+\n', b'', listed, flags=re.M).decode().splitlines()[1:-1]
         assert set(lines) == {'init', 'sh', 'ls', 'cat'}, listed
         if not args.program_disk:
             assert b'unknown command: counter' in run('counter')
-            assert b'cannot open directory' in run('ls /disk')
-        for command, expected in [('echo', b'\n'), ('echo hello world', b'hello world\n'),
-                                  ('echo "a  b" c', b'a  b c\n')]:
+            assert b'shell: ls failed' in run('ls /disk')
+        for command, expected in [('echo', b'\n'), ('echo "hello world"', b'hello world\n'),
+                                  ('echo "a  b c"', b'a  b c\n')]:
             result = run(command)
             assert result.split(b'\n', 1)[1] == expected + b'os1> ', result
         assert b'failed' not in run('touch /tmp/empty')
@@ -111,12 +111,10 @@ def main():
         assert b'duplicate redirection' in run('echo damage > /tmp/copy > /tmp/other')
         content('/tmp/copy', 'A > B\nsecond\n')
         assert b'redirection failed' in run('echo damage > /etc/motd')
-        assert b'restored\n' in run("echo re'stored'")
+        assert b'restored\n' in run("echo 'restored'")
         send('cat > /tmp/eof\n')
         # cat has no prompt; its input echo provides a fresh synchronization point.
         expect(b'cat > /tmp/eof\n')
-        expect(b'root alloc ')
-        expect(b'\n')
         send('from stdin\n')
         expect(b'from stdin\n')
         send(b'\x04')
@@ -132,7 +130,7 @@ def main():
         send('cat << STOP > /tmp/absent\n')
         send(b'\x04')
         assert b'redirection failed' in expect()
-        assert b'cannot open file' in run('cat /tmp/absent')
+        assert b'cat/copy failed' in run('cat /tmp/absent')
         send('write /tmp/writer\n')
         expect(b'.. enters a dot line\n')
         send('written\n..\n.\n')
@@ -210,14 +208,14 @@ def main():
         send('touch /tmp/injected\n.\n')
         assert b'write: saved' not in expect()
         content('/tmp/long-writer', '')
-        assert b'cannot open file' in run('cat /tmp/injected')
+        assert b'cat/copy failed' in run('cat /tmp/injected')
         # Invalid here-documents never open the target, and drain to their delimiter.
         send('cat << END > /tmp/long-here\n')
         send('x' * 140 + '\n')
         send('touch /tmp/injected\n')
         send('END\n')
         assert b'redirection failed' in expect()
-        assert b'cannot open file' in run('cat /tmp/long-here')
+        assert b'cat/copy failed' in run('cat /tmp/long-here')
         # Failed replacement retains the whole original editor buffer.
         send('edit /tmp/writer\n')
         expect(b'edit> ')
@@ -236,7 +234,7 @@ def main():
             send(line + '\n')
         send('END\n')
         assert b'end of input; unsaved changes discarded' in expect()
-        assert b'cannot open file' in run('cat /tmp/unsaved')
+        assert b'cat/copy failed' in run('cat /tmp/unsaved')
         send('cat << END > /tmp/editor-script\n')
         for line in ['a', 'saved from file', '.', 'wq']:
             send(line + '\n')
@@ -245,16 +243,16 @@ def main():
         assert b'edit: saved' in run('edit /tmp/scripted < /tmp/editor-script')
         content('/tmp/scripted', 'saved from file\n')
         # Child shells terminate at finite EOF and keep prompts off stdout.
-        send("sh < /tmp/empty > /tmp/empty-shell\necho empty-shell-'complete'\n")
+        send("sh < /tmp/empty > /tmp/empty-shell\necho 'empty-shell-complete'\n")
         assert b'command failed:' not in expect(b'empty-shell-complete\n')
         assert b'command failed:' not in expect()
         content('/tmp/empty-shell', '')
         send('cat << END > /tmp/shell-script\n')
-        for line in ['echo script-one', 'echo script-two']:
+        for line in ['echo "script-one"', 'echo "script-two"']:
             send(line + '\n')
         send('END\n')
         expect()
-        send("sh < /tmp/shell-script > /tmp/script-output\necho script-shell-'complete'\n")
+        send("sh < /tmp/shell-script > /tmp/script-output\necho 'script-shell-complete'\n")
         assert b'command failed:' not in expect(b'script-shell-complete\n')
         assert b'command failed:' not in expect()
         content('/tmp/script-output', 'script-one\nscript-two\n')
@@ -263,10 +261,10 @@ def main():
         content('/tmp/repeat', 'stable\n')
         # Long input must not execute its truncated, potentially destructive prefix.
         run('echo dangerous > /tmp/overlong ' + 'x' * 130)
-        assert b'cannot open file' in run('cat /tmp/overlong')
+        assert b'cat/copy failed' in run('cat /tmp/overlong')
         listing = run('ls /tmp')
         assert b'.shell-' not in listing, listing
-        assert b'interactive-complete\n' in run("echo interactive-'complete'")
+        assert b'interactive-complete\n' in run("echo 'interactive-complete'")
         print('interactive files: redirection, EOF, heredoc, writer, editor, and cleanup passed')
     finally:
         child.terminate()

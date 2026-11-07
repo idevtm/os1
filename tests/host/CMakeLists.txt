@@ -27,7 +27,7 @@ set(OS1_HOST_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 include("${OS1_REPO_ROOT}/cmake/acpica_sources.cmake")
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
-set(OS1_INITRD_LOAD_ADDRESS 0x6b200)
+set(OS1_INITRD_LOAD_ADDRESS 0x72000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
@@ -167,6 +167,7 @@ target_include_directories(os1_host_support SYSTEM PUBLIC
 )
 
 add_executable(os1_host_tests
+  common/context_tests.cpp
   common/shell_tests.cpp
   common/interface_tests.cpp
   common/parameter_runtime_tests.cpp

@@ -73,6 +73,7 @@ struct Line
 };
 struct Reader
 {
+    int fd = 0;
     char pending[128]{};
     size_t position = 0, count = 0;
     long line(Line& out)
@@ -84,7 +85,7 @@ struct Reader
             if(position == count)
             {
                 // Do not read ahead: a foreground command can take over the same stdin.
-                long n = os1::user::read(0, pending, 1);
+                long n = os1::user::read(fd, pending, 1);
                 if(n < 0)
                     return n;
                 position = 0;
@@ -227,12 +228,11 @@ inline bool dot(Line& line)
     }
     return false;
 }
-inline long here_document(const char* marker)
+inline long here_document(const char* marker, Reader& reader)
 {
     Handle file(temporary());
     if(file.fd < 0)
         return file.fd;
-    Reader reader;
     Line line;
     long failure = 0;
     for(;;)
@@ -357,7 +357,7 @@ struct Streams
         saved[i].reset(duplicate(i, info.rights));
         return saved[i].fd >= 0;
     }
-    bool apply(shell::Command& command)
+    bool apply(shell::Command& command, Reader& command_reader, int copy_source = -2)
     {
         bool input = command.input != shell::Input::None,
              output = command.output != shell::Output::None;
@@ -367,18 +367,36 @@ struct Streams
         if(input)
         {
             in.reset(command.input == shell::Input::Here
-                         ? here_document(command.input_name)
+                         ? here_document(command.input_name, command_reader)
                          : open_file(command.input_name, Mode::Existing));
             if(in.fd < 0)
                 return false;
         }
         if(output)
         {
-            out.reset(
-                open_file(command.output_name,
-                          command.output == shell::Output::Append ? Mode::Append : Mode::Replace));
+            out.reset(open_file(command.output_name, Mode::Keep));
             if(out.fd < 0)
                 return false;
+            // Compare the retained copy input before truncating this exact output object.
+            int source = copy_source == 0 && input ? in.fd : copy_source;
+            if(source >= 0)
+            {
+                long same =
+                    os1_syscall3(os1_sys_resource, source, OS1_RESOURCE_SAME_OBJECT, out.fd);
+                if(same != 0)
+                    return false;
+            }
+            if(command.output == shell::Output::Append)
+            {
+                if(os1_status_flags(out.fd, OS1_STATUS_APPEND) < 0)
+                    return false;
+            }
+            else
+            {
+                Handle client(fs::bind(out.fd, false, OS1_RIGHT_WRITE));
+                if(client.fd < 0 || fs::truncate(client.fd, 0) < 0)
+                    return false;
+            }
         }
         if(input)
         {

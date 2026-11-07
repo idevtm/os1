@@ -6,6 +6,7 @@
 #include "sync/atomic.hpp"
 #include "util/memory.h"
 #include "vfs/filesystem.hpp"
+#include "vfs/namespace.hpp"
 namespace
 {
 struct DiskFs
@@ -209,6 +210,9 @@ long lookup(VfsNode* base, const char* name, size_t size, NativeObject*& out)
 }
 long create(VfsNode* base, const char* name, size_t size, uint32_t kind, OpenInstance*& out)
 {
+    NamespaceGuard namespace_guard;
+    if(!namespace_guard.held)
+        return OS1_ERR_WOULD_BLOCK;
     out = nullptr;
     auto* p = static_cast<DiskNode*>(base);
     auto& fs = *p->disk;
@@ -250,8 +254,11 @@ long create(VfsNode* base, const char* name, size_t size, uint32_t kind, OpenIns
     out = opened.take();
     return 0;
 }
-long remove(VfsNode* base, const char* name, size_t size)
+long remove(VfsNode* base, const char* name, size_t size, uint32_t kind)
 {
+    NamespaceGuard namespace_guard;
+    if(!namespace_guard.held)
+        return OS1_ERR_WOULD_BLOCK;
     auto* p = static_cast<DiskNode*>(base);
     auto& fs = *p->disk;
     Guard g(fs);
@@ -264,6 +271,8 @@ long remove(VfsNode* base, const char* name, size_t size)
     auto* child = static_cast<DiskNode*>(find(p, name, size));
     if(!child)
         return OS1_ERR_NOT_FOUND;
+    if(kind && child->kind != kind)
+        return OS1_ERR_INVALID;
     if(child->children)
         return OS1_ERR_NOT_EMPTY;
     // Ext2 has no orphan journal. Do not unlink an object retained by a caller.
@@ -284,6 +293,9 @@ long remove(VfsNode* base, const char* name, size_t size)
 }
 long rename(VfsNode* base, const char* from, size_t a, const char* to, size_t b)
 {
+    NamespaceGuard namespace_guard;
+    if(!namespace_guard.held)
+        return OS1_ERR_WOULD_BLOCK;
     auto* p = static_cast<DiskNode*>(base);
     auto& fs = *p->disk;
     Guard g(fs);
@@ -308,6 +320,90 @@ long rename(VfsNode* base, const char* from, size_t a, const char* to, size_t b)
     memcpy(child->name, to, b);
     child->name_size = b;
     child->cookie = ++fs.cookie;
+    return 0;
+}
+
+void set_depth(VfsNode* node, unsigned depth)
+{
+    static_cast<DiskNode*>(node)->depth = depth;
+    for(auto* child = node->children; child; child = child->next)
+        set_depth(child, depth + 1);
+}
+long move(VfsNode* from,
+          const char* source,
+          size_t a,
+          VfsNode* to,
+          const char* destination,
+          size_t b,
+          bool replace)
+{
+    NamespaceGuard namespace_guard;
+    if(!namespace_guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    auto* p = static_cast<DiskNode*>(from);
+    auto* q = static_cast<DiskNode*>(to);
+    if(p->disk != q->disk)
+        return OS1_ERR_UNSUPPORTED;
+    auto& fs = *p->disk;
+    Guard guard(fs);
+    if(!guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    if(!valid(source, a) || !valid(destination, b))
+        return OS1_ERR_INVALID;
+    if(!p->linked || !q->linked)
+        return OS1_ERR_CLOSED;
+    auto* child = static_cast<DiskNode*>(find(p, source, a));
+    auto* target = static_cast<DiskNode*>(find(q, destination, b));
+    if(!child)
+        return OS1_ERR_NOT_FOUND;
+    if(child == target)
+        return 0;
+    if(vfs_contains(child, q))
+        return OS1_ERR_INVALID;
+    if(target && !replace)
+        return OS1_ERR_EXISTS;
+    if(target && target->kind != child->kind)
+        return OS1_ERR_INVALID;
+    if(target && target->children)
+        return OS1_ERR_NOT_EMPTY;
+    if(target && atomic_load_acquire(&target->references) != 1)
+        return OS1_ERR_WOULD_BLOCK;
+    if(q->depth + 1 + vfs_height(child) >= 32 || fs.cookie == UINT64_MAX)
+        return OS1_ERR_LIMIT;
+    auto* scratch = static_cast<uint8_t*>(kmalloc(2 * ext2::block_bytes));
+    if(!scratch)
+        return OS1_ERR_NO_MEMORY;
+    long r = fs.volume.move(p->number,
+                            p->inode,
+                            source,
+                            a,
+                            q->number,
+                            q->inode,
+                            destination,
+                            b,
+                            child->number,
+                            child->inode,
+                            target ? target->number : 0,
+                            target ? &target->inode : nullptr,
+                            scratch);
+    kfree(scratch);
+    if(r < 0)
+        return r;
+    if(target)
+    {
+        vfs_detach(q, target);
+        target->linked = false;
+        __atomic_sub_fetch(&fs.nodes, 1u, __ATOMIC_RELAXED);
+        object_release(target);
+    }
+    vfs_detach(p, child);
+    memset(child->name, 0, sizeof(child->name));
+    memcpy(child->name, destination, b);
+    child->name_size = b;
+    set_depth(child, q->depth + 1);
+    child->cookie = ++fs.cookie;
+    child->next = q->children;
+    q->children = child;
     return 0;
 }
 long read(VfsNode* base, uint64_t offset, void* out, size_t size)
@@ -434,7 +530,7 @@ long snapshot(VfsNode* base, uint8_t*& out, uint64_t& length)
     return 0;
 }
 const VfsOperations operations{
-    lookup, create, remove, rename, read, write, truncate, seek, next, info, sync, snapshot};
+    lookup, create, remove, rename, read, write, truncate, seek, next, info, sync, snapshot, move};
 }  // namespace
 long ext2_mount(NativeObject* root, BlockDevice& device)
 {

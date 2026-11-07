@@ -1,6 +1,7 @@
 #include "proc/startup.hpp"
 
 #include "buffer/buffer.hpp"
+#include "context/data.hpp"
 #include "fs/initrd.hpp"
 #include "handoff/memory_layout.h"
 #include "ipc/channel.hpp"
@@ -19,6 +20,8 @@ long validate_startup(const os1_startup_record& record)
        record.string_bytes > sizeof(record.strings) || record.root_fd < -1 || record.cwd_fd < -1 ||
        record.root_fd >= static_cast<int>(OS1_DESCRIPTOR_LIMIT) ||
        record.cwd_fd >= static_cast<int>(OS1_DESCRIPTOR_LIMIT))
+        return OS1_ERR_INVALID;
+    if(!os1::context::validate(record.environment))
         return OS1_ERR_INVALID;
     const auto& args = record.constructor;
     if(args.size > OS1_CONSTRUCTOR_BYTES || ((args.schema_id == 0) != (args.version == 0)) ||

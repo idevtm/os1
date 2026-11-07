@@ -1,7 +1,7 @@
 # os1 Shell Language and Runtime Profile
 
-Status: revised later-stage proposal, 2026-11-05. **Illustrative language and API
-syntax; no shell runtime, hosted-service API, or frozen language ABI is claimed.**
+Status: revised later-stage proposal, 2026-11-07. **Illustrative language and API
+syntax; the full reflective runtime and language ABI are not implemented.**
 
 The [native contract](../native-api/object-contract.md) owns resource, authority,
 process, and service semantics. The [VFS profile](../native-api/vfs-contract.md)
@@ -13,6 +13,21 @@ The [service roadmap](../native-api/roadmap.md) prioritizes OS services before t
 
 The current bounded shell already supports [interactive files, redirection, and a line editor](interactive-files.md).
 Those features do not implement the reflective language described below.
+
+The selected [OS hierarchy](../native-api/object-hierarchy.md) owns object roots, environment inheritance, and discovery.
+The [object-command proposal](object-commands.md) owns the settled first command slice and explicitly deferred language extensions.
+It takes precedence over later-stage syntax sketches in this document.
+Aliases apply to interactive commands and scripts; typed property arguments need no interpolation syntax.
+Interactive commands allow warned text fallback after expression resolution; scripts default to strict expressions.
+Declared positional arguments can mix with named arguments in any order.
+
+The selected environment contains inherited plain data, with resource grants kept separately.
+
+```mermaid
+flowchart LR
+    A[OS object contracts] --> B[Shell bindings and short commands]
+    B --> C[Later script language]
+```
 
 ## 1. Purpose and design limits
 
@@ -51,7 +66,7 @@ controls slot reuse: a stale raw fd can refer to a later resource, so wrappers
 must not advertise generation protection that the integer ABI lacks.
 
 ```text
-output = os.stdout
+output = process.streams.output
 alias = output                 # Same owner, not another kernel entry.
 copy = output.duplicate(rights: [WRITE], flags: [CLOEXEC])
 copy.close()                   # Does not close output or alias.
@@ -66,8 +81,8 @@ specified before implementing closures or asynchronous tasks.
 ## 3. The injected `os` capability bundle
 
 `os` is a runtime facade over the startup context and explicitly granted service
-endpoints. It is not an ambient path to unrestricted kernel authority. Its
-root/cwd and standard streams are actual granted descriptors. Absolute-path
+endpoints. It is not an ambient path to unrestricted kernel authority. Filesystem roots and process cwd use granted directory references.
+`process.streams` contains the standard stream grants. Absolute-path
 helpers resolve from that supplied root; changing syntax cannot obtain a more
 powerful root. Startup environment strings and claimed user identities cannot
 create capabilities.
@@ -93,10 +108,10 @@ the open fails. The runtime must preserve that distinction. A future discovery
 catalog similarly returns descriptions; acquiring a process, device, or service
 handle is an explicit, separately authorized action.
 
-The first namespace is immutable and read-only. Runtime path helpers follow the
-[bounded namespace profile](../native-api/object-contract.md#6-namespace-profile),
-including rejection of `..`, links, and unsupported mutations. A future
-`children` collection is an adapter over those operations, not another resolver.
+Initrd is immutable; tmpfs and ext2 support their documented mutation profiles.
+Runtime helpers must enforce the selected filesystem contract.
+Parent traversal, links, and new cwd behavior require explicit contracts before use.
+Object child discovery does not replace filesystem lookup.
 
 ## 4. Ordinary programs, services, and local modules
 
@@ -268,8 +283,7 @@ it never implicitly mutates the referenced object's contents.
 
 Generated codecs initially cover fixed scalar fields, bounded strings/arrays,
 and documented record types. A numeric fd in a record is data. Actual capability
-transfer uses the kernel-validated attachment mechanism when that later feature
-exists, with explicit rights and ownership on success and failure. Arbitrary
+transfer uses the kernel-validated attachment mechanism within the supported attachment profile, with explicit rights and ownership on success and failure. Arbitrary
 local references, closures, and serialized exception instances cannot cross the
 boundary by default.
 
@@ -342,39 +356,23 @@ request identity, and bounded text; it must not deserialize arbitrary remote
 exception classes or allocate an unbounded cause tree. Even out-of-memory errors
 need a reporting path that does not require allocating another error object.
 
-## 9. Illustrative `os` catalog
+## 9. OS roots and process context
 
-This catalog preserves the long-term direction, not an implementation checklist
-for the first shell. A missing capability or unsupported interface is explicit;
-fields do not imply administrator access. Discovery returns bounded descriptions
-and authorized snapshots, with explicit acquisition for resource handles.
+The [OS hierarchy proposal](../native-api/object-hierarchy.md#proposed-roots) replaces this document's earlier OS catalog.
+OS service organization is independent of command grammar.
+`process.environment` contains typed inherited values; `process.streams` contains named standard stream grants.
+`os.system.clock` is the proposed clock location.
+Earlier `os.env`, `os.stdout`, `os.time`, and `os.sys` spellings are superseded catalog sketches.
 
-| Facade | Useful surface | Boundary and dependency |
-| --- | --- | --- |
-| `os.process` | Current process identity; permitted state/exit inspection; waiting and explicit control of granted processes. | A PID is not a control capability. Process/handle/thread listings need bounded snapshots; stop/terminate/trace are separate privileged operations. |
-| `os.user` | Current credential description, permitted user lookup, advisory authority queries. | Future credentials/authentication policy. Changing a local UID field cannot authenticate or grant rights. |
-| `os.env` | Local environment variables, locale/timezone preferences, explicit child environment construction. | Mutates this runtime's environment; does not rewrite another process or confer authority. Launch records remain bounded. |
-| `os.fs` | Granted root/cwd, `open_at`, read/seek, bounded directory pages, object information. | Read-only initrd first. Mutation, links, mounts, watches, and writable storage need later resource-specific contracts. |
-| `os.objects` | Class construction with typed optional arguments; class code selects fresh or existing objects. | Requires authorized class references, per-client grants, readiness, and declared reuse/argument behavior; shared activation is a later manager/runtime facility. |
-| `os.services` | Authorized discovery, READY-gated startup, connection, explicit supervision. | Depends on bounded IPC, generated codecs, deadlines, failure handling, and a publisher authority model. |
-| `os.net` | Socket connections, listeners, name resolution, permitted interface/route snapshots. | Later networking protocols and socket lifetime/backpressure contracts. Route or interface administration requires separate grants. |
-| `os.devices` | Enumerated device descriptions, explicit authorized opening, passive snapshots, later change events. | Device IDs/names are not handles. Rescan, reset, power, claim, or release require dedicated control protocols and driver quiescence. |
-| `os.time` | Monotonic deadlines/durations, sleep, later timers; separately identified wall-clock time. | Units, overflow, cancellation, and clock domains must be defined. Existing TSC helpers are not a public deadline API. |
-| `os.observe` | Bounded passive snapshots; later explicit event subscriptions, metrics, and trace sessions. | One facade, avoiding the former conflicting `os.observe(...)` function spelling. Inspection must not trigger rescan, reset, or active tests. |
-| `os.sys` | Build/platform/features and authorized system snapshots; explicit power control when granted. | Version/feature queries do not grant shutdown/reboot authority. Kernel panic is not a general shell action; runtime GC belongs to the runtime. |
+| Concern | Owning proposal |
+| --- | --- |
+| Interface and child discovery | [OS reflection](../native-api/object-hierarchy.md#reflection-and-child-discovery) |
+| Context copy and capability delegation | [Typed environment](../native-api/object-hierarchy.md#typed-process-environment) |
+| Short commands and literal arguments | [Object commands](object-commands.md) |
 
-Passive observability should precede broad control APIs. Process/device getters
-need clear snapshot boundaries and redaction, not live pointers into mutable
-kernel structures. Enumeration must distinguish a stale description from a
-successful acquisition. Device removal can invalidate an operation even after a
-snapshot reported the device present; the concrete device contract owns that
-failure behavior. An event such as `on_device_removed` supplements a state query
-and cannot be the only way to discover loss.
-
-Standard input/output/error are real descriptor entries. Console byte I/O alone
-does not establish a TTY, PTY, terminal session, line discipline, or job-control
-model. POSIX adapters use the same descriptors and documented mappings; their
-flags and inheritance defaults need not match native `CLOEXEC` defaults.
+Standard input/output/error remain real resource grants.
+Console byte I/O does not establish a TTY, PTY, terminal session, or job-control model.
+POSIX adapters use the shared resource table and documented semantic mappings.
 
 ## 10. Example workflows and acceptance
 

@@ -104,6 +104,8 @@ def main():
     try:
         # No monitor command or serial input before the shell: auto-selection is tested.
         expect(b'shell prompt ready')
+        # Do not inject a report while the shell is still writing its first prompt.
+        expect(b'os1> ')
         elapsed = time.monotonic() - started
         connection.connect(str(monitor))
         connection.recv(4096)

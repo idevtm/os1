@@ -60,3 +60,31 @@ struct os1_file_info
     uint64_t byte_size;
     uint32_t max_directory_record, reserved;
 };
+// Namespace extension: explicit root/cwd grants; process-local fds are syscall arguments.
+#define OS1_RESOURCE_CONTEXT_OPEN 20u
+#define OS1_RESOURCE_DESCRIBE_PATH 21u
+#define OS1_RESOURCE_MOVE_AT 22u
+#define OS1_RESOURCE_SAME_OBJECT 23u
+struct os1_context_open_request
+{
+    uint32_t version, size;
+    int32_t cwd_fd;
+    uint32_t path_bytes;
+    uint64_t path;
+    uint32_t rights, descendant_rights, descriptor_flags, reserved;
+};
+struct os1_path_request
+{
+    uint32_t version, size;
+    int32_t object_fd;
+    uint32_t capacity;
+    uint64_t buffer;
+};
+struct os1_move_request
+{
+    uint32_t version, size;
+    int32_t destination_fd;
+    uint32_t replace;
+    uint32_t source_bytes, destination_bytes;
+    char source[64], destination[64];
+};
