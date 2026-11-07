@@ -68,5 +68,6 @@ Update repository links and source comments whenever a document moves.
 ## Filesystem utility extension
 
 - [Metadata and recursive commands](shell/filesystem-tools.md)
+- [Text utilities](shell/text-utilities.md)
 - [Native metadata and traversal ABI](native-api/abi/filesystem-metadata-abi.md)
 - [Implementation and validation record](archive/shell/2026-11-07-filesystem-traversal.md)

@@ -60,6 +60,7 @@ The current encoding remains `fd`; general typed owning/borrowed C++ wrappers re
 
 ## Latest implementation
 
+The [text utility profile](../shell/text-utilities.md) uses existing native File and stream handles without a new ABI.
 The [filesystem traversal record](../archive/shell/2026-11-07-filesystem-traversal.md) covers metadata, recursive commands, `find`, and `du`.
 
 The [typed shell record](../shell/typed-context-plan.md) covers the first object-command stage and namespace extensions.

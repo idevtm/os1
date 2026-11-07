@@ -73,6 +73,8 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${PROJECT_SOURCE_DIR}/src/common/shell/command.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/shell/values.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/shell_runtime.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/text_tools.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/text/tools.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/shell/program_path.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/shell/text_buffer.hpp"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
@@ -117,6 +119,8 @@ os1_add_user_cxx_program(copycheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/copyche
 os1_add_user_cxx_program(smpcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/smpcheck.cpp" OS1_USER_SMPCHECK_ELF)
 os1_add_user_cxx_program(acpiprobe "${CMAKE_CURRENT_SOURCE_DIR}/programs/acpiprobe.cpp" OS1_USER_ACPIPROBE_ELF)
 os1_add_user_cxx_program(ascii "${CMAKE_CURRENT_SOURCE_DIR}/programs/ascii.cpp" OS1_USER_ASCII_ELF)
+
+os1_add_user_cxx_program(textcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/textcheck.cpp" OS1_USER_TEXTCHECK_ELF)
 
 os1_add_user_cxx_program(fdcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/fdcheck.cpp" OS1_USER_FDCHECK_ELF)
 
