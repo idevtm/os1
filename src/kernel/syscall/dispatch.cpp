@@ -1,3 +1,4 @@
+#include "debug/log.hpp"
 // Register-level syscall switch extracted from the kernel trap file.
 #include "syscall/dispatch.hpp"
 
@@ -45,6 +46,9 @@ Thread* handle_syscall(TrapFrame* frame)
     ipc_drain_wakeups();
     switch(frame->rax)
     {
+        case os1_sys_log:
+            frame->rax = diagnostic_log::context(page_frames, thread, frame->rdi, frame->rsi);
+            return thread;
         case os1_sys_write:
             if(frame->rdi >= OS1_DESCRIPTOR_LIMIT) { frame->rax = OS1_ERR_BAD_DESCRIPTOR; return thread; }
             frame->rax = (uint64_t)sys_write(

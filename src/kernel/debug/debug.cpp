@@ -4,6 +4,7 @@
 
 #include "arch/x86_64/cpu/io_port.hpp"
 #include "debug/bootlog.hpp"
+#include "debug/log.hpp"
 #include "handoff/memory_layout.h"
 #include "util/memory.h"
 
@@ -171,6 +172,7 @@ void Debug::set_mirror(void (*sink)(char))
 
 void Debug::write(const char c)
 {
+    diagnostic_log::text(c);
     if(nullptr != mirror_)
     {
         mirror_(c);

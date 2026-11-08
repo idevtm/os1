@@ -1,3 +1,4 @@
+#include "debug/log.hpp"
 // Kmem-backed thread-registry implementation. This file owns thread IDs,
 // kernel stacks, saved TrapFrame initialization, wait-state transitions, and
 // CPU-local current-thread publication.
@@ -751,6 +752,8 @@ void mark_current_thread_dying(int exit_status)
         return;
     }
 
+    diagnostic_log::syscall_end(thread, exit_status);
+    diagnostic_log::process_exit(thread->process, exit_status);
     ipc_stop_children(thread->process);
     thread->exit_status = exit_status;
     cancel_console_read(thread);

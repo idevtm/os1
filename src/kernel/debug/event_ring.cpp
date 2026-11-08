@@ -1,5 +1,7 @@
 #include "debug/event_ring.hpp"
 
+#include "debug/log.hpp"
+
 #if !defined(OS1_HOST_TEST)
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "core/kernel_state.hpp"
@@ -126,6 +128,7 @@ void record(uint32_t type,
             pid = thread->process->pid;
         }
     }
+    diagnostic_log::event(type, flags, pid, arg0, arg1);
     g_event_ring.append(
         g_timer_ticks, type, flags, current_cpu_id(), pid, tid, arg0, arg1, arg2, arg3);
 #endif
@@ -144,6 +147,7 @@ void record_subject(uint32_t type,
     g_event_ring.append(0, type, flags, 0, pid, tid, arg0, arg1, arg2, arg3);
 #else
     IrqSpinGuard guard(g_event_ring_lock);
+    diagnostic_log::event(type, flags, pid, arg0, arg1);
     g_event_ring.append(
         g_timer_ticks, type, flags, current_cpu_id(), pid, tid, arg0, arg1, arg2, arg3);
 #endif

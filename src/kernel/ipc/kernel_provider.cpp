@@ -5,6 +5,7 @@
 
 #include "console/console.hpp"
 #include "console/console_input.hpp"
+#include "debug/log.hpp"
 #include "fs/initrd.hpp"
 #include "mm/kmem.hpp"
 #include "platform/system_control.hpp"
@@ -586,6 +587,44 @@ void invoke_system(OpenInstance&,
                                 : request.payload_bytes ? OS1_ERR_INVALID
                                                         : system_control(request.member);
 }
+void invoke_log(OpenInstance&,
+                uint32_t rights,
+                uint32_t,
+                const os1_ipc_message& request,
+                os1_ipc_result& result,
+                DescriptorEntry&)
+{
+    if(!(rights & OS1_RIGHT_LOG_READ))
+    {
+        result.application_status = OS1_ERR_ACCESS;
+        return;
+    }
+    if(request.member == OS1_LOG_INFO && !request.payload_bytes)
+    {
+        auto information = diagnostic_log::info();
+        memcpy(result.payload, &information, sizeof(information));
+        result.payload_bytes = sizeof(information);
+        return;
+    }
+    if(request.member != OS1_LOG_READ || request.payload_bytes != sizeof(os1_log_query))
+    {
+        result.application_status = OS1_ERR_INVALID;
+        return;
+    }
+    os1_log_query query{};
+    memcpy(&query, request.payload, sizeof(query));
+    os1_log_record record{};
+    long status = diagnostic_log::read(query, record);
+    if(status < 0)
+        result.application_status = status;
+    else if(status)
+    {
+        memcpy(result.payload, &record, sizeof(record));
+        result.payload_bytes = sizeof(record);
+    }
+}
+const KernelProvider log_provider{
+    OS1_LOG_INTERFACE_ID, 1, OS1_OBJECT_DIRECTORY, OS1_RIGHT_LOG_READ, system_root, invoke_log};
 const KernelProvider system_provider{OS1_SYSTEM_INTERFACE_ID,
                                      1,
                                      OS1_OBJECT_DIRECTORY,
@@ -616,7 +655,7 @@ const KernelProvider console{OS1_CONSOLE_INTERFACE_ID,
 const KernelProvider* kernel_provider(uint64_t id, uint32_t version)
 {
     const KernelProvider* providers[] = {
-        &console, &input_session, &directory, &file, &system_provider};
+        &console, &input_session, &directory, &file, &system_provider, &log_provider};
     for(auto* provider : providers)
         if(id == provider->interface_id && version == provider->interface_version)
             return provider;

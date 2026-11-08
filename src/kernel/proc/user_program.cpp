@@ -1,3 +1,4 @@
+#include "debug/log.hpp"
 #include "mm/kmem.hpp"
 #include "vfs/filesystem.hpp"
 // Initrd-backed ELF64 user-program loader. It owns user address-space creation,
@@ -193,6 +194,7 @@ Thread* load_user_program(PageFrameContainer& frames,
         return nullptr;
     }
     process->parent = parent;
+    diagnostic_log::inherit(process, parent);
 
     long grants = parent ? descriptor_inherit_standard(parent->descriptors, process->descriptors)
                          : descriptor_bootstrap_console(process->descriptors);

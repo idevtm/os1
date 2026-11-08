@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <os1/line_editor.hpp>
+#include <os1/log.hpp>
 #include <os1/parameter_client.hpp>
 #include <os1/shell_runtime.hpp>
 #include <os1/syscall.hpp>
@@ -19,6 +20,9 @@ constexpr size_t kShellMaxTokens = 16;
 int output_fd = 1;
 bool output_failed = false;
 bool command_failed = false;
+char* log_output_buffer = nullptr;
+size_t log_output_size = 0;
+constexpr size_t kLogOutputBytes = 4096;
 struct DiagnosticOutput
 {
     int saved = output_fd;
@@ -49,6 +53,20 @@ void write_bytes(const char* data, size_t length)
 {
     if((nullptr == data) || (0 == length))
     {
+        return;
+    }
+    if(log_output_buffer)
+    {
+        for(size_t i = 0; i < length; ++i)
+        {
+            log_output_buffer[log_output_size++] = data[i];
+            if(log_output_size == kLogOutputBytes)
+            {
+                if(!os1::user::files::put(output_fd, log_output_buffer, log_output_size))
+                    output_failed = true;
+                log_output_size = 0;
+            }
+        }
         return;
     }
     if(output_fd == 1 && output_failed)
@@ -1190,6 +1208,235 @@ struct ShellLifetime
         os1::user::write(2, "shell ended\n", 12);
     }
 };
+
+bool history_enabled = true;
+struct CommandRecord
+{
+    os1_log_command record{};
+    bool executed = false;
+    CommandRecord(const char* line, bool interactive)
+    {
+        record.version = 1;
+        record.size = sizeof(record);
+        if(!history_enabled || (interactive && line[0] == ' '))
+            record.flags = OS1_LOG_SUPPRESSED;
+        if(!(record.flags & OS1_LOG_SUPPRESSED))
+        {
+            size_t n = string_length(line);
+            if(n >= sizeof(record.text))
+                n = sizeof(record.text) - 1;
+            __builtin_memcpy(record.text, line, n);
+            os1::user::context::describe(os1::user::cwd(), record.cwd, sizeof(record.cwd));
+        }
+        if(os1::user::logs::context(OS1_LOG_COMMAND_BEGIN, &record) < 0)
+            record.command_id = 0;
+    }
+    ~CommandRecord()
+    {
+        if(!record.command_id)
+            return;
+        record.status = (!executed || command_failed || output_failed) ? 1 : 0;
+        os1::user::logs::context(OS1_LOG_COMMAND_END, &record);
+    }
+};
+bool log_number(const char* s, uint64_t& value)
+{
+    value = 0;
+    if(!*s)
+        return false;
+    for(; *s; ++s)
+    {
+        if(*s < '0' || *s > '9' || value > (UINT64_MAX - (*s - '0')) / 10)
+            return false;
+        value = value * 10 + (*s - '0');
+    }
+    return true;
+}
+struct LogOutput
+{
+    char bytes[kLogOutputBytes];
+    LogOutput()
+    {
+        log_output_size = 0;
+        log_output_buffer = bytes;
+    }
+    ~LogOutput()
+    {
+        log_output_buffer = nullptr;
+        if(log_output_size && !os1::user::files::put(output_fd, bytes, log_output_size))
+            output_failed = true;
+        log_output_size = 0;
+    }
+};
+void write_log_text(const char* text, size_t limit)
+{
+    const char hex[] = "0123456789abcdef";
+    for(size_t i = 0; i < limit && text[i]; ++i)
+    {
+        unsigned char c = text[i];
+        if(c < 32 || c >= 127 || c == '\\' || c == '"')
+        {
+            const char bytes[] = {'\\', 'x', hex[c >> 4], hex[c & 15]};
+            write_bytes(bytes, 4);
+        }
+        else
+            write_char(c);
+    }
+}
+void run_log(bool history, size_t argc, char** argv)
+{
+    if(history && argc == 2 && (strings_equal(argv[1], "off") || strings_equal(argv[1], "on")))
+    {
+        history_enabled = strings_equal(argv[1], "on");
+        return;
+    }
+    os1_log_query query{};
+    query.version = 1;
+    query.size = sizeof(query);
+    uint64_t limit = 20;
+    bool explicit_after = false;
+    const bool information = argc == 2 && strings_equal(argv[1], "info");
+    for(size_t i = 1; !information && i < argc; ++i)
+    {
+        const char* value = argv[i];
+        while(*value && *value != ':')
+            ++value;
+        if(!*value)
+        {
+            command_failed = true;
+            break;
+        }
+        size_t key = value++ - argv[i];
+        uint64_t number = 0;
+        if(key == 5 && os1::context::same(argv[i], 5, "level", 5))
+        {
+            query.min_level = strings_equal(value, "error")     ? OS1_LOG_ERROR
+                              : strings_equal(value, "warning") ? OS1_LOG_WARNING
+                              : strings_equal(value, "info")    ? OS1_LOG_INFO_LEVEL
+                                                                : 99;
+            if(query.min_level == 99)
+                command_failed = true;
+            continue;
+        }
+        if(!log_number(value, number))
+        {
+            command_failed = true;
+            break;
+        }
+        if(key == 5 && os1::context::same(argv[i], 5, "limit", 5))
+            limit = number;
+        else if(key == 5 && os1::context::same(argv[i], 5, "after", 5))
+        {
+            query.after = number;
+            explicit_after = true;
+        }
+        else if(key == 10 && os1::context::same(argv[i], 10, "command_id", 10))
+            query.command_id = number;
+        else if(key == 3 && os1::context::same(argv[i], 3, "pid", 3))
+            query.pid = number;
+        else if(key == 4 && os1::context::same(argv[i], 4, "kind", 4) && number <= OS1_LOG_TEXT)
+            query.kind = number;
+        else
+            command_failed = true;
+    }
+    if(command_failed || !limit || limit > 256)
+    {
+        command_failed = true;
+        os1::user::files::message("log: invalid filter; limit is 1..256\n");
+        return;
+    }
+    os1::user::files::Handle client(history ? -1 : os1::user::logs::bind());
+    os1_log_info info{};
+    long status = history         ? os1::user::logs::context(OS1_LOG_CONTEXT_INFO, &info)
+                  : client.fd < 0 ? client.fd
+                                  : os1::user::logs::call(
+                                        client.fd, OS1_LOG_INFO, nullptr, 0, &info, sizeof(info));
+    if(status < 0)
+    {
+        command_failed = true;
+        os1::user::files::message("log: access unavailable\n");
+        return;
+    }
+    query.through = info.latest;
+    LogOutput output;
+    if(information)
+    {
+        write_string("log capacity_bytes=");
+        write_unsigned(info.capacity_bytes);
+        write_string(" latest=");
+        write_unsigned(info.latest);
+        write_string(" overwritten=");
+        write_unsigned(info.overwritten);
+        write_string(" dropped=");
+        write_unsigned(info.dropped);
+        write_string(" clock_resolution_ns=");
+        write_unsigned(info.clock_resolution_ns);
+        write_string(" diagnostic=");
+        write_unsigned(info.diagnostic);
+        write_char('\n');
+        return;
+    }
+    // The default view is the recent sequence window. Explicit cursors allow older reads.
+    if(!explicit_after && !query.command_id && !query.pid && !query.kind && !query.min_level &&
+       info.latest > limit)
+        query.after = info.latest - limit;
+    for(uint64_t i = 0; i < limit && query.after < query.through; ++i)
+    {
+        os1_log_record record{};
+        os1_log_history_query row{};
+        row.query = query;
+        status = history
+                     ? os1::user::logs::context(OS1_LOG_HISTORY_READ, &row)
+                     : os1::user::logs::call(
+                           client.fd, OS1_LOG_READ, &query, sizeof(query), &record, sizeof(record));
+        if(status <= 0)
+        {
+            if(status < 0)
+                command_failed = true;
+            break;
+        }
+        if(history)
+            record = row.result.record;
+        query.after = record.sequence;
+        write_string(history ? "history " : "log ");
+        write_unsigned(record.sequence);
+        write_string(" time_ns=");
+        write_unsigned(record.time_ns);
+        write_string(" command=");
+        write_unsigned(record.command_id);
+        write_string(" pid=");
+        write_unsigned(record.pid);
+        write_string(" request=");
+        write_unsigned(record.request_id);
+        write_string(" session=");
+        write_unsigned(record.session_id);
+        write_string(" interface=");
+        write_hex(record.interface_id);
+        write_string(" operation=");
+        write_unsigned(record.arg0);
+        write_string(" duration_ns=");
+        write_unsigned(record.duration_ns);
+        write_string(" kind=");
+        write_unsigned(record.kind);
+        write_string(" status=");
+        write_signed(record.status);
+        if(record.flags & OS1_LOG_TRUNCATED)
+            write_string(" truncated");
+        if(history && (record.flags & OS1_LOG_PENDING))
+            write_string(" pending");
+        if(record.flags & OS1_LOG_SUPPRESSED)
+            write_string(" [suppressed]");
+        else
+        {
+            write_string(" text=\"");
+            write_log_text(history ? row.result.text : record.text,
+                           history ? sizeof(row.result.text) : sizeof(record.text));
+            write_char('"');
+        }
+        write_char('\n');
+    }
+}
+
 struct CommandSync
 {
     bool pending;
@@ -1240,6 +1487,8 @@ bool may_write(os1::user::shell_runtime::Method method)
 int main(int argc_main, char** argv_main)
 {
     ShellLifetime lifetime;
+    if(os1::user::logs::context(OS1_LOG_CONTEXT_OPEN) < 0)
+        os1::user::files::message("shell: history capture unavailable\n");
     char line[kShellLineBytes];
     os1::user::files::Reader reader;
     os1::user::files::Handle script;
@@ -1290,6 +1539,7 @@ int main(int argc_main, char** argv_main)
         for(size_t i = 0; i < input.size; ++i)
             line[i] = input.bytes[i];
         normalize_line(line, input.size);
+        CommandRecord command_record(line, console_input);
         os1::shell::Command parsed;
         if(!os1::shell::parse(line, parsed))
         {
@@ -1326,15 +1576,39 @@ int main(int argc_main, char** argv_main)
                 return 1;
             continue;
         }
+        const bool log_command = strings_equal(tokens[0], "dmesg") ||
+                                 strings_equal(tokens[0], "os.system.log.print") ||
+                                 strings_equal(tokens[0], "history") ||
+                                 strings_equal(tokens[0], "process.shell.history.print");
         bool external = call.method == os1::user::shell_runtime::Method::Unknown;
-        const char* builtins[] = {"write",         "edit",        "help",
-                                  "pid",           "sys",         "ps",
-                                  "cpu",           "pci",         "initrd",
-                                  "usb",           "devices",     "irqs",
-                                  "resources",     "kmem",        "events",
-                                  "call",          "sync",        "shutdown",
-                                  "reboot",        "system.sync", "system.shutdown",
-                                  "system.reboot", "exec",        "exit"};
+        const char* builtins[] = {"write",
+                                  "edit",
+                                  "help",
+                                  "pid",
+                                  "sys",
+                                  "ps",
+                                  "cpu",
+                                  "pci",
+                                  "initrd",
+                                  "usb",
+                                  "devices",
+                                  "irqs",
+                                  "resources",
+                                  "kmem",
+                                  "events",
+                                  "call",
+                                  "sync",
+                                  "shutdown",
+                                  "reboot",
+                                  "system.sync",
+                                  "system.shutdown",
+                                  "system.reboot",
+                                  "exec",
+                                  "exit",
+                                  "dmesg",
+                                  "history",
+                                  "os.system.log.print",
+                                  "process.shell.history.print"};
         for(const char* builtin : builtins)
             if(strings_equal(tokens[0], builtin))
                 external = false;
@@ -1424,7 +1698,7 @@ int main(int argc_main, char** argv_main)
                 return 1;
             continue;
         }
-        CommandSync command_sync(may_write(call.method) || parsed.output_name[0]);
+        CommandSync command_sync((may_write(call.method) && !log_command) || parsed.output_name[0]);
         os1::user::files::Streams streams;
         if(!streams.apply(parsed, reader, copy_source, call.recursive))
         {
@@ -1436,7 +1710,15 @@ int main(int argc_main, char** argv_main)
         // Output redirection can replace a readable source in descriptor 1.
         if(copy_source == 1 && streams.active[1])
             call.streams[os1::user::shell_runtime::source_slot(call.method)] = streams.saved[1].fd;
-        if(call.method != os1::user::shell_runtime::Method::Unknown)
+        command_record.executed = true;
+        if(strings_equal(tokens[0], "dmesg") || strings_equal(tokens[0], "os.system.log.print") ||
+           strings_equal(tokens[0], "history") ||
+           strings_equal(tokens[0], "process.shell.history.print"))
+            run_log(strings_equal(tokens[0], "history") ||
+                        strings_equal(tokens[0], "process.shell.history.print"),
+                    argc,
+                    tokens);
+        else if(call.method != os1::user::shell_runtime::Method::Unknown)
         {
             long result = os1::user::shell_runtime::execute(call);
             if(result < 0)
@@ -1460,7 +1742,7 @@ int main(int argc_main, char** argv_main)
                 command_failed = true;
             }
             else
-                os1::user::files::write_command(argc, tokens);
+                command_failed = !os1::user::files::write_command(argc, tokens);
         }
         else if(strings_equal(tokens[0], "edit"))
         {
@@ -1470,7 +1752,7 @@ int main(int argc_main, char** argv_main)
                 command_failed = true;
             }
             else
-                os1::user::files::edit(argc, tokens);
+                command_failed = !os1::user::files::edit(argc, tokens);
         }
         else if(strings_equal(tokens[0], "help"))
         {

@@ -2,6 +2,7 @@
 
 #include "buffer/buffer.hpp"
 #include "context/data.hpp"
+#include "debug/log.hpp"
 #include "fs/initrd.hpp"
 #include "handoff/memory_layout.h"
 #include "ipc/channel.hpp"
@@ -140,7 +141,7 @@ long inherit_process_namespace(Process* parent, Process* child)
         auto* root = initrd_namespace_root();
         if(!root)
             return OS1_ERR_BAD_IMAGE;
-        root->allowed_rights |= OS1_RIGHT_SYSTEM_CONTROL;
+        root->allowed_rights |= OS1_RIGHT_SYSTEM_CONTROL | OS1_RIGHT_LOG_READ;
         const int roles[] = {OS1_BOOT_ROOT_FD, OS1_BOOT_CWD_FD};
         for(int fd : roles)
         {
@@ -150,7 +151,8 @@ long inherit_process_namespace(Process* parent, Process* child)
             const long status = descriptor_install(
                 child->descriptors,
                 instance.get(),
-                kDirectoryRights | (fd == OS1_BOOT_ROOT_FD ? OS1_RIGHT_SYSTEM_CONTROL : 0),
+                kDirectoryRights |
+                    (fd == OS1_BOOT_ROOT_FD ? OS1_RIGHT_SYSTEM_CONTROL | OS1_RIGHT_LOG_READ : 0),
                 0,
                 fd,
                 kNamespaceCeiling);
@@ -267,6 +269,7 @@ long replace_process_image(const ProcessSyscallContext& context,
         return OS1_ERR_FAULT;
     }
     const uint64_t old = thread->address_space_cr3;
+    diagnostic_log::process_exec(thread->process);
     buffer_process_exec(*context.frames, thread->process);
     descriptor_close_exec(thread->process->descriptors);
     thread->address_space_cr3 = cr3;
@@ -350,6 +353,7 @@ long sys_launch(const ProcessSyscallContext& context,
     if(!child)
         return OS1_ERR_NO_MEMORY;
     child->parent = thread->process;
+    diagnostic_log::inherit(child, thread->process);
     result = install_child_grants(thread->process->descriptors, child->descriptors, *request);
     if(result < 0)
     {

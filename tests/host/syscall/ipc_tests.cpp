@@ -1,3 +1,4 @@
+#include "debug/log.hpp"
 extern void (*host_console_after_ready)();
 extern int host_console_session_allocation_budget;
 #include "arch/x86_64/cpu/cpu.hpp"
@@ -19,6 +20,7 @@ extern int host_console_session_allocation_budget;
 #include <gtest/gtest.h>
 #include <os1/console.h>
 #include <os1/system.h>
+#include <os1/tmpfs.h>
 
 #include <array>
 #include <atomic>
@@ -2387,4 +2389,210 @@ TEST(SystemControl, ProviderRejectsAuthorityAndMalformedRequestsBeforeTransition
     request.member = 99;
     provider->invoke(source, OS1_RIGHT_SYSTEM_CONTROL, 0, request, result, output);
     EXPECT_EQ(OS1_ERR_UNSUPPORTED, result.application_status);
+}
+
+namespace
+{
+class LogIpc : public Ipc
+{
+protected:
+    bool diagnostic_mode = true;
+    void SetUp() override
+    {
+        Ipc::SetUp();
+        diagnostic_log::test_reset();
+        diagnostic_log::initialize(diagnostic_mode);
+    }
+    void TearDown() override
+    {
+        diagnostic_log::cleanup(thread->process);
+        diagnostic_log::test_reset();
+        Ipc::TearDown();
+    }
+    template<class T>
+    long context(unsigned op, T& record)
+    {
+        EXPECT_TRUE(copy_to_user(frames, thread, address, &record, sizeof(record)));
+        long r = diagnostic_log::context(frames, thread, op, address);
+        EXPECT_TRUE(copy_from_user(frames, thread, address, &record, sizeof(record)));
+        return r;
+    }
+};
+class NormalLogIpc : public LogIpc
+{
+protected:
+    void SetUp() override
+    {
+        diagnostic_mode = false;
+        LogIpc::SetUp();
+    }
+};
+TEST_F(NormalLogIpc, TimestampMutationsAreCapturedButReadsAreOmitted)
+{
+    const uint64_t interfaces[] = {OS1_FILE_INTERFACE_ID, OS1_DIRECTORY_INTERFACE_ID};
+    const uint32_t mutations[] = {OS1_FILE_SET_TIMES, OS1_DIRECTORY_SET_TIMES};
+    const uint32_t reads[] = {OS1_FILE_TIMES, OS1_DIRECTORY_TIMES};
+    for(unsigned i = 0; i < 2; ++i)
+    {
+        os1_log_query query{};
+        query.version = 1;
+        query.size = sizeof(query);
+        query.after = diagnostic_log::info().latest;
+        os1_log_record origin{}, record{};
+        diagnostic_log::ipc_begin(origin, thread->process, interfaces[i], mutations[i]);
+        diagnostic_log::ipc_end(origin, 0);
+        ASSERT_EQ(1, diagnostic_log::read(query, record));
+        EXPECT_EQ(OS1_LOG_IPC_BEGIN, record.kind);
+        EXPECT_EQ(interfaces[i], record.interface_id);
+        EXPECT_EQ(mutations[i], record.arg0);
+        query.after = record.sequence;
+        ASSERT_EQ(1, diagnostic_log::read(query, record));
+        EXPECT_EQ(OS1_LOG_IPC_END, record.kind);
+        EXPECT_EQ(origin.request_id, record.request_id);
+        EXPECT_EQ(0, record.status);
+        query.after = record.sequence;
+        diagnostic_log::ipc_begin(origin, thread->process, interfaces[i], reads[i]);
+        diagnostic_log::ipc_end(origin, 0);
+        EXPECT_EQ(0, diagnostic_log::read(query, record));
+    }
+}
+TEST_F(LogIpc, CommandsAreAssignedAndParentContextRestored)
+{
+    auto* p = thread->process;
+    p->log_command = 55;
+    p->log_session = 9;
+    ASSERT_EQ(0, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
+    os1_log_command c{};
+    c.version = 1;
+    c.size = sizeof(c);
+    std::memcpy(c.text, "example", 8);
+    ASSERT_EQ(0, context(OS1_LOG_COMMAND_BEGIN, c));
+    EXPECT_NE(0u, c.command_id);
+    EXPECT_NE(55u, c.command_id);
+    EXPECT_EQ(55u, p->log_parent_command);
+    EXPECT_EQ(p->pid, p->log_session);
+    auto original = c.command_id;
+    c.command_id++;
+    EXPECT_EQ(OS1_ERR_INVALID, context(OS1_LOG_COMMAND_END, c));
+    c.command_id = original;
+    c.status = 7;
+    ASSERT_EQ(0, context(OS1_LOG_COMMAND_END, c));
+    EXPECT_EQ(55u, p->log_command);
+    EXPECT_EQ(9u, p->log_session);
+    os1_log_history_query q{};
+    q.query.version = 1;
+    q.query.size = sizeof(q.query);
+    ASSERT_EQ(1, context(OS1_LOG_HISTORY_READ, q));
+    EXPECT_EQ(7, q.result.record.status);
+    EXPECT_STREQ("example", q.result.text);
+    EXPECT_FALSE(q.result.record.flags & OS1_LOG_PENDING);
+}
+TEST_F(LogIpc, SuppressionAndQuotaFailureDoNotPreventCorrelation)
+{
+    Process others[4];
+    Thread temporary{};
+    for(unsigned i = 0; i < 4; ++i)
+    {
+        temporary.process = &others[i];
+        ASSERT_EQ(0, diagnostic_log::context(frames, &temporary, OS1_LOG_CONTEXT_OPEN, 0));
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
+    for(auto& p : others)
+        diagnostic_log::cleanup(&p);
+    ASSERT_EQ(0, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
+    os1_log_command c{};
+    c.version = 1;
+    c.size = sizeof(c);
+    c.flags = OS1_LOG_SUPPRESSED;
+    std::memcpy(c.text, "secret", 7);
+    ASSERT_EQ(0, context(OS1_LOG_COMMAND_BEGIN, c));
+    os1_log_history_query q{};
+    q.query.version = 1;
+    q.query.size = sizeof(q.query);
+    ASSERT_EQ(1, context(OS1_LOG_HISTORY_READ, q));
+    EXPECT_EQ(0, q.result.text[0]);
+    EXPECT_TRUE(q.result.record.flags & OS1_LOG_SUPPRESSED);
+    ASSERT_EQ(0, context(OS1_LOG_COMMAND_END, c));
+}
+TEST_F(LogIpc, RetainedOperationKeepsOriginalCommandAfterCallerMovesOn)
+{
+    ASSERT_EQ(0, ready());
+    thread->process->log_command = 42;
+    thread->process->log_session = 7;
+    ASSERT_GE(submit(), 0);
+    os1_ipc_message received{};
+    ASSERT_EQ(0, call(OS1_IPC_RECEIVE, pair.provider, received));
+    thread->process->log_command = 99;
+    auto r = response(received);
+    ASSERT_EQ(0, call(OS1_IPC_REPLY, pair.provider, r));
+    os1_log_query q{};
+    q.version = 1;
+    q.size = sizeof(q);
+    q.command_id = 42;
+    q.kind = OS1_LOG_IPC_END;
+    os1_log_record row{};
+    ASSERT_EQ(1, diagnostic_log::read(q, row));
+    EXPECT_EQ(42u, row.command_id);
+    EXPECT_EQ(7u, row.session_id);
+    EXPECT_NE(0u, row.request_id);
+}
+TEST_F(LogIpc, PeerFailureRetainsOriginalCorrelation)
+{
+    ASSERT_EQ(0, ready());
+    thread->process->log_command = 81;
+    ASSERT_GE(submit(), 0);
+    thread->process->log_command = 82;
+    descriptor_close(table(), pair.provider);
+    os1_log_query q{};
+    q.version = 1;
+    q.size = sizeof(q);
+    q.command_id = 81;
+    q.kind = OS1_LOG_IPC_END;
+    os1_log_record row{};
+    ASSERT_EQ(1, diagnostic_log::read(q, row));
+    EXPECT_LT(row.status, 0);
+}
+TEST_F(LogIpc, InvalidPointerCannotChangeCommandContext)
+{
+    EXPECT_EQ(OS1_ERR_FAULT,
+              diagnostic_log::context(frames, thread, OS1_LOG_COMMAND_BEGIN, 0x1000));
+    EXPECT_EQ(0u, thread->process->log_command);
+}
+TEST(LogProvider, RequiresDistinctAuthority)
+{
+    auto* provider = kernel_provider(OS1_LOG_INTERFACE_ID, 1);
+    ASSERT_NE(nullptr, provider);
+    EXPECT_EQ(OS1_RIGHT_LOG_READ, provider->allowed_rights);
+    OpenInstance source{};
+    DescriptorEntry output{};
+    os1_ipc_message request{};
+    os1_ipc_result result{};
+    request.member = OS1_LOG_INFO;
+    provider->invoke(source, OS1_RIGHT_SYSTEM_CONTROL, 0, request, result, output);
+    EXPECT_EQ(OS1_ERR_ACCESS, result.application_status);
+}
+}  // namespace
+
+TEST_F(LogIpc, ExecReleasesScopeButRetainsOriginForReplacement)
+{
+    ASSERT_EQ(0, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
+    os1_log_command first{};
+    first.version = 1;
+    first.size = sizeof(first);
+    ASSERT_EQ(0, context(OS1_LOG_COMMAND_BEGIN, first));
+    diagnostic_log::process_exec(thread->process);
+    EXPECT_FALSE(thread->process->log_command_active);
+    EXPECT_EQ(first.command_id, thread->process->log_command);
+    os1_log_command next{};
+    next.version = 1;
+    next.size = sizeof(next);
+    ASSERT_EQ(0, context(OS1_LOG_COMMAND_BEGIN, next));
+    EXPECT_EQ(first.command_id, thread->process->log_parent_command);
+    ASSERT_EQ(0, context(OS1_LOG_COMMAND_END, next));
+    os1_log_history_query q{};
+    q.query.version = 1;
+    q.query.size = sizeof(q.query);
+    ASSERT_EQ(1, context(OS1_LOG_HISTORY_READ, q));
+    EXPECT_TRUE(q.result.record.flags & OS1_LOG_REPLACED);
+    EXPECT_FALSE(q.result.record.flags & OS1_LOG_PENDING);
 }

@@ -4,6 +4,8 @@ constinit Debug debug;
 
 void Debug::write(const char) {}
 
+void Debug::write_unmirrored(const char) {}
+
 void Debug::write(const char*) {}
 
 void Debug::write_line(const char*) {}

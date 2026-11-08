@@ -494,7 +494,7 @@ The project is not trying to:
 The [Native API service roadmap](docs/native-api/roadmap.md#remaining-priorities) defines the acceptance criteria for this sequence.
 
 1. Verify physical boot and program updates preserve an existing user file; retest the scheduler correction on hardware.
-2. Complete the [minimal-initrd deployment split](docs/archive/filesystems/2026-11-06-minimal-initrd.md), then qualify preserving updates on hardware.
+2. Qualify preserving updates for the implemented [minimal-initrd deployment split](docs/archive/filesystems/2026-11-06-minimal-initrd.md) on hardware.
 3. Expose native keyboard and mouse services with volatile events, unsubscribe, state recovery, and removal handling.
 4. Add scoped service discovery and lifecycle rules. Add kernel Buffer borrowing and BlockDevice methods when required by a concrete client.
 5. Expand storage capacity and filesystem operations beyond the bounded ext2 profile; qualify device failure and update recovery separately.
@@ -506,7 +506,10 @@ Hardware acceptance can proceed alongside code work; it is not a prerequisite fo
 Keep hardware results separate from emulator coverage.
 Device IRQ affinity, lock-order checks, generic reclamation, and measured storage scheduling remain cross-cutting reliability work.
 The [latest review](docs/latest-review.md) separates completed corrections from these remaining boundaries.
-Generated bindings, a reflective shell, userspace drivers, and a compositor remain later extensions.
+[Live context discovery and diagnostics](docs/native-api/context-diagnostics.md) now form a parallel proposed work track.
+It includes inspection without activation, shell completion, bounded kernel and shell logs, and staged `/tmp` and USB exports.
+These facilities support physical-device diagnosis without replacing the input and storage milestones.
+Generated bindings, userspace drivers, and a compositor remain later extensions.
 
 The in-repo milestone designs (M1–M5) refine the coarser A–G map below into concrete engineering plans.
 

@@ -45,6 +45,10 @@ struct Process
     DescriptorTable descriptors;
     int root_fd = -1, cwd_fd = -1;
     bool private_provider = false;
+    void* log_history = nullptr;
+    uint64_t log_session = 0, log_command = 0, log_parent_command = 0;
+    uint64_t log_saved_session = 0, log_saved_command = 0, log_saved_parent = 0;
+    bool log_command_active = false;
 };
 
 // Initialize the kmem-backed process registry.

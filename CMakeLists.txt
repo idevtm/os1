@@ -184,7 +184,7 @@ set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
 # Keep the firmware ceiling and all file/overlap checks unchanged.
 set(OS1_INITRD_LOAD_ADDRESS 0x76000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
-set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x194000)
+set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x198000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
 set(OS1_KERNEL_SHIM_VIRTUAL_BASE 0xFFFFFFFF90000000)
 set(OS1_DIRECT_MAP_BASE 0xFFFF800000000000)
@@ -1834,6 +1834,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
       set(file_test_image "${OS1_RAW_IMAGE}")
       set(file_test_firmware)
     endif()
+    add_test(NAME os1_smoke_memory_logging_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_memory_logging.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-memory-logging-${boot}.log"
+        ${file_test_firmware})
+    set_tests_properties(os1_smoke_memory_logging_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_memory_logging_${boot})
     add_test(NAME os1_smoke_system_lifecycle_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_system_lifecycle.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"

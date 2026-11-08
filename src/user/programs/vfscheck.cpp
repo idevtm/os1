@@ -89,11 +89,13 @@ int main(int argc, char** argv)
     }
     if(argc == 2 && equal(argv[1], "times"))
     {
-        // Exercise the real user helpers with the complete previous ceiling.
+        CHECK(open("/", OS1_RIGHT_LOG_READ) == OS1_ERR_ACCESS, "logs not recovered by lookup");
+        // Exercise the real user helpers with the filesystem-only ceiling.
         files::Handle limited(
             open("/",
                  OS1_RIGHT_LOOKUP | OS1_RIGHT_ENUMERATE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE,
-                 OS1_RIGHT_ALL & ~(OS1_RIGHT_SET_TIMES | OS1_RIGHT_SYSTEM_CONTROL)));
+                 OS1_RIGHT_ALL &
+                     ~(OS1_RIGHT_SET_TIMES | OS1_RIGHT_SYSTEM_CONTROL | OS1_RIGHT_LOG_READ)));
         CHECK(limited.fd >= 0, "time restricted root");
         os1_startup_record context = *startup_record;
         context.root_fd = limited.fd;

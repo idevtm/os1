@@ -136,6 +136,7 @@ os1_add_user_cxx_program(vfscheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/vfscheck
 
 os1_add_user_cxx_program(textprocessor "${CMAKE_CURRENT_SOURCE_DIR}/programs/textprocessor.cpp" OS1_USER_TEXTPROCESSOR_ELF)
 os1_add_user_cxx_program(buffercheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/buffercheck.cpp" OS1_USER_BUFFERCHECK_ELF)
+os1_add_user_cxx_program(logcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/logcheck.cpp" OS1_USER_LOGCHECK_ELF)
 os1_add_user_cxx_program(ipccheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/ipccheck.cpp" OS1_USER_IPCCHECK_ELF)
 os1_add_user_cxx_program(paramdemo "${CMAKE_CURRENT_SOURCE_DIR}/programs/paramdemo.cpp" OS1_USER_PARAMDEMO_ELF)
 os1_add_user_cxx_program(paramcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/paramcheck.cpp" OS1_USER_PARAMCHECK_ELF)

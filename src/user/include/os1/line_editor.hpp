@@ -15,12 +15,12 @@ inline bool decimal(const char* text, size_t& n)
     }
     return n <= 65537;
 }
-inline void edit(size_t argc, char** argv)
+inline bool edit(size_t argc, char** argv)
 {
     if(argc != 2)
     {
         message("usage: edit <path>\n");
-        return;
+        return false;
     }
     static shell::TextBuffer buffer;
     static char inserted[shell::TextBuffer::capacity];
@@ -31,7 +31,7 @@ inline void edit(size_t argc, char** argv)
         if(file.fd < 0 && file.fd != OS1_ERR_NOT_FOUND)
         {
             message("edit: cannot read file\n");
-            return;
+            return false;
         }
         if(file.fd >= 0)
         {
@@ -45,7 +45,7 @@ inline void edit(size_t argc, char** argv)
                 if(n < 0 || (!capacity && n))
                 {
                     message("edit: file unreadable or exceeds 64 KiB\n");
-                    return;
+                    return false;
                 }
                 if(!n)
                     break;
@@ -68,14 +68,14 @@ inline void edit(size_t argc, char** argv)
         {
             message("edit: invalid input\n");
             if(status != OS1_ERR_RANGE)
-                return;
+                return false;
             continue;
         }
         if(line.eof && !line.size && !console_input)
         {
             if(buffer.dirty)
                 message("edit: end of input; unsaved changes discarded\n");
-            return;
+            return !buffer.dirty;
         }
         size_t length = line.size;
         if(length && line.bytes[length - 1] == '\n')
@@ -108,7 +108,7 @@ inline void edit(size_t argc, char** argv)
                 message("edit: unsaved changes; use w or q!\n");
                 continue;
             }
-            return;
+            return true;
         }
         if(shell::equal(op, "w") || shell::equal(op, "wq"))
         {
@@ -129,7 +129,7 @@ inline void edit(size_t argc, char** argv)
             number(2, buffer.size);
             message(" bytes\n");
             if(shell::equal(op, "wq"))
-                return;
+                return true;
             continue;
         }
         size_t first = 1, last = 0, total = buffer.lines();
@@ -218,7 +218,7 @@ inline void edit(size_t argc, char** argv)
                     valid = false;
                     message("edit: insertion discarded; input error\n");
                     if(status != OS1_ERR_RANGE)
-                        return;
+                        return false;
                     if(line.eof)
                         break;
                     continue;

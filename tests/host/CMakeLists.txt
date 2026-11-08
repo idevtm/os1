@@ -29,7 +29,7 @@ include("${OS1_REPO_ROOT}/cmake/acpica_sources.cmake")
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
 set(OS1_INITRD_LOAD_ADDRESS 0x76000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
-set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x194000)
+set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x198000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
 set(OS1_KERNEL_SHIM_VIRTUAL_BASE 0xFFFFFFFF90000000)
 set(OS1_DIRECT_MAP_BASE 0xFFFF800000000000)
@@ -115,6 +115,7 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/arch/x86_64/interrupt/vector_allocator.cpp"
   "${OS1_REPO_ROOT}/src/kernel/core/timer_source.cpp"
   "${OS1_REPO_ROOT}/src/kernel/debug/event_ring.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/debug/log.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/device.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/driver_registry.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/pci_bus.cpp"
@@ -188,6 +189,7 @@ add_executable(os1_host_tests
   kernel/cpu_record_tests.cpp
   kernel/utility_tests.cpp
   kernel/event_ring_tests.cpp
+  kernel/log_ring_tests.cpp
   kernel/irq_route_registry_tests.cpp
   kernel/irq_vector_allocator_tests.cpp
   kernel/load_balancer_tests.cpp

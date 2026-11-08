@@ -43,7 +43,15 @@ def main():
             assert times(run, path) == written
             run(f'cat "{path}"', b'preserved\n')
             assert times(run, path) == written, 'ordinary reads must not change atime'
-            time.sleep(1.2)
+            # Host time does not guarantee guest timer progress under emulation.
+            # Observe a separate RAM file before testing one touch on the target.
+            deadline = time.monotonic() + 10
+            while True:
+                run('touch "/tmp/clock-probe"')
+                if times(run, '/tmp/clock-probe')[1] >= written[1] + written[3]:
+                    break
+                assert time.monotonic() < deadline, 'guest clock did not advance'
+                time.sleep(0.1)
             run(f'touch "{path}"')
             touched = times(run, path)
             assert touched[0] == touched[1] == touched[2] and touched[1] > written[1], (written, touched)

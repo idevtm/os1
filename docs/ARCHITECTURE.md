@@ -547,7 +547,7 @@ The 2880-sector raw image, firmware ceiling, and boot-log placement remain uncha
 Kernel C++ and bundled userspace use `-Os`; userspace discards unreferenced sections while retaining metadata.
 
 ELF-aware checks enforce file size, staging limits, execution extent, reserve space, initrd capacity, and disk overlap.
-The reserved execution window ends at `0x194000`, where the page-frame bitmap starts. The 16 KiB post-image requirement remains unchanged.
+The reserved execution window ends at `0x198000`, where the page-frame bitmap starts. The 16 KiB post-image requirement remains unchanged.
 The [temporary filesystem record](archive/filesystems/2026-11-06-tmpfs-implementation.md) contains current sizes and validation.
 The [reliability record](archive/kernel/2026-11-05-reliability-and-clock-plan.md) preserves the preceding layout measurements.
 
@@ -606,7 +606,7 @@ Key addresses:
 | `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
 | `0x76000` | BIOS initrd load buffer (144 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
-| `0x194000-0x213FFF` | page-frame bitmap |
+| `0x198000-0x217FFF` | page-frame bitmap |
 
 The modern path deliberately mirrors this layout before entering `kernel_main`. That is not nostalgia. It is a compatibility technique that keeps the shared kernel bootloader-agnostic while the frontends converge on the same higher-half kernel ABI.
 
@@ -1566,5 +1566,23 @@ Capture retains up to 2048 bytes from the requesting thread. Successful shutdown
 Explicit shutdown installs device-scoped [Embedded Controller handlers](kernel/acpi-embedded-controller.md) before sleep preparation.
 Validated firmware I/O resources select the ports. Bounded, serialized byte transactions support AML EC regions without SCI event handling.
 Controllers that require the ACPI Global Lock remain unsupported. Ordinary boot and passive observation do not activate these handlers.
-The [CI boot-envelope correction](kernel/acpi-embedded-controller.md#ci-boot-envelope-correction--2026-11-08) sets the reserved end and page-frame bitmap base to `0x194000`.
+The [CI boot-envelope correction](kernel/acpi-embedded-controller.md#ci-boot-envelope-correction--2026-11-08) set the reserved end and page-frame bitmap base to `0x194000`.
+Memory logging extends that window to `0x198000`; the post-image reserve and staging limits remain checked.
 The 16 KiB post-image reserve and low-memory firmware ceiling remain unchanged.
+
+## Memory logging and correlation
+
+The [memory log ABI](native-api/abi/memory-log-abi.md) adds bounded kernel records and process-owned shell histories.
+
+```text
+shell command -> kernel-assigned identity -> child launch / retained IPC Operation
+kernel capture -> bounded ring -> LOG_READ grant -> Native Log provider -> safe shell text
+shell capture -> process-owned history -> own-process context query -> safe shell text
+```
+
+The kernel allocates capture storage after allocator initialization and before platform discovery.
+Capture uses a nonblocking lock attempt; contention increments a loss counter.
+The clock advances once per BSP scheduler tick, independent of CPU count.
+A retained Operation owns its origin record until completion or failure.
+History allocation counts against a system-wide ceiling and is released when its process is reaped.
+No log capture performs filesystem I/O. Export and general context reflection remain later slices.
