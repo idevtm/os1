@@ -4,6 +4,7 @@
 #include "discovery/view.hpp"
 namespace os1::user::discovery
 {
+inline bool (*extend)(os1::discovery::View&) = nullptr;
 inline bool refresh(os1::discovery::View& view, bool shell = false)
 {
     // QUERY and FILE_INFO require INSPECT. Do not infer hidden grant authority.
@@ -21,6 +22,7 @@ inline bool refresh(os1::discovery::View& view, bool shell = false)
     grants.shell = shell;
     // Refresh invalidates prior cursors, even if grants and data happen to match.
     uint64_t next = view.generation + 1;
-    return next && view.build(grants, environment_data, next);
+    return next && view.build(grants, environment_data, next) &&
+           (!shell || !extend || extend(view));
 }
 }  // namespace os1::user::discovery

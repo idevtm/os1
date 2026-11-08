@@ -41,7 +41,7 @@ Documents can contain proposals after promotion, provided their scope and status
 
 | Capability | Current contract |
 | --- | --- |
-| Fixed live context descriptions and Tab completion | [Runtime discovery profile](context-discovery.md) |
+| Fixed live context descriptions, typed calls, bindings, and guided completion | [Runtime discovery profile](context-discovery.md) |
 | Memory logs and command correlation | [Memory log ABI](abi/memory-log-abi.md) |
 | System synchronization and power control | [SystemControl ABI](abi/system-control-abi.md) |
 | Filesystem timestamps and current-time mutation | [Timestamp ABI](abi/filesystem-times-abi.md) |
@@ -91,3 +91,5 @@ USB persistence is implemented; physical preserving updates and broader failure 
 Console bindings capture method-specific authority; each additional service needs its own policy.
 Generated SDKs, `.so` bindings, a reflective shell, userspace drivers, and shared-memory rings are not prerequisites for those milestones.
 Class code continues to select new or existing object instances; ordinary callers receive no creation-policy override.
+
+The [guided command record](../shell/guided-command-plan.md) defines command editing and shell-local object lifetimes.

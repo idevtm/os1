@@ -415,7 +415,7 @@ long context(PageFrameContainer& frames, Thread* t, uint64_t op, uint64_t pointe
         if(!copy_from_user(frames, t, pointer, &command, sizeof(command)))
             return OS1_ERR_FAULT;
         if(command.version != 1 || command.size != sizeof(command) || command.reserved ||
-           (command.flags & ~OS1_LOG_SUPPRESSED))
+           (command.flags & ~(OS1_LOG_SUPPRESSED | OS1_LOG_INTERACTIVE)))
             return OS1_ERR_INVALID;
         if(op == OS1_LOG_COMMAND_BEGIN)
         {

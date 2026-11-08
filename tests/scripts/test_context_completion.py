@@ -174,7 +174,7 @@ def main():
         if connection:
             connection.close()
 
-        send('os.system.log.pr\t')
+        send('os.system.log.pr')
         expect(b'context choices')
         expect(b'  > os.system.log.pr')
         send('\r\n')
@@ -190,7 +190,7 @@ def main():
         assert b'time_ns=' not in pending and b'os1> ' not in pending, pending
         send('\n')
         assert b'time_ns=' in expect()
-        send('echo process.environment.c\t')
+        send('echo process.environment.c')
         expect(b'  > echo process.environment.c')
         send('\n')
         expect(b'  > echo process.environment.cwd')

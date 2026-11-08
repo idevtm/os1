@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <os1/command_engine.hpp>
 #include <os1/line_editor.hpp>
 #include <os1/log.hpp>
 #include <os1/parameter_client.hpp>
@@ -16,7 +17,7 @@
 
 namespace
 {
-constexpr size_t kShellLineBytes = 128;
+constexpr size_t kShellLineBytes = os1::shell::line_capacity;
 constexpr size_t kShellMaxTokens = 16;
 int output_fd = 1;
 bool output_failed = false;
@@ -1201,6 +1202,7 @@ struct ShellLifetime
     }
     ~ShellLifetime()
     {
+        os1::user::commands::clear_bindings();
         os1::user::write(2, "shell ended\n", 12);
     }
 };
@@ -1214,8 +1216,10 @@ struct CommandRecord
     {
         record.version = 1;
         record.size = sizeof(record);
+        if(interactive)
+            record.flags |= OS1_LOG_INTERACTIVE;
         if(!history_enabled || (interactive && line[0] == ' '))
-            record.flags = OS1_LOG_SUPPRESSED;
+            record.flags |= OS1_LOG_SUPPRESSED;
         if(!(record.flags & OS1_LOG_SUPPRESSED))
         {
             size_t n = string_length(line);
@@ -1483,6 +1487,16 @@ bool may_write(os1::user::shell_runtime::Method method)
 int main(int argc_main, char** argv_main)
 {
     ShellLifetime lifetime;
+    os1::user::commands::initialize();
+    os1::user::discovery::extend = os1::user::commands::extend;
+    os1::user::commands::extra_call = [](const char* name, const char* text) -> long {
+        static os1::shell::Command command;
+        if(!os1::shell::parse(text, command))
+            return OS1_ERR_INVALID;
+        run_log(
+            os1::discovery::same(name, "process.shell.history.print"), command.argc, command.argv);
+        return command_failed ? OS1_ERR_INVALID : 0;
+    };
     if(os1::user::logs::context(OS1_LOG_CONTEXT_OPEN) < 0)
         os1::user::files::message("shell: history capture unavailable\n");
     char line[kShellLineBytes];
@@ -1535,7 +1549,28 @@ int main(int argc_main, char** argv_main)
             line[i] = input.bytes[i];
         normalize_line(line, input.size);
         CommandRecord command_record(line, console_input);
-        os1::shell::Command parsed;
+        if(os1::user::commands::handles(line))
+        {
+            command_record.executed = true;
+            os1::user::commands::error = nullptr;
+            os1::user::commands::last_status = 0;
+            os1::user::commands::mutated = false;
+            if(!os1::user::commands::run(line, console_input))
+            {
+                os1::user::shell_runtime::diagnostic(
+                    os1::user::commands::error ? os1::user::commands::error : "command failed");
+                command_failed = true;
+                if(console_input && os1::user::prompt::last_guided)
+                    os1::user::prompt::retain(line);
+            }
+            CommandSync command_sync(os1::user::commands::mutated);
+            if(!command_sync.finish())
+                command_failed = true;
+            if(command_failed && !console_input)
+                return 1;
+            continue;
+        }
+        static os1::shell::Command parsed;
         if(!os1::shell::parse(line, parsed))
         {
             os1::user::files::message(parsed.error);

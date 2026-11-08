@@ -28,3 +28,5 @@ The richer language below remains a proposal.
 
 The proposed language does not define a second object ownership or authorization model.
 It builds on the [Native API](../native-api/README.md).
+
+- [Guided commands, bindings, and lifetime rules](guided-command-plan.md)

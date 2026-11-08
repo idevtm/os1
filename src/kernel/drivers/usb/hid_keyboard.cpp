@@ -76,7 +76,7 @@ char boot_key_usage_to_ascii(uint8_t usage, bool shift)
         case 0x2au:
             return '\b';
         case 0x2bu:
-            return '\t';
+            return shift ? static_cast<char>(OS1_CONSOLE_KEY_BACKTAB) : '\t';
         case 0x2cu:
             return ' ';
         case 0x2du:
@@ -139,6 +139,8 @@ bool boot_keyboard_apply_report(BootKeyboardState& state,
         char ascii = boot_key_usage_to_ascii(usage, shift);
         if(modifiers & 0x11u)
         {
+            if(usage == 0x2cu)
+                ascii = static_cast<char>(OS1_CONSOLE_KEY_COMPLETE);
             if(usage == 0x06u)
                 ascii = 3;
             if(usage == 0x07u)

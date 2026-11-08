@@ -2749,3 +2749,33 @@ TEST_F(KernelConsole, RedrawChecksRightsPayloadAndRetainsEmptyResult)
     descriptor_close(table(), operation);
     descriptor_close(table(), client);
 }
+
+TEST_F(KernelConsole, CursorPositionChecksAuthorityAndColumnBounds)
+{
+    auto request = console_request(OS1_CONSOLE_SET_CURSOR);
+    int client = bind();
+    ASSERT_GE(client, 0);
+    for(unsigned bytes : {0u, 3u, 5u})
+    {
+        request.payload_bytes = bytes;
+        int op = call(OS1_IPC_SUBMIT, client, request);
+        EXPECT_EQ(OS1_ERR_INVALID, complete(op).application_status);
+        descriptor_close(table(), op);
+    }
+    request.payload_bytes = sizeof(uint32_t);
+    for(uint32_t column : {0u, 79u, 80u, UINT32_MAX})
+    {
+        std::memcpy(request.payload, &column, sizeof(column));
+        int op = call(OS1_IPC_SUBMIT, client, request);
+        auto result = complete(op);
+        EXPECT_EQ(column < 80 ? 0 : OS1_ERR_INVALID, result.application_status);
+        EXPECT_EQ(0u, result.payload_bytes);
+        descriptor_close(table(), op);
+    }
+    descriptor_close(table(), client);
+    client = bind(1, OS1_RIGHT_INSPECT);
+    int op = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_ACCESS, complete(op).application_status);
+    descriptor_close(table(), op);
+    descriptor_close(table(), client);
+}

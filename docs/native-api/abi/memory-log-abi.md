@@ -123,3 +123,11 @@ The [implementation plan](../memory-logging-plan.md) records checks, measurement
 Host tests cover partition retention, query validation, identity restoration, quotas, suppression, pointer rejection, authority, and retained IPC completion.
 Guest `logcheck` checks Native Log access and an asynchronous reply after command completion.
 UEFI and BIOS shell tests cover history wraparound, suppression, filters, and shell restart.
+
+## Interactive history classification
+
+`OS1_LOG_INTERACTIVE` (`32`) marks commands captured at an interactive shell prompt.
+The flag combines with `OS1_LOG_SUPPRESSED`; suppression still removes command text.
+History navigation selects completed interactive records and excludes suppressed records.
+Script commands remain available to diagnostic history but do not enter interactive recall.
+The existing 32-slot ring and record layouts remain unchanged.

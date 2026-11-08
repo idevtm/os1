@@ -105,14 +105,13 @@ TEST_F(Discovery, CompletionDrillsAndAcceptsWithoutExecution)
     ASSERT_TRUE(c.begin(view));
     ASSERT_EQ(1, c.matches);
     ASSERT_TRUE(c.accept(view, false));
-    EXPECT_STREQ("os.system.log.print", c.line);
+    EXPECT_STREQ("os.system.log.print after:unset limit:20 level:info", c.line);
     EXPECT_FALSE(c.open);
     EXPECT_FALSE(c.detail);
-    ASSERT_TRUE(c.begin(view));
-    ASSERT_TRUE(c.accept(view, true));
-    EXPECT_TRUE(c.detail);
-    c.cancel();
+    EXPECT_GE(c.focus, 0);
+    EXPECT_EQ(3u, c.field_count);
     EXPECT_FALSE(c.detail);
+    c.cancel();
 }
 TEST_F(Discovery, CompletionLimitsQuotingAndStaleSelection)
 {
@@ -132,10 +131,10 @@ TEST_F(Discovery, CompletionLimitsQuotingAndStaleSelection)
     ASSERT_TRUE(c.begin(view));
     ASSERT_TRUE(view.build(grants(), data, 2));
     EXPECT_FALSE(c.accept(view, false));
-    for(unsigned i = 0; i < 127; ++i)
+    for(unsigned i = 0; i < os1::shell::line_capacity - 1; ++i)
         ASSERT_TRUE(c.insert('x'));
     EXPECT_FALSE(c.insert('x'));
-    EXPECT_EQ(127, c.size);
+    EXPECT_EQ(os1::shell::line_capacity - 1, c.size);
 }
 TEST_F(Discovery, MaximumEnvironmentFitsWithoutTruncatingMembers)
 {

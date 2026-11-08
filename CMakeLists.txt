@@ -1842,6 +1842,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         ${file_test_firmware})
     set_tests_properties(os1_smoke_memory_logging_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_memory_logging_${boot})
+    add_test(NAME os1_smoke_guided_shell_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_guided_shell.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-guided-shell-${boot}.log"
+        ${file_test_firmware})
+    set_tests_properties(os1_smoke_guided_shell_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_guided_shell_${boot})
     add_test(NAME os1_smoke_context_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_context_completion.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
@@ -1889,6 +1896,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --log "${OS1_ARTIFACT_DIR}/smoke-pager-keyboard-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_pager_keyboard_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_pager_keyboard_${boot})
+    add_test(NAME os1_smoke_guided_keyboard_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_guided_shell.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --keyboard "${pager_keyboard}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-guided-keyboard-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_guided_keyboard_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_guided_keyboard_${boot})
     add_test(NAME os1_smoke_context_keyboard_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_context_completion.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"

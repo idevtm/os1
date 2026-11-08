@@ -59,6 +59,7 @@ All fields use the current x86-64 little-endian ABI.
 | Method `clear` | 5 | WRITE | Empty | Empty |
 | Method `acquire_input` | 6 | READ | Empty or `os1_console_input_options` | One owned ConsoleInputSession through RESULT_CAPS |
 | Method `redraw_line` | 7 | WRITE | `os1_console_redraw` and printable text | Empty |
+| Method `set_cursor` | 8 | WRITE | One `u32 column` | Empty |
 
 `info` contains four `u32` fields: `rights`, `max_write_bytes`, `max_read_bytes`, and `flags`.
 `rights` reports captured service rights.
@@ -188,6 +189,19 @@ Bindings, Operations, and wait pins retain resource lifetime; closing one descri
 Existing process cleanup cancels waits and closes descriptors.
 No session pointer or ownership token crosses the ABI.
 The [pager](../../shell/pager.md) uses this contract; it adds no console event subscription or exclusive display lease.
+
+## Horizontal cursor placement
+
+`set_cursor` moves the local cursor within its current row.
+It uses the console output lock and does not scroll or change cells.
+The column must be less than the current console width.
+Invalid columns or payload sizes return INVALID without changing the cursor.
+Serial output uses a separate caret line when the cursor moves within a command.
+It requires no serial cursor-control capability.
+
+Shift-Tab produces `OS1_CONSOLE_KEY_BACKTAB` (`0x87`).
+Ctrl-Space produces `OS1_CONSOLE_KEY_COMPLETE` (`0x88`).
+The prompt also accepts serial `ESC [ Z` and NUL for these actions.
 
 ## Dispatch, bounds, and lifetime
 

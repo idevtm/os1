@@ -175,6 +175,7 @@ add_executable(os1_host_tests
   common/context_tests.cpp
   common/discovery_tests.cpp
   common/presentation_tests.cpp
+  common/guided_tests.cpp
   common/shell_tests.cpp
   common/pager_tests.cpp
   common/text_tools_tests.cpp

@@ -1593,7 +1593,8 @@ The [runtime discovery profile](native-api/context-discovery.md) exposes fixed b
 The shell shares this profile between `context` inspection and Tab completion.
 
 ```text
-resource metadata + environment -> bounded View -> context / completion
+resource metadata + environment + shell bindings -> bounded View -> context / completion
+parameter definitions -> guided values -> expression evaluator -> local helper / native IPC
 Console input session -> prompt editing -> explicit release -> canonical command input
 ```
 
@@ -1609,4 +1610,11 @@ Each redraw uses the output lock; a sequence of rows does not create an exclusiv
 Existing pager sessions retain discard-on-release behavior.
 Script and redirected input retain their existing reader.
 PS/2 and USB navigation keys share byte codes; the prompt decodes serial navigation sequences separately.
-See the [implementation record](native-api/context-completion-plan.md) for bounds, validation, and measured resource costs.
+Executable parameter definitions connect the fixed registry to guided command expansion and typed invocation.
+The evaluator runs nested calls once, from left to right, and releases temporary references on error.
+Named bindings retain data or ordinary object references inside the shell.
+Exclusive input results require a lexical scope or the existing foreground handoff.
+Scope cleanup releases input ownership before the prompt returns.
+Large evaluation buffers use bounded shell storage instead of recursive stack allocations.
+History recall reuses the command log and excludes scripts, pending records, and suppressed records.
+See the [guided command record](shell/guided-command-plan.md) for bounds, validation, and measured resource costs.

@@ -7,6 +7,7 @@
 
 os1_console_geometry console_geometry();
 void clear_console();
+long set_console_column(unsigned column);
 long redraw_console_line(int delta, const char* text, size_t bytes);
 
 // write exactly `length` bytes to the kernel console stream.

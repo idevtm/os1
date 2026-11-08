@@ -80,6 +80,14 @@ void Terminal::move_cursor(int row, int col)
     }
 }
 
+bool Terminal::set_column(unsigned column)
+{
+    if(column >= width_)
+        return false;
+    move_cursor(row_, column);
+    return true;
+}
+
 bool Terminal::redraw_line(int delta, const char* text, unsigned bytes)
 {
     if(!os1::terminal::redraw_line(buffer_, width_, height_, row_, col_, delta, text, bytes))

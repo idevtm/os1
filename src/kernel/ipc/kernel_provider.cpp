@@ -100,6 +100,7 @@ void invoke_console(OpenInstance& source,
     uint32_t required;
     switch(request.member)
     {
+        case OS1_CONSOLE_SET_CURSOR:
         case OS1_CONSOLE_REDRAW_LINE:
         case OS1_CONSOLE_CLEAR:
         case OS1_CONSOLE_WRITE:
@@ -152,6 +153,20 @@ void invoke_console(OpenInstance& source,
             auto geometry = console_geometry();
             memcpy(result.payload, &geometry, sizeof(geometry));
             result.payload_bytes = sizeof(geometry);
+        }
+        return;
+    }
+    if(request.member == OS1_CONSOLE_SET_CURSOR)
+    {
+        uint32_t column = 0;
+        if(!object->write_bytes)
+            result.application_status = OS1_ERR_UNSUPPORTED;
+        else if(request.payload_bytes != sizeof(column))
+            result.application_status = OS1_ERR_INVALID;
+        else
+        {
+            memcpy(&column, request.payload, sizeof(column));
+            result.application_status = set_console_column(column);
         }
         return;
     }

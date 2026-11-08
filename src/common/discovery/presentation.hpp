@@ -39,7 +39,7 @@ struct Presentation
     template<class Sink>
     bool paint(const View& view, const Completion& state, Sink& sink)
     {
-        bool visible = state.open || state.detail;
+        bool visible = state.open || state.detail || state.focus >= 0;
         if(visible && !reserved)
         {
             for(unsigned i = 0; i < menu_rows; ++i)
@@ -68,17 +68,30 @@ struct Presentation
                     if(index < state.matches)
                     {
                         line.append(index == state.selected ? "> " : "  ");
-                        line.member(view.nodes[state.ids[index]]);
+                        if(state.values)
+                            line.append(state.choices[index]);
+                        else
+                            line.member(view.nodes[state.ids[index]]);
                     }
                 }
             }
-            else if(state.detail && state.leaf >= 0)
+            else if(state.focus >= 0)
             {
-                const auto& member = view.nodes[state.leaf];
+                const auto& field = state.fields[state.focus];
                 if(!row)
-                    line.member(member);
-                else if(row == 1 && (member.flags & Native) && !(member.flags & Shell))
-                    line.append("Metadata only in this shell; use the typed API.");
+                {
+                    line.append("Argument: ");
+                    if(field.method >= 0 && field.parameter >= 0)
+                    {
+                        auto spec = definition(view, field.method);
+                        line.append(spec.parameters[field.parameter].name);
+                    }
+                    else
+                        line.append("value");
+                }
+                else if(row == 1)
+                    line.append(
+                        "Tab: next  Shift-Tab: previous  Ctrl-Space: choices  Esc: whole line");
             }
             if(!draw(row, line))
                 return false;
@@ -86,7 +99,7 @@ struct Presentation
         Row command(width);
         command.append("  > ");
         unsigned available = width > command.size ? width - command.size : 0;
-        unsigned start = state.size > available ? state.size - available : 0;
+        unsigned start = state.cursor > available ? state.cursor - available : 0;
         command.append(state.line + start);
         if(!visible && reserved)
         {
@@ -96,6 +109,9 @@ struct Presentation
         }
         if(!draw(visible ? reserved : 0, command))
             return false;
+        if constexpr(requires { sink.cursor(0u); })
+            if(!sink.cursor(4 + state.cursor - start))
+                return false;
         if(!visible)
             reserved = 0;
         prefix = 4;
@@ -117,6 +133,7 @@ struct PresentationCleanup
         if(presentation.reserved)
         {
             state.cancel();
+            state.focus = -1;
             presentation.paint(view, state, sink);
         }
     }

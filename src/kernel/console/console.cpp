@@ -31,6 +31,23 @@ void clear_console()
         active_terminal->clear();
 }
 
+long set_console_column(unsigned column)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    if(column >= (active_terminal ? active_terminal->columns() : 80))
+        return OS1_ERR_INVALID;
+    bool indicator = active_terminal && active_terminal->cursor_column() != column;
+    if(active_terminal && !active_terminal->set_column(column))
+        return OS1_ERR_INVALID;
+    if(indicator)
+    {
+        debug.write_unmirrored('\n');
+        for(unsigned i = 0; i < column; ++i)
+            debug.write_unmirrored(' ');
+        debug.write_unmirrored('^');
+    }
+    return 0;
+}
 long redraw_console_line(int delta, const char* text, size_t bytes)
 {
     IrqSpinGuard guard(g_console_output_lock);

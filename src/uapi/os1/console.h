@@ -10,6 +10,7 @@
 #define OS1_CONSOLE_CLEAR 5u
 #define OS1_CONSOLE_ACQUIRE_INPUT 6u
 #define OS1_CONSOLE_REDRAW_LINE 7u
+#define OS1_CONSOLE_SET_CURSOR 8u
 #define OS1_CONSOLE_REDRAW_MAX 252u
 #define OS1_CONSOLE_ROW_DELTA_MAX 200
 #define OS1_OBJECT_CONSOLE_INPUT_SESSION 10u
@@ -27,6 +28,8 @@
 #define OS1_CONSOLE_KEY_HOME 0x84u
 #define OS1_CONSOLE_KEY_END 0x85u
 #define OS1_CONSOLE_KEY_DELETE 0x86u
+#define OS1_CONSOLE_KEY_BACKTAB 0x87u
+#define OS1_CONSOLE_KEY_COMPLETE 0x88u
 // Followed by 0..252 printable ASCII bytes; redraw never wraps or scrolls.
 struct os1_console_redraw
 {

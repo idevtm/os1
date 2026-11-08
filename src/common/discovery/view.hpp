@@ -7,7 +7,7 @@
 #include "context/data.hpp"
 namespace os1::discovery
 {
-constexpr unsigned node_limit = 128, page_limit = 8, path_limit = 256;
+constexpr unsigned node_limit = 256, page_limit = 8, path_limit = 256;
 enum class Kind : uint8_t
 {
     Object,
@@ -25,10 +25,10 @@ enum : uint32_t
 };
 struct Member
 {
-    uint16_t parent = 0, target = 0, value = 0xffff;
+    uint16_t parent = 0, target = 0, value = 0;
     Kind kind = Kind::Object;
     uint8_t type = 0;
-    uint32_t flags = Local, rights = 0, member = 0, interface_version = 0;
+    uint32_t flags = 0, rights = 0, member = 0, interface_version = 0;
     uint64_t interface_id = 0;
     char name[64]{}, signature[96]{};
 };
@@ -114,6 +114,7 @@ struct View
         }
         auto& n = nodes[count];
         n = {};
+        n.value = 0xffff;
         n.parent = parent;
         n.kind = kind;
         n.rights = rights;
@@ -250,7 +251,7 @@ struct View
             nodes[map[i]].value = i;
         }
         unsigned context = add(process, "context", Kind::Object, "ContextView");
-        add(context, "list", Kind::Method, "path:String=\"\" -> Member[]", 0, 0, 0, Local | Shell);
+        add(context, "list", Kind::Method, "path:String=\"\"", 0, 0, 0, Local | Shell);
         if(g.shell)
         {
             unsigned shell = add(process, "shell", Kind::Object, "Shell");
@@ -258,7 +259,7 @@ struct View
             add(history,
                 "print",
                 Kind::Method,
-                "after:Integer=0 limit:Integer=20",
+                "after:Integer=unset limit:Integer=20",
                 0,
                 0,
                 0,
@@ -282,7 +283,8 @@ struct View
                 {"create_file", "path:String", OS1_RIGHT_CREATE},
                 {"update_times", "path:String", OS1_RIGHT_SET_TIMES},
                 {"copy",
-                 "source:PathOrStream destination:PathOrStream=output recursive:Boolean=false",
+                 "source:PathOrStream destination:PathOrStream=out mode:CopyMode=unset "
+                 "recursive:Boolean=false",
                  OS1_RIGHT_READ},
                 {"move", "source:String destination:String", OS1_RIGHT_RENAME},
                 {"remove_file", "path:String", OS1_RIGHT_REMOVE},
@@ -290,8 +292,10 @@ struct View
                 {"remove_directory", "path:String recursive:Boolean=false", OS1_RIGHT_REMOVE},
                 {"info", "path:String", OS1_RIGHT_INSPECT},
                 {"space", "path:String=\".\"", OS1_RIGHT_INSPECT},
-                {"find", "path:String=\".\"", OS1_RIGHT_ENUMERATE},
-                {"usage", "path:String=\".\"", OS1_RIGHT_ENUMERATE},
+                {"find",
+                 "path:String=\".\" name:String=unset kind:FileKind=any",
+                 OS1_RIGHT_ENUMERATE},
+                {"usage", "path:String=\".\" logical:Boolean=false", OS1_RIGHT_ENUMERATE},
                 {"identify", "path:String", OS1_RIGHT_READ}};
             for(const auto& e : entries)
                 if((g.ceiling & e.rights) == e.rights &&
@@ -352,7 +356,7 @@ struct View
                 Local | Shell);
             add(text, "count", Kind::Method, "source:PathOrStream=input", 0, 0, 0, Local | Shell);
             unsigned pager = add(0, "pager", Kind::Object, "Pager");
-            add(pager, "show", Kind::Method, "source:PathOrStream=input", 0, 0, 0, Local | Shell);
+            add(pager, "show", Kind::Method, "path:String", 0, 0, 0, Local | Shell);
         }
         unsigned system = 0;
         if(g.root.rights & (OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL))
@@ -380,7 +384,7 @@ struct View
             add(log,
                 "print",
                 Kind::Method,
-                "after:Integer=0 limit:Integer=20 level:Level=info",
+                "after:Integer=unset limit:Integer=20 level:Level=info",
                 OS1_RIGHT_LOG_READ,
                 0,
                 0,
@@ -463,6 +467,11 @@ struct View
                  OS1_CONSOLE_GET_GEOMETRY,
                  Kind::Property},
                 {"clear", "()", OS1_RIGHT_WRITE, OS1_CONSOLE_CLEAR, Kind::Method},
+                {"set_cursor",
+                 "column:Integer",
+                 OS1_RIGHT_WRITE,
+                 OS1_CONSOLE_SET_CURSOR,
+                 Kind::Method},
                 {"redraw_line",
                  "row_delta:Integer text:String",
                  OS1_RIGHT_WRITE,
@@ -484,6 +493,64 @@ struct View
                         OS1_CONSOLE_INTERFACE_ID,
                         e.id,
                         Native);
+        }
+        unsigned described = count;
+        for(unsigned i = 1; i < described; ++i)
+        {
+            const char* fields[20]{};
+            unsigned fields_count = 0;
+            if(nodes[i].interface_id == OS1_CONSOLE_INTERFACE_ID &&
+               nodes[i].member == OS1_CONSOLE_GET_GEOMETRY)
+            {
+                fields[0] = "columns";
+                fields[1] = "rows";
+                fields_count = 2;
+            }
+            if(nodes[i].interface_id == OS1_CONSOLE_INTERFACE_ID &&
+               nodes[i].member == OS1_CONSOLE_GET_INFO)
+            {
+                fields[0] = "rights";
+                fields[1] = "max_write_bytes";
+                fields[2] = "max_read_bytes";
+                fields[3] = "flags";
+                fields_count = 4;
+            }
+            if(nodes[i].interface_id == OS1_LOG_INTERFACE_ID)
+            {
+                const char* info[] = {"boot_id",
+                                      "latest",
+                                      "overwritten",
+                                      "dropped",
+                                      "capacity_bytes",
+                                      "clock_resolution_ns",
+                                      "wall_time_ns",
+                                      "diagnostic",
+                                      "history_slots"};
+                const char* row[] = {"sequence",
+                                     "time_ns",
+                                     "session_id",
+                                     "command_id",
+                                     "pid",
+                                     "request_id",
+                                     "interface_id",
+                                     "arg0",
+                                     "arg1",
+                                     "parent_command_id",
+                                     "duration_ns",
+                                     "status",
+                                     "kind",
+                                     "level",
+                                     "flags",
+                                     "cpu",
+                                     "text"};
+                fields_count = nodes[i].member == OS1_LOG_INFO ? 9 : 17;
+                for(unsigned j = 0; j < fields_count; ++j)
+                    fields[j] = nodes[i].member == OS1_LOG_INFO ? info[j] : row[j];
+            }
+            if(fields_count)
+                nodes[i].type = OS1_VALUE_RECORD;
+            for(unsigned j = 0; j < fields_count; ++j)
+                add(i, fields[j], Kind::Field, j == 16 ? "String" : "Integer");
         }
         return !failed;
     }

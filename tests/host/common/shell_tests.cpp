@@ -43,7 +43,7 @@ TEST(ShellCommand, RejectsIncompleteAmbiguousAndUnsupportedCommands)
         EXPECT_NE(nullptr, c.error);
     }
     Command c;
-    EXPECT_FALSE(parse(std::string(128, 'a').c_str(), c));
+    EXPECT_FALSE(parse(std::string(line_capacity, 'a').c_str(), c));
     EXPECT_FALSE(parse("x a b c d e f g h i j k l m n o p", c));
 }
 TEST(ShellCommand, EmptyQuotedArgumentsAndEscapedOperators)

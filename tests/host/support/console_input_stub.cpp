@@ -22,6 +22,10 @@ void clear_console()
     output.clear();
 }
 
+long set_console_column(unsigned column)
+{
+    return column < 80 ? 0 : OS1_ERR_INVALID;
+}
 long redraw_console_line(int delta, const char* text, size_t bytes)
 {
     if(!os1::terminal::valid_line(80, delta, text, bytes))

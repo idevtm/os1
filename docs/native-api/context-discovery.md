@@ -39,6 +39,8 @@ Refresh performs no filesystem writes and starts no processes.
 | `process.streams.output.print`, alias `out.print` | Shell output helper when output has WRITE authority |
 | `process.context.list`, alias `context` | Bounded structural inspection |
 | `process.shell.history` | Current shell history description; absent from ordinary process views |
+| `process.shell.bindings` | Shell-local named results and explicit removal |
+| User binding names | Retained data or object references; absent from child environments |
 | `text`, `pager` | Existing shell text and pager helpers; absent from ordinary process views |
 
 The registry does not enumerate arbitrary open descriptors or runtime provider registrations.
@@ -53,9 +55,11 @@ Descriptors closed after refresh can make a previously described operation unava
 
 Each member has a bounded name, kind, type, signature, required rights, and flags.
 Native descriptions also include interface identity, version, and member identity.
-Local signatures provide concise help; they are not complete executable parameter schemas.
+Local signatures provide concise help.
+The shared [parameter definitions](../../src/common/discovery/schema.hpp) drive expansion, argument validation, and invocation.
 Flags distinguish local helpers, native members, aliases, and shell-callable members.
-Native metadata alone does not add shell invocation support.
+The shell invokes every method in this fixed registry.
+This support does not imply general invocation of arbitrary discovered provider interfaces.
 
 `View` supports `resolve`, `container`, and `enumerate`.
 `Member.value` indexes the copied environment when the member describes environment data.
@@ -65,7 +69,7 @@ Typed clients can inspect copied environment values directly.
 
 | Bound | Value |
 | --- | --- |
-| Snapshot nodes | 128 |
+| Snapshot nodes | 256 |
 | Members per page or displayed page | 8 |
 | Name storage | 64 bytes, including terminator |
 | Signature storage | 96 bytes, including terminator |
@@ -91,28 +95,38 @@ Each list page contains at most eight choices.
 
 | Key | Action |
 | --- | --- |
-| Tab | Open filtered choices for the current unquoted dotted token |
-| Up / Down | Select a choice while the list is open |
-| Tab on an object | Insert its name and enumerate its children |
-| Tab on a leaf | Insert its name and display its kind and signature |
+| Tab | Open choices, accept a choice, or focus the next parameter |
+| Shift-Tab | Focus the previous parameter when choices are closed |
+| Dot | Open children outside quoted strings and numeric literals |
+| Up / Down | Select a choice; otherwise recall history outside parameter focus |
+| Ctrl-Space | Open choices for the focused parameter |
 | Enter with an open list | Accept the selection without execution |
-| Enter with a closed list | Execute the command |
-| Escape | Close the list; a serial Escape uses a bounded 50 ms sequence timeout |
+| Enter with a closed list | Validate and execute the command |
+| Escape | Close choices or leave focus; serial input uses a 50 ms sequence timeout |
 | Ctrl-C | Cancel the current line |
-| Backspace | Remove the final byte |
+| Left / Right, Home / End | Move within the focused value or whole command |
+| Backspace / Delete | Delete before or after the cursor |
 
-Native members without shell invocation support display an explicit metadata-only message.
-Completion does not read property values or subscribe to events.
-This slice supports editing at the line end, with a 127-byte command bound.
-Long command lines show their final visible bytes without wrapping the completion area.
-Filename completion, history navigation, cursor editing, and arbitrary provider discovery remain separate work.
-Quoted or escaped tokens do not receive object completion.
+Selecting a method expands its named parameters, defaults, and required placeholders.
+String placeholders start with editable quotes.
+Deleting those quotes permits a property reference or nested call.
+Nested calls use parentheses, such as `out.print text:path.search(path:"sh")`.
+Completion uses declared return fields without evaluating getters or methods.
+A fully typed exact member closes its filtered list.
+
+The command buffer permits 1023 bytes plus a terminator.
+The display keeps the cursor in a bounded horizontal viewport.
+A failed guided command remains editable at the next prompt.
+History recall uses completed, unsuppressed interactive records from the existing 32-slot ring.
+It preserves the unfinished draft and cursor when the user returns past the newest record.
+Filename completion and arbitrary provider discovery remain separate work.
+See [guided commands](../shell/guided-command-plan.md) for ownership, bounds, and validation.
 
 ```text
 context
 context os.system
 context process.environment
-process.context.list path:process.environment.path
+process.context.list path:"process.environment.path"
 os.fs.list "/tmp"
 echo os.fs.cwd
 process.path.list
@@ -120,7 +134,8 @@ process.path.list
 
 These commands inspect or use existing bindings.
 The `os.fs` and `process.path` forms share the existing `fs` and `path` implementations.
-Scripts use the same inspection command but retain their existing input parser.
+Scripts and interactive guided calls use the same expression evaluator.
+Scripts retain strict expression resolution and require explicit output for bare values.
 
 ## Input handoff
 

@@ -2,7 +2,7 @@
 #include <stddef.h>
 namespace os1::shell
 {
-constexpr size_t line_capacity = 128;
+constexpr size_t line_capacity = 1024;
 constexpr size_t argument_limit = 16;
 enum class Input
 {

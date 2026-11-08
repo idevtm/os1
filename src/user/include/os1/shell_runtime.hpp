@@ -132,9 +132,27 @@ inline int environment_node(const char* token, size_t size)
         size_t end = at;
         while(end < size && token[end] != '.')
             ++end;
-        if(environment_data.nodes[parent].kind != OS1_VALUE_RECORD)
-            return -1;
-        int found = os1::context::child(environment_data, parent, token + at, end - at);
+        int found = -1;
+        if(environment_data.nodes[parent].kind == OS1_VALUE_RECORD)
+            found = os1::context::child(environment_data, parent, token + at, end - at);
+        else if(environment_data.nodes[parent].kind == OS1_VALUE_LIST)
+        {
+            unsigned index = 0;
+            if(at == end)
+                return -1;
+            for(size_t i = at; i < end; ++i)
+            {
+                if(token[i] < '0' || token[i] > '9' || index > OS1_CONTEXT_NODES)
+                    return -1;
+                index = index * 10 + token[i] - '0';
+            }
+            for(unsigned i = parent + 1; i < environment_data.count; ++i)
+                if(environment_data.nodes[i].parent == parent && !index--)
+                {
+                    found = i;
+                    break;
+                }
+        }
         if(found < 0)
             return -1;
         parent = found;

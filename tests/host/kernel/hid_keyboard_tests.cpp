@@ -119,3 +119,18 @@ TEST(HidKeyboard, NavigationKeysHaveDistinctSessionCodes)
     EXPECT_EQ(0x81, static_cast<unsigned char>(usb::hid::boot_key_usage_to_ascii(0x51, false)));
     EXPECT_EQ('\t', usb::hid::boot_key_usage_to_ascii(0x2b, false));
 }
+
+TEST(HidKeyboard, GuidedCompletionKeysRemainDistinct)
+{
+    EXPECT_EQ(0x87, static_cast<unsigned char>(usb::hid::boot_key_usage_to_ascii(0x2b, true)));
+    for(uint8_t control : {0x01, 0x10})
+    {
+        usb::hid::BootKeyboardState state{};
+        uint8_t report[8]{control, 0, 0x2c};
+        char out[6]{};
+        size_t count = 0;
+        ASSERT_TRUE(usb::hid::boot_keyboard_apply_report(state, report, 8, out, 6, count));
+        ASSERT_EQ(1u, count);
+        EXPECT_EQ(0x88, static_cast<unsigned char>(out[0]));
+    }
+}
