@@ -219,3 +219,35 @@ candidate initrd.cpio 8ae63d6cbafb680fa8f947cd9d08a978b5c38fa417a5b1e55bb7a92498
 candidate os1.iso 27db43ebd077a6896bac419a868e86d0c521b033bf9d6f61545d850e6d86c3ff
 candidate os1.raw 37051a216f0465e2d299a709c14fd0a15d7a894da0da098060728b64d5f95b61
 ```
+
+### CI compiler compatibility correction
+
+This correction makes the empty schema return explicit for GCC compatibility.
+
+```text
+unrepresentable member path -> Definition{} -> unknown definition with zero parameters
+```
+
+GitHub CI rejected the implicit `return {};` with GCC 13.3.0.
+Local GCC 16 reproduced the failure; an explicit `return Definition{};` compiled successfully.
+The regression test checks the empty definition when the member path exceeds its bound.
+
+The change affects compiler compatibility and validation only.
+It preserves interface layouts, ownership, resource bounds, boot behavior, and concurrency contracts.
+No new runtime requirement or dependency applies.
+
+GCC 16 syntax checks passed for the discovery, presentation, and guided host test sources.
+The complete host suite passed 561 tests in 13.84 seconds.
+The normal GCC 11.2.0 build passed.
+Kernel and shell executable hashes remain identical to the measured candidate.
+Packaged image hashes changed during rebuilding; the original artifact identities above remain historical measurement evidence.
+The executable comparison supports retaining the recorded resource measurements.
+
+Validation logs are `build/guided-evidence/ci-fix-host-tests.txt` and `build/guided-evidence/ci-fix-build.txt`.
+
+All four guided guest checks passed in 55.48 seconds after rebuilding.
+They cover BIOS and UEFI invocation, PS/2 editing, and USB keyboard editing.
+The log is `build/guided-evidence/ci-fix-guided-tests.txt`.
+
+An independent read-only review found no defect in the correction or its immediate interactions.
+The reviewer verified host and guest results, executable hashes, and the updated evidence.

@@ -226,4 +226,17 @@ TEST_F(Guided, StreamVariantDefaultsFollowSourceAndDestinationRoles)
               std::string(editor.line).find("destination.stream:process.streams.output"));
 }
 
+TEST_F(Guided, UnrepresentableMemberPathReturnsAnEmptyDefinition)
+{
+    unsigned parent = 0;
+    for(unsigned i = 0; i < 9; ++i)
+        parent = view.add(parent, "long_member_name_for_path_limit");
+    char path[discovery::path_limit]{};
+    ASSERT_FALSE(discovery::member_path(view, parent, path, sizeof(path)));
+    auto definition = discovery::definition(view, parent);
+    EXPECT_FALSE(definition.known);
+    EXPECT_FALSE(definition.exclusive);
+    EXPECT_EQ(0u, definition.count);
+}
+
 }  // namespace

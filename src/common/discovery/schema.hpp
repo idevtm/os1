@@ -200,7 +200,7 @@ inline Definition definition(const View& view, unsigned id)
 {
     char path[path_limit]{};
     if(!member_path(view, id, path, sizeof(path)))
-        return {};
+        return Definition{};
     return definition(path, view.nodes[id].interface_id, view.nodes[id].member);
 }
 }  // namespace os1::discovery
