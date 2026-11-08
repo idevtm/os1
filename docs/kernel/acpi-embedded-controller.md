@@ -197,3 +197,77 @@ Boot, memory, isolation, concurrency, interfaces, and runtime resources are unaf
 Existing implementation measurements remain valid. No additional runtime benchmark or kernel build is required for this record.
 Validation checks the reported result, current status statements, local links, and whitespace. Independent review covers the documentation delta and PR description.
 Full ASD-STE100 dictionary verification remains unavailable.
+
+
+## CI boot-envelope correction — 2026-11-08
+
+CI run `42465930210` rejected the GCC 16.2 BIOS kernel because its 409856-byte file exceeded the 409600-byte disk slot.
+The local GCC 11.2 build produced 405760 bytes. This compiler-size difference requires a larger boot envelope before merge.
+
+```text
+existing low-memory window -> 416 KiB kernel staging + 144 KiB initrd staging
+execution window -> one additional reserved page -> unchanged 16 KiB post-image requirement
+```
+
+| Area | Impact and validation plan |
+| --- | --- |
+| Scope | Restore the supported CI build without removing diagnostic or EC behavior. |
+| Boot and platform | Move initrd staging from `0x72000` to `0x76000`. Keep the `0x9A000` ceiling and raw-image boot-log placement. |
+| Memory and isolation | Move reserved end and page bitmap together to `0x194000`. Keep execution, overlap, and post-image checks. |
+| Concurrency | No synchronization algorithm changes. Validate the shared layout with SMP boot checks. |
+| Interfaces | Generated kernel layout changes; user ABI, BootInfo records, and filesystem formats remain unchanged. |
+| Runtime resources | Transfer 16 KiB from initrd capacity to kernel capacity. Reserve one additional 4096-byte physical page. |
+| Validation and documents | Test bounds, host contracts, both firmware paths, USB images, and current CI. Compare memory and artifact sizes with `b956330`. |
+
+The initrd slot decreases from 320 to 288 sectors. The existing minimal initrd fits both capacities.
+The kernel slot increases from 800 to 832 sectors. No size assertion is disabled or bypassed.
+This supersedes earlier statements that the staging split and reserved end remain unchanged.
+Hardware shutdown succeeded before this layout correction; the revised image needs separate physical qualification.
+
+
+### Correction validation and measurements
+
+The corrected local kernel and USB images build successfully. All 511 host tests and ten focused QEMU checks pass.
+The guest checks cover BIOS and UEFI boot, passive observation, SMP balancing, lifecycle operations, and BIOS xHCI/EHCI combined storage images.
+The independent source review found no defect in the layout correction or its interactions with the earlier changes.
+The full GCC 16.2 CI build remains a separate merge condition.
+
+A local ELF padded to the observed CI size reproduces the old-slot rejection and passes the new-slot check.
+A file one byte larger than the new slot still fails. This fixture tests the bound; it is not the CI-built ELF.
+No kernel algorithm changed. Existing runtime and ABI regression tests were retained.
+
+```sh
+cmake --build build
+cmake --build build --target os1_usb_image
+cmake --build build-host-tests
+ctest --test-dir build-host-tests --output-on-failure
+ctest --test-dir build --output-on-failure -R 'os1_smoke_system_lifecycle|os1_smoke_observe|os1_smoke_balance|os1_smoke$|os1_smoke_bios$|os1_smoke_usb_data_bios|os1_smoke_ehci_data_bios'
+python3 build/ci40-size/measure.py
+```
+
+Baseline: `b956330`, with the same tree as `3ca71d6`. Candidate: the six-file boot-envelope correction described above.
+The comparison retains the preceding macOS, GCC 11.2, Debug, QEMU 11.1.3, firmware, four-CPU, and 128 MiB configuration.
+Three trials per version repeat five persistent-file replacements. Each trial uses the same copied data image and waits for every prompt.
+
+| Measurement | Baseline | Corrected layout | Absolute change | Relative change |
+| --- | ---: | ---: | ---: | ---: |
+| Five replacements, median | 31.757667 ms | 30.931042 ms | -0.826625 ms | -2.6029% |
+| Kernel staging capacity | 409600 bytes | 425984 bytes | +16384 bytes | +4% |
+| Initrd staging capacity | 163840 bytes | 147456 bytes | -16384 bytes | -10% |
+| Reserved kernel window | 602112 bytes | 606208 bytes | +4096 bytes | +0.6803% |
+| Allocated physical memory before workload | 21266432 bytes | 21270528 bytes | +4096 bytes | +0.0193% |
+| ISO size | 4362240 bytes | 4362240 bytes | 0 bytes | 0% |
+| BIOS image size | 1474560 bytes | 1474560 bytes | 0 bytes | 0% |
+| BIOS kernel file, GCC 11.2 | 405760 bytes | 405760 bytes | 0 bytes | 0% |
+| Slab pages before and after workload | 168 | 168 | 0 pages | 0% |
+
+All six trials reached a clean filesystem marker. Free pages decreased from 19484 to 19483; managed pages remain 24676.
+The current 92160-byte initrd fits the 147456-byte slot. No allocator failure occurred.
+The extra reserved page provides compiler-size margin while retaining the existing 16 KiB post-image minimum.
+Short timing samples do not establish a speed change. Physical behavior with this revised layout remains unmeasured.
+Logs, the bounds regression, raw samples, and the measurement script are retained under `build/ci40-size/`.
+
+| Corrected local artifact | SHA-256 |
+| --- | --- |
+| UEFI ISO | `5516343d62d6c42ccb52c3f9e596355b5d5f5b93c4d078202cf26233c8c383d9` |
+| BIOS image | `d98aad2cfa41bf7e39e8fcbc41512e21fd8f5f52fa6b35d9b1c6ed0d2c6eceb8` |
