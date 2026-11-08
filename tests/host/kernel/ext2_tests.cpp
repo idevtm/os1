@@ -679,6 +679,9 @@ TEST_F(Ext2, NamespaceChangesAdvanceParentAndObjectTimes)
     EXPECT_EQ(ext2::u32(persisted.bytes + 16), 1700000003u);
 }
 
+void host_console_output_clear();
+const std::string& host_console_output();
+
 TEST_F(Ext2, SystemSyncFreezesWritesAndCanThawAfterFailedTransition)
 {
     os1::host_test::PhysicalMemoryArena arena{16 * 1024 * 1024};
@@ -699,12 +702,18 @@ TEST_F(Ext2, SystemSyncFreezesWritesAndCanThawAfterFailedTransition)
     EXPECT_EQ(1, ext2::u16(disk.bytes.data() + start + 1082));
     EXPECT_EQ(OS1_ERR_WOULD_BLOCK, mount->operations->remove(mount, "lifecycle", 9, 0));
     ext2_system_thaw();
+    host_console_output_clear();
     EXPECT_EQ(OS1_ERR_UNSUPPORTED, system_control(OS1_SYSTEM_SHUTDOWN));
+    EXPECT_EQ("system: shutdown stage=acpi-tables detail=not-initialized\n", host_console_output());
     EXPECT_EQ(0, mount->operations->remove(mount, "lifecycle", 9, 0));
     EXPECT_EQ(2, ext2::u16(disk.bytes.data() + start + 1082));
     disk.fail_flush = true;
+    host_console_output_clear();
     EXPECT_EQ(OS1_ERR_IO, system_control(OS1_SYSTEM_SHUTDOWN));
+    EXPECT_EQ("system: shutdown stage=storage-sync detail=failed\n", host_console_output());
+    host_console_output_clear();
     EXPECT_EQ(OS1_ERR_IO, system_control(OS1_SYSTEM_REBOOT));
+    EXPECT_EQ("system: reboot stage=storage-sync detail=failed\n", host_console_output());
     EXPECT_EQ(2, ext2::u16(disk.bytes.data() + start + 1082));
     object_release(mount);
     EXPECT_EQ(0, ext2_system_sync(false));

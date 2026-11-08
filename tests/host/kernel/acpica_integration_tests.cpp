@@ -1,9 +1,16 @@
+#include <os1/resource.h>
+#include <os1/system.h>
+
+#include "arch/x86_64/cpu/cpu.hpp"
 #include "handoff/boot_info.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "mm/virtual_memory.hpp"
+#include "platform/acpica_diagnostics.hpp"
+#include "platform/acpica_ec.hpp"
 #include "platform/acpica_integration.hpp"
 #include "platform/state.hpp"
+#include "platform/system_control.hpp"
 #include "platform/system_power.hpp"
 #include "support/physical_memory.hpp"
 
@@ -16,6 +23,8 @@ extern "C"
 
 #include <array>
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -441,6 +450,550 @@ TEST_F(AcpicaIntegration, ReducedHardwareShutdownIsRejectedWithoutEnteringSleep)
     fadt->flags = ACPI_FADT_HW_REDUCED;
     finalize_sdt(fadt->header);
     ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
-    EXPECT_FALSE(acpica_prepare_shutdown());
-    EXPECT_FALSE(acpica_prepare_shutdown());  // Failure does not enter a polling sleep loop.
+    PowerDiagnostic diagnostic;
+    EXPECT_FALSE(acpica_prepare_shutdown(diagnostic));
+    EXPECT_STREQ("fadt-profile", diagnostic.stage);
+    EXPECT_STREQ("hardware-reduced-unsupported", diagnostic.detail);
+    EXPECT_FALSE(acpica_prepare_shutdown(diagnostic));  // No polling sleep loop.
+    EXPECT_STREQ("fadt-profile", diagnostic.stage);
+}
+
+TEST_F(AcpicaIntegration, ShutdownDiagnosticsDistinguishMissingTablesAndInvalidControls)
+{
+    PowerDiagnostic diagnostic{"stale", "stale"};
+    EXPECT_FALSE(acpica_prepare_shutdown(diagnostic));
+    EXPECT_STREQ("acpi-tables", diagnostic.stage);
+    EXPECT_STREQ("not-initialized", diagnostic.detail);
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    AcpicaScopedReset cleanup;
+    build_tables(arena, true, false);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    EXPECT_FALSE(acpica_prepare_shutdown(diagnostic));
+    EXPECT_STREQ("pm1a-control", diagnostic.stage);
+    EXPECT_STREQ("invalid-register", diagnostic.detail);
+}
+
+TEST_F(AcpicaIntegration, ShutdownDiagnosticsPreserveMissingS5Exception)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    AcpicaScopedReset cleanup;
+    build_tables(arena, true, false);
+    auto* table = reinterpret_cast<ACPI_TABLE_FADT*>(arena.data() + kFadtPhysical);
+    table->Header.Length = sizeof(*table);
+    table->Pm1ControlLength = 2;
+    table->XPm1aControlBlock = {ACPI_ADR_SPACE_SYSTEM_MEMORY, 16, 0, 2, kOslMemoryPhysical};
+    *reinterpret_cast<uint16_t*>(arena.data() + kOslMemoryPhysical) = 1;  // SCI_EN.
+    finalize_sdt(*reinterpret_cast<TestSdtHeader*>(table));
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    PowerDiagnostic diagnostic;
+    EXPECT_FALSE(acpica_prepare_shutdown(diagnostic));
+    EXPECT_STREQ("s5-types", diagnostic.stage);
+    EXPECT_STREQ("AE_NOT_FOUND", diagnostic.detail);
+}
+
+void host_console_output_clear();
+const std::string& host_console_output();
+
+TEST_F(AcpicaIntegration, ShutdownReportsUnhandledRegionAndMethod)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    AcpicaScopedReset cleanup;
+    build_tables(arena, true, false);
+    auto* table = reinterpret_cast<ACPI_TABLE_FADT*>(arena.data() + kFadtPhysical);
+    table->Header.Length = sizeof(*table);
+    table->Pm1ControlLength = 2;
+    table->XPm1aControlBlock = {ACPI_ADR_SPACE_SYSTEM_MEMORY, 16, 0, 2, kOslMemoryPhysical};
+    *reinterpret_cast<uint16_t*>(arena.data() + kOslMemoryPhysical) = 1;
+    finalize_sdt(*reinterpret_cast<TestSdtHeader*>(table));
+    // Name (_S5, Package (2) {5,5})
+    // OperationRegion (ERAM, EmbeddedControl, 0, 16)
+    // Field (ERAM, ByteAcc, NoLock, Preserve) {TEST, 8}
+    // Method (_PTS, 1) {Store (One, TEST)}
+    const uint8_t aml[] = {0x08, '_',  'S', '5', '_', 0x12, 0x06, 0x02, 0x0A, 5,   0x0A, 5,
+                           0x5B, 0x80, 'E', 'R', 'A', 'M',  3,    0,    0x0A, 16,  0x5B, 0x81,
+                           0x0B, 'E',  'R', 'A', 'M', 1,    'T',  'E',  'S',  'T', 8,    0x14,
+                           0x0C, '_',  'P', 'T', 'S', 1,    0x70, 1,    'T',  'E', 'S',  'T'};
+    auto* dsdt = reinterpret_cast<TestSdtHeader*>(arena.data() + kDsdtPhysical);
+    dsdt->length = sizeof(*dsdt) + sizeof(aml);
+    std::memcpy(dsdt + 1, aml, sizeof(aml));
+    finalize_sdt(*dsdt);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    for(unsigned repeat = 0; repeat < 2; ++repeat)
+    {
+        host_console_output_clear();
+        EXPECT_EQ(OS1_ERR_UNSUPPORTED, system_control(OS1_SYSTEM_SHUTDOWN));
+        const auto& output = host_console_output();
+        EXPECT_NE(std::string::npos, output.find("No handler for Region [ERAM]"));
+        EXPECT_NE(std::string::npos, output.find("EmbeddedControl"));
+        EXPECT_NE(std::string::npos, output.find("\\_PTS"));
+        EXPECT_NE(std::string::npos, output.find("AE_NOT_EXIST"));
+        EXPECT_NE(std::string::npos, output.find("stage=s5-preparation detail=AE_NOT_EXIST"));
+    }
+}
+
+TEST_F(AcpicaIntegration, DiagnosticCaptureIsScopedAndBounded)
+{
+    host_console_output_clear();
+    AcpiOsPrintf("outside capture\n");
+    EXPECT_TRUE(host_console_output().empty());
+    {
+        AcpicaDiagnosticCapture discarded;
+        AcpiOsPrintf("discard me\n");
+    }
+    {
+        AcpicaDiagnosticCapture capture;
+        AcpiOsPrintf("region=%s code=%8.8X value=%u\n", "ERAM", 0x1001, 7);
+        {
+            AcpicaDiagnosticCapture nested;
+            nested.report();  // Must not detach or clear the outer capture.
+        }
+        EXPECT_TRUE(host_console_output().empty());
+        capture.report();
+        EXPECT_EQ("acpica: shutdown diagnostics\nregion=ERAM code=00001001 value=7\n",
+                  host_console_output());
+        capture.report();  // No duplicate report.
+        EXPECT_EQ("acpica: shutdown diagnostics\nregion=ERAM code=00001001 value=7\n",
+                  host_console_output());
+    }
+    host_console_output_clear();
+    {
+        AcpicaDiagnosticCapture capture;
+        std::string oversized(600, 'x');
+        AcpiOsPrintf("%s", oversized.c_str());
+        capture.report();
+    }
+    EXPECT_NE(std::string::npos, host_console_output().find("output truncated"));
+    EXPECT_LT(host_console_output().size(), 400u);
+    host_console_output_clear();
+    {
+        AcpicaDiagnosticCapture capture;
+        for(unsigned i = 0; i < 100; ++i)
+            AcpiOsPrintf("line %u: bounded output\n", i);
+        AcpiOsPrintf("final failure\n");
+        capture.report();
+    }
+    EXPECT_NE(std::string::npos, host_console_output().find("output truncated"));
+    EXPECT_NE(std::string::npos, host_console_output().find("final failure"));
+    EXPECT_LT(host_console_output().size(), 2200u);
+}
+
+TEST_F(AcpicaIntegration, DiagnosticCaptureExcludesOtherThread)
+{
+    // Simulate a CPU switch while capture is attached to the requesting thread.
+    cpu owner{}, other{};
+    int owner_token, other_token;
+    owner.current_thread = reinterpret_cast<Thread*>(&owner_token);
+    other.current_thread = reinterpret_cast<Thread*>(&other_token);
+    auto* saved = g_cpu_host_current;
+    g_cpu_host_current = &owner;
+    host_console_output_clear();
+    {
+        AcpicaDiagnosticCapture capture;
+        AcpiOsPrintf("owner before\n");
+        g_cpu_host_current = &other;
+        AcpiOsPrintf("unrelated error\n");
+        g_cpu_host_current = &owner;
+        AcpiOsPrintf("owner after\n");
+        capture.report();
+    }
+    g_cpu_host_current = saved;
+    EXPECT_EQ("acpica: shutdown diagnostics\nowner before\nowner after\n", host_console_output());
+}
+
+namespace
+{
+using Aml = std::vector<uint8_t>;
+void append(Aml& out, const Aml& bytes)
+{
+    out.insert(out.end(), bytes.begin(), bytes.end());
+}
+Aml package(Aml opcode, const Aml& body)
+{
+    size_t size = body.size() + (body.size() + 1 < 64 ? 1 : 2);
+    if(size < 64)
+        opcode.push_back(static_cast<uint8_t>(size));
+    else
+    {
+        opcode.push_back(static_cast<uint8_t>(0x40 | (size & 15)));
+        opcode.push_back(static_cast<uint8_t>(size >> 4));
+    }
+    append(opcode, body);
+    return opcode;
+}
+void ec_tables(os1::host_test::PhysicalMemoryArena& arena,
+               int glk = 0,
+               uint16_t data_port = 0x62,
+               uint16_t command_port = 0x66,
+               bool fixed = true,
+               bool duplicate = false,
+               int sta = -1,
+               unsigned reg_mode = 0,
+               bool orphan = false)
+{
+    build_tables(arena, true, false);
+    auto* table = reinterpret_cast<ACPI_TABLE_FADT*>(arena.data() + kFadtPhysical);
+    table->Header.Length = sizeof(*table);
+    table->Pm1ControlLength = 2;
+    table->XPm1aControlBlock = {ACPI_ADR_SPACE_SYSTEM_MEMORY, 16, 0, 2, kOslMemoryPhysical};
+    *reinterpret_cast<uint16_t*>(arena.data() + kOslMemoryPhysical) = 1;
+    finalize_sdt(*reinterpret_cast<TestSdtHeader*>(table));
+    Aml aml{0x08, 'R', 'G', 'O', 'N', 0, 0x08, '_', 'S', '5', '_'};
+    append(aml, package({0x12}, {2, 0x0A, 5, 0x0A, 5}));
+    Aml resources;
+    for(auto port : {data_port, command_port})
+    {
+        if(fixed)
+            append(resources, {0x4B, uint8_t(port), uint8_t(port >> 8), 1});
+        else
+            append(resources,
+                   {0x47,
+                    1,
+                    uint8_t(port),
+                    uint8_t(port >> 8),
+                    uint8_t(port),
+                    uint8_t(port >> 8),
+                    1,
+                    1});
+    }
+    append(resources, {0x79, 0});
+    for(unsigned index = 0; index < (duplicate ? 2u : 1u); ++index)
+    {
+        Aml body{'E',
+                 'C',
+                 uint8_t('0' + index),
+                 '_',
+                 0x08,
+                 '_',
+                 'H',
+                 'I',
+                 'D',
+                 0x0D,
+                 'P',
+                 'N',
+                 'P',
+                 '0',
+                 'C',
+                 '0',
+                 '9',
+                 0};
+        if(sta >= 0)
+            append(body, {0x08, '_', 'S', 'T', 'A', 0x0A, uint8_t(sta)});
+        if(glk >= 0)
+            append(body, {0x08, '_', 'G', 'L', 'K', 0x0A, uint8_t(glk)});
+        append(body, {0x08, '_', 'C', 'R', 'S'});
+        Aml buffer{0x0A, uint8_t(resources.size())};
+        append(buffer, resources);
+        append(body, package({0x11}, buffer));
+        if(!orphan)
+        {
+            // OperationRegion (ECOR, EmbeddedControl, Zero, 256)
+            append(body, {0x5B, 0x80, 'E', 'C', 'O', 'R', 3, 0, 0x0B, 0, 1});
+            append(body, package({0x5B, 0x81}, {'E', 'C', 'O', 'R', 1, 'D', 'A', 'T', 'A', 16}));
+        }
+        Aml reg{'_', 'R', 'E', 'G', 2};
+        if(reg_mode == 1)
+            append(reg, {0x70, 'M', 'I', 'S', 'S', 0x60});  // Missing AML name.
+        if(reg_mode == 2)
+            append(reg, {0x70, 1, 'D', 'A', 'T', 'A'});
+        append(reg, {0x70, 0x69, 0x5C, 'R', 'G', 'O', 'N'});
+        append(body, package({0x14}, reg));
+        append(body, package({0x14}, {'R', 'E', 'A', 'D', 0, 0xA4, 'D', 'A', 'T', 'A'}));
+        append(body, package({0x14}, {'W', 'R', 'I', 'T', 1, 0x70, 0x68, 'D', 'A', 'T', 'A'}));
+        append(aml, package({0x5B, 0x82}, body));
+    }
+    // _PTS writes One to the first controller's DATA field.
+    append(
+        aml,
+        package(
+            {0x14},
+            {'_', 'P', 'T', 'S', 1, 0x70, 1, 0x5C, 0x2E, 'E', 'C', '0', '_', 'D', 'A', 'T', 'A'}));
+    auto* dsdt = reinterpret_cast<TestSdtHeader*>(arena.data() + kDsdtPhysical);
+    dsdt->length = sizeof(*dsdt) + aml.size();
+    std::memcpy(dsdt + 1, aml.data(), aml.size());
+    finalize_sdt(*dsdt);
+}
+struct EcDevice
+{
+    std::array<uint8_t, 256> memory{};
+    uint16_t data_port = 0x62, command_port = 0x66;
+    enum Phase
+    {
+        Idle,
+        ReadAddress,
+        WriteAddress,
+        WriteData
+    } phase = Idle;
+    uint8_t address{}, response{};
+    bool ready{}, stuck_input{}, drop_response{}, stick_after_write{}, nested{};
+    int fail_read_address = -1;
+    unsigned stale{}, reads{}, writes{}, delay{}, nested_status = AE_OK;
+    std::vector<std::pair<uint16_t, uint8_t>> sent;
+    static uint32_t read(void* context, uint16_t port, uint8_t& value)
+    {
+        auto& ec = *static_cast<EcDevice*>(context);
+        ++ec.reads;
+        if(port == ec.command_port)
+        {
+            value = uint8_t((ec.stuck_input ? 2 : 0) | ((ec.ready || ec.stale) ? 1 : 0));
+            return AE_OK;
+        }
+        if(port != ec.data_port)
+            return AE_BAD_PARAMETER;
+        if(ec.stale)
+        {
+            --ec.stale;
+            value = 0xDD;
+            return AE_OK;
+        }
+        if(!ec.ready || ec.address == ec.fail_read_address)
+            return AE_IO_ERROR;
+        value = ec.response;
+        ec.ready = false;
+        return AE_OK;
+    }
+    static uint32_t write(void* context, uint16_t port, uint8_t value)
+    {
+        auto& ec = *static_cast<EcDevice*>(context);
+        ++ec.writes;
+        ec.sent.emplace_back(port, value);
+        if(port == ec.command_port)
+        {
+            if(ec.phase != Idle || (value != 0x80 && value != 0x81))
+                return AE_BAD_PARAMETER;
+            if(ec.nested)
+            {
+                ec.nested = false;
+                uint64_t other = 0;
+                ec.nested_status = acpica_ec_test_access(0, ACPI_READ, 0, 8, other);
+            }
+            ec.phase = value == 0x80 ? ReadAddress : WriteAddress;
+            return AE_OK;
+        }
+        if(port != ec.data_port)
+            return AE_BAD_PARAMETER;
+        if(ec.phase == ReadAddress)
+        {
+            ec.address = value;
+            ec.response = ec.memory[value];
+            ec.ready = !ec.drop_response;
+            ec.phase = Idle;
+        }
+        else if(ec.phase == WriteAddress)
+        {
+            ec.address = value;
+            ec.phase = WriteData;
+        }
+        else if(ec.phase == WriteData)
+        {
+            ec.memory[ec.address] = value;
+            ec.phase = Idle;
+            ec.stuck_input = ec.stick_after_write;
+        }
+        else
+            return AE_BAD_PARAMETER;
+        return AE_OK;
+    }
+    static void stall(void* context, uint32_t us)
+    {
+        static_cast<EcDevice*>(context)->delay += us;
+    }
+    void attach()
+    {
+        acpica_ec_set_test_io({this, read, write, stall});
+    }
+};
+}  // namespace
+
+TEST_F(AcpicaIntegration, EcConnectsRegionAndExecutesShutdownFirmware)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    EcDevice ec;
+    AcpicaScopedReset cleanup;
+    ec_tables(arena);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    ec.attach();
+    ASSERT_TRUE(acpica_load_namespace());
+    EXPECT_EQ(0u, ec.reads + ec.writes);  // Ordinary namespace activation does not probe EC ports.
+    uint64_t connected = 42;
+    ASSERT_TRUE(acpica_read_named_integer("\\RGON", connected));
+    EXPECT_EQ(0u, connected);
+    PowerDiagnostic diagnostic;
+    ASSERT_TRUE(acpica_prepare_shutdown(diagnostic))
+        << diagnostic.stage << ": " << diagnostic.detail;
+    ASSERT_TRUE(acpica_read_named_integer("\\RGON", connected));
+    EXPECT_EQ(1u, connected);
+    EXPECT_EQ(1u, ec.memory[0]);
+    EXPECT_EQ(0u, ec.memory[1]);
+    const std::vector<std::pair<uint16_t, uint8_t>> expected{
+        {0x66, 0x81}, {0x62, 0}, {0x62, 1}, {0x66, 0x81}, {0x62, 1}, {0x62, 0}};
+    EXPECT_EQ(expected, ec.sent);
+    ec.memory[0] = 0x34;
+    ec.memory[1] = 0x12;
+    ASSERT_TRUE(acpica_read_named_integer("\\EC0.READ", connected));
+    EXPECT_EQ(0x1234u, connected);
+    ASSERT_TRUE(
+        acpica_prepare_shutdown(diagnostic));  // Persistent handler, no duplicate installation.
+}
+
+TEST_F(AcpicaIntegration, EcValidatesAccessAndSerializesTransactions)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    EcDevice ec;
+    AcpicaScopedReset cleanup;
+    ec_tables(arena, -1, 0x164, 0x168, false);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    ec.data_port = 0x164;
+    ec.command_port = 0x168;
+    ec.attach();
+    ASSERT_TRUE(acpica_load_namespace());
+    ASSERT_EQ(AE_OK, acpica_ec_initialize());
+    uint64_t value = 0x8877665544332211ull;
+    EXPECT_EQ(AE_BAD_PARAMETER, acpica_ec_test_access(0, ACPI_WRITE, 255, 16, value));
+    EXPECT_EQ(AE_BAD_PARAMETER, acpica_ec_test_access(0, 2, 0, 8, value));
+    EXPECT_EQ(AE_BAD_PARAMETER, acpica_ec_test_access(0, ACPI_READ, 0, 7, value));
+    EXPECT_EQ(0u, ec.reads + ec.writes);
+    ec.nested = true;
+    ASSERT_EQ(AE_OK, acpica_ec_test_access(0, ACPI_WRITE, 248, 64, value));
+    EXPECT_EQ(AE_TIME, ec.nested_status);
+    EXPECT_EQ(0x11u, ec.memory[248]);
+    EXPECT_EQ(0x88u, ec.memory[255]);
+    value = 0;
+    ec.stale = 1;
+    ASSERT_EQ(AE_OK, acpica_ec_test_access(0, ACPI_READ, 248, 64, value));
+    EXPECT_EQ(0x8877665544332211ull, value);
+}
+
+TEST_F(AcpicaIntegration, EcRejectsUnsafeResourcesWithoutPortAccess)
+{
+    for(unsigned scenario = 0; scenario < 4; ++scenario)
+    {
+        os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+        auto frames = make_frames();
+        kmem_init(frames);
+        VirtualMemory vm(frames);
+        EcDevice ec;
+        AcpicaScopedReset cleanup;
+        ec_tables(arena,
+                  scenario == 0 ? 1 : 0,
+                  scenario == 1 ? 0 : 0x62,
+                  scenario == 2 ? 0x62 : 0x66,
+                  true,
+                  scenario == 3);
+        ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+        ec.attach();
+        ASSERT_TRUE(acpica_load_namespace());
+        EXPECT_NE(AE_OK, acpica_ec_initialize());
+        EXPECT_EQ(0u, ec.reads + ec.writes);
+        EXPECT_NE(AE_OK, acpica_ec_initialize());
+    }
+}
+
+TEST_F(AcpicaIntegration, EcTimeoutsAreBoundedAndDoNotRetryUncertainTransactions)
+{
+    for(unsigned scenario = 0; scenario < 5; ++scenario)
+    {
+        os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+        auto frames = make_frames();
+        kmem_init(frames);
+        VirtualMemory vm(frames);
+        EcDevice ec;
+        AcpicaScopedReset cleanup;
+        ec_tables(arena);
+        ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+        ec.attach();
+        ASSERT_TRUE(acpica_load_namespace());
+        ASSERT_EQ(AE_OK, acpica_ec_initialize());
+        ec.stuck_input = scenario == 0;
+        ec.drop_response = scenario == 1;
+        ec.stick_after_write = scenario == 2;
+        ec.stale = scenario == 3 ? 17 : 0;
+        ec.fail_read_address = scenario == 4 ? 1 : -1;
+        uint64_t value = 0xBEEF;
+        const auto function = scenario == 2 ? ACPI_WRITE : ACPI_READ;
+        const auto status = acpica_ec_test_access(0, function, 0, 16, value);
+        EXPECT_EQ(scenario == 4 ? AE_IO_ERROR : AE_TIME, status);
+        if(function == ACPI_READ)
+            EXPECT_EQ(0xBEEFu, value);
+        EXPECT_LE(ec.delay, 100006u);
+        const auto calls = ec.reads + ec.writes;
+        EXPECT_EQ(status, acpica_ec_test_access(0, ACPI_READ, 0, 8, value));
+        EXPECT_EQ(calls, ec.reads + ec.writes);
+    }
+}
+
+TEST_F(AcpicaIntegration, EcConnectionErrorsBlockSleepPreparation)
+{
+    for(unsigned scenario = 0; scenario < 3; ++scenario)
+    {
+        os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+        auto frames = make_frames();
+        kmem_init(frames);
+        VirtualMemory vm(frames);
+        EcDevice ec;
+        AcpicaScopedReset cleanup;
+        ec_tables(arena, 0, 0x62, 0x66, true, false, -1, scenario == 2 ? 2 : 1, scenario == 1);
+        ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+        ec.stuck_input = scenario == 2;
+        ec.attach();
+        PowerDiagnostic diagnostic;
+        EXPECT_FALSE(acpica_prepare_shutdown(diagnostic));
+        EXPECT_STREQ("ec-initialization", diagnostic.stage);
+        EXPECT_EQ(0u, ec.memory[0]);  // _PTS must not execute after a failed connection.
+        const auto calls = ec.reads + ec.writes;
+        EXPECT_FALSE(acpica_prepare_shutdown(diagnostic));
+        EXPECT_EQ(calls, ec.reads + ec.writes);
+    }
+}
+
+TEST_F(AcpicaIntegration, EcSkipsDisabledController)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    EcDevice ec;
+    AcpicaScopedReset cleanup;
+    ec_tables(arena, 0, 0x62, 0x66, true, false, 9);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    ec.attach();
+    ASSERT_TRUE(acpica_load_namespace());
+    ASSERT_EQ(AE_OK, acpica_ec_initialize());
+    uint64_t value = 0;
+    EXPECT_EQ(AE_NOT_EXIST, acpica_ec_test_access(0, ACPI_READ, 0, 8, value));
+    EXPECT_EQ(0u, ec.reads + ec.writes);
+}
+
+TEST_F(AcpicaIntegration, EcConnectsOrphanRegOnce)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    EcDevice ec;
+    AcpicaScopedReset cleanup;
+    ec_tables(arena, 0, 0x62, 0x66, true, false, -1, 0, true);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    ec.attach();
+    ASSERT_TRUE(acpica_load_namespace());
+    ASSERT_EQ(AE_OK, acpica_ec_initialize());
+    uint64_t connected = 0;
+    ASSERT_TRUE(acpica_read_named_integer("\\RGON", connected));
+    EXPECT_EQ(1u, connected);
+    EXPECT_EQ(0u, ec.reads + ec.writes);
+    ASSERT_EQ(AE_OK, acpica_ec_initialize());
 }

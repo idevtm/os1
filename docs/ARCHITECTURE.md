@@ -1560,3 +1560,11 @@ Only the bootstrap root grant contains the new system-control right. Child launc
 Shutdown freezes ext2 admission before the final flush. Failed transitions reopen admission and report failure.
 Shell command completion synchronizes possible writes. Reads leave ext2 timestamps unchanged under the existing noatime policy.
 Init stays alive to supervise the primary shell. Nested shells retain ordinary child-process behavior.
+
+Failed shutdown preparation can report bounded ACPICA region and method errors through the kernel console.
+Capture retains up to 2048 bytes from the requesting thread. Successful shutdown and ordinary boot do not display captured text.
+Explicit shutdown installs device-scoped [Embedded Controller handlers](kernel/acpi-embedded-controller.md) before sleep preparation.
+Validated firmware I/O resources select the ports. Bounded, serialized byte transactions support AML EC regions without SCI event handling.
+Controllers that require the ACPI Global Lock remain unsupported. Ordinary boot and passive observation do not activate these handlers.
+The selected ACPICA diagnostic code requires a kernel reserved end of `0x193000`; the page-frame bitmap starts there.
+The 16 KiB post-image reserve and BIOS disk staging boundaries remain unchanged.

@@ -93,6 +93,7 @@ set(KERNEL_PLATFORM_SOURCES
   platform/power.cpp
   platform/system_control.cpp
   platform/system_power.cpp
+  platform/acpica_ec.cpp
   platform/rtc.cpp
   platform/pci.cpp
   platform/pci_capability.cpp

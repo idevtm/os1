@@ -196,6 +196,9 @@ The Gigabyte H81M-S1 desktop uses a Lenovo keyboard `17ef:6190` in a rear port.
 PR 33 corrects firmware ownership, Intel xHCI routing, and control transfers.
 The [acceptance record](docs/archive/filesystems/2026-11-06-minimal-initrd.md#keyboard-hardware-acceptance) separates this result from broader qualification.
 
+The user confirmed successful Asus G74SX shutdown after EC support on November 8.
+The [hardware result](docs/kernel/acpi-embedded-controller.md#hardware-result--2026-11-08) records this confirmation and its limits.
+
 Broader real-hardware goals remain:
 
 - extend the existing xHCI/HID keyboard path to more controllers and USB classes

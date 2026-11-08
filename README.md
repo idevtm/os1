@@ -521,4 +521,6 @@ Use `shutdown` to synchronize persistent storage and power off the guest. Use `r
 Use `sync` to synchronize without stopping. Interactive QEMU targets permit guest shutdown and reboot.
 Killing QEMU can interrupt a write. Command-boundary synchronization reduces this risk but does not make ext2 crash-atomic.
 The top-level shell restarts after `exit`. Shells print start and end messages on their diagnostic stream.
+The shell prints a numeric status for failed power commands. Failures inside the system-control handler also produce a kernel stage report.
+Capture both lines when present. If an `acpica: shutdown diagnostics` block appears, capture that block too.
 See the [SystemControl contract](docs/native-api/abi/system-control-abi.md) for authority and platform limits.

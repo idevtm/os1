@@ -136,3 +136,252 @@ No physical-device test was performed. A hardware test must qualify shutdown and
 | Candidate BIOS image | `c169e581a61da589155fff6fb5fa4407de43f0039d4001cdc812e9568762bbfb` |
 
 Changed owned C/C++ files were formatted with the project configuration. Unrelated formatting changes were excluded from the diff.
+
+## Physical test report — 2026-11-08
+
+The user tested both physical systems after PR #40 opened. Reboot succeeded on both; shutdown failed on the Asus laptop.
+This initial report predates the EC fix. The [later retest](acpi-embedded-controller.md#hardware-result--2026-11-08) confirms successful laptop shutdown.
+
+| Observation | Asus G74SX | Gigabyte H81M-S1 desktop |
+| --- | --- | --- |
+| Top-level shell exit and restart | Passed, user reported | Passed, user reported |
+| Ext2 readable after sudden system stop | Passed, user reported | Passed, user reported |
+| `reboot` | Passed, user reported | Passed, user reported |
+| `shutdown` | Failed; printed an error | Passed, user reported |
+
+The tested image hashes, firmware settings, and repetition counts were not supplied. Association with commit `7df6f85` is not independently verified.
+The sudden-stop report does not identify write timing, filesystem clean markers, or an offline filesystem check.
+Readability after these stops does not establish atomic writes or general power-loss safety.
+These observations supplement the earlier emulator evidence. They do not replace its recorded measurements.
+
+### Laptop shutdown investigation
+
+The tested image reported a generic system-command failure without the underlying status.
+That message did not distinguish synchronization failure, ACPI preparation failure, or returned power-entry execution.
+The cause remains unknown. Record the method status and ACPI preparation stage before selecting a correction.
+After a failed shutdown, verify that commands and persistent writes still work.
+
+### Report impact and validation
+
+This update records hardware observations and the unresolved shutdown failure. It changes no implementation or ABI contract.
+Boot, memory, isolation, concurrency, and runtime resource behavior are unchanged because only documentation changed.
+Check these claims against the user report and current power-control source. No new runtime measurements or kernel builds are required.
+
+## Shutdown diagnostics plan — 2026-11-08
+
+The laptop failure needs a precise stage and status before a firmware correction is selected.
+The user confirmed that ordinary shell commands still work after the failure. Persistent writes after failure remain unverified.
+
+```text
+failed power stage -> local diagnostic record -> thaw storage -> console report
+failed native call -> shell diagnostic stream -> numeric status
+```
+
+| Impact area | Assessment |
+| --- | --- |
+| Project scope | GOALS platform qualification: identify the laptop failure without changing the power sequence. |
+| Boot and platform | ARCHITECTURE System lifecycle: retain BIOS/UEFI behavior and passive firmware observation. |
+| Memory and isolation | Use fixed-size local formatting and static status strings. Add no allocation, syscall, or authority. |
+| Concurrency | Keep diagnostic data local to the serialized request. Print after the transition interrupt guard and filesystem admission guard end. |
+| Interfaces | SystemControl ABI records and status codes stay unchanged. Add console diagnostics and numeric shell errors. |
+| Runtime resources | Measure image size and successful-command latency against commit `7df6f85`. Failure reporting adds bounded console output. |
+| Validation and documents | Test distinct preparation errors, storage failures, and shell status output. Run BIOS/UEFI lifecycle checks and independent review. |
+
+1. Preserve the failed ACPI stage and returned exception name.
+2. Report storage and returned power-entry failures on the console.
+3. Include the native status in shell diagnostics.
+4. Run host tests and lifecycle smoke tests with both firmware paths.
+5. Review the changes before the laptop retest.
+
+This task adds diagnostics only. The physical shutdown cause remains unknown.
+
+### Diagnostic validation and comparison
+
+All 501 host tests passed. Both BIOS and UEFI lifecycle checks passed with four guest CPUs.
+The image and USB image builds passed. Local document links, Python syntax, and whitespace checks passed.
+Host tests verify distinct storage failures, missing tables, invalid controls, reduced-hardware rejection, and the real ACPICA missing-S5 exception.
+Guest tests verify numeric shell errors and subsequent persistent writes. They also retain the successful shutdown, reboot, and shell supervision checks.
+The laptop failure itself remains unreproduced locally. Firmware-specific failure stages need the planned physical retest.
+
+```sh
+cmake --build build
+cmake --build build --target os1_usb_image
+cmake --build build-host-tests
+ctest --test-dir build-host-tests --output-on-failure
+ctest --test-dir build --output-on-failure -R 'os1_smoke_system_lifecycle_'
+```
+
+The baseline is `7df6f8537dfc4e397d97dd3e2bb8fbdb6fc47225`. The candidate is this shutdown-diagnostics working diff.
+Both use macOS arm64, GCC x86_64-elf 11.2.0, Debug, QEMU 11.1.3, q35, four CPUs, 128 MiB, and virtio-blk.
+`OS1_KMEM_DEBUG` and `OS1_QEMU_DEBUGCON` were enabled.
+Measurements used Homebrew edk2 firmware and fresh variables. Each version used the same initial copied data image.
+Three trials ran per version and workload. Each command waited for the next prompt.
+
+| Measurement | Baseline | Candidate | Absolute difference | Relative difference |
+| --- | ---: | ---: | ---: | ---: |
+| Five persistent replacements, median | 31.515375 ms | 31.312834 ms | -0.202541 ms | -0.6427% |
+| Five rejected shutdown commands, median | 19.594208 ms | 21.860125 ms | +2.265917 ms | +11.5642% |
+| Five rejection transcripts, including echoes and prompts | 390 bytes | 490 bytes | +100 bytes | +25.6410% |
+| ISO size | 4352000 bytes | 4352000 bytes | 0 bytes | 0% |
+| Slab pages before replacements | 167 | 167 | 0 pages | 0% |
+| Slab pages after replacements | 168 | 168 | 0 pages | 0% |
+| Live process objects | 3 | 3 | 0 | 0% |
+
+The rejection workload used `shutdown "invalid"`; it measures shell error output, not firmware failure latency.
+The longer error text explains the additional transcript bytes. Small QEMU samples do not establish hardware performance.
+All replacement trials retained a clean marker and reported zero allocator failures.
+The failure path adds a 192-byte local formatting buffer and a two-pointer local record. It adds no dynamic allocation.
+No numerical latency requirement applies. Diagnostics trade failure-output time and stack space for a visible failure stage.
+
+Evidence and reproduction scripts are in `build/shutdown-diagnostics/`.
+See `host-tests.log`, `lifecycle-tests.log`, `measurements.json`, `failure-measurements.json`, and the retained guest transcripts.
+The full pre-diagnostics suite passed previously; this change reran all host tests and the affected lifecycle smoke tests.
+Unrelated smoke tests were not repeated. Complete ASD-STE100 dictionary verification remains unavailable.
+
+| Diagnostic artifact | SHA-256 |
+| --- | --- |
+| UEFI ISO | `7efe9780eef68a5b92cf27c22d5bf35254b6c9da16aa1fa121557e6b008ff38d` |
+| BIOS image | `345fe985878d1a1b4e2ea128951f513dea2988a08fb9debaa1e6549429db0538` |
+
+### Laptop retest
+
+Use the normal USB menu to build and deploy the updated image. No special diagnostic boot mode is required.
+Run `shutdown`. If it fails, capture the `shell:` status line and any `system:` stage line.
+Then create a test file on `/disk`. Read it back before rebooting.
+These checks identify the failure stage and test persistent access after storage admission reopens.
+
+### Diagnostic independent review
+
+The first independent review found no code defect. It found one documentation error about failures before the system-control handler.
+The documentation now distinguishes kernel-stage reports from shell-only argument, binding, and authority errors.
+The existing invalid-argument guest test confirms this distinction. No implementation correction or additional runtime test was required.
+Register-entry failure branches received source review; direct fault injection for those branches remains unmeasured.
+The correction review passed with no remaining substantive findings.
+
+## Detailed ACPICA errors plan — 2026-11-08
+
+The laptop photo reports `stage=s5-preparation detail=AE_NOT_EXIST` and native status `-5`.
+The preceding preparation checks succeeded. The failing firmware dependency remains unidentified.
+
+```text
+explicit shutdown -> scoped ACPICA output capture -> failed preparation
+    -> reopen storage admission -> retained ACPICA errors -> stage and shell status
+ordinary boot and successful shutdown -> no captured output displayed
+```
+
+| Impact area | Assessment |
+| --- | --- |
+| Project scope | GOALS platform qualification: expose evidence before selecting a firmware correction. |
+| Boot and platform | ARCHITECTURE System lifecycle: enable compiled ACPICA errors, but retain quiet ordinary boot and existing power sequencing. |
+| Memory and isolation | Bound capture buffers without dynamic allocation. ACPICA can allocate temporary method pathnames; authority and ABI records remain unchanged. |
+| Concurrency | Protect capture state with a lock. Associate capture with the requesting thread and detach before console output. |
+| Interfaces | Preserve SystemControl status codes and records. Add diagnostic text only. |
+| Runtime resources | Measure image growth and command latency against the previously tested diagnostic image. |
+| Validation and documents | Reproduce an unhandled OperationRegion in host AML. Test formatting, capture limits, isolation, and BIOS/UEFI lifecycle behavior. |
+
+1. Enable ACPICA error generation without changing upstream sources.
+2. Capture bounded output during explicit shutdown preparation.
+3. Print retained errors after a failed transition reopens storage admission.
+4. Test a real AML method failure and successful power transitions.
+5. Obtain independent review before the laptop retest.
+
+The baseline is commit `7df6f85` plus the preceding reviewed shutdown-diagnostics working diff.
+Its ISO hash is `7efe9780eef68a5b92cf27c22d5bf35254b6c9da16aa1fa121557e6b008ff38d`.
+The prior diff is retained in `build/acpica-errors/prior-diagnostics.patch`.
+
+### Build constraints
+
+Enabling all ACPICA messages exceeded the 400 KiB BIOS disk slot. The selected profile enables region-dispatch and method-abort reports with their helpers.
+Host and kernel builds use the same four-source profile. Other ACPICA messages remain disabled where the previous configuration disabled them.
+The BIOS disk slot and staging addresses remain unchanged.
+The resulting loaded kernel needs one additional page with the existing 16 KiB post-image reserve.
+Move the reserved end and page-frame bitmap base together, from `0x192000` to `0x193000`.
+This adds 4096 reserved bytes. Keep the overlap, file-size, and post-image reserve checks unchanged.
+
+### Detailed error implementation
+
+The shared build profile enables error generation in `evregion.c`, `psparse.c`, `uterror.c`, and `utxferror.c`.
+It does not modify ACPICA sources. Other error-generation sites retain the previous disabled profile.
+The OSL uses ACPICA's bounded formatter in both kernel and host builds.
+A lock protects the 2048-byte capture ring and its owner. The requesting thread identity remains valid across CPU migration.
+Nested captures cannot replace an active owner. Destruction discards unreported text and detaches the owner.
+Reporting detaches capture before console output. It uses a 2048-byte stack snapshot and a 256-byte formatting workspace in separate calls.
+ACPICA's pathname reporting can allocate and free a temporary string. Allocation failure can omit that pathname without changing the original method status.
+
+The synthetic AML test defines `_S5` and `_PTS`, plus an `EmbeddedControl` region named `ERAM` without a handler.
+Two shutdown attempts return `AE_NOT_EXIST` during preparation. Both reports identify `ERAM`, `EmbeddedControl`, and `\_PTS`.
+This reproduces the reporting boundary. It does not prove that the laptop has the same missing handler.
+
+### Detailed error checks and measurements
+
+All 504 host tests and all 60 QEMU/contract checks passed. The full suite covers BIOS, UEFI, SMP, storage, and lifecycle behavior.
+Kernel and USB image builds passed with the original disk-slot, overlap, and post-image reserve checks.
+Successful BIOS and UEFI power transcripts contain no captured ACPICA diagnostic block.
+Local document links and whitespace checks passed. Changed source was formatted; unrelated formatting changes were excluded.
+
+```sh
+cmake --build build
+cmake --build build --target os1_usb_image
+cmake --build build-host-tests
+ctest --test-dir build-host-tests --output-on-failure
+ctest --test-dir build --output-on-failure -j 2
+python3 build/acpica-errors/measure.py
+```
+
+The full QEMU suite required local Unix-socket access outside the sandbox. No test requirements were weakened.
+The initial build failures identified a missing formatter declaration and the two image-capacity constraints described above.
+The final builds resolve these failures. The existing host `acpi_aml_tests.cpp` assert-macro warning remains unrelated.
+
+The comparison uses the preceding diagnostic image as its baseline. The baseline source identity and image hash are recorded above.
+The candidate source patch is `build/acpica-errors/candidate-source.patch`.
+Its SHA-256 is `455bad83eca986ed5aac1414986cec489843dbe78a794a078e93aeaa2bdc48bf`.
+Both builds use macOS arm64, x86_64-elf GCC 11.2.0, Debug, `OS1_KMEM_DEBUG`, and `OS1_QEMU_DEBUGCON`.
+The guest uses QEMU 11.1.3, q35, four CPUs, 128 MiB, virtio-blk, and fresh Homebrew edk2 variables.
+Firmware is `/opt/homebrew/share/qemu/edk2-x86_64-code.fd` with `edk2-i386-vars.fd`.
+
+Each trial starts from the same copied data image. Each command waits for the next prompt.
+Three trials per version measure five persistent-file replacements, with `sys` and `kmem` observations before the workload.
+
+| Measurement | Baseline | Candidate | Absolute difference | Relative difference |
+| --- | ---: | ---: | ---: | ---: |
+| Five replacements, median | 30.899459 ms | 29.474167 ms | -1.425291 ms | -4.6127% |
+| ISO size | 4352000 bytes | 4362240 bytes | +10240 bytes | +0.2353% |
+| BIOS kernel file | 397568 bytes | 405760 bytes | +8192 bytes | +2.0605% |
+| Reserved kernel window | 598016 bytes | 602112 bytes | +4096 bytes | +0.6849% |
+| Allocated physical memory before workload | 21254144 bytes | 21266432 bytes | +12288 bytes | +0.0578% |
+| Slab pages before and after workload | 168 | 168 | 0 pages | 0% |
+| ACPICA capture capacity | 0 bytes | 2048 bytes | +2048 bytes | Undefined from zero |
+
+All six trials reached a clean filesystem marker. Each version reported 24676 managed pages and three process objects.
+Free pages changed from 19487 to 19484. Slab counts matched across trials, with no allocator failures.
+The physical-memory difference includes code, static capture storage, and changed boot reservations; it is not only the ring size.
+Short QEMU timing samples do not establish a speed improvement or physical-hardware performance.
+No numerical latency requirement applies. Actual firmware-failure reporting latency remains unmeasured until the laptop retest.
+
+Logs, measurements, and the reproduction script are retained in `build/acpica-errors/`.
+The existing user data image retained SHA-256 `7a9bb6b5b3eec7360dd447da5bab87d4e643a9cc0eced62a88b7a2a685208a48`.
+
+| Detailed-error artifact | SHA-256 |
+| --- | --- |
+| UEFI ISO | `d39b66a745523843ec0bcb89f0d988625dbf449747105940d5d92143a0489e19` |
+| BIOS image | `9a462b61ea3987bd9fa63388b354b3a2e45b16581b6fa88fa62da695c53b8811` |
+
+The first independent review found no implementation defect and one documentation error about successful preparation versus successful shutdown.
+The wording now permits diagnostics when preparation succeeds but power entry fails. No code correction was required.
+Complete ASD-STE100 dictionary verification remains unavailable.
+
+### Detailed error laptop retest
+
+Use the normal USB menu to deploy the new image. Run `shutdown` on the laptop.
+If shutdown fails, capture the full block from `acpica: shutdown diagnostics` through the final shell status.
+Include any truncation notice. Then verify that a persistent test file can be written and read.
+The new report must identify the actual firmware dependency before a corrective driver or firmware change is selected.
+
+The final independent review accepted the correction and validation evidence. No substantive findings remain.
+
+## Embedded Controller implementation — 2026-11-08
+
+The next laptop report identified a missing `EmbeddedControl` handler for `ECOR`. The failing chain includes `EC0.RRAM`, `EC0.ECOS`, `OEMS`, `PTS`, and `_PTS`.
+The [EC implementation record](acpi-embedded-controller.md) defines discovery, transactions, impact, validation, and remaining hardware limits.
+This evidence replaces the earlier uncertainty about the firmware dependency. The user subsequently confirmed successful shutdown with the new EC support.
+The [hardware result](acpi-embedded-controller.md#hardware-result--2026-11-08) records that confirmation and its limits.

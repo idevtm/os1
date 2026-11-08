@@ -1547,8 +1547,11 @@ int main(int argc_main, char** argv_main)
             long status = argc == 1 ? os1::user::system_control(member) : OS1_ERR_INVALID;
             if(status < 0)
             {
-                os1::user::shell_runtime::diagnostic(
-                    "system command failed; machine remains running");
+                os1::user::files::message("shell: system command failed: ");
+                os1::user::files::message(tokens[0]);
+                os1::user::files::message(" status=-");
+                os1::user::files::number(2, uint64_t(0) - static_cast<uint64_t>(status));
+                os1::user::files::message("; machine remains running\n");
                 command_failed = true;
             }
         }

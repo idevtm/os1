@@ -23,8 +23,21 @@ remain no-ops and therefore do not validate real firmware timing.
 The November 3 implementation performed D3/D0 transitions during observation.
 The [November 5 correction](../archive/kernel/2026-11-05-passive-acpi-observation.md) removes those calls and the live route-resolution fallback.
 Both observability smokes now require cached-route and passive-snapshot output.
-Power diagnostics remain deferred until authority, driver quiescence, and failure recovery have explicit contracts.
+General device-power diagnostics remain deferred. The later SystemControl contract authorizes explicit shutdown and defines storage synchronization and failure recovery.
 The [historical review](../archive/reviews/2026-11-03-review.md) retains the original findings and hardware-evidence limits.
+
+## Shutdown EC support — 2026-11-08
+
+The [EC adapter](acpi-embedded-controller.md) adds shutdown-time access to firmware-declared Embedded Controller regions.
+
+```text
+SystemControl -> namespace -> EC discovery and connection -> _PTS -> S5 entry
+```
+
+The adapter validates `_STA`, `_CRS`, and `_GLK` before installing handlers. Bounded polling supports ordinary EC byte reads and writes.
+Connection failures stop shutdown preparation. The implementation preserves ACPICA connection flags through its internal helper and retains AML error status.
+SCI queries, real Global Lock ownership, early ECDT activation, and general runtime EC services remain unsupported.
+The user confirmed successful Asus G74SX shutdown in the [November 8 hardware retest](acpi-embedded-controller.md#hardware-result--2026-11-08).
 
 ## Source Inputs Reviewed
 

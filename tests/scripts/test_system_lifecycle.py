@@ -54,7 +54,7 @@ def main():
         selector.register(child.stdout, selectors.EVENT_READ)
         pending, transcript = bytearray(), bytearray()
 
-        def expect(marker=b'os1> ', timeout=60):
+        def expect(marker=b'os1> ', timeout=60, allowed_errors=()):
             deadline = time.monotonic() + timeout
             while marker not in pending:
                 assert time.monotonic() < deadline, bytes(pending[-4000:])
@@ -68,7 +68,7 @@ def main():
             result = bytes(pending[:end]); del pending[:end]
             for error in (b'PANIC', b'#GP general protection', b'ext2 mount rejected',
                           b'command failed:', b'sync failed', b'system command failed'):
-                assert error not in result, result[-4000:]
+                assert error in allowed_errors or error not in result, result[-4000:]
             return result
 
         def send(text):
@@ -86,6 +86,14 @@ def main():
             startup = expect()
             assert b'shell started' in startup and b'ext2 mounted /disk' in startup, startup[-4000:]
             if phase == 'interrupt':
+                send('shutdown "invalid"')
+                rejected = expect(allowed_errors=(b'command failed:', b'system command failed'))
+                assert (b'shell: system command failed: shutdown status=-4; '
+                        b'machine remains running') in rejected, rejected
+                assert b'system: shutdown stage=' not in rejected  # Never reached the provider.
+                run('echo "after rejected shutdown" > "/disk/rejected-shutdown"')
+                clean()
+                run('cat "/disk/rejected-shutdown"', b'after rejected shutdown')
                 begin = time.monotonic()
                 for i in range(5):
                     run(f'echo "durable {i}" > "/disk/lifecycle"')
