@@ -25,7 +25,8 @@ Snapshot refresh invalidates old cursors; bound nodes, paths, page size, and tra
 Tab opens completion; Up/Down selects; Tab descends into objects or describes a leaf.
 Enter accepts an open selection without execution; a later Enter submits the line.
 Escape cancels completion. Ctrl-C cancels the input line.
-Use bounded scrolling text lists that work on serial, VGA, and framebuffer consoles.
+The initial renderer used bounded scrolling lists on all consoles.
+The [redraw correction](../shell/completion-redraw-plan.md) replaces local rows while keeping serial output sequential.
 Keep script input, redirection, heredocs, and foreground input ownership compatible.
 Reuse the Console input-session protocol, with explicit typeahead handoff for shell sessions only.
 Existing pager sessions retain discard-on-release behavior.

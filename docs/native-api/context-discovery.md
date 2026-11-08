@@ -83,7 +83,10 @@ The current registry exposes no events because its available services have no im
 ## Shell controls
 
 The shell owns presentation and editing independently of discovery.
-It displays scrolling text lists on serial, VGA, and framebuffer consoles.
+It replaces one bounded completion area on VGA and framebuffer consoles.
+Serial output retains sequential text lists and requires no cursor-control capability.
+Opening completion can scroll once to reserve space; subsequent selection and descent reuse that space.
+Shorter lists clear stale rows, and cancellation restores the original command row.
 Each list page contains at most eight choices.
 
 | Key | Action |
@@ -101,6 +104,7 @@ Each list page contains at most eight choices.
 Native members without shell invocation support display an explicit metadata-only message.
 Completion does not read property values or subscribe to events.
 This slice supports editing at the line end, with a 127-byte command bound.
+Long command lines show their final visible bytes without wrapping the completion area.
 Filename completion, history navigation, cursor editing, and arbitrary provider discovery remain separate work.
 Quoted or escaped tokens do not receive object completion.
 

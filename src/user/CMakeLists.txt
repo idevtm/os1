@@ -87,6 +87,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/discovery.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/discovery/view.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/discovery/completion.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/discovery/presentation.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/programs/kernel_console_check.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/programs/tmpfs_check.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/tmpfs.hpp"

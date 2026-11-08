@@ -100,6 +100,7 @@ void invoke_console(OpenInstance& source,
     uint32_t required;
     switch(request.member)
     {
+        case OS1_CONSOLE_REDRAW_LINE:
         case OS1_CONSOLE_CLEAR:
         case OS1_CONSOLE_WRITE:
             required = OS1_RIGHT_WRITE;
@@ -151,6 +152,23 @@ void invoke_console(OpenInstance& source,
             auto geometry = console_geometry();
             memcpy(result.payload, &geometry, sizeof(geometry));
             result.payload_bytes = sizeof(geometry);
+        }
+        return;
+    }
+    if(request.member == OS1_CONSOLE_REDRAW_LINE)
+    {
+        if(!object->write_bytes)
+            result.application_status = OS1_ERR_UNSUPPORTED;
+        else if(request.payload_bytes < sizeof(os1_console_redraw))
+            result.application_status = OS1_ERR_INVALID;
+        else
+        {
+            os1_console_redraw row{};
+            memcpy(&row, request.payload, sizeof(row));
+            result.application_status =
+                redraw_console_line(row.row_delta,
+                                    reinterpret_cast<const char*>(request.payload + sizeof(row)),
+                                    request.payload_bytes - sizeof(row));
         }
         return;
     }

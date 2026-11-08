@@ -3,7 +3,7 @@
 #include <os1/discovery.hpp>
 #include <os1/file_tools.hpp>
 
-#include "discovery/completion.hpp"
+#include "discovery/presentation.hpp"
 namespace os1::user::prompt
 {
 inline os1::discovery::View view;
@@ -51,32 +51,39 @@ inline long inspect(const char* path, int fd)
     } while(!page.end);
     return 0;
 }
-inline bool display(const os1::discovery::Completion& state)
+struct Display
 {
-    if(!output(2, "\n"))
-        return false;
-    if(state.open)
+    files::Handle client;
+    os1::discovery::Presentation presentation;
+    Display() : client(console_bind(2, OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT))
     {
-        if(!output(2, "context choices (Tab explore, Enter accept, Esc cancel)\n"))
-            return false;
-        unsigned first = state.selected / os1::discovery::page_limit * os1::discovery::page_limit;
-        for(unsigned i = first; i < state.matches && i < first + os1::discovery::page_limit; ++i)
-            if(!output(2, i == state.selected ? "> " : "  ") ||
-               !describe(2, view.nodes[state.ids[i]]))
-                return false;
+        os1_console_geometry geometry{};
+        if(client.fd < 0 || console_geometry(client.fd, geometry) < 0 || geometry.columns < 8 ||
+           geometry.rows < 3)
+            client.reset();
+        else
+            presentation.configure(geometry.columns, geometry.rows);
     }
-    else if(state.detail && state.leaf >= 0)
+    bool advance()
     {
-        if(!describe(2, view.nodes[state.leaf]))
-            return false;
-        if((view.nodes[state.leaf].flags & os1::discovery::Native) &&
-           !(view.nodes[state.leaf].flags & os1::discovery::Shell) &&
-           !output(2,
-                   "Metadata only in this shell; invoke native members through the typed API.\n"))
-            return false;
+        return output(2, "\n");
     }
-    return output(2, "  > ") && output(2, state.line);
-}
+    bool row(int delta, const char* text, unsigned bytes)
+    {
+        if(client.fd >= 0)
+            return console_redraw_line(client.fd, delta, text, bytes) >= 0;
+        return advance() && files::put(2, text, bytes);
+    }
+    bool paint(const os1::discovery::Completion& state)
+    {
+        return presentation.paint(view, state, *this);
+    }
+    bool cancel(os1::discovery::Completion& state)
+    {
+        state.cancel();
+        return !presentation.reserved || paint(state);
+    }
+};
 inline long read(files::Reader& fallback, files::Line& line)
 {
     files::Handle input(console_bind(0, OS1_RIGHT_READ));
@@ -94,9 +101,12 @@ inline long read(files::Reader& fallback, files::Line& line)
     if(keys.fd < 0)
         return keys.fd;
     ReleaseInput release{keys.fd};
+    Display display;
     if(!output(2, "os1> "))
         return OS1_ERR_FAULT;
     os1::discovery::Completion state;
+    os1::discovery::PresentationCleanup<Display> cleanup{
+        view, state, display.presentation, display};
     bool overflow = false, skip_lf = false;
     for(;;)
     {
@@ -105,7 +115,8 @@ inline long read(files::Reader& fallback, files::Line& line)
         if(r == OS1_ERR_RANGE)
         {
             overflow = true;
-            state.cancel();
+            if(!display.cancel(state))
+                return OS1_ERR_FAULT;
             continue;
         }
         if(r < 0)
@@ -125,8 +136,7 @@ inline long read(files::Reader& fallback, files::Line& line)
                           : console_read_key(session.fd, keys.fd, key, uint64_t(clock) + 50000000);
             if(r == OS1_ERR_TIMED_OUT)
             {
-                state.cancel();
-                if(!display(state))
+                if(!display.cancel(state))
                     return OS1_ERR_FAULT;
                 continue;
             }
@@ -143,7 +153,8 @@ inline long read(files::Reader& fallback, files::Line& line)
                 } while(r >= 0 && (key < 0x40 || key > 0x7e) && ++consumed < 16);
                 if(r == OS1_ERR_TIMED_OUT)
                 {
-                    state.cancel();
+                    if(!display.cancel(state))
+                        return OS1_ERR_FAULT;
                     continue;
                 }
                 if(r < 0)
@@ -154,30 +165,32 @@ inline long read(files::Reader& fallback, files::Line& line)
                     key = OS1_CONSOLE_KEY_DOWN;
                 else
                 {
-                    state.cancel();
+                    if(!display.cancel(state))
+                        return OS1_ERR_FAULT;
                     continue;
                 }
             }
-            else
-                state.cancel();
+            else if(!display.cancel(state))
+                return OS1_ERR_FAULT;
         }
         if(key == 3)
         {
-            state = {};
-            overflow = false;
+            if(!display.cancel(state))
+                return OS1_ERR_FAULT;
             line = {};
-            output(2, "^C\n");
-            return 0;
+            return output(2, "^C\n") ? 0 : OS1_ERR_FAULT;
         }
         if(key == '\r' || key == '\n' || key == 4)
         {
             if(state.open && !overflow && key != 4)
             {
                 state.accept(view, false);
-                if(!display(state))
+                if(!display.paint(state))
                     return OS1_ERR_FAULT;
                 continue;
             }
+            if(!display.cancel(state))
+                return OS1_ERR_FAULT;
             if(!output(2, "\n"))
                 return OS1_ERR_FAULT;
             line = {};
@@ -197,7 +210,7 @@ inline long read(files::Reader& fallback, files::Line& line)
                 state.accept(view, true);
             else if(discovery::refresh(view, true))
                 state.begin(view);
-            if(!display(state))
+            if(!display.paint(state))
                 return OS1_ERR_FAULT;
         }
         else if(key == OS1_CONSOLE_KEY_UP || key == OS1_CONSOLE_KEY_DOWN)
@@ -205,7 +218,7 @@ inline long read(files::Reader& fallback, files::Line& line)
             if(state.open)
             {
                 state.move(key == OS1_CONSOLE_KEY_UP ? -1 : 1);
-                if(!display(state))
+                if(!display.paint(state))
                     return OS1_ERR_FAULT;
             }
         }
@@ -215,9 +228,9 @@ inline long read(files::Reader& fallback, files::Line& line)
             if(state.size)
             {
                 state.backspace();
-                if(menu)
+                if(menu || display.presentation.clipped)
                 {
-                    if(!display(state))
+                    if(!display.paint(state))
                         return OS1_ERR_FAULT;
                 }
                 else if(!output(2, "\b \b"))
@@ -228,10 +241,15 @@ inline long read(files::Reader& fallback, files::Line& line)
         {
             bool menu = state.open || state.detail;
             if(!state.insert(static_cast<char>(key)))
-                overflow = true;
-            else if(menu)
             {
-                if(!display(state))
+                overflow = true;
+                if(!display.cancel(state))
+                    return OS1_ERR_FAULT;
+            }
+            else if(menu || display.presentation.clipped ||
+                    state.size + display.presentation.prefix > display.presentation.width)
+            {
+                if(!display.paint(state))
                     return OS1_ERR_FAULT;
             }
             else

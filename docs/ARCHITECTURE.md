@@ -1603,6 +1603,9 @@ Snapshot generations reject stale cursors; aliases and paths have bounded traver
 Native descriptions retain interface identity, while local helpers remain distinct from native wire protocols.
 
 The prompt uses an exclusive input session with opt-in typeahead handoff.
+The Console `redraw_line` method replaces bounded local rows while keeping serial output sequential.
+The shell reserves one completion area and clears it when completion closes.
+Each redraw uses the output lock; a sequence of rows does not create an exclusive display lease.
 Existing pager sessions retain discard-on-release behavior.
 Script and redirected input retain their existing reader.
 PS/2 and USB navigation keys share byte codes; the prompt decodes serial navigation sequences separately.

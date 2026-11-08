@@ -58,6 +58,7 @@ All fields use the current x86-64 little-endian ABI.
 | Read-only property `geometry` | 4 | INSPECT | Empty | `os1_console_geometry`, 8 bytes |
 | Method `clear` | 5 | WRITE | Empty | Empty |
 | Method `acquire_input` | 6 | READ | Empty or `os1_console_input_options` | One owned ConsoleInputSession through RESULT_CAPS |
+| Method `redraw_line` | 7 | WRITE | `os1_console_redraw` and printable text | Empty |
 
 `info` contains four `u32` fields: `rights`, `max_write_bytes`, `max_read_bytes`, and `flags`.
 `rights` reports captured service rights.
@@ -85,6 +86,35 @@ Missing method authority produces application status ACCESS.
 Malformed method input produces application status INVALID.
 These errors appear in a successfully completed Operation with transport status zero.
 Envelope errors, descriptor errors, and admission failures occur before acceptance.
+
+## Local row redraw
+
+`redraw_line` replaces one local display row and emits sequential text on serial.
+It does not parse terminal escape sequences or change input ownership.
+
+```text
+copied row request -> WRITE validation -> output lock -> local cell replacement
+                                                   -> serial newline and text
+```
+
+The four-byte header contains signed `i32 row_delta` at offset zero.
+The remaining payload contains zero through 252 printable ASCII bytes, without a terminator.
+`row_delta` must be between -200 and 200.
+Text must fit within `columns - 1` cells; control bytes, non-ASCII bytes, and excessive lengths return INVALID.
+Validation precedes display or serial changes.
+
+The local cursor moves by `row_delta` rows, clamped to the screen bounds.
+The operation clears that row, writes the supplied text, and leaves the cursor after the text.
+It never wraps or scrolls the local terminal.
+One operation holds the existing output lock and presents the cell buffer once.
+The serial sink receives a newline followed by the text, without cursor-control sequences.
+Without a local terminal, validation uses the existing 80-column fallback.
+
+The source must be an output Console with captured WRITE authority.
+The normal retained-result contract applies; reading RESULT again does not redraw another row.
+The operation creates no display lease and does not reserve a multirow region.
+Concurrent output can move the shared cursor between requests.
+The shell owns [completion area management](../../shell/completion-redraw-plan.md).
 
 ## Interactive input session
 

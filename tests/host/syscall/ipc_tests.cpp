@@ -2700,3 +2700,52 @@ TEST_F(ConsoleSession, ConsumedOverflowStillDiscardsTruncatedTypeaheadOnRelease)
     EXPECT_EQ("\n", std::string(text, count));
     console_input_finish(count);
 }
+
+TEST_F(KernelConsole, RedrawChecksRightsPayloadAndRetainsEmptyResult)
+{
+    int client = bind();
+    ASSERT_GE(client, 0);
+    auto request = console_request(OS1_CONSOLE_REDRAW_LINE);
+    int operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    os1_console_redraw row{-1};
+    request.payload_bytes = sizeof(row) + 3;
+    std::memcpy(request.payload, &row, sizeof(row));
+    std::memcpy(request.payload + sizeof(row), "new", 3);
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    auto result = complete(operation);
+    EXPECT_EQ(0, result.application_status);
+    EXPECT_EQ(0u, result.payload_bytes);
+    EXPECT_EQ("\nnew", host_console_output());
+    os1_ipc_result repeated{};
+    EXPECT_EQ(0, call(OS1_IPC_RESULT, operation, repeated));
+    EXPECT_EQ("\nnew", host_console_output());
+    descriptor_close(table(), operation);
+    row.row_delta = OS1_CONSOLE_ROW_DELTA_MAX + 1;
+    std::memcpy(request.payload, &row, sizeof(row));
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    EXPECT_EQ("\nnew", host_console_output());
+    row.row_delta = 0;
+    std::memcpy(request.payload, &row, sizeof(row));
+    request.payload_bytes = sizeof(row) + 80;
+    std::memset(request.payload + sizeof(row), 'x', 80);
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    EXPECT_EQ("\nnew", host_console_output());
+    request.payload_bytes = sizeof(row) + 3;
+    std::memset(request.payload + sizeof(row), 0, sizeof(request.payload) - sizeof(row));
+    request.payload[sizeof(row)] = '\n';
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    descriptor_close(table(), client);
+    client = bind(1, OS1_RIGHT_INSPECT);
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_ACCESS, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    descriptor_close(table(), client);
+}

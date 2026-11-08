@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Live discovery, completion, cancellation, and prompt ownership checks."""
 import argparse
+import json
 import os
 import re
 import selectors
@@ -109,17 +110,63 @@ def main():
                 time.sleep(.15)
             else:
                 send(serial)
+        def screen(name):
+            if not connection:
+                return None
+            path = log.with_suffix('.' + name + '.ppm').resolve()
+            path.unlink(missing_ok=True)
+            connection.sendall(('screendump ' + json.dumps(str(path)) + '\n').encode())
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if path.exists():
+                    parts = path.read_bytes().split(b'\n', 3)
+                    if len(parts) == 4 and parts[0] == b'P6' and parts[2] == b'255':
+                        width, height = map(int, parts[1].split())
+                        if len(parts[3]) == width * height * 3:
+                            return width, height, parts[3]
+                time.sleep(.01)
+            raise AssertionError('incomplete QEMU screen capture')
+
+        # Ignored and incomplete escape sequences must close an open menu.
+        for sequence in (b'\x1b[3~', b'\x1b['):
+            key('tab', b'\t')
+            expect(b'context choices')
+            expect(b'  > ')
+            send(sequence)
+            expect(b'  > ')
+            closed_screen = screen('closed')
+            if closed_screen:
+                cw, ch, cp = closed_screen
+                assert not any(cp[cw * (ch - 9 * 16) * 3:]), 'cancel left stale menu rows'
+            assert b'after-cancel\n' in run('echo "after-cancel"')
         key('tab', b'\t')
         expect(b'context choices')
         expect(b'  > ')
+        original_screen = screen('choices')
         key('down', b'\x1b[B')
         expect(b'> process [object]')
         expect(b'  > ')
+        selected_screen = screen('selected')
+        if original_screen:
+            width, height, pixels = original_screen
+            assert selected_screen[:2] == (width, height)
+            history_bytes = width * (height // 2) * 3
+            assert pixels[:history_bytes] == selected_screen[2][:history_bytes], 'selection scrolled console history'
         key('up', b'\x1b[A')
         expect(b'> os [object]')
         expect(b'  > ')
+        restored_screen = screen('restored')
+        if original_screen:
+            # Both test displays use 16-pixel cells. Ignore the blinking prompt cursor row.
+            body = width * (height - 16) * 3
+            assert pixels[:body] == restored_screen[2][:body], 'selection did not redraw in place'
         key('tab', b'\t')
         expect(b'  > os.')
+        shorter_screen = screen('shorter')
+        if original_screen:
+            assert pixels[:history_bytes] == shorter_screen[2][:history_bytes], 'descent scrolled console history'
+            blank = shorter_screen[2][width * (height - 7 * 16) * 3:width * (height - 16) * 3]
+            assert not any(blank), 'shorter menu left stale rows'
         key('esc', b'\x1b')
         expect(b'  > os.')
         key('ctrl-c', b'\x03')

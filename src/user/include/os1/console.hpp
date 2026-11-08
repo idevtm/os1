@@ -79,6 +79,23 @@ inline long console_clear(int client)
     os1_ipc_result result{};
     return console_call(client, OS1_CONSOLE_INTERFACE_ID, OS1_CONSOLE_CLEAR, result);
 }
+inline long console_redraw_line(int client, int delta, const char* text, unsigned bytes)
+{
+    if(bytes > OS1_CONSOLE_REDRAW_MAX || (bytes && !text))
+        return OS1_ERR_INVALID;
+    auto request = console_request(OS1_CONSOLE_REDRAW_LINE);
+    os1_console_redraw row{delta};
+    request.payload_bytes = sizeof(row) + bytes;
+    for(unsigned i = 0; i < sizeof(row); ++i)
+        request.payload[i] = reinterpret_cast<const uint8_t*>(&row)[i];
+    for(unsigned i = 0; i < bytes; ++i)
+        request.payload[sizeof(row) + i] = text[i];
+    os1_ipc_result result{};
+    long status = ipc_call(client, request, result);
+    return status < 0                ? status
+           : result.transport_status ? result.transport_status
+                                     : result.application_status;
+}
 inline long console_acquire_input(int client, bool handoff = false)
 {
     auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
