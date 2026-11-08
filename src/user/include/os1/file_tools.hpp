@@ -113,7 +113,10 @@ struct Reader
     }
 };
 // Native operations accept one child name; path splitting does not add authority.
-inline long parent(const char* path, char* leaf, uint32_t rights)
+inline long parent(const char* path,
+                   char* leaf,
+                   uint32_t rights,
+                   uint32_t file_rights = fs::file_rights)
 {
     size_t n = length(path);
     if(!n || n >= OS1_PATH_MAX || path[n - 1] == '/')
@@ -135,7 +138,7 @@ inline long parent(const char* path, char* leaf, uint32_t rights)
     else
         for(size_t i = 0; i < start; ++i)
             prefix[i] = path[i];
-    Handle resource(os1::user::open(prefix, rights, fs::file_rights));
+    Handle resource(os1::user::open(prefix, rights, file_rights));
     if(resource.fd < 0)
         return resource.fd;
     return fs::bind(resource.fd, true, rights);
@@ -148,18 +151,19 @@ enum class Mode
     Replace,
     Append
 };
-inline long open_file(const char* path, Mode mode)
+inline long open_file(const char* path, Mode mode, uint32_t rights = fs::file_rights)
 {
     if(mode == Mode::Existing)
         return os1::user::open(
             path, OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE);
     char leaf[64]{};
-    Handle directory(parent(path, leaf, OS1_RIGHT_LOOKUP | OS1_RIGHT_CREATE | OS1_RIGHT_DELEGATE));
+    Handle directory(
+        parent(path, leaf, OS1_RIGHT_LOOKUP | OS1_RIGHT_CREATE | OS1_RIGHT_DELEGATE, rights));
     if(directory.fd < 0)
         return directory.fd;
-    long fd = fs::open(directory.fd, leaf, fs::file_rights, 0, OS1_OBJECT_FILE);
+    long fd = fs::open(directory.fd, leaf, rights, 0, OS1_OBJECT_FILE);
     if(fd == OS1_ERR_EXISTS && mode != Mode::Exclusive)
-        fd = fs::open(directory.fd, leaf, fs::file_rights);
+        fd = fs::open(directory.fd, leaf, rights);
     if(fd < 0)
         return fd;
     Handle file(fd);

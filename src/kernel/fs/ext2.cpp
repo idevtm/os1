@@ -339,6 +339,36 @@ long Volume::zero_tail(Inode& inode, uint64_t end)
     memset(data + old % 4096, 0, count);
     return write_block(block, data) ? 0 : OS1_ERR_IO;
 }
+bool Volume::stamp(Inode& inode, uint32_t fields)
+{
+    uint64_t now = 0;
+    if(!io.clock || !io.clock(io.context, now) || !now || now / 1000000000ull > UINT32_MAX)
+        return false;
+    const uint32_t seconds = now / 1000000000ull;
+    if(!seconds)
+        return false;
+    if(fields & OS1_TIME_ACCESS)
+        put32(inode.bytes + 8, seconds);
+    if(fields & OS1_TIME_MODIFY)
+        put32(inode.bytes + 16, seconds);
+    put32(inode.bytes + 12, seconds);
+    return true;
+}
+long Volume::set_times(uint32_t number, Inode& inode, uint32_t fields)
+{
+    if(!fields || fields & ~(OS1_TIME_ACCESS | OS1_TIME_MODIFY))
+        return OS1_ERR_INVALID;
+    Inode changed = inode;
+    if(!stamp(changed, fields))
+        return OS1_ERR_UNSUPPORTED;
+    long r = begin_write();
+    if(r < 0)
+        return r;
+    r = inode_write(number, changed);
+    if(r == 0)
+        inode = changed;
+    return r;
+}
 long Volume::write(uint32_t n, Inode& inode, uint64_t offset, const void* in, size_t length)
 {
     if(offset > max_file_bytes || length > max_file_bytes - offset)
@@ -386,6 +416,7 @@ long Volume::write(uint32_t n, Inode& inode, uint64_t offset, const void* in, si
     }
     if(offset + length > size(inode))
         put32(inode.bytes + 4, offset + length);
+    stamp(inode, OS1_TIME_MODIFY);
     r = inode_write(n, inode);
     return r < 0 ? r : static_cast<long>(done);
 }
@@ -451,6 +482,7 @@ long Volume::truncate(uint32_t n, Inode& inode, uint64_t length)
         }
     }
     put32(inode.bytes + 4, length);
+    stamp(inode, OS1_TIME_MODIFY);
     return inode_write(n, inode);
 }
 long Volume::next(Inode& inode, uint64_t offset, Entry& entry, uint64_t& next_offset)
@@ -531,6 +563,7 @@ long Volume::create(uint32_t parent_number,
     if(!write_block(inode_bitmap, inode_bits) || counters() < 0)
         return OS1_ERR_IO;
     inode = {};
+    stamp(inode, OS1_TIME_ACCESS | OS1_TIME_MODIFY);
     put16(inode.bytes, dir ? 0x41ed : 0x81a4);
     put16(inode.bytes + 26, dir ? 2 : 1);
     if(dir)
@@ -555,9 +588,9 @@ long Volume::create(uint32_t parent_number,
             return OS1_ERR_IO;
         put32(inode.bytes + 4, 4096);
         put16(parent.bytes + 26, u16(parent.bytes + 26) + 1);
-        if(inode_write(parent_number, parent) < 0)
-            return OS1_ERR_IO;
     }
+    if((stamp(parent, OS1_TIME_MODIFY) || dir) && inode_write(parent_number, parent) < 0)
+        return OS1_ERR_IO;
     if(inode_write(n, inode) < 0 || !read_block(b, data))
         return OS1_ERR_IO;
     uint32_t rec = u16(data + at + 4), used = u32(data + at) ? record_size(data[at + 6]) : 0;
@@ -612,14 +645,21 @@ long Volume::remove(
     {
         put16(group + 16, u16(group + 16) - 1);
         put16(parent.bytes + 26, u16(parent.bytes + 26) - 1);
-        if(inode_write(parent_number, parent) < 0)
-            return OS1_ERR_IO;
     }
+    if((stamp(parent, OS1_TIME_MODIFY) || dir) && inode_write(parent_number, parent) < 0)
+        return OS1_ERR_IO;
     if(!write_block(inode_bitmap, inode_bits))
         return OS1_ERR_IO;
     return counters();
 }
-long Volume::rename(Inode& parent, const char* from, size_t from_len, const char* to, size_t to_len)
+long Volume::rename(uint32_t parent_number,
+                    Inode& parent,
+                    uint32_t number,
+                    Inode& inode,
+                    const char* from,
+                    size_t from_len,
+                    const char* to,
+                    size_t to_len)
 {
     uint32_t b = 0;
     long r = get_block(parent, 0, b);
@@ -643,7 +683,13 @@ long Volume::rename(Inode& parent, const char* from, size_t from_len, const char
     memset(data + at + 8, 0, u16(data + at + 4) - 8);
     memcpy(data + at + 8, to, to_len);
     data[at + 6] = to_len;
-    return write_block(b, data) ? 0 : OS1_ERR_IO;
+    if(!write_block(b, data))
+        return OS1_ERR_IO;
+    if(stamp(parent, OS1_TIME_MODIFY) && inode_write(parent_number, parent) < 0)
+        return OS1_ERR_IO;
+    if(stamp(inode, 0) && inode_write(number, inode) < 0)
+        return OS1_ERR_IO;
+    return 0;
 }
 
 namespace
@@ -796,6 +842,10 @@ long Volume::move(uint32_t source_parent,
         if(!write_block(inode_bitmap, inode_bits) || counters() < 0)
             return OS1_ERR_IO;
     }
+    stamp(source_directory, OS1_TIME_MODIFY);
+    stamp(destination_directory, OS1_TIME_MODIFY);
+    if(stamp(inode, 0) && inode_write(number, inode) < 0)
+        return OS1_ERR_IO;
     if(inode_write(source_parent, source_directory) < 0 ||
        (source_parent != destination_parent &&
         inode_write(destination_parent, destination_directory) < 0))

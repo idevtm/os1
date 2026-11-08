@@ -12,7 +12,7 @@ long sys_resource(
     if(fd >= OS1_DESCRIPTOR_LIMIT)
         return OS1_ERR_BAD_DESCRIPTOR;
     if((operation >= OS1_RESOURCE_DUPLICATE_SCOPED && operation <= OS1_RESOURCE_FILE_INFO) ||
-       (operation >= OS1_RESOURCE_CONTEXT_OPEN && operation <= OS1_RESOURCE_TREE_STEP))
+       (operation >= OS1_RESOURCE_CONTEXT_OPEN && operation <= OS1_RESOURCE_SET_TIMES))
         return sys_vfs(frames, thread, static_cast<int>(fd), operation, argument);
     if(operation >= OS1_RESOURCE_BUFFER_CREATE && operation <= OS1_RESOURCE_BUFFER_UNMAP)
         return sys_buffer(frames, thread, fd, operation, argument);

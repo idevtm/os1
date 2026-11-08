@@ -52,3 +52,7 @@ void vfs_changed();                          // NamespaceGuard required, after p
 long vfs_metadata(VfsNode*, os1_metadata&);  // NamespaceGuard required.
 long vfs_space(VfsNode*, os1_space&);        // NamespaceGuard required.
 long vfs_tree_step(DescriptorTable&, int, os1_tree_step&);
+
+// Caller holds NamespaceGuard. Current-time mutation accepts access/modify bits only.
+long vfs_times(VfsNode*, os1_file_times&);
+long vfs_set_times(VfsNode*, const os1_set_times&);

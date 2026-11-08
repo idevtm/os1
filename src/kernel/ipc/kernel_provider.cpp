@@ -246,6 +246,34 @@ bool inspect_metadata(OpenInstance& source,
                       os1_ipc_result& result,
                       bool directory)
 {
+    const bool times = request.member == (directory ? OS1_DIRECTORY_TIMES : OS1_FILE_TIMES);
+    const bool set_times =
+        request.member == (directory ? OS1_DIRECTORY_SET_TIMES : OS1_FILE_SET_TIMES);
+    if(times || set_times)
+    {
+        os1_set_times args{};
+        if(!(rights & (set_times ? OS1_RIGHT_SET_TIMES : OS1_RIGHT_INSPECT)))
+            result.application_status = OS1_ERR_ACCESS;
+        else if(set_times ? !decode(request, args) : request.payload_bytes != 0)
+            result.application_status = OS1_ERR_INVALID;
+        else
+        {
+            NamespaceGuard guard;
+            auto* node = static_cast<VfsNode*>(source.object);
+            if(!guard.held)
+                result.application_status = OS1_ERR_WOULD_BLOCK;
+            else if(set_times)
+                result.application_status = vfs_set_times(node, args);
+            else
+            {
+                os1_file_times out{};
+                result.application_status = vfs_times(node, out);
+                if(!result.application_status)
+                    encode(result, out);
+            }
+        }
+        return true;
+    }
     bool metadata = request.member == (directory ? OS1_DIRECTORY_METADATA : OS1_FILE_METADATA);
     if(!metadata && request.member != (directory ? OS1_DIRECTORY_SPACE : OS1_FILE_SPACE))
         return false;

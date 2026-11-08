@@ -15,7 +15,8 @@
 #define OS1_RIGHT_CREATE (1u << 8)
 #define OS1_RIGHT_REMOVE (1u << 9)
 #define OS1_RIGHT_RENAME (1u << 10)
-#define OS1_RIGHT_ALL 2047u
+#define OS1_RIGHT_SET_TIMES (1u << 11)
+#define OS1_RIGHT_ALL 4095u
 #define OS1_DESCRIPTOR_CLOEXEC 1u
 #define OS1_STATUS_NONBLOCK 1u
 #define OS1_STATUS_APPEND 2u

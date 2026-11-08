@@ -37,7 +37,8 @@ All integers use the current x86-64 little-endian ABI.
 Backend IDs are 1 for initrd, 2 for tmpfs, and 3 for ext2.
 Tokens are nonreused within one boot and remain stable across rename and retained-object lifetime.
 Tokens do not persist across reboot and confer no authority.
-Timestamps, ownership, permissions, and links remain unsupported.
+The separate [timestamp ABI](filesystem-times-abi.md) provides times without changing this record.
+Ownership, permissions, and links remain unsupported.
 
 | Backend | Logical size | Allocated bytes |
 | --- | --- | --- |

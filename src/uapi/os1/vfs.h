@@ -124,3 +124,19 @@ struct os1_tree_step
     char name[256];
     struct os1_metadata metadata;
 };
+
+// UTC Unix-epoch nanoseconds. Zero validity means no known timestamps.
+#define OS1_TIME_ACCESS 1u
+#define OS1_TIME_MODIFY 2u
+#define OS1_TIME_CHANGE 4u
+#define OS1_RESOURCE_TIMES 27u
+#define OS1_RESOURCE_SET_TIMES 28u
+struct os1_file_times
+{
+    uint32_t version, size, valid, resolution_ns;
+    uint64_t access_ns, modify_ns, change_ns;
+};
+struct os1_set_times
+{
+    uint32_t version, size, fields, reserved;
+};

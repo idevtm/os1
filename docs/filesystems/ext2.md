@@ -155,3 +155,16 @@ Multi-group ext2, multi-block directories, online installation, journal recovery
 - [Linux ext2 documentation](https://www.kernel.org/doc/html/latest/filesystems/ext2.html)
 - [Virtio 1.2 block device specification](https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html)
 - [QEMU disk images](https://www.qemu.org/docs/master/system/images.html)
+
+## File timestamps
+
+The [timestamp ABI](../native-api/abi/filesystem-times-abi.md) exposes inode access, modification, and metadata-change times.
+
+```text
+Native set_times -> serialized volume -> existing inode fields -> sync -> persistent storage
+```
+
+Ext2 stores unsigned epoch seconds without changing its disk layout.
+Creation, writes, truncation, and namespace mutations maintain the applicable fields.
+Ordinary reads preserve access time and cause no timestamp write.
+Unknown zero fields remain explicitly unsupported until an applicable update supplies a valid value.

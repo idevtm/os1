@@ -75,3 +75,8 @@ struct os1_filesystem_info
 #define OS1_DIRECTORY_SPACE 11u
 #define OS1_FILE_METADATA 8u
 #define OS1_FILE_SPACE 9u
+
+#define OS1_DIRECTORY_TIMES 12u
+#define OS1_DIRECTORY_SET_TIMES 13u
+#define OS1_FILE_TIMES 10u
+#define OS1_FILE_SET_TIMES 11u

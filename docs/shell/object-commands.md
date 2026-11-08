@@ -22,7 +22,7 @@ flowchart LR
 | Interpretation | Interactive commands prefer expressions, then allow text fallback with a warning; scripts default to strict expressions |
 | Arguments | Declared positional mappings; named and unnamed arguments can appear in any order |
 | Copy | `fs.copy` accepts path or object sources/destinations; `cp` defaults to replace and `cat` to append |
-| Creation | `touch` ensures a file exists; the accepted timestamp extension adds access/modification time updates |
+| Creation | `touch` creates if absent and updates access/modification times; existing directories are supported |
 | Expressions | String concatenation and formatting remain deferred extensions |
 | Search | Initial path contains `/bin`, then `/disk/bin`; configuration files come later |
 | Search behavior | Ordered search, explicit-path bypass, not-found-only fallback, and retained executable references |
@@ -47,7 +47,7 @@ Alias-definition syntax, scope, replacement, and recursion limits remain open.
 | `ls` | `fs.list` | Enumerate cwd and present names; an optional path selects another directory |
 | `cd "/tmp"` | `fs.change_directory "/tmp"` | Validate and update this shell's cwd string and directory reference |
 | `pwd` | `out.print fs.cwd` | Explicitly print the cwd String |
-| `touch "a.txt"` | `fs.ensure_file`, then timestamp update | Preserve contents; timestamp behavior requires the accepted metadata extension |
+| `touch "a.txt"` | `fs.ensure_file`, then timestamp update | Preserve contents; update access and modification times |
 
 `pwd` binds a call with a property expression, not a constant captured when the alias is defined.
 The property is evaluated when the alias runs.
@@ -109,12 +109,13 @@ A failure after partial output reports failure without claiming rollback or auto
 Multiple sources remain deferred. `cat` preserves existing input-stream behavior when the source is absent or `-`.
 The first stage does not claim complete POSIX `cat` compatibility.
 
-`touch` uses the selected `fs.ensure_file` helper.
-The accepted [timestamp extension](file-utilities.md#metadata-and-timestamps) adds a separate update to access and modification times.
-It creates an empty regular file if absent and preserves an existing regular file's contents.
-A directory or incompatible object at the same name is an error.
-The provider must implement create-if-absent safely; a client-side check followed by destructive creation is insufficient.
-This helper does not update timestamps, matching the [current limited touch behavior](interactive-files.md).
+`fs.ensure_file` creates an absent regular file and preserves an existing regular file's contents and timestamps.
+It rejects directories and incompatible objects.
+Creation must fail safely if another object acquires the name first.
+
+`touch` creates an absent regular file or updates an existing file or directory.
+It preserves contents and uses the [timestamp ABI](../native-api/abi/filesystem-times-abi.md) to update access and modification times.
+`fs.update_times` performs the timestamp update without creation.
 
 | Operation | Rule |
 | --- | --- |
@@ -295,7 +296,7 @@ This table separates them from deferred extensions and implementation specificat
 | --- | --- |
 | Aliases | Available in commands and scripts; defaults fill omitted parameters |
 | Interpretation | Expression precedence; warned text fallback at the prompt; scripts strict by default |
-| File helpers | `fs.copy` with path/object overloads; `cp` replace default; `cat` append/output defaults; `touch` ensure-file plus later timestamp support |
+| File helpers | `fs.copy` with path/object overloads; `cp` replace default; `cat` append/output defaults; `touch` ensure-file plus current-time update |
 | Output | `out.print` and `pwd` as an explicit print call; String methods deferred |
 | Arguments | Declared positional slots mixed freely with named arguments; duplicate assignments fail |
 | Expressions | Concatenation, formatting, precedence, and escaping need a later expression grammar specification |

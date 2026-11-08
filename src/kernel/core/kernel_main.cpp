@@ -38,6 +38,7 @@
 #include "mm/virtual_memory.hpp"
 #include "platform/irq_registry.hpp"
 #include "platform/platform.hpp"
+#include "platform/rtc.hpp"
 #include "platform/topology.hpp"
 #include "proc/thread.hpp"
 #include "proc/user_program.hpp"
@@ -786,6 +787,7 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     {
         cpu_boot_others(g_kernel_root_cr3);
     }
+    rtc_initialize_wall_clock();
 
     if(SchedulerTimerSource::Lapic == timer_source_scheduler())
     {

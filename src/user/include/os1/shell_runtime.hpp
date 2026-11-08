@@ -19,6 +19,8 @@ enum class Method
     ChangeDirectory,
     List,
     Ensure,
+    Touch,
+    UpdateTimes,
     Create,
     Copy,
     Move,
@@ -76,7 +78,8 @@ constexpr Binding bindings[] = {{"less", Method::Pager},
                                 {"fs.change_directory", Method::ChangeDirectory},
                                 {"ls", Method::List},
                                 {"fs.list", Method::List},
-                                {"touch", Method::Ensure},
+                                {"touch", Method::Touch},
+                                {"fs.update_times", Method::UpdateTimes},
                                 {"fs.ensure_file", Method::Ensure},
                                 {"fs.create_file", Method::Create},
                                 {"cp", Method::Copy},
@@ -665,6 +668,36 @@ inline long directory_resource(const char* path, char* leaf, uint32_t rights)
 }
 inline long mutation(const char* path, Method method)
 {
+    if(method == Method::Touch || method == Method::UpdateTimes)
+    {
+        constexpr uint32_t rights = OS1_RIGHT_SET_TIMES | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE;
+        Handle fd(open(path, rights));
+        if(fd.fd == OS1_ERR_NOT_FOUND && method == Method::Touch)
+        {
+            fd.reset(files::open_file(path, files::Mode::Exclusive, rights));
+            if(fd.fd == OS1_ERR_EXISTS)
+                fd.reset(open(path, rights));
+        }
+        if(fd.fd < 0)
+            return fd.fd;
+        os1_metadata metadata{};
+        long r = tree::metadata(fd.fd, metadata);
+        if(r < 0)
+            return r;
+        const bool directory = metadata.kind == OS1_OBJECT_DIRECTORY;
+        Handle client(fs::bind(fd.fd, directory, OS1_RIGHT_SET_TIMES));
+        if(client.fd < 0)
+            return client.fd;
+        os1_set_times request{
+            OS1_VFS_ABI_VERSION, sizeof(request), OS1_TIME_ACCESS | OS1_TIME_MODIFY, 0};
+        os1_ipc_result result{};
+        return fs::call(client.fd,
+                        directory,
+                        directory ? OS1_DIRECTORY_SET_TIMES : OS1_FILE_SET_TIMES,
+                        &request,
+                        sizeof(request),
+                        result);
+    }
     if(method == Method::Ensure || method == Method::Create)
     {
         Handle fd(files::open_file(
@@ -1034,6 +1067,8 @@ inline long execute(Call& call)
         }
         case Method::ChangeDirectory:
             return context::change_directory(a);
+        case Method::Touch:
+        case Method::UpdateTimes:
         case Method::Ensure:
         case Method::Create:
         case Method::Remove:

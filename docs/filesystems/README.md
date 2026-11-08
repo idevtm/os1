@@ -5,6 +5,8 @@ Temporary contents disappear on reboot. A bounded ext2 profile provides persiste
 
 | Document | Status |
 | --- | --- |
+| [Timestamp implementation record](../archive/filesystems/2026-11-08-filesystem-timestamps.md) | Plan, impact, checks, resource comparison, and review |
+| Filesystem timestamps | [Timestamp ABI](../native-api/abi/filesystem-times-abi.md) |
 | [Metadata and traversal ABI](../native-api/abi/filesystem-metadata-abi.md) | Common metadata, space accounting, and guarded namespace steps |
 | [USB mass storage](../hardware/usb-storage.md) | Current USB transport and failure behavior; physical qualification pending |
 | [Minimal initrd record](../archive/filesystems/2026-11-06-minimal-initrd.md) | Recovery packaging, disk program lookup, and validation |

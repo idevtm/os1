@@ -3,9 +3,9 @@
 
 #include "vfs/initrd.hpp"
 constexpr uint32_t kTmpDirectoryRights =
-    kDirectoryRights | OS1_RIGHT_CREATE | OS1_RIGHT_REMOVE | OS1_RIGHT_RENAME;
-constexpr uint32_t kTmpFileRights =
-    OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE;
+    kDirectoryRights | OS1_RIGHT_CREATE | OS1_RIGHT_REMOVE | OS1_RIGHT_RENAME | OS1_RIGHT_SET_TIMES;
+constexpr uint32_t kTmpFileRights = OS1_RIGHT_READ | OS1_RIGHT_WRITE | OS1_RIGHT_SEEK |
+                                    OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE | OS1_RIGHT_SET_TIMES;
 constexpr uint32_t kNamespaceCeiling = kInitrdCeiling | kTmpDirectoryRights | kTmpFileRights;
 // Bootstrap-only mutation of the unpublished namespace root. Reject name collisions.
 long tmpfs_mount(NativeObject* root);

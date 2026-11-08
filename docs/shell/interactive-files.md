@@ -12,7 +12,7 @@ Console / input file -> shell command -> granted Directory and File resources
 
 | Task | Command | Details |
 | --- | --- | --- |
-| Create an empty file | `touch /tmp/note` | Existing contents remain unchanged; timestamps are not implemented. |
+| Create an empty file | `touch /tmp/note` | Preserve contents; update access and modification times. See the [timestamp ABI](../native-api/abi/filesystem-times-abi.md). |
 | Enter new text | `write /tmp/note` | Refuses an existing file. |
 | Replace text | `write --replace /tmp/note` | Truncates before input. |
 | Append text | `write --append /tmp/note` | Creates the file if absent. |

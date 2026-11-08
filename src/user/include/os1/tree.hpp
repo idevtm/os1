@@ -89,7 +89,19 @@ inline long info(const char* path, bool capacity)
         ok = ok && field(" allocated_bytes:", result.allocated_bytes);
     else
         ok = ok && files::put(1, " allocated_bytes:unsupported", 28);
-    return ok && files::put(1, "\n", 1) ? 0 : OS1_ERR_IO;
+    os1_file_times times{};
+    r = os1_syscall3(
+        os1_sys_resource, fd.fd, OS1_RESOURCE_TIMES, reinterpret_cast<uint64_t>(&times));
+    if(r < 0)
+        return r;
+    const char* names[] = {" access_ns:", " modify_ns:", " change_ns:"};
+    const uint64_t values[] = {times.access_ns, times.modify_ns, times.change_ns};
+    for(unsigned i = 0; i < 3; ++i)
+        ok = ok && files::put(1, names[i], files::length(names[i])) &&
+             ((times.valid & (1u << i)) ? number(values[i]) : files::put(1, "unsupported", 11));
+    return ok && field(" time_resolution_ns:", times.resolution_ns) && files::put(1, "\n", 1)
+               ? 0
+               : OS1_ERR_IO;
 }
 enum class Mode
 {

@@ -40,6 +40,7 @@ Documents can contain proposals after promotion, provided their scope and status
 
 | Capability | Current contract |
 | --- | --- |
+| Filesystem timestamps and current-time mutation | [Timestamp ABI](abi/filesystem-times-abi.md) |
 | Filesystem metadata, space accounting, and guarded traversal | [Metadata and traversal ABI](abi/filesystem-metadata-abi.md) |
 | Typed environment, rooted navigation, and same-filesystem moves | [Startup and namespace extension](abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension) |
 | Kernel-hosted Console methods, geometry, exclusive input sessions, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |
@@ -59,6 +60,8 @@ The [approved object-handle model](object-contract.md#object-handles-and-interop
 The current encoding remains `fd`; general typed owning/borrowed C++ wrappers remain SDK work.
 
 ## Latest implementation
+
+The [timestamp ABI](abi/filesystem-times-abi.md) adds native time inspection and current-time updates for `touch`.
 
 The [text utility profile](../shell/text-utilities.md) uses existing native File and stream handles without a new ABI.
 The [filesystem traversal record](../archive/shell/2026-11-07-filesystem-traversal.md) covers metadata, recursive commands, `find`, and `du`.

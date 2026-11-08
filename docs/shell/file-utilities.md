@@ -5,7 +5,7 @@ Permissions and links remain deferred to a later stage.
 The [first stage](typed-context.md) implements basic context, navigation, and file operations.
 The [second stage](filesystem-tools.md) implements metadata, traversal, recursive copy/removal, `find`, and `du`.
 The [text utility profile](text-utilities.md) implements line selection, literal search, counts, and bounded file classification.
-Timestamps and paging remain accepted direction.
+The [pager profile](pager.md) and [timestamp ABI](../native-api/abi/filesystem-times-abi.md) are implemented.
 This profile does not claim complete POSIX compatibility.
 
 ```mermaid
@@ -37,7 +37,7 @@ Examples below quote literal paths and patterns so they work in either proposed 
 | `pwd` | `out.print fs.cwd` | Print current directory |
 | `cd` | `fs.change_directory` | Require a path; home shortcuts deferred |
 | `ls` | `fs.list` | List immediate children; default to cwd |
-| `touch` | `fs.ensure_file`, then timestamp update | Create if absent; update access/modification times when timestamp support exists |
+| `touch` | `fs.ensure_file`, then timestamp update | Create if absent; update access and modification times; preserve contents |
 | `cp` | `fs.copy` | Create or replace destination; explicit recursion |
 | `cat` | `fs.copy` | Default to append/output; preserve bytes |
 | `mv` | `fs.move` | Atomic rename within one filesystem; cross-filesystem moves rejected initially |
@@ -138,9 +138,9 @@ Define reuse and lifetime rules before using identities for recursive traversal 
 
 `touch` composes ensure-file behavior with setting access and modification times to now.
 `fs.ensure_file` itself continues to preserve existing file contents without promising timestamp changes.
-Timestamp updates need a native mutation operation and a defined wall-clock source.
-Until that support exists, the current `touch` remains creation-only and must be documented as limited.
-Clock-unavailable behavior and exact timestamp representation belong to the implementation specification.
+The [timestamp ABI](../native-api/abi/filesystem-times-abi.md) defines native mutation, wall time, validity, and unavailable-clock errors.
+`fs.update_times` updates an existing file or directory without creating it.
+Ordinary reads preserve access time.
 
 `du` reports allocated storage below its selected path; logical size is an optional alternative.
 `df` reports total, free, and caller-available space for the containing filesystem.
@@ -211,7 +211,7 @@ The minimal feature choices are settled.
 The [traversal profile](filesystem-tools.md) specifies implemented command behavior and resource bounds.
 The [text profile](text-utilities.md) specifies implemented streaming behavior and limits.
 The [pager profile](pager.md) specifies implemented paging.
-Timestamp mutation remains the next implementation stage.
+The [timestamp ABI](../native-api/abi/filesystem-times-abi.md) implements current-time mutation.
 These specifications must preserve the accepted behavior; they are not permission to expand the feature set.
 Custom configuration, user-defined aliases, String output methods, general expression operators, and a full scripting language can remain deferred.
 

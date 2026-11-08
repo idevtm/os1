@@ -178,7 +178,7 @@ struct AcpiFixedInfo
     uint8_t preferred_pm_profile;
     uint16_t sci_interrupt;
     uint16_t boot_architecture_flags;
-    uint16_t reserved0;
+    uint8_t century, reserved0;
     uint32_t flags;
     uint64_t firmware_ctrl;
     uint64_t dsdt_physical;

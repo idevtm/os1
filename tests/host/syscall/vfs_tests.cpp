@@ -1793,3 +1793,132 @@ TEST_F(TmpfsContract, MetadataSerializesWithSparseWritesAndTruncation)
     }
     writer.join();
 }
+
+#include "core/wall_clock.hpp"
+namespace
+{
+struct TestWallClock
+{
+    explicit TestWallClock(uint64_t now)
+    {
+        wall_clock_initialize(now);
+    }
+    ~TestWallClock()
+    {
+        wall_clock_initialize(0);
+    }
+};
+TEST_F(TmpfsContract, TimesAuthorityValidationAndRetainedOperation)
+{
+    TestWallClock clock(1700000000000000000ull);
+    const int fd = create("timed");
+    ASSERT_GE(fd, 0);
+    auto* file = static_cast<VfsNode*>(table().entries[fd].instance->object);
+    auto get = [&] {
+        NamespaceGuard guard;
+        os1_file_times times{};
+        EXPECT_EQ(0, vfs_times(file, times));
+        return times;
+    };
+    auto initial = get();
+    EXPECT_EQ(initial.valid, 7u);
+    EXPECT_EQ(initial.access_ns, initial.modify_ns);
+    EXPECT_EQ(initial.change_ns, initial.modify_ns);
+    EXPECT_EQ(initial.resolution_ns, 1000000u);
+    wall_clock_tick(2000000);
+    ASSERT_EQ(3, tmpfs_write(file, 0, "abc", 3));
+    auto written = get();
+    EXPECT_EQ(written.access_ns, initial.access_ns);
+    EXPECT_GT(written.modify_ns, initial.modify_ns);
+    char bytes[3]{};
+    ASSERT_EQ(3, tmpfs_read(file, 0, bytes, 3));
+    EXPECT_EQ(get().access_ns, initial.access_ns);
+    int read_only = bind(fd, OS1_FILE_INTERFACE_ID, OS1_RIGHT_INSPECT);
+    ASSERT_GE(read_only, 0);
+    os1_set_times request{1, sizeof(request), OS1_TIME_ACCESS | OS1_TIME_MODIFY, 0};
+    EXPECT_EQ(
+        OS1_ERR_ACCESS,
+        invoke(read_only, OS1_FILE_INTERFACE_ID, OS1_FILE_SET_TIMES, &request, sizeof(request))
+            .application_status);
+    int writer = bind(fd, OS1_FILE_INTERFACE_ID, OS1_RIGHT_SET_TIMES);
+    ASSERT_GE(writer, 0);
+    request.reserved = 1;
+    EXPECT_EQ(OS1_ERR_INVALID,
+              invoke(writer, OS1_FILE_INTERFACE_ID, OS1_FILE_SET_TIMES, &request, sizeof(request))
+                  .application_status);
+    request.reserved = 0;
+    request.fields = OS1_TIME_CHANGE;
+    EXPECT_EQ(OS1_ERR_INVALID, call(fd, OS1_RESOURCE_SET_TIMES, request));
+    request.fields = 0;
+    EXPECT_EQ(OS1_ERR_INVALID, call(fd, OS1_RESOURCE_SET_TIMES, request));
+    request.fields = 3;
+    request.version = 2;
+    EXPECT_EQ(OS1_ERR_INVALID, call(fd, OS1_RESOURCE_SET_TIMES, request));
+    request.version = 1;
+    request.size = sizeof(request) - 1;
+    EXPECT_EQ(OS1_ERR_INVALID, call(fd, OS1_RESOURCE_SET_TIMES, request));
+    request.size = sizeof(request);
+    EXPECT_EQ(
+        OS1_ERR_INVALID,
+        invoke(writer, OS1_FILE_INTERFACE_ID, OS1_FILE_SET_TIMES, &request, sizeof(request) - 1)
+            .application_status);
+
+    request.fields = OS1_TIME_ACCESS;
+    EXPECT_EQ(OS1_ERR_FAULT, sys_resource(frames, thread, fd, OS1_RESOURCE_SET_TIMES, 1));
+    EXPECT_EQ(get().change_ns, written.change_ns);
+    wall_clock_tick(3000000);
+    int operation =
+        submit(writer, OS1_FILE_INTERFACE_ID, OS1_FILE_SET_TIMES, &request, sizeof(request));
+    ASSERT_GE(operation, 0);
+    EXPECT_EQ(result(operation).application_status, 0);
+    auto updated = get();
+    EXPECT_GT(updated.access_ns, initial.access_ns);
+    EXPECT_EQ(updated.modify_ns, written.modify_ns);
+    EXPECT_EQ(updated.change_ns, updated.access_ns);
+    wall_clock_tick(9000000);
+    os1_ipc_result repeated{};
+    EXPECT_EQ(0, ipc(OS1_IPC_RESULT, operation, repeated));
+    EXPECT_EQ(get().change_ns, updated.change_ns);
+    EXPECT_EQ(0, descriptor_close(table(), operation));
+    auto inspected = invoke(read_only, OS1_FILE_INTERFACE_ID, OS1_FILE_TIMES);
+    EXPECT_EQ(inspected.application_status, 0);
+    ASSERT_EQ(inspected.payload_bytes, sizeof(os1_file_times));
+    os1_file_times native{};
+    std::memcpy(&native, inspected.payload, sizeof(native));
+    EXPECT_EQ(native.access_ns, updated.access_ns);
+    EXPECT_EQ(3, tmpfs_read(file, 0, bytes, 3));
+    EXPECT_EQ(std::string(bytes, 3), "abc");
+    wall_clock_initialize(0);
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, call(fd, OS1_RESOURCE_SET_TIMES, request));
+    EXPECT_EQ(get().change_ns, updated.change_ns);
+    EXPECT_EQ(0, tmpfs_truncate(file, 2));
+    EXPECT_EQ(get().modify_ns, updated.modify_ns);
+}
+TEST_F(TmpfsContract, DirectoryTimesAndUnsupportedInitrd)
+{
+    TestWallClock clock(1700000000000000000ull);
+    os1_set_times request{1, sizeof(request), 3, 0};
+    EXPECT_EQ(
+        0,
+        invoke(
+            client, OS1_DIRECTORY_INTERFACE_ID, OS1_DIRECTORY_SET_TIMES, &request, sizeof(request))
+            .application_status);
+    auto before = invoke(client, OS1_DIRECTORY_INTERFACE_ID, OS1_DIRECTORY_TIMES);
+    os1_file_times a{}, b{};
+    ASSERT_EQ(before.payload_bytes, sizeof(a));
+    std::memcpy(&a, before.payload, sizeof(a));
+    wall_clock_tick(1000000);
+    ASSERT_GE(create("entry"), 0);
+    auto after = invoke(client, OS1_DIRECTORY_INTERFACE_ID, OS1_DIRECTORY_TIMES);
+    std::memcpy(&b, after.payload, sizeof(b));
+    EXPECT_GT(b.modify_ns, a.modify_ns);
+    EXPECT_EQ(b.access_ns, a.access_ns);
+    const int immutable = open("etc/motd", OS1_RIGHT_INSPECT);
+    ASSERT_GE(immutable, 0);
+    EXPECT_EQ(0, call(immutable, OS1_RESOURCE_TIMES, a));
+    ASSERT_TRUE(copy_from_user(frames, thread, kRequest, &a, sizeof(a)));
+    EXPECT_EQ(a.valid, 0u);
+    EXPECT_EQ(OS1_ERR_ACCESS, call(immutable, OS1_RESOURCE_SET_TIMES, request));
+    EXPECT_EQ(OS1_ERR_ACCESS, open("etc/motd", OS1_RIGHT_SET_TIMES));
+}
+}  // namespace

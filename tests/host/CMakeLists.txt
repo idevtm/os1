@@ -81,6 +81,7 @@ set_target_properties(
 target_compile_options(os1_acpica PRIVATE -O2 -w)
 
 add_library(os1_host_support
+  "${OS1_REPO_ROOT}/src/kernel/core/wall_clock.cpp"
   "${OS1_REPO_ROOT}/src/kernel/buffer/buffer.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/kernel_provider.cpp"
@@ -190,6 +191,7 @@ add_executable(os1_host_tests
   kernel/runqueue_tests.cpp
   kernel/timer_source_tests.cpp
   kernel/measurement_clock_tests.cpp
+  kernel/wall_clock_tests.cpp
   kernel/pci_bus_tests.cpp
   kernel/pci_capability_tests.cpp
   kernel/pci_msi_tests.cpp

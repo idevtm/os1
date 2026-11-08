@@ -16,6 +16,7 @@ def main():
     parser = argparse.ArgumentParser()
     for name in ('baseline', 'candidate', 'output', 'qemu', 'code', 'vars'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--workload', choices=('shell', 'timestamps'), default='shell')
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
@@ -26,6 +27,12 @@ def main():
             ('cat "/tmp/note"', b'measurement\n'),
             ('ls "/tmp"', b'note\n'),
         ])
+    if args.workload == 'timestamps':
+        commands = [('kmem', b'kmem complete'),
+                    ('echo "measurement" > "/tmp/note"', None),
+                    ('echo "measurement" > "/disk/note"', None)]
+        for _ in range(20):
+            commands.extend([('touch "/tmp/note"', None), ('touch "/disk/note"', None)])
     commands.extend([('/disk/diskutil "sync"', b'sync ok'), ('kmem', b'kmem complete')])
     results = []
     for firmware in ('bios', 'uefi'):

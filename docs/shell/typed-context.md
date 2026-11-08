@@ -50,7 +50,7 @@ Only NOT_FOUND advances to the next directory. Explicit paths bypass search and 
 | `pwd` | `out.print fs.cwd` | None |
 | `cd` | `fs.change_directory` | Required String `path`, slot 1 |
 | `ls` | `fs.list` | Optional String `path`, slot 1; default cwd |
-| `touch` | `fs.ensure_file` | Required String `path`, slot 1; no timestamp changes yet |
+| `touch` | Ensure file, then native `set_times` | Required String `path`, slot 1; create if absent, then update access and modification times |
 | `cp` | `fs.copy` | `source` slot 1, `destination` slot 2, named `mode`; default replace |
 | `cat` | `fs.copy` | Same parameters; default input stream and output stream, append policy |
 | `mv` | `fs.move` | Required String `source` slot 1 and `destination` slot 2 |

@@ -76,6 +76,7 @@ set(KERNEL_CORE_SOURCES
   core/kernel_state.cpp
   core/panic.cpp
   core/timer_source.cpp
+  core/wall_clock.cpp
   core/trap_dispatch.cpp
 )
 
@@ -90,6 +91,7 @@ set(KERNEL_PLATFORM_SOURCES
   platform/irq_routing.cpp
   platform/irq_registry.cpp
   platform/power.cpp
+  platform/rtc.cpp
   platform/pci.cpp
   platform/pci_capability.cpp
   platform/pci_config.cpp
