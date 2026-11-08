@@ -531,23 +531,23 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-809`: `kernel_bios.elf`
-- LBA `810-1184`: `initrd.cpio`
+- LBA `65-896`: `kernel_bios.elf`
+- LBA `897-1184`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
 The core ELF uses 256-byte file alignment while kernel memory boundaries remain page-aligned.
 BIOS packaging removes unused section metadata; the diagnostic kernel ELF retains symbols.
-The BIOS loader stages the stripped kernel in `[0xE000,0x72000)` (400 KiB).
-It stages the plain initrd in `[0x72000,0x9A000)` (160 KiB).
-The ext2 slice moves 12 KiB of staging capacity from initrd to the kernel.
+The BIOS loader stages the stripped kernel in `[0xE000,0x76000)` (416 KiB).
+It stages the plain initrd in `[0x76000,0x9A000)` (144 KiB).
+The latest CI correction moves 16 KiB of staging capacity from initrd to the kernel.
 Compact non-reflective executables keep the initrd within its new bound.
 The 2880-sector raw image, firmware ceiling, and boot-log placement remain unchanged.
 Kernel C++ and bundled userspace use `-Os`; userspace discards unreferenced sections while retaining metadata.
 
 ELF-aware checks enforce file size, staging limits, execution extent, reserve space, initrd capacity, and disk overlap.
-The reserved execution window and page bitmap remain unchanged.
+The reserved execution window ends at `0x194000`, where the page-frame bitmap starts. The 16 KiB post-image requirement remains unchanged.
 The [temporary filesystem record](archive/filesystems/2026-11-06-tmpfs-implementation.md) contains current sizes and validation.
 The [reliability record](archive/kernel/2026-11-05-reliability-and-clock-plan.md) preserves the preceding layout measurements.
 
@@ -604,9 +604,9 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x09000` | BIOS disk scratch, then temporary page tables after firmware disk I/O completes |
 | `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
-| `0x72000` | BIOS initrd load buffer (160 KiB slot, ending at `0x9A000`) |
+| `0x76000` | BIOS initrd load buffer (144 KiB slot, ending at `0x9A000`) |
 | `0x100000` | shared kernel physical load base |
-| `0x20000-0x5FFFF` | page-frame bitmap |
+| `0x194000-0x213FFF` | page-frame bitmap |
 
 The modern path deliberately mirrors this layout before entering `kernel_main`. That is not nostalgia. It is a compatibility technique that keeps the shared kernel bootloader-agnostic while the frontends converge on the same higher-half kernel ABI.
 
@@ -1492,7 +1492,7 @@ The runtime stores path data and cwd text locally; directory descriptors retain 
 Rooted lookup and namespace mutations use one nonblocking admission guard before backend locks.
 Content I/O keeps the existing backend locking and failure rules.
 Same-filesystem moves publish one namespace change; ext2 retains its existing dirty-volume failure policy.
-The BIOS staging split reserves 400 KiB for the kernel and 160 KiB for the minimal initrd.
+The BIOS staging split reserves 416 KiB for the kernel and 144 KiB for the minimal initrd.
 
 
 ## Filesystem metadata and user traversal
@@ -1546,3 +1546,25 @@ The user adapter supplies native reads, writes, seeks, metadata, and access chec
 File input is retained before redirection to prevent source truncation through the output path.
 Seekable files use bounded rereads; non-seekable inputs use one 64 KiB shell workspace with explicit limit errors.
 No new kernel service, syscall, IPC layout, or process is required.
+
+## System lifecycle
+
+The [SystemControl provider](native-api/abi/system-control-abi.md) uses the native kernel adapter for synchronization, shutdown, and reboot.
+
+```text
+shell -> SystemControl capability -> ext2 freeze and sync -> explicit firmware transition
+init -> shell child -> wait and reap -> fresh shell
+```
+
+Only the bootstrap root grant contains the new system-control right. Child launch can attenuate that right.
+Shutdown freezes ext2 admission before the final flush. Failed transitions reopen admission and report failure.
+Shell command completion synchronizes possible writes. Reads leave ext2 timestamps unchanged under the existing noatime policy.
+Init stays alive to supervise the primary shell. Nested shells retain ordinary child-process behavior.
+
+Failed shutdown preparation can report bounded ACPICA region and method errors through the kernel console.
+Capture retains up to 2048 bytes from the requesting thread. Successful shutdown and ordinary boot do not display captured text.
+Explicit shutdown installs device-scoped [Embedded Controller handlers](kernel/acpi-embedded-controller.md) before sleep preparation.
+Validated firmware I/O resources select the ports. Bounded, serialized byte transactions support AML EC regions without SCI event handling.
+Controllers that require the ACPI Global Lock remain unsupported. Ordinary boot and passive observation do not activate these handlers.
+The [CI boot-envelope correction](kernel/acpi-embedded-controller.md#ci-boot-envelope-correction--2026-11-08) sets the reserved end and page-frame bitmap base to `0x194000`.
+The 16 KiB post-image reserve and low-memory firmware ceiling remain unchanged.

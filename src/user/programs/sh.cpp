@@ -6,6 +6,7 @@
 #include <os1/parameter_client.hpp>
 #include <os1/shell_runtime.hpp>
 #include <os1/syscall.hpp>
+#include <os1/system.hpp>
 #include <os1/vfs.hpp>
 
 #include "interface/parameter_demo.hpp"
@@ -447,7 +448,8 @@ void run_help()
     write_string("pager: less path; space/enter/f next page, b previous page, q quit\n");
     write_string("streams: < file, > file, >> file, << delimiter; Ctrl-D ends input\n");
     write_string(
-        "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit\n");
+        "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit sync "
+        "shutdown reboot\n");
     write_string(
         "call <image> <method> [field:value | field.case | field:{...}]\nintf <image>: offline "
         "constructor/method parameter help\n");
@@ -1175,8 +1177,69 @@ void run_external(size_t argc,
 }
 }  // namespace
 
+namespace
+{
+struct ShellLifetime
+{
+    ShellLifetime()
+    {
+        os1::user::write(2, "shell started\n", 14);
+    }
+    ~ShellLifetime()
+    {
+        os1::user::write(2, "shell ended\n", 12);
+    }
+};
+struct CommandSync
+{
+    bool pending;
+    explicit CommandSync(bool enabled) : pending(enabled) {}
+    bool finish()
+    {
+        if(!pending)
+            return true;
+        pending = false;
+        // Binding checks SYSTEM_CONTROL directly; INSPECT is not required.
+        if(os1::user::root() < 0)
+            return true;
+        long status = os1::user::system_control(OS1_SYSTEM_SYNC);
+        if(status == OS1_ERR_ACCESS)
+            return true;  // An attenuated shell retains no global sync authority.
+        if(status >= 0)
+            return true;
+        os1::user::shell_runtime::diagnostic("sync failed; persistent data may be unclean");
+        return false;
+    }
+    ~CommandSync()
+    {
+        finish();
+    }
+};
+bool may_write(os1::user::shell_runtime::Method method)
+{
+    using M = os1::user::shell_runtime::Method;
+    switch(method)
+    {
+        case M::Unknown:  // External programs, editors, and explicit exec can write.
+        case M::Ensure:
+        case M::Touch:
+        case M::UpdateTimes:
+        case M::Create:
+        case M::Copy:
+        case M::Move:
+        case M::Remove:
+        case M::MakeDirectory:
+        case M::RemoveDirectory:
+            return true;
+        default:
+            return false;
+    }
+}
+}  // namespace
+
 int main(int argc_main, char** argv_main)
 {
+    ShellLifetime lifetime;
     char line[kShellLineBytes];
     os1::user::files::Reader reader;
     os1::user::files::Handle script;
@@ -1264,24 +1327,14 @@ int main(int argc_main, char** argv_main)
             continue;
         }
         bool external = call.method == os1::user::shell_runtime::Method::Unknown;
-        const char* builtins[] = {"write",
-                                  "edit",
-                                  "help",
-                                  "pid",
-                                  "sys",
-                                  "ps",
-                                  "cpu",
-                                  "pci",
-                                  "initrd",
-                                  "usb",
-                                  "devices",
-                                  "irqs",
-                                  "resources",
-                                  "kmem",
-                                  "events",
-                                  "call",
-                                  "exec",
-                                  "exit"};
+        const char* builtins[] = {"write",         "edit",        "help",
+                                  "pid",           "sys",         "ps",
+                                  "cpu",           "pci",         "initrd",
+                                  "usb",           "devices",     "irqs",
+                                  "resources",     "kmem",        "events",
+                                  "call",          "sync",        "shutdown",
+                                  "reboot",        "system.sync", "system.shutdown",
+                                  "system.reboot", "exec",        "exit"};
         for(const char* builtin : builtins)
             if(strings_equal(tokens[0], builtin))
                 external = false;
@@ -1371,6 +1424,7 @@ int main(int argc_main, char** argv_main)
                 return 1;
             continue;
         }
+        CommandSync command_sync(may_write(call.method) || parsed.output_name[0]);
         os1::user::files::Streams streams;
         if(!streams.apply(parsed, reader, copy_source, call.recursive))
         {
@@ -1474,16 +1528,43 @@ int main(int argc_main, char** argv_main)
         }
         else if(strings_equal(tokens[0], "exec"))
         {
-            run_exec(argc, tokens, raw);
+            if(command_sync.finish())
+                run_exec(argc, tokens, raw);
+            else
+                command_failed = true;
+        }
+        else if(strings_equal(tokens[0], "sync") || strings_equal(tokens[0], "system.sync") ||
+                strings_equal(tokens[0], "shutdown") ||
+                strings_equal(tokens[0], "system.shutdown") || strings_equal(tokens[0], "reboot") ||
+                strings_equal(tokens[0], "system.reboot"))
+        {
+            unsigned member =
+                strings_equal(tokens[0], "shutdown") || strings_equal(tokens[0], "system.shutdown")
+                    ? OS1_SYSTEM_SHUTDOWN
+                : strings_equal(tokens[0], "reboot") || strings_equal(tokens[0], "system.reboot")
+                    ? OS1_SYSTEM_REBOOT
+                    : OS1_SYSTEM_SYNC;
+            long status = argc == 1 ? os1::user::system_control(member) : OS1_ERR_INVALID;
+            if(status < 0)
+            {
+                os1::user::files::message("shell: system command failed: ");
+                os1::user::files::message(tokens[0]);
+                os1::user::files::message(" status=-");
+                os1::user::files::number(2, uint64_t(0) - static_cast<uint64_t>(status));
+                os1::user::files::message("; machine remains running\n");
+                command_failed = true;
+            }
         }
         else if(strings_equal(tokens[0], "exit"))
         {
-            return 0;
+            return command_sync.finish() ? 0 : 1;
         }
         else
         {
             run_external(argc, tokens, raw, executable_path, executable.take(), constructor);
         }
+        if(!command_sync.finish())
+            command_failed = true;
         if(!console_input && (command_failed || output_failed))
             return 1;
     }

@@ -140,6 +140,7 @@ long inherit_process_namespace(Process* parent, Process* child)
         auto* root = initrd_namespace_root();
         if(!root)
             return OS1_ERR_BAD_IMAGE;
+        root->allowed_rights |= OS1_RIGHT_SYSTEM_CONTROL;
         const int roles[] = {OS1_BOOT_ROOT_FD, OS1_BOOT_CWD_FD};
         for(int fd : roles)
         {
@@ -147,7 +148,12 @@ long inherit_process_namespace(Process* parent, Process* child)
             if(!instance.get())
                 return OS1_ERR_NO_MEMORY;
             const long status = descriptor_install(
-                child->descriptors, instance.get(), kDirectoryRights, 0, fd, kNamespaceCeiling);
+                child->descriptors,
+                instance.get(),
+                kDirectoryRights | (fd == OS1_BOOT_ROOT_FD ? OS1_RIGHT_SYSTEM_CONTROL : 0),
+                0,
+                fd,
+                kNamespaceCeiling);
             if(status < 0)
                 return status;
         }

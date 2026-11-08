@@ -8,23 +8,84 @@
 extern "C"
 {
 #include "acpi.h"
+#if !defined(OS1_HOST_TEST)
+#include "acclib.h"
+#endif
 }
 
+#include "arch/x86_64/cpu/cpu.hpp"
+#include "console/console.hpp"
 #include "debug/debug.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/boot_mapping.hpp"
 #include "mm/kmem.hpp"
 #include "mm/virtual_memory.hpp"
+#include "platform/acpica_diagnostics.hpp"
 #include "platform/acpica_internal.hpp"
 #include "platform/state.hpp"
+#include "sync/smp.hpp"
 
 #if !defined(OS1_HOST_TEST)
 #include "arch/x86_64/cpu/io_port.hpp"
 #include "drivers/timer/tsc_clock.hpp"
 #endif
 
+#if defined(OS1_HOST_TEST)
+// Exercise the same bounded formatter as the kernel, not the host libc formatter.
+extern "C" int os1_acpica_vsnprintf(char*, size_t, const char*, va_list);
+#endif
+
 namespace
 {
+constexpr size_t kDiagnosticCapacity = 2048;
+Spinlock diagnostic_lock{"acpica-diagnostics"};
+const AcpicaDiagnosticCapture* diagnostic_scope;
+const void* diagnostic_thread;
+char diagnostic_bytes[kDiagnosticCapacity];
+size_t diagnostic_next, diagnostic_used;
+bool diagnostic_truncated;
+
+const void* current_diagnostic_thread()
+{
+    const auto* owner = cpu_cur();
+    return owner ? owner->current_thread : nullptr;
+}
+
+bool capture_printf(const char* format, va_list args)
+{
+    const AcpicaDiagnosticCapture* scope;
+    {
+        IrqSpinGuard guard(diagnostic_lock);
+        if(!diagnostic_scope || diagnostic_thread != current_diagnostic_thread())
+            return false;
+        scope = diagnostic_scope;
+    }
+    char chunk[256];
+#if defined(OS1_HOST_TEST)
+    const int length = os1_acpica_vsnprintf(chunk, sizeof(chunk), format, args);
+#else
+    const int length = vsnprintf(chunk, sizeof(chunk), format, args);
+#endif
+    if(length < 0)
+        return true;
+    const size_t size = static_cast<size_t>(length) < sizeof(chunk) ? static_cast<size_t>(length)
+                                                                    : sizeof(chunk) - 1;
+    IrqSpinGuard guard(diagnostic_lock);
+    if(diagnostic_scope != scope || diagnostic_thread != current_diagnostic_thread())
+        return true;
+    diagnostic_truncated |= static_cast<size_t>(length) >= sizeof(chunk);
+    for(size_t i = 0; i < size; ++i)
+    {
+        diagnostic_bytes[diagnostic_next] = chunk[i];
+        diagnostic_next = (diagnostic_next + 1) % kDiagnosticCapacity;
+        if(diagnostic_used < kDiagnosticCapacity)
+            ++diagnostic_used;
+        else
+            diagnostic_truncated = true;
+    }
+    return true;
+}
+
 struct AcpicaSemaphore
 {
     UINT32 max_units;
@@ -146,6 +207,62 @@ bool pci_config_physical_address(const ACPI_PCI_ID* pci_id,
     return false;
 }
 }  // namespace
+
+AcpicaDiagnosticCapture::AcpicaDiagnosticCapture(bool enabled)
+{
+    if(!enabled)
+        return;
+    IrqSpinGuard guard(diagnostic_lock);
+    if(diagnostic_scope)
+        return;
+    diagnostic_scope = this;
+    attached_ = true;
+    diagnostic_thread = current_diagnostic_thread();
+    diagnostic_next = diagnostic_used = 0;
+    diagnostic_truncated = false;
+}
+
+AcpicaDiagnosticCapture::~AcpicaDiagnosticCapture()
+{
+    if(!attached_)
+        return;
+    IrqSpinGuard guard(diagnostic_lock);
+    if(diagnostic_scope == this)
+        diagnostic_scope = nullptr;
+}
+
+void AcpicaDiagnosticCapture::report()
+{
+    if(!attached_)
+        return;
+    char snapshot[kDiagnosticCapacity];
+    size_t used;
+    bool truncated;
+    {
+        IrqSpinGuard guard(diagnostic_lock);
+        if(diagnostic_scope != this)
+            return;
+        diagnostic_scope = nullptr;
+        attached_ = false;
+        used = diagnostic_used;
+        truncated = diagnostic_truncated;
+        const size_t start = (diagnostic_next + kDiagnosticCapacity - used) % kDiagnosticCapacity;
+        for(size_t i = 0; i < used; ++i)
+            snapshot[i] = diagnostic_bytes[(start + i) % kDiagnosticCapacity];
+    }
+    if(!used)
+        return;
+    static const char heading[] = "acpica: shutdown diagnostics\n";
+    write_console_bytes(heading, sizeof(heading) - 1);
+    if(truncated)
+    {
+        static const char notice[] = "acpica: output truncated; retained text follows\n";
+        write_console_bytes(notice, sizeof(notice) - 1);
+    }
+    write_console_bytes(snapshot, used);
+    if(snapshot[used - 1] != '\n')
+        write_console_bytes("\n", 1);
+}
 
 extern "C"
 {
@@ -556,23 +673,18 @@ ACPI_STATUS AcpiOsEnterSleep(UINT8, UINT32, UINT32)
 
 void ACPI_INTERNAL_VAR_XFACE AcpiOsPrintf(const char* format, ...)
 {
-#if defined(OS1_HOST_TEST)
     va_list args;
     va_start(args, format);
-    vfprintf(stderr, format, args);
+    AcpiOsVprintf(format, args);
     va_end(args);
-#else
-    (void)format;
-#endif
 }
 
 void AcpiOsVprintf(const char* format, va_list args)
 {
+    if(!format || capture_printf(format, args))
+        return;
 #if defined(OS1_HOST_TEST)
     vfprintf(stderr, format, args);
-#else
-    (void)format;
-    (void)args;
 #endif
 }
 

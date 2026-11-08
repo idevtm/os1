@@ -52,7 +52,10 @@ cat /disk/note
 `verify` checks every byte and the exact file length.
 This utility is absent from the initrd. Both its metadata reads and executable snapshot come from disk.
 `sync` synchronizes the entire mounted filesystem.
-Run it before stopping QEMU after shell writes.
+Use `shutdown` or `reboot` for a controlled transition.
+The shell now synchronizes commands that can write before it returns to the prompt.
+Explicit `sync` remains available for program writes and scripts.
+Killing QEMU during a command can still leave the volume unclean.
 
 ## Supported disk profile
 

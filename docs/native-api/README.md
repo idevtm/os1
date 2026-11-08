@@ -40,6 +40,7 @@ Documents can contain proposals after promotion, provided their scope and status
 
 | Capability | Current contract |
 | --- | --- |
+| System synchronization and power control | [SystemControl ABI](abi/system-control-abi.md) |
 | Filesystem timestamps and current-time mutation | [Timestamp ABI](abi/filesystem-times-abi.md) |
 | Filesystem metadata, space accounting, and guarded traversal | [Metadata and traversal ABI](abi/filesystem-metadata-abi.md) |
 | Typed environment, rooted navigation, and same-filesystem moves | [Startup and namespace extension](abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension) |

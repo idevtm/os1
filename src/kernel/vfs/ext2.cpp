@@ -17,9 +17,11 @@ struct DiskFs
     uint64_t start, sectors;
     volatile bool busy;
     uint32_t references, nodes;
+    volatile bool frozen;
     uint64_t cookie, identity;
     bool seen[ext2::max_inodes + 1];
 };
+DiskFs* mounted_disk;
 struct DiskNode : VfsNode
 {
     DiskFs* disk;
@@ -34,6 +36,11 @@ struct Guard
     {
         bool expected = false;
         held = atomic_compare_exchange_strong(&fs.busy, &expected, true);
+        if(held && atomic_load_acquire(&fs.frozen))
+        {
+            atomic_store_release(&fs.busy, false);
+            held = false;
+        }
     }
     ~Guard()
     {
@@ -93,7 +100,11 @@ void destroy(NativeObject* object)
     }
     kfree(n);
     if(__atomic_sub_fetch(&fs->references, 1u, __ATOMIC_ACQ_REL) == 0)
+    {
+        if(mounted_disk == fs)
+            mounted_disk = nullptr;
         kfree(fs);
+    }
 }
 extern const VfsOperations operations;
 DiskNode* node(DiskFs& fs,
@@ -709,5 +720,28 @@ long ext2_mount(NativeObject* root, BlockDevice& device)
     }
     mount->next = static_cast<VfsNode*>(root)->children;
     static_cast<VfsNode*>(root)->children = mount;
+    mounted_disk = fs;
     return 0;
+}
+
+long ext2_system_sync(bool freeze)
+{
+    if(!mounted_disk)
+        return 0;
+    Guard guard(*mounted_disk);
+    if(!guard.held)
+        return OS1_ERR_WOULD_BLOCK;
+    auto& volume = mounted_disk->volume;
+    // Clean command boundaries require no extra device flush.
+    long status = volume.failed ? OS1_ERR_IO : (volume.dirty || freeze ? volume.sync() : 0);
+    if(status == 0 && freeze)
+        atomic_store_release(&mounted_disk->frozen, true);
+    return status;
+}
+void ext2_system_thaw()
+{
+    if(!mounted_disk)
+        return;
+    // Only the serialized system transition can thaw; no volume data changes here.
+    atomic_store_release(&mounted_disk->frozen, false);
 }

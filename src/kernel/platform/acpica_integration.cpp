@@ -1,4 +1,5 @@
 #include "platform/acpica_integration.hpp"
+#include "platform/acpica_ec.hpp"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -303,6 +304,7 @@ void reset_state_internal()
         AcpiTbTerminate();
     }
 
+    acpica_ec_reset();
     clear_table_array();
     g_acpica_state = {};
     g_acpica_state.last_status = kStatusOk;

@@ -31,3 +31,14 @@ foreach(component_dir IN LISTS OS1_ACPICA_COMPONENT_DIRS)
 endforeach()
 list(FILTER OS1_ACPICA_SOURCES EXCLUDE REGEX ".*/rsdump(info)?\\.c$")
 list(SORT OS1_ACPICA_SOURCES)
+
+# Keep detailed region and method failures without exceeding the BIOS kernel slot.
+# Both host and kernel builds use this profile; upstream sources remain unchanged.
+foreach(diagnostic_source
+    events/evregion.c
+    parser/psparse.c
+    utilities/uterror.c
+    utilities/utxferror.c)
+  set_property(SOURCE "${OS1_ACPICA_ROOT}/source/components/${diagnostic_source}"
+    APPEND PROPERTY COMPILE_DEFINITIONS OS1_ACPICA_ERROR_DIAGNOSTICS=1)
+endforeach()

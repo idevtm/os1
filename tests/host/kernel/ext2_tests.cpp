@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <os1/system.h>
 
 #include <array>
 #include <cstring>
@@ -11,6 +12,7 @@
 #include "fs/ext2.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
+#include "platform/system_control.hpp"
 #include "storage/block_device.hpp"
 #include "support/physical_memory.hpp"
 #include "vfs/ext2.hpp"
@@ -73,7 +75,7 @@ struct Disk
         else if(ok && r.operation == BlockOperation::Write)
             std::memcpy(d.bytes.data() + at, r.buffer, count);
         else
-            ok = r.operation == BlockOperation::Flush;
+            ok = r.operation == BlockOperation::Flush && !d.fail_flush;
         block_request_complete(
             r, ok ? BlockRequestStatus::Success : BlockRequestStatus::Invalid, ok ? count : 0);
         return ok;
@@ -675,4 +677,44 @@ TEST_F(Ext2, NamespaceChangesAdvanceParentAndObjectTimes)
     ext2::Inode persisted{};
     ASSERT_EQ(0, reload->inode_read(directory_number, persisted));
     EXPECT_EQ(ext2::u32(persisted.bytes + 16), 1700000003u);
+}
+
+void host_console_output_clear();
+const std::string& host_console_output();
+
+TEST_F(Ext2, SystemSyncFreezesWritesAndCanThawAfterFailedTransition)
+{
+    os1::host_test::PhysicalMemoryArena arena{16 * 1024 * 1024};
+    PageFrameContainer frames;
+    std::array<BootMemoryRegion, 1> regions{{{0, arena.size(), BootMemoryType::Usable, 0}}};
+    ASSERT_TRUE(frames.initialize(regions, 0x300000, kPageFrameBitmapQwordLimit));
+    kmem_init(frames);
+    VfsNode root_node{};
+    root_node.kind = OS1_OBJECT_DIRECTORY;
+    auto device = disk.device();
+    ASSERT_EQ(0, ext2_mount(&root_node, device));
+    auto* mount = root_node.children;
+    OpenInstance* opened = nullptr;
+    ASSERT_EQ(0, mount->operations->create(mount, "lifecycle", 9, OS1_OBJECT_FILE, opened));
+    instance_release(opened);
+    EXPECT_EQ(2, ext2::u16(disk.bytes.data() + start + 1082));
+    ASSERT_EQ(0, ext2_system_sync(true));
+    EXPECT_EQ(1, ext2::u16(disk.bytes.data() + start + 1082));
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, mount->operations->remove(mount, "lifecycle", 9, 0));
+    ext2_system_thaw();
+    host_console_output_clear();
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, system_control(OS1_SYSTEM_SHUTDOWN));
+    EXPECT_EQ("system: shutdown stage=acpi-tables detail=not-initialized\n", host_console_output());
+    EXPECT_EQ(0, mount->operations->remove(mount, "lifecycle", 9, 0));
+    EXPECT_EQ(2, ext2::u16(disk.bytes.data() + start + 1082));
+    disk.fail_flush = true;
+    host_console_output_clear();
+    EXPECT_EQ(OS1_ERR_IO, system_control(OS1_SYSTEM_SHUTDOWN));
+    EXPECT_EQ("system: shutdown stage=storage-sync detail=failed\n", host_console_output());
+    host_console_output_clear();
+    EXPECT_EQ(OS1_ERR_IO, system_control(OS1_SYSTEM_REBOOT));
+    EXPECT_EQ("system: reboot stage=storage-sync detail=failed\n", host_console_output());
+    EXPECT_EQ(2, ext2::u16(disk.bytes.data() + start + 1082));
+    object_release(mount);
+    EXPECT_EQ(0, ext2_system_sync(false));
 }

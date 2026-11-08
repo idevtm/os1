@@ -1,10 +1,13 @@
 #include "ipc/kernel_provider.hpp"
 
 #include <os1/console.h>
+#include <os1/system.h>
 
 #include "console/console.hpp"
 #include "console/console_input.hpp"
+#include "fs/initrd.hpp"
 #include "mm/kmem.hpp"
+#include "platform/system_control.hpp"
 #include "sync/atomic.hpp"
 #include "util/memory.h"
 #include "vfs/filesystem.hpp"
@@ -568,6 +571,27 @@ void invoke_file(OpenInstance& source,
     }
     result.application_status = status;
 }
+bool system_root(const NativeObject* object)
+{
+    return object == initrd_namespace_root();
+}
+void invoke_system(OpenInstance&,
+                   uint32_t rights,
+                   uint32_t,
+                   const os1_ipc_message& request,
+                   os1_ipc_result& result,
+                   DescriptorEntry&)
+{
+    result.application_status = !(rights & OS1_RIGHT_SYSTEM_CONTROL) ? OS1_ERR_ACCESS
+                                : request.payload_bytes ? OS1_ERR_INVALID
+                                                        : system_control(request.member);
+}
+const KernelProvider system_provider{OS1_SYSTEM_INTERFACE_ID,
+                                     1,
+                                     OS1_OBJECT_DIRECTORY,
+                                     OS1_RIGHT_SYSTEM_CONTROL,
+                                     system_root,
+                                     invoke_system};
 const KernelProvider directory{OS1_DIRECTORY_INTERFACE_ID,
                                1,
                                OS1_OBJECT_DIRECTORY,
@@ -591,7 +615,8 @@ const KernelProvider console{OS1_CONSOLE_INTERFACE_ID,
 }  // namespace
 const KernelProvider* kernel_provider(uint64_t id, uint32_t version)
 {
-    const KernelProvider* providers[] = {&console, &input_session, &directory, &file};
+    const KernelProvider* providers[] = {
+        &console, &input_session, &directory, &file, &system_provider};
     for(auto* provider : providers)
         if(id == provider->interface_id && version == provider->interface_version)
             return provider;

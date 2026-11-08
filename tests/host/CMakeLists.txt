@@ -27,9 +27,9 @@ set(OS1_HOST_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 include("${OS1_REPO_ROOT}/cmake/acpica_sources.cmake")
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
-set(OS1_INITRD_LOAD_ADDRESS 0x72000)
+set(OS1_INITRD_LOAD_ADDRESS 0x76000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
-set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x192000)
+set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x194000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
 set(OS1_KERNEL_SHIM_VIRTUAL_BASE 0xFFFFFFFF90000000)
 set(OS1_DIRECT_MAP_BASE 0xFFFF800000000000)
@@ -85,6 +85,9 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/buffer/buffer.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/kernel_provider.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/platform/system_control.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/platform/system_power.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/platform/acpica_ec.cpp"
   support/cpu_stubs.cpp
   support/console_input_stub.cpp
   "${OS1_REPO_ROOT}/src/kernel/vfs/initrd.cpp"
