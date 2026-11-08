@@ -1,3 +1,4 @@
+#include "debug/log.hpp"
 // Shared kernel entry and bring-up sequencing. Boot-frontends normalize their
 // native firmware/bootloader state into BootInfo, then both paths arrive here.
 #include <stdbool.h>
@@ -580,6 +581,8 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     g_kernel_direct_map_ready = true;
     page_frames.enable_direct_map_access();
     kmem_init(page_frames);
+    diagnostic_log::initialize(boot_info_has_option(*g_boot_info, "os1.log=diagnostic") ||
+                               boot_info_has_option(*g_boot_info, "os1.bootdiag"));
     g_cpu_boot = kernel_physical_pointer<cpu>((uint64_t)g_cpu_boot);
     // `cpu_cur()` reads the self-pointer through GS, so rebind it before the
     // first direct-map `cpu_init()` reloads descriptor state.

@@ -145,6 +145,7 @@ set(KERNEL_DEBUG_SOURCES
   debug/bootlog.cpp
   debug/debug.cpp
   debug/event_ring.cpp
+  debug/log.cpp
 )
 
 set(KERNEL_UTIL_SOURCES

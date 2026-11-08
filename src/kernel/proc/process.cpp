@@ -1,3 +1,4 @@
+#include "debug/log.hpp"
 // Kmem-backed process-registry implementation. This file owns process IDs,
 // parent/child metadata, address-space ownership, and process reaping once
 // threads are gone.
@@ -272,6 +273,7 @@ bool reap_process(Process* process, PageFrameContainer& frames)
         unlink_process(process);
     }
 
+    diagnostic_log::cleanup(process);
     buffer_process_cleanup(frames, process);
     if((0 != cr3_to_destroy) && !keep_kernel_process)
     {

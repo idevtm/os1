@@ -4,6 +4,7 @@
 #pragma once
 
 #include <os1/ipc.h>
+#include <os1/log.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -113,6 +114,8 @@ struct Thread
     cpu* run_queue_cpu = nullptr;
     uint64_t affinity_mask = ~0ull;
     uint64_t last_migration_tick = 0;
+    os1_log_record log_trace{};
+    bool log_pending = false;
 };
 
 #define THREAD_STATIC_ASSERT(name, expr) typedef char thread_static_assert_##name[(expr) ? 1 : -1]

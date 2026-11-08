@@ -24,4 +24,5 @@ enum
     os1_sys_resource = 10,
     os1_sys_launch = 11,
     os1_sys_ipc = 12,
+    os1_sys_log = 13,
 };

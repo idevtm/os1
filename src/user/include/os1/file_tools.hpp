@@ -286,7 +286,7 @@ inline void touch(size_t argc, char** argv)
         }
     }
 }
-inline void write_command(size_t argc, char** argv)
+inline bool write_command(size_t argc, char** argv)
 {
     Mode mode = Mode::Exclusive;
     size_t path = 1;
@@ -303,13 +303,13 @@ inline void write_command(size_t argc, char** argv)
     if(argc != path + 1)
     {
         message("usage: write [--append|--replace] <path>\n");
-        return;
+        return false;
     }
     Handle file(open_file(argv[path], mode));
     if(file.fd < 0)
     {
         message("write: cannot open file (existing files need --replace or --append)\n");
-        return;
+        return false;
     }
     message("write: enter text; . or Ctrl-D ends, .. enters a dot line\n");
     Reader reader;
@@ -323,7 +323,7 @@ inline void write_command(size_t argc, char** argv)
             failed = true;
             message("write: input failed; file may contain earlier lines\n");
             if(status != OS1_ERR_RANGE || line.eof)
-                return;
+                return false;
             continue;
         }
         if(dot(line))
@@ -338,6 +338,7 @@ inline void write_command(size_t argc, char** argv)
     }
     if(!failed)
         message("write: saved\n");
+    return !failed;
 }
 struct Streams
 {

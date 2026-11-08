@@ -1,8 +1,9 @@
 # Native API service roadmap
 
 This roadmap connects the implemented Native API to writable storage and device services.
-Current status baseline: `535ee54951b68c9858bf32b7577d4f121a64ab57`, reviewed on 2026-11-06.
+Original review baseline: `535ee54951b68c9858bf32b7577d4f121a64ab57`, reviewed on 2026-11-06.
 The [project review](../reviews/2026-11-06-review.md) records evidence and remaining risks.
+The 2026-11-08 status update includes merged PRs 35–40 and the proposed context and diagnostic work below.
 Milestone numbers below retain their original design order; they do not imply unfinished storage implementation.
 The user selected an in-memory filesystem at `/tmp` and kernel-resident hardware drivers for these milestones.
 Console v1 and [Directory/File v1](abi/tmpfs-abi.md) now have implemented ABI records.
@@ -69,7 +70,8 @@ The [hierarchy proposal](object-hierarchy.md) records roots, environment inherit
 The [shell command proposal](../shell/object-commands.md) records separate syntax choices and short bindings.
 The accepted [file utility profile](../shell/file-utilities.md) stages basic tools, recursive/search/metadata tools, then deferred permissions and links.
 The [first stage](../shell/typed-context.md) implements native rooted lookup, retained cwd, and same-filesystem moves.
-Recursive helpers and metadata extensions remain later work.
+Metadata, traversal, recursive operations, text utilities, the pager, timestamps, and system lifecycle control are now implemented.
+Permissions and links remain deferred.
 
 | Stage | Scope |
 | --- | --- |
@@ -87,7 +89,8 @@ Existing service and hardware work does not require a complete reflective shell.
 
 The first kernel-hosted adapter now exposes [Console v1](abi/kernel-console-abi.md).
 It binds existing console grants and dispatches copied requests through one bounded worker queue.
-General service discovery, kernel Buffer borrowing, and broader lifecycle control remain planned.
+General service discovery, kernel Buffer borrowing, and service supervision remain planned.
+System synchronization, shutdown, reboot, and top-level shell restart are implemented.
 Keep hardware drivers in the kernel, as selected by the user.
 Native object interfaces describe the public boundary; they do not require a process boundary for every driver.
 Existing user providers retain their current transport.
@@ -312,7 +315,7 @@ This table records priority, acceptance, and dependencies without assigning new 
 | Order | Work | Acceptance | Dependency |
 | --- | --- | --- | --- |
 | 1 | Physical update preservation | An existing user file survives boot-only and program-only updates, synchronization, and reboot; updated code also runs | Existing managed USB tooling; record image hash, disk identity, commands, and results |
-| 2 | Minimal initrd and disk programs: implemented | Recovery and disk lookup checks passed; retain physical update acceptance | Typed context and configurable search are implemented; broader utility stages remain |
+| 2 | Minimal initrd and disk programs: implemented | Recovery and disk lookup checks passed; retain physical update acceptance | Typed context and configurable search are implemented; permissions and links remain deferred |
 | 3 | Native keyboard/mouse objects | Two clients receive future events; unsubscribe, overflow recovery, removal, and console typing work | Input protocol and kernel adapter event support; controller additions follow observed hardware needs |
 | 4 | Service discovery and lifecycle | Startup grants a scoped service directory; lookup attenuates authority; shutdown/restart outcomes remain explicit | Existing capabilities and sessions; prove supported connection topology |
 | 5 | Kernel bulk I/O and BlockDevice | A real file/block client uses retained Buffer ranges; failure ends access before ownership returns | Internal kernel borrower lifetime; DMA pinning/quiescence only where device access requires it |
@@ -321,7 +324,7 @@ This table records priority, acceptance, and dependencies without assigning new 
 | 8 | Networking and remote sessions | IP/UDP/TCP, addressing, DNS, sockets, then PTYs and authenticated SSH sessions | Packet ownership, operation-specific cancellation, entropy/cryptography, and security policy |
 
 Hardware checks can run alongside design and implementation.
-Retest the scheduler correction on a fresh physical image and retain its image identity.
+Retest the scheduler correction and the revised BIOS staging layout on physical hardware; retain each image identity.
 Physical unplug, interrupted updates, and broader USB topology need separate qualification records.
 The current ext2 profile has no journal; successful ordinary writes alone do not establish power-loss durability.
 
@@ -329,6 +332,24 @@ Keep drivers in the kernel for these milestones.
 Use `snake_case` for methods, properties, and events; types and interfaces may use `UpperCamelCase`.
 Class code retains creation policy; clients receive no fresh/shared-instance override.
 Input events remain volatile broadcast with explicit unsubscribe and state recovery after loss.
+
+## Context discovery and diagnostics additions
+
+The user requested live context discovery and staged kernel/shell logs on 2026-11-08.
+The [design proposal](context-diagnostics.md) records options and acceptance criteria; it assigns no new ABI.
+
+| Addition | Required direction | Proposed first scope |
+| --- | --- | --- |
+| Live context discovery | Inspect available `os` and `process` members without object creation | Fixed authorized descriptions, bounded child enumeration, and shell completion |
+| Kernel diagnostics | Capture system, API, and device records in bounded memory; failures must not stop the system | Structured records, query filters, explicit loss, and command correlation |
+| Shell history | Keep timestamped command records in a shell-owned memory ring | Command start/result records and optional filters |
+| Staged exports | Kernel: memory, `/tmp`, USB; shell serialization: `/tmp`, USB | Bounded files under `/tmp/log` and `/disk/log`; independent export failures |
+| Hardware automation | Correlate commands, kernel work, and device observations | Export build identity, boot identity, clock quality, records, and loss evidence |
+
+The [first memory logging slice](abi/memory-log-abi.md) implements bounded capture and command correlation.
+Discovery, completion, and staged persistence remain planned.
+The existing native input milestone and hardware acceptance remain active.
+Keep full API tracing configurable until its overhead and retention costs are measured.
 
 ## Immediate implementation slice
 

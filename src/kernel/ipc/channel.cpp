@@ -6,6 +6,7 @@
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "buffer/buffer.hpp"
 #include "console/console_input.hpp"
+#include "debug/log.hpp"
 #include "ipc/kernel_provider.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
@@ -71,6 +72,7 @@ struct Operation : NativeObject
     Capabilities request_caps, result_caps;
     os1_ipc_message request;
     os1_ipc_result result;
+    os1_log_record log_origin;
 };
 struct Subscription : NativeObject
 {
@@ -182,11 +184,15 @@ void finish_locked(Operation* op, int32_t transport)
     op->result.request_id = op->request.request_id;
     op->result.transport_status = transport;
     op->complete = true;
+    if(transport)
+        diagnostic_log::ipc_end(op->log_origin, transport);
 }
 void destroy_operation(NativeObject* object)
 {
     auto* op = static_cast<Operation*>(object);
     auto* c = op->connection;
+    if(!op->complete)
+        diagnostic_log::ipc_end(op->log_origin, OS1_ERR_CLOSED);
     {
         IrqSpinGuard guard(waiters.lock);
         if(op->counted)
@@ -944,6 +950,8 @@ long submit(
             detach_locked(op);
         else
         {
+            diagnostic_log::ipc_begin(
+                op->log_origin, thread->process, request.interface_id, request.member);
             op->submitting = false;
             if(c->kernel)
             {
@@ -1117,6 +1125,7 @@ long reply(
         completed->outputs = outputs;
         completed->retiring = false;
         completed->complete = true;
+        diagnostic_log::ipc_end(completed->log_origin, result.application_status);
         detach_locked(completed);
         signal_locked();
     }
@@ -1461,6 +1470,7 @@ bool ipc_stop_requested(const Thread* thread)
 }
 void ipc_timer_tick(uint64_t elapsed_ns)
 {
+    diagnostic_log::tick(elapsed_ns);
     {
         IrqSpinGuard guard(waiters.lock);
         monotonic_ns =
@@ -1532,6 +1542,7 @@ bool ipc_run_kernel_request()
         }
         else
             op->result.application_status = OS1_ERR_INVALID;
+        diagnostic_log::ipc_end(op->log_origin, op->result.application_status);
         if(!op->result.application_status && output.instance)
         {
             op->result_caps.count = 1;

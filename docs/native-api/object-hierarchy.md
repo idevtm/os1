@@ -133,6 +133,7 @@ Offline ELF descriptions and runtime descriptions should use compatible type and
 Metadata describes behavior; it does not contain an executable method implementation.
 The [ELF profile](elf-interface.md) remains authoritative for implemented offline metadata.
 General runtime reflection is not implemented.
+The [context diagnostics proposal](context-diagnostics.md#live-context) details live-only enumeration and shell completion without activation.
 
 ## Typed process environment
 

@@ -51,7 +51,7 @@ OS1_LOCKED_BY(g_console_input_lock) bool g_key_overflow = false;
 
 void echo_byte(char c)
 {
-    debug.write(c);
+    debug.write_unmirrored(c);
     if(active_terminal)
     {
         active_terminal->write(c);
@@ -60,9 +60,9 @@ void echo_byte(char c)
 
 void echo_backspace()
 {
-    debug.write('\b');
-    debug.write(' ');
-    debug.write('\b');
+    debug.write_unmirrored('\b');
+    debug.write_unmirrored(' ');
+    debug.write_unmirrored('\b');
     if(active_terminal)
     {
         active_terminal->write('\b');
