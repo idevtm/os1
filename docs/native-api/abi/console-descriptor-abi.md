@@ -5,7 +5,7 @@ The [native contract](../object-contract.md) defines the broader model.
 The [VFS/startup ABI](initrd-vfs-abi.md) extends this foundation.
 
 The [temporary filesystem ABI](tmpfs-abi.md) adds CREATE=256, REMOVE=512, and RENAME=1024.
-The [timestamp ABI](filesystem-times-abi.md) adds SET_TIMES=2048; ALL is 4095.
+The [timestamp ABI](filesystem-times-abi.md) adds SET_TIMES=2048; ALL is 8191.
 [Copied IPC](copied-ipc-abi.md) implements hosted calls; [Console IPC](kernel-console-abi.md) adds kernel service dispatch.
 See the [implementation record](../../archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) for the original plan and validation.
 
@@ -111,3 +111,5 @@ A live owner suppresses canonical delivery and echo.
 Canonical descriptor readers wait until the session releases input and new canonical data becomes available.
 Acquisition cannot displace pending canonical data or an active read reservation.
 Existing descriptor rights and read records remain unchanged.
+
+The [SystemControl ABI](system-control-abi.md) adds SYSTEM_CONTROL=4096. Filesystem descendant ceilings do not include this right.

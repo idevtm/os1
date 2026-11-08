@@ -2,10 +2,15 @@
 
 int main(int, char**)
 {
-    static const char kShellPath[] = "/bin/sh";
-    static const char kExecFailed[] = "[user/init] exec /bin/sh failed\n";
-
-    const long result = os1::user::exec(kShellPath);
-    os1::user::write(1, kExecFailed, sizeof(kExecFailed) - 1);
-    return (result < 0) ? 1 : (int)result;
+    for(;;)
+    {
+        long child = os1::user::spawn("/bin/sh");
+        int status = 0;
+        if(child >= 0 && os1::user::waitpid(child, &status) == child)
+            continue;
+        static const char error[] = "init: shell restart failed; retrying\n";
+        os1::user::write(2, error, sizeof(error) - 1);
+        for(unsigned i = 0; i < 10000; ++i)
+            os1::user::yield();
+    }
 }

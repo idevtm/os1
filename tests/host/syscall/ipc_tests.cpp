@@ -18,6 +18,7 @@ extern int host_console_session_allocation_budget;
 #endif
 #include <gtest/gtest.h>
 #include <os1/console.h>
+#include <os1/system.h>
 
 #include <array>
 #include <atomic>
@@ -25,6 +26,8 @@ extern int host_console_session_allocation_budget;
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "ipc/kernel_provider.hpp"
 extern void (*host_buffer_before_prepare)();
 namespace
 {
@@ -2360,4 +2363,28 @@ TEST_F(KernelConsole, WaitManyPinsCompletionAcrossDescriptorClose)
     EXPECT_EQ(ThreadState::Ready, thread->state);
     EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
     EXPECT_EQ(0u, thread->io_pins);
+}
+
+TEST(SystemControl, ProviderRejectsAuthorityAndMalformedRequestsBeforeTransition)
+{
+    const auto* provider = kernel_provider(OS1_SYSTEM_INTERFACE_ID, 1);
+    ASSERT_NE(nullptr, provider);
+    EXPECT_EQ(nullptr, kernel_provider(OS1_SYSTEM_INTERFACE_ID, 2));
+    EXPECT_EQ(OS1_RIGHT_SYSTEM_CONTROL, provider->allowed_rights);
+    NativeObject unrelated{};
+    EXPECT_FALSE(provider->accepts(&unrelated));
+    OpenInstance source{};
+    DescriptorEntry output{};
+    os1_ipc_message request{};
+    os1_ipc_result result{};
+    request.member = OS1_SYSTEM_SHUTDOWN;
+    provider->invoke(source, OS1_RIGHT_WRITE, 0, request, result, output);
+    EXPECT_EQ(OS1_ERR_ACCESS, result.application_status);
+    request.payload_bytes = 1;
+    provider->invoke(source, OS1_RIGHT_SYSTEM_CONTROL, 0, request, result, output);
+    EXPECT_EQ(OS1_ERR_INVALID, result.application_status);
+    request.payload_bytes = 0;
+    request.member = 99;
+    provider->invoke(source, OS1_RIGHT_SYSTEM_CONTROL, 0, request, result, output);
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, result.application_status);
 }

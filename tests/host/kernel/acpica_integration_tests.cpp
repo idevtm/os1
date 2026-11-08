@@ -4,6 +4,7 @@
 #include "mm/virtual_memory.hpp"
 #include "platform/acpica_integration.hpp"
 #include "platform/state.hpp"
+#include "platform/system_power.hpp"
 #include "support/physical_memory.hpp"
 
 extern "C"
@@ -426,4 +427,20 @@ TEST_F(AcpicaIntegration, OslReadsAndWritesPublishedPciConfigSpace)
     pci_id.Bus = 1;
     EXPECT_EQ(AE_NOT_FOUND, AcpiOsReadPciConfiguration(&pci_id, 0x10, &value, 32));
     EXPECT_EQ(AE_NOT_FOUND, AcpiOsWritePciConfiguration(&pci_id, 0x10, 0x11u, 32));
+}
+
+TEST_F(AcpicaIntegration, ReducedHardwareShutdownIsRejectedWithoutEnteringSleep)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    AcpicaScopedReset cleanup;
+    build_tables(arena, true, false);
+    auto* fadt = reinterpret_cast<TestFadt*>(arena.data() + kFadtPhysical);
+    fadt->flags = ACPI_FADT_HW_REDUCED;
+    finalize_sdt(fadt->header);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    EXPECT_FALSE(acpica_prepare_shutdown());
+    EXPECT_FALSE(acpica_prepare_shutdown());  // Failure does not enter a polling sleep loop.
 }

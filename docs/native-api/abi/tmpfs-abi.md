@@ -26,7 +26,7 @@ Kernel interface descriptions are compiled contracts; no separate filesystem ELF
 | File | READ, WRITE, SEEK, INSPECT, DELEGATE, SET_TIMES |
 
 Mutation rights are CREATE=256, REMOVE=512, RENAME=1024, and SET_TIMES=2048.
-`OS1_RIGHT_ALL` is 4095.
+`OS1_RIGHT_ALL` is 8191.
 The [timestamp ABI](filesystem-times-abi.md) defines additional `times` and `set_times` members.
 Existing rights keep their values. Initrd objects do not gain mutation rights.
 Trusted root/cwd grants include writable rights in their descendant ceilings; their direct initrd rights remain unchanged.
@@ -221,3 +221,5 @@ Ext2 reports IO (-23) for device failures and refuses further disk operations af
 
 The [metadata ABI](filesystem-metadata-abi.md) adds File and Directory `metadata` and `space` methods.
 Existing `info` layouts and method IDs remain unchanged.
+
+The [SystemControl ABI](system-control-abi.md) adds SYSTEM_CONTROL=4096. Filesystem descendant ceilings do not include this right.

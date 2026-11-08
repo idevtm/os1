@@ -1,4 +1,5 @@
 #include <os1/file_tools.hpp>
+#include <os1/system.hpp>
 #include <os1/vfs.hpp>
 
 #include "tmpfs_check.hpp"
@@ -27,13 +28,72 @@ bool equal(const char* a, const char* b)
 
 int main(int argc, char** argv)
 {
+    if(argc == 2 && equal(argv[1], "system"))
+    {
+        os1_resource_info info{};
+        os1_file_info detail{};
+        CHECK(query(root(), &info) == 0 && file_info(root(), &detail) == 0, "system root info");
+        CHECK(open("/", OS1_RIGHT_SYSTEM_CONTROL) == OS1_ERR_ACCESS,
+              "power not recovered by lookup");
+        files::Handle limited(duplicate_scoped(
+            root(), info.rights & ~OS1_RIGHT_SYSTEM_CONTROL, detail.descendant_rights));
+        CHECK(limited.fd >= 0, "limited system root");
+        const auto* original = startup_record;
+        os1_startup_record attenuated = *original;
+        attenuated.root_fd = limited.fd;
+        startup_record = &attenuated;
+        CHECK(system_control(OS1_SYSTEM_SHUTDOWN) == OS1_ERR_ACCESS, "shutdown authority denied");
+        CHECK(system_control(OS1_SYSTEM_REBOOT) == OS1_ERR_ACCESS, "reboot authority denied");
+        startup_record = original;
+        files::Handle script(files::open_file("/tmp/system-script", files::Mode::Replace));
+        CHECK(script.fd >= 0, "system script");
+        constexpr char text[] = "echo \"no inspect sync\" > \"/disk/no-inspect\"\n";
+        CHECK(write(script.fd, text, sizeof(text) - 1) == sizeof(text) - 1, "system script write");
+        files::Handle shell(open("/bin/sh", OS1_RIGHT_READ | OS1_RIGHT_EXECUTE));
+        CHECK(shell.fd >= 0, "system shell");
+        os1_launch_request request{};
+        request.version = OS1_STARTUP_VERSION;
+        request.size = sizeof(request);
+        request.startup.version = OS1_STARTUP_VERSION;
+        request.startup.size = sizeof(request.startup);
+        request.startup.root_fd = root();
+        request.startup.cwd_fd = cwd();
+        request.startup.argc = 2;
+        constexpr char arguments[] = "/bin/sh\0/tmp/system-script";
+        request.startup.string_bytes = sizeof(arguments);
+        request.startup.argv[1] = 8;
+        for(unsigned i = 0; i < sizeof(arguments); ++i)
+            request.startup.strings[i] = arguments[i];
+        request.grant_count = 5;
+        for(int fd = 0; fd < 3; ++fd)
+        {
+            os1_resource_info stream{};
+            CHECK(query(fd, &stream) == 0, "system stream info");
+            request.grants[fd] = {fd, fd, stream.rights, 0, 0, 0};
+        }
+        request.grants[3] = {
+            root(), root(), info.rights & ~OS1_RIGHT_INSPECT, 0, detail.descendant_rights, 0};
+        os1_resource_info cwd_info{};
+        os1_file_info cwd_detail{};
+        CHECK(query(cwd(), &cwd_info) == 0 && file_info(cwd(), &cwd_detail) == 0,
+              "system cwd info");
+        request.grants[4] = {cwd(), cwd(), cwd_info.rights, 0, cwd_detail.descendant_rights, 0};
+        long child = launch(shell.fd, OS1_LAUNCH_SPAWN, request);
+        int status = -1;
+        CHECK(child > 0 && waitpid(child, &status) == child && status == 0, "no-inspect child");
+        constexpr char done[] = "[user/vfscheck] no-inspect child complete\n";
+        write(1, done, sizeof(done) - 1);
+        char input[2];
+        CHECK(read(0, input, sizeof(input)) > 0, "system check acknowledgement");
+        return 0;
+    }
     if(argc == 2 && equal(argv[1], "times"))
     {
         // Exercise the real user helpers with the complete previous ceiling.
         files::Handle limited(
             open("/",
                  OS1_RIGHT_LOOKUP | OS1_RIGHT_ENUMERATE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE,
-                 OS1_RIGHT_ALL & ~OS1_RIGHT_SET_TIMES));
+                 OS1_RIGHT_ALL & ~(OS1_RIGHT_SET_TIMES | OS1_RIGHT_SYSTEM_CONTROL)));
         CHECK(limited.fd >= 0, "time restricted root");
         os1_startup_record context = *startup_record;
         context.root_fd = limited.fd;

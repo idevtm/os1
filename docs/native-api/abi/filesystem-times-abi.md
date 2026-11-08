@@ -49,7 +49,7 @@ Explicit dates, birth time, and time-zone conversion remain deferred.
 | File | `times` | 10 | INSPECT | Empty | `os1_file_times` |
 | File | `set_times` | 11 | SET_TIMES | `os1_set_times` | Empty |
 
-`OS1_RIGHT_SET_TIMES` is bit 11, value 2048; `OS1_RIGHT_ALL` is 4095.
+`OS1_RIGHT_SET_TIMES` is bit 11, value 2048; `OS1_RIGHT_ALL` is 8191.
 Mutable objects support this right independently of content-write authority.
 Bindings capture selected authority; existing restricted bindings do not acquire it automatically.
 Ordinary file and directory helpers retain their previous rights requirements.
@@ -141,3 +141,5 @@ Unknown fields appear as `unsupported`.
 Quoted examples work in both interactive and strict script modes.
 Creation and timestamp mutation are separate operations.
 If mutation fails after creation, report failure and retain the created file.
+
+The [SystemControl ABI](system-control-abi.md) adds SYSTEM_CONTROL=4096. Filesystem descendant ceilings do not include this right.

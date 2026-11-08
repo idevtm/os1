@@ -16,7 +16,7 @@ a = p.parse_args()
 with tempfile.TemporaryDirectory(prefix='os1-usb-run-') as temporary:
     command = [a.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M',
                '-drive', f'if=none,id=data,format=raw,file={a.disk},cache=writeback',
-               '-serial', 'stdio', '-monitor', 'none', '-no-reboot']
+               '-serial', 'stdio', '-monitor', 'none']
     if a.controller == 'ehci':
         command += ['-device', 'usb-ehci,id=ehci', '-device', 'usb-storage,bus=ehci.0,drive=data']
     else:

@@ -1546,3 +1546,17 @@ The user adapter supplies native reads, writes, seeks, metadata, and access chec
 File input is retained before redirection to prevent source truncation through the output path.
 Seekable files use bounded rereads; non-seekable inputs use one 64 KiB shell workspace with explicit limit errors.
 No new kernel service, syscall, IPC layout, or process is required.
+
+## System lifecycle
+
+The [SystemControl provider](native-api/abi/system-control-abi.md) uses the native kernel adapter for synchronization, shutdown, and reboot.
+
+```text
+shell -> SystemControl capability -> ext2 freeze and sync -> explicit firmware transition
+init -> shell child -> wait and reap -> fresh shell
+```
+
+Only the bootstrap root grant contains the new system-control right. Child launch can attenuate that right.
+Shutdown freezes ext2 admission before the final flush. Failed transitions reopen admission and report failure.
+Shell command completion synchronizes possible writes. Reads leave ext2 timestamps unchanged under the existing noatime policy.
+Init stays alive to supervise the primary shell. Nested shells retain ordinary child-process behavior.

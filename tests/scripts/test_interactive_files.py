@@ -112,9 +112,9 @@ def main():
         content('/tmp/copy', 'A > B\nsecond\n')
         assert b'redirection failed' in run('echo damage > /etc/motd')
         assert b'restored\n' in run("echo 'restored'")
-        send('cat > /tmp/eof\n')
+        send('cat > "/tmp/eof"\n')
         # cat has no prompt; its input echo provides a fresh synchronization point.
-        expect(b'cat > /tmp/eof\n')
+        expect(b'cat > "/tmp/eof"\n')
         send('from stdin\n')
         expect(b'from stdin\n')
         send(b'\x04')

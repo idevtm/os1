@@ -716,7 +716,6 @@ if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
       "virtio-blk-pci,drive=virtio_test,disable-legacy=on"
       -serial
       "file:${OS1_SERIAL_LOG}"
-      -no-reboot
       -d
       cpu_reset
       -d
@@ -755,8 +754,6 @@ if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
       stdio
       -display
       none
-      -no-reboot
-      -no-shutdown
     DEPENDS os1_image storage_create
     USES_TERMINAL
     VERBATIM
@@ -801,7 +798,6 @@ if(OS1_QEMU_EXECUTABLE)
       "virtio-blk-pci,drive=virtio_test,disable-legacy=on"
       -serial
       "file:${OS1_BIOS_SERIAL_LOG}"
-      -no-reboot
       -d
       cpu_reset
       -d
@@ -835,8 +831,6 @@ if(OS1_QEMU_EXECUTABLE)
       stdio
       -display
       none
-      -no-reboot
-      -no-shutdown
     DEPENDS os1_bios_image storage_create
     USES_TERMINAL
     VERBATIM
@@ -1840,6 +1834,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
       set(file_test_image "${OS1_RAW_IMAGE}")
       set(file_test_firmware)
     endif()
+    add_test(NAME os1_smoke_system_lifecycle_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_system_lifecycle.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --utility "${OS1_USER_DISKUTIL_ELF}" --manifest "${OS1_GENERATED_DIR}/storage-programs.json"
+        --log "${OS1_ARTIFACT_DIR}/smoke-system-lifecycle-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_system_lifecycle_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_system_lifecycle_${boot})
     add_test(NAME os1_smoke_typed_shell_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_typed_shell.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
@@ -1966,9 +1967,9 @@ if(OS1_QEMU_EXECUTABLE)
       -drive "format=raw,file=${OS1_RAW_IMAGE}"
       -drive "if=none,id=data,format=raw,file=${OS1_PERSISTENT_DISK},cache=writeback"
       -device virtio-blk-pci,drive=data,disable-legacy=on
-      -serial stdio -monitor none -no-reboot
+      -serial stdio -monitor none
     DEPENDS os1_bios_image storage_create USES_TERMINAL VERBATIM)
-  os1_register_menu_target(run_persistent_bios "BIOS with persistent ext2 storage" "Boot with /disk. Run /disk/diskutil sync before stopping QEMU.")
+  os1_register_menu_target(run_persistent_bios "BIOS with persistent ext2 storage" "Boot with /disk. Use shutdown or reboot for a synchronized transition.")
   if(OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
     add_custom_target(run_persistent
       COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_OVMF_VARS_TEMPLATE}" "${OS1_ARTIFACT_DIR}/persistent-vars.fd"
@@ -1978,7 +1979,7 @@ if(OS1_QEMU_EXECUTABLE)
         -cdrom "${OS1_ISO_IMAGE}"
         -drive "if=none,id=data,format=raw,file=${OS1_PERSISTENT_DISK},cache=writeback"
         -device virtio-blk-pci,drive=data,disable-legacy=on
-        -serial stdio -monitor none -no-reboot
+        -serial stdio -monitor none
       DEPENDS os1_image storage_create USES_TERMINAL VERBATIM)
     os1_register_menu_target(run_persistent "UEFI with persistent ext2 storage" "Boot with /disk. Keep files across launches and ordinary rebuilds.")
   endif()
