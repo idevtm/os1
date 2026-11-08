@@ -35,6 +35,18 @@ def main():
             return
         info = run('dmesg info', b'capacity_bytes=' + (b'1048576' if args.diagnostic else b'262144'))
         assert b'clock_resolution_ns=1000000' in info
+        run('touch "/tmp/log-times-file"')
+        run('mkdir "/tmp/log-times-dir"')
+        for path, interface, member in (
+                ('/tmp/log-times-file', b'46494c4530303031', 11),
+                ('/tmp/log-times-dir', b'4449523030303031', 13)):
+            run(f'touch "{path}"')
+            rows = run('history limit:3')
+            row = next(x for x in rows.splitlines() if b'text="touch' in x and path.encode() in x)
+            command = int(re.search(rb'command=(\d+)', row)[1])
+            records = run(f'dmesg command_id:{command} kind:5 limit:256')
+            assert any(interface in x.lower() and f'operation={member} '.encode() in x
+                       and b'status=0' in x for x in records.splitlines()), records
         run('logcheck', b'[user/logcheck] correlation authority history ok')
         run('echo "correlation sentinel"')
         rows = run('history limit:10', b'correlation sentinel')

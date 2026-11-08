@@ -105,7 +105,7 @@ Both firmware paths passed the corrected check; target advancement and persisten
 ### Comparable resource measurements
 
 The baseline revision is `146c0c84498ceba6159e945451dfbd533f98357f`.
-The candidate uses this branch's memory-log implementation; the kernel hash below identifies the measured binary.
+The candidate is revision `5a9bef74374c7ab0e2dcb81f02eb59d348cdd724`; the kernel hash below identifies the measured binary.
 Both builds use GCC 11.2.0, Debug configuration, `-Os`, LTO, and enabled kmem checks.
 The host runs macOS 26.6.2 on ARM64; QEMU 11.1.3 uses TCG, q35, four CPUs, and 128 MiB RAM.
 BIOS uses the project loader; UEFI uses Limine 11.4.0 and the Homebrew OVMF firmware.
@@ -174,3 +174,49 @@ Worst-case physical interrupt latency and physical-device capture contention are
 QEMU workload timings do not establish those properties; hardware qualification remains necessary.
 No physical-hardware result is claimed for this change.
 The complete ASD-STE100 Issue 9 standard and dictionary are unavailable; language review follows repository rules.
+
+## Pre-merge timestamp capture correction
+
+Review found that normal capture omitted successful File and Directory timestamp mutations.
+The correction includes both `set_times` members; successful timestamp reads remain excluded.
+
+```text
+touch existing file/directory -> set_times -> correlated IPC begin/completion records
+```
+
+The impact is limited to capture selection and regression coverage.
+Scope, boot layouts, authority, ABI, allocation, ownership, and synchronization remain unchanged.
+Two extra 256-byte records per successful timestamp update increase ring turnover without increasing its capacity.
+The normal-mode regression failed before the correction and passed afterward.
+Guest tests check actual file and directory updates through the provider, using their shell command identities.
+
+| Check | Result |
+| --- | --- |
+| `cmake --build build-host-tests -j 4` | Passed |
+| `ctest --test-dir build-host-tests --output-on-failure` | 523 passed in 12.31 seconds |
+| `cmake --build build -j 4` | Passed |
+| `ctest --test-dir build -R 'memory_logging\|timestamps' --output-on-failure` | Four UEFI/BIOS checks passed in 16.29 seconds |
+| Independent correction review | Original P2 resolved; no additional finding |
+
+The earlier CI run passed 522 host tests, 62 guest checks, and three keyboard diagnostic checks on `5a9bef7`.
+The PR tracks CI for the corrected revision separately.
+Logs for this correction use the `build/logging-evidence/pr41-` prefix.
+
+Resource comparisons use `5a9bef7` as baseline, with the same machine, firmware, compiler, settings, and three-trial workload described above.
+
+| Measurement | Before correction | After correction | Absolute change | Relative change |
+| --- | ---: | ---: | ---: | ---: |
+| Successful timestamp mutation records | 0 | 2 | +2 | Undefined: zero baseline |
+| Kernel ELF size | 555032 bytes | 555064 bytes | +32 bytes | +0.006% |
+| BIOS staged kernel size | 413952 bytes | 413952 bytes | 0 bytes | 0% |
+| UEFI image size | 4378624 bytes | 4378624 bytes | 0 bytes | 0% |
+| BIOS allocated physical memory | 3708 KiB | 3708 KiB | 0 KiB | 0% |
+| UEFI allocated physical memory | 21140 KiB | 21140 KiB | 0 KiB | 0% |
+| BIOS median 20-command time | 147.974 ms | 150.746 ms | +2.772 ms | +1.87% |
+| UEFI median 20-command time | 111.451 ms | 111.872 ms | +0.421 ms | +0.38% |
+
+Corrected BIOS trials were 159.506, 146.644, and 150.746 ms; UEFI trials were 68.686, 111.872, and 115.550 ms.
+These samples do not isolate capture overhead from emulator variability.
+The corrected kernel SHA-256 is `bfad0ba1803c161f288a6bf44b329370bc09c21a96edeabe6416389e4fe00fbe`.
+The corrected staged BIOS kernel SHA-256 is `5dd136371a7e25b00d4e175961d4eab8b47407a20375bc4ae5643c2105d8a25b`.
+The previously stated hardware and worst-case latency limits still apply.

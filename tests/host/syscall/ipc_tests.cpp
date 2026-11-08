@@ -20,6 +20,7 @@ extern int host_console_session_allocation_budget;
 #include <gtest/gtest.h>
 #include <os1/console.h>
 #include <os1/system.h>
+#include <os1/tmpfs.h>
 
 #include <array>
 #include <atomic>
@@ -2395,11 +2396,12 @@ namespace
 class LogIpc : public Ipc
 {
 protected:
+    bool diagnostic_mode = true;
     void SetUp() override
     {
         Ipc::SetUp();
         diagnostic_log::test_reset();
-        diagnostic_log::initialize(true);
+        diagnostic_log::initialize(diagnostic_mode);
     }
     void TearDown() override
     {
@@ -2416,6 +2418,44 @@ protected:
         return r;
     }
 };
+class NormalLogIpc : public LogIpc
+{
+protected:
+    void SetUp() override
+    {
+        diagnostic_mode = false;
+        LogIpc::SetUp();
+    }
+};
+TEST_F(NormalLogIpc, TimestampMutationsAreCapturedButReadsAreOmitted)
+{
+    const uint64_t interfaces[] = {OS1_FILE_INTERFACE_ID, OS1_DIRECTORY_INTERFACE_ID};
+    const uint32_t mutations[] = {OS1_FILE_SET_TIMES, OS1_DIRECTORY_SET_TIMES};
+    const uint32_t reads[] = {OS1_FILE_TIMES, OS1_DIRECTORY_TIMES};
+    for(unsigned i = 0; i < 2; ++i)
+    {
+        os1_log_query query{};
+        query.version = 1;
+        query.size = sizeof(query);
+        query.after = diagnostic_log::info().latest;
+        os1_log_record origin{}, record{};
+        diagnostic_log::ipc_begin(origin, thread->process, interfaces[i], mutations[i]);
+        diagnostic_log::ipc_end(origin, 0);
+        ASSERT_EQ(1, diagnostic_log::read(query, record));
+        EXPECT_EQ(OS1_LOG_IPC_BEGIN, record.kind);
+        EXPECT_EQ(interfaces[i], record.interface_id);
+        EXPECT_EQ(mutations[i], record.arg0);
+        query.after = record.sequence;
+        ASSERT_EQ(1, diagnostic_log::read(query, record));
+        EXPECT_EQ(OS1_LOG_IPC_END, record.kind);
+        EXPECT_EQ(origin.request_id, record.request_id);
+        EXPECT_EQ(0, record.status);
+        query.after = record.sequence;
+        diagnostic_log::ipc_begin(origin, thread->process, interfaces[i], reads[i]);
+        diagnostic_log::ipc_end(origin, 0);
+        EXPECT_EQ(0, diagnostic_log::read(query, record));
+    }
+}
 TEST_F(LogIpc, CommandsAreAssignedAndParentContextRestored)
 {
     auto* p = thread->process;

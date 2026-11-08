@@ -285,11 +285,12 @@ bool trace_ipc(const os1_log_record& r)
         return false;
     if(r.interface_id == OS1_FILE_INTERFACE_ID)
         return r.arg0 == OS1_FILE_WRITE || r.arg0 == OS1_FILE_APPEND ||
-               r.arg0 == OS1_FILE_TRUNCATE || r.arg0 == OS1_FILE_SYNC;
+               r.arg0 == OS1_FILE_TRUNCATE || r.arg0 == OS1_FILE_SYNC ||
+               r.arg0 == OS1_FILE_SET_TIMES;
     if(r.interface_id == OS1_DIRECTORY_INTERFACE_ID)
         return r.arg0 == OS1_DIRECTORY_CREATE || r.arg0 == OS1_DIRECTORY_REMOVE ||
                r.arg0 == OS1_DIRECTORY_RENAME || r.arg0 == OS1_DIRECTORY_REMOVE_TYPED ||
-               r.arg0 == OS1_DIRECTORY_SYNC;
+               r.arg0 == OS1_DIRECTORY_SYNC || r.arg0 == OS1_DIRECTORY_SET_TIMES;
     return true;  // Unknown service methods can mutate resources.
 }
 void ipc_begin(os1_log_record& r, Process* p, uint64_t interface_id, uint32_t member)
