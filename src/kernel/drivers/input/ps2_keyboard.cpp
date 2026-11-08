@@ -81,6 +81,8 @@ os1::input::Ps2Modifiers modifiers;
 
 char key_to_char(uint8_t key)
 {
+    if(modifiers.keypad && os1::input::navigation_key(key))
+        return static_cast<char>(os1::input::navigation_key(key));
     if(modifiers.control && key == 0x2e)
         return 3;
     if(modifiers.control && key == 0x20)

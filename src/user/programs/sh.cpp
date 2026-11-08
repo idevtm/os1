@@ -5,6 +5,7 @@
 #include <os1/line_editor.hpp>
 #include <os1/log.hpp>
 #include <os1/parameter_client.hpp>
+#include <os1/prompt.hpp>
 #include <os1/shell_runtime.hpp>
 #include <os1/syscall.hpp>
 #include <os1/system.hpp>
@@ -169,12 +170,6 @@ size_t normalize_line(char* buffer, long count)
     }
     buffer[length] = 0;
     return length;
-}
-
-void write_prompt()
-{
-    DiagnosticOutput diagnostic_output;
-    write_string("os1> ");
 }
 
 void write_observe_failure(const char* command)
@@ -459,6 +454,7 @@ bool observe(uint32_t kind, const Record*& records, uint32_t& record_count)
 
 void run_help()
 {
+    write_string("context [object.path]; Tab explores, Up/Down selects, Enter accepts\n");
     write_string("files: touch path; write [--append|--replace] path; edit path\n");
     write_string(
         "text: head source lines:10; tail source lines:10; grep pattern source; wc source; file "
@@ -1518,9 +1514,8 @@ int main(int argc_main, char** argv_main)
     {
         output_failed = false;
         command_failed = false;
-        if(console_input)
-            write_prompt();
-        long input_status = reader.line(input);
+        long input_status =
+            console_input ? os1::user::prompt::read(reader, input) : reader.line(input);
         if(input_status < 0)
         {
             os1::user::files::message("shell read failed\n");
@@ -1556,6 +1551,11 @@ int main(int argc_main, char** argv_main)
         {
             continue;
         }
+        // These are existing system-control commands under their discovery paths.
+        if(os1::user::shell_runtime::prefix(tokens[0], "os.system.") &&
+           (strings_equal(tokens[0] + 10, "sync") || strings_equal(tokens[0] + 10, "shutdown") ||
+            strings_equal(tokens[0] + 10, "reboot")))
+            tokens[0] += 10;
 
         static os1::user::shell_runtime::Call call;
         if(!call.prepare(parsed, !console_input))
@@ -1577,11 +1577,15 @@ int main(int argc_main, char** argv_main)
             continue;
         }
         const bool log_command = strings_equal(tokens[0], "dmesg") ||
+                                 strings_equal(tokens[0], "context") ||
+                                 strings_equal(tokens[0], "process.context.list") ||
                                  strings_equal(tokens[0], "os.system.log.print") ||
                                  strings_equal(tokens[0], "history") ||
                                  strings_equal(tokens[0], "process.shell.history.print");
         bool external = call.method == os1::user::shell_runtime::Method::Unknown;
-        const char* builtins[] = {"write",
+        const char* builtins[] = {"context",
+                                  "process.context.list",
+                                  "write",
                                   "edit",
                                   "help",
                                   "pid",
@@ -1711,9 +1715,26 @@ int main(int argc_main, char** argv_main)
         if(copy_source == 1 && streams.active[1])
             call.streams[os1::user::shell_runtime::source_slot(call.method)] = streams.saved[1].fd;
         command_record.executed = true;
-        if(strings_equal(tokens[0], "dmesg") || strings_equal(tokens[0], "os.system.log.print") ||
-           strings_equal(tokens[0], "history") ||
-           strings_equal(tokens[0], "process.shell.history.print"))
+        if(strings_equal(tokens[0], "context") || strings_equal(tokens[0], "process.context.list"))
+        {
+            const char* path = argc == 2 ? tokens[1] : "";
+            if(os1::user::shell_runtime::prefix(path, "path:"))
+                path += 5;
+            // Reflection paths contain only identifiers and decimal list indexes.
+            bool valid = argc <= 2;
+            for(const char* p = path; *p; ++p)
+                valid = valid && ((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
+                                  *p == '_' || *p == '.');
+            if(!valid || os1::user::prompt::inspect(path, output_fd) < 0)
+            {
+                os1::user::files::message("context: unavailable or invalid path\n");
+                command_failed = true;
+            }
+        }
+        else if(strings_equal(tokens[0], "dmesg") ||
+                strings_equal(tokens[0], "os.system.log.print") ||
+                strings_equal(tokens[0], "history") ||
+                strings_equal(tokens[0], "process.shell.history.print"))
             run_log(strings_equal(tokens[0], "history") ||
                         strings_equal(tokens[0], "process.shell.history.print"),
                     argc,

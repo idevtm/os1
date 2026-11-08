@@ -67,7 +67,8 @@ Scheduler and individual interrupt records remain in the existing observation ri
 
 Normal syscall tracing records failures and resource/launch/exec/exit outcomes.
 Normal IPC tracing records failures and mutating filesystem methods; unknown service methods are conservatively traced.
-Successful console and filesystem read methods are omitted in normal mode.
+Successful console, input-session, and filesystem read methods are omitted in normal mode.
+Expected input-session WOULD_BLOCK results are also omitted; genuine failures retain warning records.
 Diagnostic mode also records instrumented non-IPC syscall entries and completions, plus all admitted Native API requests and completions.
 IPC mechanism failures are recorded separately; polling outcomes such as WOULD_BLOCK are excluded.
 Log-query Operations do not trace themselves. Local runtime methods without kernel calls are not instrumented.

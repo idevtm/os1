@@ -1585,4 +1585,25 @@ Capture uses a nonblocking lock attempt; contention increments a loss counter.
 The clock advances once per BSP scheduler tick, independent of CPU count.
 A retained Operation owns its origin record until completion or failure.
 History allocation counts against a system-wide ceiling and is released when its process is reaped.
-No log capture performs filesystem I/O. Export and general context reflection remain later slices.
+No log capture performs filesystem I/O. Export and general provider reflection remain later slices.
+
+## Live context exploration
+
+The [runtime discovery profile](native-api/context-discovery.md) exposes fixed bindings and copied environment data without activation.
+The shell shares this profile between `context` inspection and Tab completion.
+
+```text
+resource metadata + environment -> bounded View -> context / completion
+Console input session -> prompt editing -> explicit release -> canonical command input
+```
+
+The user runtime filters members by existing descriptor grants and descendant rights.
+It performs no file opens, provider activation, hardware probes, or arbitrary property reads during discovery.
+Snapshot generations reject stale cursors; aliases and paths have bounded traversal.
+Native descriptions retain interface identity, while local helpers remain distinct from native wire protocols.
+
+The prompt uses an exclusive input session with opt-in typeahead handoff.
+Existing pager sessions retain discard-on-release behavior.
+Script and redirected input retain their existing reader.
+PS/2 and USB navigation keys share byte codes; the prompt decodes serial navigation sequences separately.
+See the [implementation record](native-api/context-completion-plan.md) for bounds, validation, and measured resource costs.

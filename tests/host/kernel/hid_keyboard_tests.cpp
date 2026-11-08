@@ -112,3 +112,10 @@ TEST(HidKeyboard, PagerQuitControlsReachConsole)
     EXPECT_EQ(27, usb::hid::boot_key_usage_to_ascii(0x29, false));
     EXPECT_EQ(27, usb::hid::boot_key_usage_to_ascii(0x29, true));
 }
+
+TEST(HidKeyboard, NavigationKeysHaveDistinctSessionCodes)
+{
+    EXPECT_EQ(0x80, static_cast<unsigned char>(usb::hid::boot_key_usage_to_ascii(0x52, false)));
+    EXPECT_EQ(0x81, static_cast<unsigned char>(usb::hid::boot_key_usage_to_ascii(0x51, false)));
+    EXPECT_EQ('\t', usb::hid::boot_key_usage_to_ascii(0x2b, false));
+}

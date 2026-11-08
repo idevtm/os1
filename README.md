@@ -305,6 +305,9 @@ Historical BIOS failures remain separate evidence.
 ## Create and edit temporary files
 
 The shell provides typed navigation, aliases, basic file operations, interactive `write`, and the line editor `edit`.
+Use `context` to inspect live bindings, or press Tab to explore them interactively.
+Up/Down selects; Tab descends; Enter accepts a selection before a later Enter executes it.
+See the [context discovery guide](docs/native-api/context-discovery.md) for the current scope and input controls.
 See [typed context and basic commands](docs/shell/typed-context.md) for cwd, path configuration, strict scripts, and same-filesystem moves.
 See [metadata and recursive tools](docs/shell/filesystem-tools.md) for `stat`, `df`, `find`, `du`, `cp -r`, and `rm -r`.
 Use `less "/disk/log"` for [interactive paging](docs/shell/pager.md); press `b` to go back or `q` to quit.

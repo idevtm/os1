@@ -45,7 +45,9 @@ OS1_LOCKED_BY(g_console_input_lock) bool g_read_reserved = false;
 OS1_LOCKED_BY(g_console_input_lock) size_t g_reserved_bytes = 0;
 WaitQueue g_console_read_waiters{"console-read"};
 OS1_LOCKED_BY(g_console_input_lock) const void* g_input_owner = nullptr;
-OS1_LOCKED_BY(g_console_input_lock) unsigned char g_keys[64]{};
+OS1_LOCKED_BY(g_console_input_lock) unsigned char g_keys[256]{};
+OS1_LOCKED_BY(g_console_input_lock) bool g_key_handoff = false;
+OS1_LOCKED_BY(g_console_input_lock) bool g_handoff_lost = false;
 OS1_LOCKED_BY(g_console_input_lock) size_t g_key_head = 0, g_key_count = 0;
 OS1_LOCKED_BY(g_console_input_lock) bool g_key_overflow = false;
 
@@ -99,8 +101,11 @@ void handle_input_char(char ascii)
 {
     if(g_input_owner)
     {
-        if(g_key_count == sizeof(g_keys))
+        if(g_key_count == (g_key_handoff ? sizeof(g_keys) : 64))
+        {
             g_key_overflow = true;
+            g_handoff_lost = true;
+        }
         else
         {
             g_keys[(g_key_head + g_key_count) % sizeof(g_keys)] = static_cast<unsigned char>(ascii);
@@ -176,6 +181,8 @@ void console_input_initialize()
     g_completed_tail = 0;
     g_completed_count = 0;
     g_input_owner = nullptr;
+    g_key_handoff = false;
+    g_handoff_lost = false;
     g_key_head = g_key_count = 0;
     g_key_overflow = false;
     g_console_read_waiters.lock.reset("console-read");
@@ -239,7 +246,7 @@ bool console_input_reserve(char* buffer, size_t capacity, size_t& count, long* s
     return true;
 }
 
-long console_input_acquire(const void* owner)
+long console_input_acquire(const void* owner, bool handoff)
 {
     IrqSpinGuard guard(g_console_input_lock);
     if(!owner)
@@ -248,6 +255,8 @@ long console_input_acquire(const void* owner)
        g_completed_count)
         return OS1_ERR_WOULD_BLOCK;
     g_input_owner = owner;
+    g_key_handoff = handoff;
+    g_handoff_lost = false;
     g_key_head = g_key_count = 0;
     g_key_overflow = false;
     return 0;
@@ -258,6 +267,25 @@ void console_input_release(const void* owner)
     if(g_input_owner != owner)
         return;
     g_input_owner = nullptr;
+    if(g_key_handoff)
+    {
+        // Reading RANGE clears the transient notification, not the handoff loss.
+        if(g_handoff_lost)
+        {
+            g_pending_overflow = true;
+            commit_pending_line(false);
+        }
+        else
+            while(g_key_count)
+            {
+                char byte = g_keys[g_key_head];
+                g_key_head = (g_key_head + 1) % sizeof(g_keys);
+                --g_key_count;
+                handle_input_char(byte);
+            }
+    }
+    g_key_handoff = false;
+    g_handoff_lost = false;
     g_key_head = g_key_count = 0;
     g_key_overflow = false;
 }

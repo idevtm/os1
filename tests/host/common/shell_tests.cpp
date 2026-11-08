@@ -126,7 +126,9 @@ TEST(Ps2Modifiers, ExtendedKeypadEnterAndSlashRemainPrintable)
         EXPECT_FALSE(m.press(code | 0x80, key));
     }
     EXPECT_FALSE(m.press(0xe0, key));
-    EXPECT_FALSE(m.press(0x48, key));
+    EXPECT_TRUE(m.press(0x48, key));
+    EXPECT_TRUE(m.keypad);
+    EXPECT_EQ(OS1_CONSOLE_KEY_UP, os1::input::navigation_key(key));
     EXPECT_TRUE(m.press(0x20, key));
     EXPECT_FALSE(m.keypad);
 }

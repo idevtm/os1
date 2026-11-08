@@ -147,6 +147,7 @@ inline shell::Resolution resolve(
 {
     int node = -1;
     const bool cwd_value = os1::context::same(token, size, "fs.cwd", 6) ||
+                           os1::context::same(token, size, "os.fs.cwd", 9) ||
                            os1::context::same(token, size, "process.environment.cwd", 23);
     if(cwd_value)
     {
@@ -277,6 +278,10 @@ struct Call
         if(!command.argc)
             return true;
         const char* name = command.argv[0];
+        if(prefix(name, "os.fs."))
+            name += 3;
+        else if(prefix(name, "process.path."))
+            name += 8;
         for(const auto& b : bindings)
             if(shell::equal(name, b.name))
             {

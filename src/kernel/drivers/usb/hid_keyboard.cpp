@@ -1,6 +1,8 @@
 // USB HID boot-keyboard report decoder used by xHCI keyboard input.
 #include "drivers/usb/hid_keyboard.hpp"
 
+#include <os1/console.h>
+
 namespace usb::hid
 {
 namespace
@@ -33,60 +35,74 @@ char boot_key_usage_to_ascii(uint8_t usage, bool shift)
 
     switch(usage)
     {
-    case 0x1eu:
-        return shift ? '!' : '1';
-    case 0x1fu:
-        return shift ? '@' : '2';
-    case 0x20u:
-        return shift ? '#' : '3';
-    case 0x21u:
-        return shift ? '$' : '4';
-    case 0x22u:
-        return shift ? '%' : '5';
-    case 0x23u:
-        return shift ? '^' : '6';
-    case 0x24u:
-        return shift ? '&' : '7';
-    case 0x25u:
-        return shift ? '*' : '8';
-    case 0x26u:
-        return shift ? '(' : '9';
-    case 0x27u:
-        return shift ? ')' : '0';
-    case 0x28u:
-        return '\n';
-    case 0x29u:
-        return 27;
-    case 0x2au:
-        return '\b';
-    case 0x2bu:
-        return '\t';
-    case 0x2cu:
-        return ' ';
-    case 0x2du:
-        return shift ? '_' : '-';
-    case 0x2eu:
-        return shift ? '+' : '=';
-    case 0x2fu:
-        return shift ? '{' : '[';
-    case 0x30u:
-        return shift ? '}' : ']';
-    case 0x31u:
-        return shift ? '|' : '\\';
-    case 0x33u:
-        return shift ? ':' : ';';
-    case 0x34u:
-        return shift ? '"' : '\'';
-    case 0x35u:
-        return shift ? '~' : '`';
-    case 0x36u:
-        return shift ? '<' : ',';
-    case 0x37u:
-        return shift ? '>' : '.';
-    case 0x38u:
-        return shift ? '?' : '/';
-    default:
-        return 0;
+        case 0x52u:
+            return static_cast<char>(OS1_CONSOLE_KEY_UP);
+        case 0x51u:
+            return static_cast<char>(OS1_CONSOLE_KEY_DOWN);
+        case 0x50u:
+            return static_cast<char>(OS1_CONSOLE_KEY_LEFT);
+        case 0x4fu:
+            return static_cast<char>(OS1_CONSOLE_KEY_RIGHT);
+        case 0x4au:
+            return static_cast<char>(OS1_CONSOLE_KEY_HOME);
+        case 0x4du:
+            return static_cast<char>(OS1_CONSOLE_KEY_END);
+        case 0x4cu:
+            return static_cast<char>(OS1_CONSOLE_KEY_DELETE);
+        case 0x1eu:
+            return shift ? '!' : '1';
+        case 0x1fu:
+            return shift ? '@' : '2';
+        case 0x20u:
+            return shift ? '#' : '3';
+        case 0x21u:
+            return shift ? '$' : '4';
+        case 0x22u:
+            return shift ? '%' : '5';
+        case 0x23u:
+            return shift ? '^' : '6';
+        case 0x24u:
+            return shift ? '&' : '7';
+        case 0x25u:
+            return shift ? '*' : '8';
+        case 0x26u:
+            return shift ? '(' : '9';
+        case 0x27u:
+            return shift ? ')' : '0';
+        case 0x28u:
+            return '\n';
+        case 0x29u:
+            return 27;
+        case 0x2au:
+            return '\b';
+        case 0x2bu:
+            return '\t';
+        case 0x2cu:
+            return ' ';
+        case 0x2du:
+            return shift ? '_' : '-';
+        case 0x2eu:
+            return shift ? '+' : '=';
+        case 0x2fu:
+            return shift ? '{' : '[';
+        case 0x30u:
+            return shift ? '}' : ']';
+        case 0x31u:
+            return shift ? '|' : '\\';
+        case 0x33u:
+            return shift ? ':' : ';';
+        case 0x34u:
+            return shift ? '"' : '\'';
+        case 0x35u:
+            return shift ? '~' : '`';
+        case 0x36u:
+            return shift ? '<' : ',';
+        case 0x37u:
+            return shift ? '>' : '.';
+        case 0x38u:
+            return shift ? '?' : '/';
+        default:
+            return 0;
     }
 }
 

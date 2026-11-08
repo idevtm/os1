@@ -1692,10 +1692,15 @@ protected:
 class ConsoleSession : public KernelConsole
 {
 protected:
-    long acquire()
+    long acquire(bool handoff = false)
     {
         int input = bind(0, OS1_RIGHT_READ);
         auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
+        if(handoff)
+        {
+            request.payload_bytes = sizeof(os1_console_input_options);
+            request.payload[0] = OS1_CONSOLE_INPUT_HANDOFF;
+        }
         int operation = call(OS1_IPC_SUBMIT, input, request);
         descriptor_close(table(), input);
         auto result = complete(operation);
@@ -2595,4 +2600,103 @@ TEST_F(LogIpc, ExecReleasesScopeButRetainsOriginForReplacement)
     ASSERT_EQ(1, context(OS1_LOG_HISTORY_READ, q));
     EXPECT_TRUE(q.result.record.flags & OS1_LOG_REPLACED);
     EXPECT_FALSE(q.result.record.flags & OS1_LOG_PENDING);
+}
+
+TEST_F(ConsoleSession, PromptReleasePreservesTypeaheadForCanonicalReader)
+{
+    int session = acquire(true);
+    ASSERT_GE(session, 0);
+    for(char byte : std::string("echo later\n"))
+        console_input_on_keyboard_char(byte);
+    descriptor_close(table(), session);
+    char text[128]{};
+    size_t count = 0;
+    long status = 0;
+    ASSERT_TRUE(console_input_reserve(text, sizeof(text), count, &status));
+    EXPECT_EQ(0, status);
+    EXPECT_EQ("echo later\n", std::string(text, count));
+    console_input_finish(count);
+}
+TEST_F(ConsoleSession, PromptOverflowCannotExecuteTruncatedTypeahead)
+{
+    int session = acquire(true);
+    ASSERT_GE(session, 0);
+    for(unsigned i = 0; i < 257; ++i)
+        console_input_on_keyboard_char('x');
+    descriptor_close(table(), session);
+    char text[128]{};
+    size_t count = 0;
+    long status = 0;
+    ASSERT_TRUE(console_input_reserve(text, sizeof(text), count, &status));
+    EXPECT_EQ(OS1_ERR_RANGE, status);
+    EXPECT_EQ(0, count);
+    console_input_finish(0);
+}
+
+TEST_F(NormalLogIpc, InteractiveKeyPollingPreservesErrorCapacity)
+{
+    os1_log_query query{};
+    query.version = 1;
+    query.size = sizeof(query);
+    query.after = diagnostic_log::info().latest;
+    os1_log_record origin{}, record{};
+    diagnostic_log::ipc_begin(
+        origin, thread->process, OS1_CONSOLE_INPUT_INTERFACE_ID, OS1_CONSOLE_INPUT_TRY_READ_KEY);
+    diagnostic_log::ipc_end(origin, OS1_ERR_WOULD_BLOCK);
+    EXPECT_EQ(0, diagnostic_log::read(query, record));
+    diagnostic_log::ipc_end(origin, 0);
+    EXPECT_EQ(0, diagnostic_log::read(query, record));
+    diagnostic_log::ipc_end(origin, OS1_ERR_ACCESS);
+    ASSERT_EQ(1, diagnostic_log::read(query, record));
+    EXPECT_EQ(OS1_LOG_WARNING, record.level);
+}
+
+TEST_F(ConsoleSession, AcquireRejectsUnknownOptionsAndMalformedSize)
+{
+    int input = bind(0, OS1_RIGHT_READ);
+    auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
+    request.payload_bytes = sizeof(os1_console_input_options);
+    request.payload[0] = 2;
+    int operation = call(OS1_IPC_SUBMIT, input, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    request.payload[0] = 0;
+    request.payload_bytes = sizeof(os1_console_input_options) - 1;
+    operation = call(OS1_IPC_SUBMIT, input, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    descriptor_close(table(), input);
+    int session = acquire();
+    ASSERT_GE(session, 0);
+    descriptor_close(table(), session);
+}
+
+TEST_F(ConsoleSession, ConsumedOverflowStillDiscardsTruncatedTypeaheadOnRelease)
+{
+    int session = acquire(true);
+    ASSERT_GE(session, 0);
+    int client = session_bind(session);
+    ASSERT_GE(client, 0);
+    console_input_on_keyboard_char('\n');
+    for(unsigned i = 0; i < 256; ++i)
+        console_input_on_keyboard_char('x');
+    EXPECT_EQ(OS1_ERR_RANGE, action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY).application_status);
+    auto key = action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY);
+    EXPECT_EQ(0, key.application_status);
+    EXPECT_EQ('\n', key.payload[0]);
+    EXPECT_EQ(0, action(client, OS1_CONSOLE_INPUT_RELEASE).application_status);
+    descriptor_close(table(), client);
+    descriptor_close(table(), session);
+    char text[128]{};
+    size_t count = 0;
+    long status = 0;
+    ASSERT_TRUE(console_input_reserve(text, sizeof(text), count, &status));
+    EXPECT_EQ(OS1_ERR_RANGE, status);
+    EXPECT_EQ(0, count);
+    console_input_finish(0);
+    console_input_on_keyboard_char('\n');
+    ASSERT_TRUE(console_input_reserve(text, sizeof(text), count, &status));
+    EXPECT_EQ(0, status);
+    EXPECT_EQ("\n", std::string(text, count));
+    console_input_finish(count);
 }

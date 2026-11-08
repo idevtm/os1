@@ -1,7 +1,30 @@
 #pragma once
+#include <os1/console.h>
 #include <stdint.h>
 namespace os1::input
 {
+inline unsigned navigation_key(uint8_t key)
+{
+    switch(key)
+    {
+        case 0x48:
+            return OS1_CONSOLE_KEY_UP;
+        case 0x50:
+            return OS1_CONSOLE_KEY_DOWN;
+        case 0x4b:
+            return OS1_CONSOLE_KEY_LEFT;
+        case 0x4d:
+            return OS1_CONSOLE_KEY_RIGHT;
+        case 0x47:
+            return OS1_CONSOLE_KEY_HOME;
+        case 0x4f:
+            return OS1_CONSOLE_KEY_END;
+        case 0x53:
+            return OS1_CONSOLE_KEY_DELETE;
+        default:
+            return 0;
+    }
+}
 struct Ps2Modifiers
 {
     uint8_t shift = 0, control = 0, pause = 0;
@@ -49,7 +72,7 @@ struct Ps2Modifiers
                 *state |= bit;
             return false;
         }
-        return !released && (!extra || key == 0x1c || key == 0x35);
+        return !released && (!extra || key == 0x1c || key == 0x35 || navigation_key(key));
     }
 };
 }  // namespace os1::input

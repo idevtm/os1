@@ -16,6 +16,18 @@
 #define OS1_CONSOLE_MAX_BYTES 256u
 #define OS1_CONSOLE_CANONICAL_INPUT 1u
 #define OS1_CONSOLE_EOF_INPUT 2u
+#define OS1_CONSOLE_INPUT_HANDOFF 1u
+#define OS1_CONSOLE_KEY_UP 0x80u
+#define OS1_CONSOLE_KEY_DOWN 0x81u
+#define OS1_CONSOLE_KEY_LEFT 0x82u
+#define OS1_CONSOLE_KEY_RIGHT 0x83u
+#define OS1_CONSOLE_KEY_HOME 0x84u
+#define OS1_CONSOLE_KEY_END 0x85u
+#define OS1_CONSOLE_KEY_DELETE 0x86u
+struct os1_console_input_options
+{
+    uint32_t flags;
+};
 
 // WRITE input is 0..256 raw bytes; output is os1_console_written.
 // TRY_READ input is os1_console_read; output is 0..capacity raw bytes.
