@@ -109,6 +109,8 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
         return d;
     if(interface == OS1_LOG_INTERFACE_ID)
     {
+        if(member == OS1_LOG_EXPORT)
+            d.add("target", T::Enum, "tmp", "tmp|disk");
         if(member == OS1_LOG_READ)
             d.add("query",
                   T::Record,

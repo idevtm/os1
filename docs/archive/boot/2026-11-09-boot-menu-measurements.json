@@ -1,0 +1,135 @@
+{
+  "base_revision": "d0662a1e27e9b1320eedc7170ef702d477cbc7a9",
+  "baseline": "Candidate image with only both Limine configs restored from base revision; kernel and initrd identical",
+  "machine": {
+    "host": "Apple M4 Max, 16 CPUs, 64 GiB RAM, macOS 26.6.2",
+    "toolchain": "x86_64-elf GCC 11.2.0",
+    "qemu": "11.1.3, TCG, q35",
+    "guest_cpus": 4,
+    "guest_memory_mib": 128,
+    "build": "Debug; OS1_KMEM_DEBUG=ON; OS1_QEMU_DEBUGCON=ON"
+  },
+  "samples": {
+    "baseline": {
+      "boot_seconds": [
+        1.900948,
+        1.906773,
+        1.891023
+      ],
+      "echo_20_seconds": [
+        0.168157,
+        0.167942,
+        0.168697
+      ]
+    },
+    "normal": {
+      "boot_seconds": [
+        12.162688,
+        12.113502,
+        12.131052
+      ],
+      "echo_20_seconds": [
+        0.168935,
+        0.182131,
+        0.167544
+      ]
+    },
+    "diagnostic": {
+      "boot_seconds": [
+        1.998252,
+        2.015161,
+        2.012291
+      ],
+      "echo_20_seconds": [
+        0.181276,
+        0.188591,
+        0.166436
+      ]
+    }
+  },
+  "artifacts": {
+    "build/artifacts/kernel.elf": {
+      "bytes": 576400,
+      "sha256": "a7d2cd0c1f56f9c4a823f2ad980e55c5d38de3744792f8dda24bbb412adff648"
+    },
+    "build/artifacts/initrd.cpio": {
+      "bytes": 144896,
+      "sha256": "39dd05ea750c0a3b006d9e326e4bf736d39827e95401d8552b6f9ee7b6e0ffad"
+    },
+    "build/artifacts/os1.iso": {
+      "bytes": 4448256,
+      "sha256": "b88a94b718be85a74e2abd8fb40abfc469394196360b889360db9066c8a69d48"
+    },
+    "build/artifacts/os1.raw": {
+      "bytes": 1474560,
+      "sha256": "3cb04068cc61575a67d08988bac88d6a59bd41e61ab165fd620ff2b6490edb85"
+    },
+    "build/artifacts/os1-usb.img": {
+      "bytes": 35651584,
+      "sha256": "ddb6d8fe963a378d9d7d375373ca5ab1c360f4c5ca94ca71ee1c6e9f6665a81b"
+    },
+    "build/boot-menu-evidence/baseline-menu.iso": {
+      "bytes": 4521984,
+      "sha256": "d480465786e54c1b51fb44952853e1bd260e56455ec83c87b57b3b304a2bc989"
+    },
+    "/opt/homebrew/share/qemu/edk2-x86_64-code.fd": {
+      "bytes": 3653632,
+      "sha256": "33090cc07675baa5190d9f1e84bf5176b33bcbfa9bacac522961150cdb6dbb2a"
+    },
+    "/opt/homebrew/share/qemu/edk2-i386-vars.fd": {
+      "bytes": 540672,
+      "sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+    }
+  },
+  "source_identity": "#pragma once\n#define OS1_LOG_REVISION \"d0662a1e27e9b1320eedc7170ef702d477cbc7a9\"\n#define OS1_LOG_IMAGE \"55f937e376db59033188c073344dd7231bc0b71aa046fa1a2efc268524ee81ea\"\n",
+  "ring_capacity_bytes": {
+    "baseline": 262144,
+    "normal": 262144,
+    "diagnostic": 1048576
+  },
+  "slab_pages": [
+    168,
+    168,
+    168,
+    168,
+    168,
+    168,
+    168,
+    168,
+    168
+  ],
+  "original_prechange_artifacts": {
+    "src/boot/limine/limine.conf": {
+      "bytes": 200,
+      "sha256": "0f39162c6af67df10b6f768f9a2db22ac2d6f10a14a1c01d9875418f240933ba"
+    },
+    "src/boot/limine/limine-usb.conf": {
+      "bytes": 616,
+      "sha256": "198a836392c197543fcc12cc07e4a3eb032ff4435e7284a1d89a6acdce48a014"
+    },
+    "src/boot/limine/limine-usb-diagnostic.conf": {
+      "bytes": 1112,
+      "sha256": "e5952158b076a0a7f7f841935b64b1ab2fdd87299a2e596fd9d77917d591665d"
+    },
+    "src/boot/limine/limine-usb-keyboard.conf": {
+      "bytes": 271,
+      "sha256": "cc2cdea241a262e79378f73cffe3e99b818766a8f1ab84eaa42908938e311c2b"
+    },
+    "build/artifacts/kernel.elf": {
+      "bytes": 576400,
+      "sha256": "93f666baea7d948d5c08211e49dacdb1ec9d0b0cf8eb49f4ab822b15dd2e580b"
+    },
+    "build/artifacts/initrd.cpio": {
+      "bytes": 144896,
+      "sha256": "39dd05ea750c0a3b006d9e326e4bf736d39827e95401d8552b6f9ee7b6e0ffad"
+    },
+    "build/artifacts/os1.iso": {
+      "bytes": 4448256,
+      "sha256": "412614cbb5ec4daf91d7038f5c2b2f0f235b31e6182693539f557fd834e2fe99"
+    },
+    "build/artifacts/os1.raw": {
+      "bytes": 1474560,
+      "sha256": "3d130448f03b1961258397fa7006051053f9cc7cb442596545d064052a9b37b2"
+    }
+  }
+}

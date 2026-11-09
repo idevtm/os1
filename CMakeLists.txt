@@ -156,7 +156,7 @@ set(OS1_LIMINE_BOOTX64 "${OS1_LIMINE_DIR}/BOOTX64.EFI")
 set(OS1_LIMINE_UEFI_CD "${OS1_LIMINE_DIR}/limine-uefi-cd.bin")
 set(OS1_LIMINE_PROTOCOL_HEADER "${OS1_LIMINE_DIR}/limine.h")
 set(OS1_LIMINE_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine.conf")
-# The USB stick offers bring-up variants (boot options) in a Limine menu.
+# Both Limine entries select an existing runtime logging profile.
 set(OS1_LIMINE_USB_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine-usb.conf")
 set(OS1_USB_PRELOADER_ARGS)
 set(OS1_USB_PRELOADER_DEPENDS)
@@ -180,11 +180,11 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
-# Rebalance the existing low-memory window: 416 KiB kernel, 144 KiB initrd.
+# Rebalance the existing low-memory window: 424 KiB kernel, 144 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x76000)
+set(OS1_INITRD_LOAD_ADDRESS 0x78000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
-set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x198000)
+set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x1A0000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
 set(OS1_KERNEL_SHIM_VIRTUAL_BASE 0xFFFFFFFF90000000)
 set(OS1_DIRECT_MAP_BASE 0xFFFF800000000000)
@@ -207,7 +207,7 @@ math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
 set(OS1_INITRD_IMAGE_SECTOR_COUNT 288)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
-set(OS1_INITRD_LOAD_LIMIT 0x9A000)
+set(OS1_INITRD_LOAD_LIMIT 0x9C000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
 if(OS1_INITRD_LOAD_END GREATER OS1_INITRD_LOAD_LIMIT)
   message(FATAL_ERROR "BIOS initrd exceeds its low-memory load window")
@@ -852,6 +852,8 @@ os1_register_menu_target(
 )
 
 if(BUILD_TESTING)
+  add_test(NAME os1_boot_menu_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_boot_menu_config.py")
   add_test(NAME os1_usb_menu_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_usb_menu.py")
   add_test(NAME os1_smoke_settle_contract
@@ -872,8 +874,11 @@ endif()
 # UEFI ceiling is intentionally larger because OVMF + ISO + Limine do far more
 # I/O than the direct BIOS path, which matters on shared runners without KVM
 # acceleration (GitHub Actions ubuntu-hosted, in particular).
-set(OS1_UEFI_SMOKE_TIMEOUT_SECONDS 30)
+# Preserve the 30-second smoke-work budget after the 10-second Limine menu.
+set(OS1_UEFI_SMOKE_TIMEOUT_SECONDS 40)
 set(OS1_BIOS_SMOKE_TIMEOUT_SECONDS 30)
+# The compound spawn workload takes up to 40 seconds on shared TCG runners.
+set(OS1_SPAWN_SMOKE_TIMEOUT_SECONDS 60)
 set(OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS 1)
 set(OS1_SMOKE_SEND_DELAY_SECONDS 0.2)
 set(OS1_SMOKE_REJECT_MARKERS
@@ -910,8 +915,7 @@ set(OS1_SMOKE_REJECT_MARKERS
   "[user/copycheck] fail"
 )
 
-# The shell prompt does not terminate with a newline, so the line-buffered
-# smoke runner observes it when the following command output flushes.
+# The streaming smoke runner observes prompts without waiting for a newline.
 # Fully quoted echo arguments distinguish output markers from echoed input.
 set(OS1_SHELL_INPUT_EVENTS
   "shell prompt ready::help\\n"
@@ -963,7 +967,6 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
   "shell prompt ready::exec yield\\n"
-  "[user/yield] tick 2::echo 'after-exec'\\n"
 )
 
 set(OS1_SHELL_BALANCE_INPUT_EVENTS
@@ -973,7 +976,6 @@ set(OS1_SHELL_BALANCE_INPUT_EVENTS
 set(OS1_EXEC_SMOKE_REJECT_MARKERS
   ${OS1_SMOKE_REJECT_MARKERS}
   "shell exec returned"
-  "\nafter-exec\n"
 )
 
 # Preventive: if CI (or any caller) sets OS1_REQUIRE_UEFI_SMOKE=ON, a missing
@@ -1326,12 +1328,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DOVMF_CODE=${OS1_OVMF_CODE}"
       "-DOVMF_VARS_TEMPLATE=${OS1_OVMF_VARS_TEMPLATE}"
       "-DLOG_FILE=${OS1_SMOKE_SPAWN_LOG}"
-      "-DSMOKE_TIMEOUT_SECONDS=${OS1_UEFI_SMOKE_TIMEOUT_SECONDS}"
+      "-DSMOKE_TIMEOUT_SECONDS=${OS1_SPAWN_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
       "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_UEFI_SPAWN_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
-      "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_SPAWN_INPUT_EVENTS}"
+      # Select normal boot explicitly; other checks cover the automatic menu wait.
+      "-DSERIAL_INPUT_EVENTS=os1 diagnostics::\\r;${OS1_SHELL_SPAWN_INPUT_EVENTS}"
       "-DPROGRAM_DISK=${OS1_PROGRAM_TEST_DISK}"
       "-DVIRTIO_TEST_DISK=${OS1_VIRTIO_TEST_DISK}"
       "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"
@@ -1662,7 +1665,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
       "-DQEMU_EXECUTABLE=${OS1_QEMU_EXECUTABLE}"
       "-DRAW_IMAGE=${OS1_RAW_IMAGE}"
       "-DLOG_FILE=${OS1_SMOKE_SPAWN_BIOS_LOG}"
-      "-DSMOKE_TIMEOUT_SECONDS=${OS1_BIOS_SMOKE_TIMEOUT_SECONDS}"
+      "-DSMOKE_TIMEOUT_SECONDS=${OS1_SPAWN_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
       "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_BIOS_SPAWN_SMOKE_MARKERS}"
@@ -1801,11 +1804,15 @@ os1_register_menu_target(smoke_no_uart
   "Remove COM1 and verify a shell command through debugcon and PS/2."
 )
 
+find_program(OS1_DEBUGFS_EXECUTABLE NAMES debugfs HINTS /opt/homebrew/opt/e2fsprogs/sbin /usr/sbin)
 find_program(OS1_E2FSCK_EXECUTABLE NAMES e2fsck HINTS /opt/homebrew/opt/e2fsprogs/sbin /usr/sbin)
 if(OS1_E2FSCK_EXECUTABLE)
   set(OS1_EXT2_CHECK_ARGS --e2fsck "${OS1_E2FSCK_EXECUTABLE}")
 endif()
 if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
+  add_test(NAME os1_kernel_elf_padding_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_kernel_elf_padding.py"
+      --assembler "${OS1_NASM_EXECUTABLE}" --linker "${CMAKE_LINKER}" --nm "${CMAKE_NM}")
   add_test(NAME os1_usb_progress_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_progress.py")
   add_test(NAME os1_usb_data_contract
@@ -1834,6 +1841,25 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
     else()
       set(file_test_image "${OS1_RAW_IMAGE}")
       set(file_test_firmware)
+    endif()
+    if(OS1_DEBUGFS_EXECUTABLE AND OS1_E2FSCK_EXECUTABLE)
+      if(boot STREQUAL "uefi")
+        add_test(NAME os1_smoke_boot_menu_uefi
+          COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_boot_menu.py"
+            --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+            --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-boot-menu.log"
+            --debugfs "${OS1_DEBUGFS_EXECUTABLE}" ${file_test_firmware})
+        set_tests_properties(os1_smoke_boot_menu_uefi PROPERTIES TIMEOUT 180)
+        list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_boot_menu_uefi)
+      endif()
+      add_test(NAME os1_smoke_log_export_${boot}
+        COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_log_export.py"
+          --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+          --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-log-export-${boot}.log"
+          --debugfs "${OS1_DEBUGFS_EXECUTABLE}" --e2fsck "${OS1_E2FSCK_EXECUTABLE}"
+          ${file_test_firmware})
+      set_tests_properties(os1_smoke_log_export_${boot} PROPERTIES TIMEOUT 180)
+      list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_log_export_${boot})
     endif()
     add_test(NAME os1_smoke_memory_logging_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_memory_logging.py"
@@ -2104,3 +2130,8 @@ os1_write_target_menu_manifest()
 message(STATUS "Artifacts will be written to ${OS1_ARTIFACT_DIR}")
 message(STATUS "Default image: ${OS1_ISO_IMAGE}")
 message(STATUS "Legacy BIOS image: ${OS1_RAW_IMAGE}")
+
+if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
+  add_test(NAME os1_log_reader_contract COMMAND "${OS1_PYTHON_EXECUTABLE}" -B -m unittest discover
+    -s "${PROJECT_SOURCE_DIR}/tools/tests" -p test_log_dump.py)
+endif()

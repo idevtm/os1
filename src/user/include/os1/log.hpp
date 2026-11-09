@@ -10,9 +10,13 @@ inline long context(unsigned operation, void* data = nullptr)
 {
     return os1_syscall3(os1_sys_log, operation, reinterpret_cast<uint64_t>(data), 0);
 }
-inline long bind()
+inline long bind(bool control = false)
 {
-    os1_ipc_kernel_binding binding{1, sizeof(binding), OS1_LOG_INTERFACE_ID, 1, OS1_RIGHT_LOG_READ};
+    os1_ipc_kernel_binding binding{1,
+                                   sizeof(binding),
+                                   OS1_LOG_INTERFACE_ID,
+                                   1,
+                                   OS1_RIGHT_LOG_READ | (control ? OS1_RIGHT_SYSTEM_CONTROL : 0u)};
     return ipc(OS1_IPC_BIND_KERNEL, root(), &binding);
 }
 inline long call(

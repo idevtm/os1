@@ -114,6 +114,18 @@ The image is `build/usb-write/keyboard-diagnostic/artifacts/os1-usb.img`.
 
 ## Boot and use storage
 
+Fresh UEFI images offer `os1` and `os1 diagnostics`.
+The menu selects `os1` after ten seconds unless you select another entry.
+The diagnostic entry enables a 1 MiB kernel ring and all instrumented API entry and completion records.
+It drains persistent logs every 250 milliseconds and synchronizes pending writes every second.
+Its background export ceiling is 256 KiB/s; retention and privacy rules remain unchanged.
+Scheduler and individual interrupt tracing remain opt-in.
+Normal images do not enable watchdog resets when you select diagnostics.
+The dedicated keyboard-diagnostic image retains its automatic capture and reset workflow.
+Preserved-layout kernel updates retain the template menu; a fresh image installs these entries.
+The custom BIOS loader retains its build-selected profile and has no interactive menu.
+
+
 Boot the USB disk through the computer's BIOS or UEFI menu.
 The kernel mounts the data partition at `/disk` when the device matches the [USB storage profile](usb-storage.md).
 It requires an xHCI-connected root-port device; EHCI-only controllers and external USB hubs remain unsupported.

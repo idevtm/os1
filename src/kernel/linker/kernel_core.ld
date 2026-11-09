@@ -46,9 +46,11 @@ SECTIONS
     *(.dtors*)
     *(.init_array*)
     *(.fini_array*)
-    . = ALIGN(4096);
-    __kernel_data_end = .;
   } :data
+
+  /* Keep alignment in the zero-filled segment tail, not in file-backed data. */
+  . = ALIGN(4096);
+  __kernel_data_end = .;
 
   .bss : AT(ADDR(.bss) - KERNEL_VIRTUAL_OFFSET)
   {

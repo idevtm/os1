@@ -26,3 +26,18 @@ long read(const os1_log_query&, os1_log_record&);
 os1_log_info info();
 long context(PageFrameContainer&, Thread*, uint64_t operation, uint64_t pointer);
 }  // namespace diagnostic_log
+
+namespace diagnostic_log
+{
+struct HistoryState
+{
+    uint64_t session, latest, overwritten;
+    bool closing;
+};
+uint64_t monotonic();
+uint64_t error_sequence();
+void enable_export(bool enabled);
+bool history_state(unsigned slot, HistoryState&);
+long history_read(unsigned slot, uint64_t session, const os1_log_query&, os1_log_history_record&);
+void retire_history(unsigned slot, uint64_t session);
+}  // namespace diagnostic_log

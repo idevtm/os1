@@ -146,6 +146,7 @@ set(KERNEL_DEBUG_SOURCES
   debug/debug.cpp
   debug/event_ring.cpp
   debug/log.cpp
+  debug/log_export.cpp
 )
 
 set(KERNEL_UTIL_SOURCES
@@ -221,7 +222,14 @@ target_compile_options(
     -w
 )
 
+add_custom_target(os1_log_build_identity
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/log_build_identity.py"
+          --root "${PROJECT_SOURCE_DIR}" --output "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+          --profile "${CMAKE_BUILD_TYPE}:${CMAKE_CXX_COMPILER_ID}:${CMAKE_CXX_COMPILER_VERSION}:${CMAKE_CXX_FLAGS}:${OS1_KMEM_DEBUG}"
+  BYPRODUCTS "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+  VERBATIM)
 add_library(kernel_core_objects OBJECT ${KERNEL_CXX_SOURCES})
+add_dependencies(kernel_core_objects os1_log_build_identity)
 target_include_directories(kernel_core_objects PRIVATE
   "${PROJECT_SOURCE_DIR}/src/common"
   "${OS1_ACPICA_CUSTOM_INCLUDE_DIR}"

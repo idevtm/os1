@@ -116,6 +116,7 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/core/timer_source.cpp"
   "${OS1_REPO_ROOT}/src/kernel/debug/event_ring.cpp"
   "${OS1_REPO_ROOT}/src/kernel/debug/log.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/debug/log_export.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/device.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/driver_registry.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/pci_bus.cpp"
@@ -193,6 +194,7 @@ add_executable(os1_host_tests
   kernel/utility_tests.cpp
   kernel/event_ring_tests.cpp
   kernel/log_ring_tests.cpp
+  kernel/log_export_tests.cpp
   kernel/irq_route_registry_tests.cpp
   kernel/irq_vector_allocator_tests.cpp
   kernel/load_balancer_tests.cpp
@@ -233,6 +235,12 @@ execute_process(COMMAND "${Python3_EXECUTABLE}" "${OS1_REPO_ROOT}/cmake/scripts/
   --output "${OS1_EXT2_FIXTURE}" --utility "${CMAKE_CURRENT_SOURCE_DIR}/support/block_device_stub.cpp"
   --size-mib 4 --reset COMMAND_ERROR_IS_FATAL ANY)
 target_compile_definitions(os1_host_tests PRIVATE OS1_EXT2_FIXTURE="${OS1_EXT2_FIXTURE}")
+
+set(OS1_LOG_EXT2_FIXTURE "${CMAKE_BINARY_DIR}/log-ext2-fixture.raw")
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${OS1_REPO_ROOT}/cmake/scripts/create_ext2_image.py"
+  --output "${OS1_LOG_EXT2_FIXTURE}" --utility "${CMAKE_CURRENT_SOURCE_DIR}/support/block_device_stub.cpp"
+  --size-mib 16 --reset COMMAND_ERROR_IS_FATAL ANY)
+target_compile_definitions(os1_host_tests PRIVATE OS1_LOG_EXT2_FIXTURE="${OS1_LOG_EXT2_FIXTURE}")
 
 include(GoogleTest)
 gtest_add_tests(TARGET os1_host_tests TEST_LIST os1_host_tests_TESTS)

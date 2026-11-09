@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import os
+import re
 import selectors
 import shutil
 import subprocess
@@ -18,6 +19,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
                '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
+    if getattr(args, 'poweroff', False):
+        command.remove('-no-shutdown')
     if getattr(args, 'stall_init', False):
         command[-1] = command[-1].replace(f'file={disk}', f'file=blkdebug::{disk}')
         command += ['-S']
@@ -56,8 +59,10 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     pending = bytearray()
     transcript = bytearray()
     started = time.monotonic()
+    menu_selected = False
 
     def expect(marker=b'os1> ', timeout=60, allow_errors=False):
+        nonlocal menu_selected
         end = time.monotonic() + timeout
         while marker not in pending:
             if time.monotonic() > end:
@@ -69,6 +74,12 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 raise AssertionError(f'QEMU exited: {child.poll()}')
             transcript.extend(data)
             pending.extend(data.replace(b'\r', b''))
+            if getattr(args, 'boot_menu_entry', None) and not menu_selected:
+                plain = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', bytes(transcript))
+                if b'os1 diagnostics' in plain:
+                    child.stdin.write(b'\x1b[B' * (args.boot_menu_entry - 1) + b'\r')
+                    child.stdin.flush()
+                    menu_selected = True
         at = pending.index(marker) + len(marker)
         result = bytes(pending[:at])
         del pending[:at]
@@ -91,11 +102,15 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
         if before_boot is not None:
             before_boot()
         startup = expect()
+        if getattr(args, 'boot_menu_entry', None):
+            assert menu_selected, 'shell started without selecting the requested menu entry'
         if getattr(args, 'readonly', False) or getattr(args, 'stall_init', False):
             rejected = b'ehci: storage rejected' if args.transport == 'ehci' else b'usb-storage: unsupported or failed device'
             if getattr(args, 'stall_init', False) and args.transport == 'ehci':
                 rejected = b'ehci: controller retired'
             assert rejected in startup, startup[-4000:]
+            assert b'ext2 mounted /disk' not in startup
+        elif getattr(args, 'missing_disk', False):
             assert b'ext2 mounted /disk' not in startup
         else:
             assert b'ext2 mounted /disk' in startup, startup[-2000:]
@@ -150,6 +165,14 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             out = run('echo damage > /disk/diskutil')
             assert b'failed' in out or b'error' in out, out
             run('/disk/diskutil verify', b'diskutil verify ok')
+        if getattr(args, 'poweroff', False):
+            child.stdin.write(b'shutdown\n')
+            child.stdin.flush()
+            deadline = time.monotonic() + 60
+            while child.poll() is None and time.monotonic() < deadline:
+                if selector.select(.1):
+                    transcript.extend(os.read(child.stdout.fileno(), 4096))
+            assert child.poll() == 0, bytes(transcript[-4000:])
         print(f'{phase}: boot_seconds={boot_seconds:.6f} workload_seconds={time.monotonic()-operation:.6f}')
     finally:
         child.terminate()

@@ -50,6 +50,15 @@ Milestone implementation status (not a claim that all correctness or hardware-va
 
 The [documentation index](README.md) groups current contracts by topic and separates historical records in the archive.
 
+## Boot profile selection
+
+Limine presents `os1` and `os1 diagnostics` in ISO and fresh USB images.
+The second entry passes `os1.log=diagnostic` through the existing `BootInfo` command line.
+The kernel uses this option for ring capacity, API tracing, and export cadence.
+Capture-image builds additionally pass `os1.bootdiag` for their reset-and-harvest workflow.
+The custom BIOS loader retains build-selected diagnostics without an interactive menu.
+See the [boot-menu record](archive/boot/2026-11-09-boot-menu.md) for limits and validation.
+
 ## Native objects and OS services
 
 The Native API has implemented descriptor authority and bounded IPC between user programs.
@@ -486,7 +495,10 @@ The shell runs a line-buffered REPL:
  (return to user via iretq with new frame)
 ```
 
-The `exec` smoke checks for unwanted return to the *old* shell: the rejected-marker list includes `shell exec returned` and an `echo after-exec` probe. This provides bounded transcript evidence. The runner now rejects early exit before its settling interval completes.
+The `exec` smoke rejects `shell exec returned`, which the original shell emits if its replacement call returns.
+After the replacement program exits, init starts a new shell.
+Separate lifecycle checks verify this shell restart.
+The runner rejects early exit before its settling interval completes.
 
 ## Build Outputs And Boot Artifacts
 
@@ -531,23 +543,27 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-896`: `kernel_bios.elf`
-- LBA `897-1184`: `initrd.cpio`
+- LBA `65-912`: `kernel_bios.elf`
+- LBA `913-1200`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
 The core ELF uses 256-byte file alignment while kernel memory boundaries remain page-aligned.
 BIOS packaging removes unused section metadata; the diagnostic kernel ELF retains symbols.
-The BIOS loader stages the stripped kernel in `[0xE000,0x76000)` (416 KiB).
-It stages the plain initrd in `[0x76000,0x9A000)` (144 KiB).
+Final `.data` alignment occupies the zero-filled `PT_LOAD` memory tail instead of the file-backed section.
+Both loaders zero the segment memory before copying initialized bytes.
+Page-aligned boundary symbols, segment addresses, permissions, and reserved memory remain unchanged.
+The [BIOS size correction](archive/boot/2026-11-09-bios-image-size.md) records the regression and validation.
+The BIOS loader stages the stripped kernel in `[0xE000,0x78000)` (424 KiB).
+It stages the plain initrd in `[0x78000,0x9C000)` (144 KiB).
 The latest CI correction moves 16 KiB of staging capacity from initrd to the kernel.
 Compact non-reflective executables keep the initrd within its new bound.
 The 2880-sector raw image, firmware ceiling, and boot-log placement remain unchanged.
 Kernel C++ and bundled userspace use `-Os`; userspace discards unreferenced sections while retaining metadata.
 
 ELF-aware checks enforce file size, staging limits, execution extent, reserve space, initrd capacity, and disk overlap.
-The reserved execution window ends at `0x198000`, where the page-frame bitmap starts. The 16 KiB post-image requirement remains unchanged.
+The reserved execution window ends at `0x1A0000`, where the page-frame bitmap starts. The 16 KiB post-image requirement remains unchanged.
 The [temporary filesystem record](archive/filesystems/2026-11-06-tmpfs-implementation.md) contains current sizes and validation.
 The [reliability record](archive/kernel/2026-11-05-reliability-and-clock-plan.md) preserves the preceding layout measurements.
 
@@ -604,9 +620,9 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x09000` | BIOS disk scratch, then temporary page tables after firmware disk I/O completes |
 | `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
-| `0x76000` | BIOS initrd load buffer (144 KiB slot, ending at `0x9A000`) |
+| `0x78000` | BIOS initrd load buffer (144 KiB slot, ending at `0x9C000`) |
 | `0x100000` | shared kernel physical load base |
-| `0x198000-0x217FFF` | page-frame bitmap |
+| `0x1A0000-0x21FFFF` | page-frame bitmap |
 
 The modern path deliberately mirrors this layout before entering `kernel_main`. That is not nostalgia. It is a compatibility technique that keeps the shared kernel bootloader-agnostic while the frontends converge on the same higher-half kernel ABI.
 
@@ -1492,7 +1508,7 @@ The runtime stores path data and cwd text locally; directory descriptors retain 
 Rooted lookup and namespace mutations use one nonblocking admission guard before backend locks.
 Content I/O keeps the existing backend locking and failure rules.
 Same-filesystem moves publish one namespace change; ext2 retains its existing dirty-volume failure policy.
-The BIOS staging split reserves 416 KiB for the kernel and 144 KiB for the minimal initrd.
+The BIOS staging split reserves 424 KiB for the kernel and 144 KiB for the minimal initrd.
 
 
 ## Filesystem metadata and user traversal
@@ -1567,7 +1583,7 @@ Explicit shutdown installs device-scoped [Embedded Controller handlers](kernel/a
 Validated firmware I/O resources select the ports. Bounded, serialized byte transactions support AML EC regions without SCI event handling.
 Controllers that require the ACPI Global Lock remain unsupported. Ordinary boot and passive observation do not activate these handlers.
 The [CI boot-envelope correction](kernel/acpi-embedded-controller.md#ci-boot-envelope-correction--2026-11-08) set the reserved end and page-frame bitmap base to `0x194000`.
-Memory logging extends that window to `0x198000`; the post-image reserve and staging limits remain checked.
+Log export extends that window to `0x1A0000`; the post-image reserve and staging limits remain checked.
 The 16 KiB post-image reserve and low-memory firmware ceiling remain unchanged.
 
 ## Memory logging and correlation
@@ -1584,8 +1600,27 @@ The kernel allocates capture storage after allocator initialization and before p
 Capture uses a nonblocking lock attempt; contention increments a loss counter.
 The clock advances once per BSP scheduler tick, independent of CPU count.
 A retained Operation owns its origin record until completion or failure.
-History allocation counts against a system-wide ceiling and is released when its process is reaped.
-No log capture performs filesystem I/O. Export and general provider reflection remain later slices.
+History allocation counts against a system-wide ceiling.
+Process reaping transfers a closing history to the bounded exporter.
+No log capture performs filesystem I/O. General provider reflection remains a later slice.
+
+The [log export ABI](native-api/abi/log-export-abi.md) defines temporary snapshots and persistent segments.
+
+```text
+capture storage -> record copies -> 64 KiB staging -> /tmp/log or /disk/log
+kernel provider worker -> timed drain -> bounded rotation -> periodic synchronization
+process reaping -> retained closing history -> export or counted loss -> release
+```
+
+The existing kernel provider worker wakes at bounded intervals and performs export outside capture locks.
+Export reserves admission against syscall entry and deferred descriptor I/O.
+Conflicting syscalls yield before side effects and retry `INT 0x80`; queued descriptor operations wait for a later interrupt.
+This avoids foreground failures from the current nonblocking ext2 guard.
+It adds bounded syscall latency during export; interrupt capture and device completion continue.
+Explicit export requires log-read and system-control authority; status requires log-read authority.
+Filesystem failures suspend automatic export without disabling memory capture.
+Shutdown and reboot attempt a final drain before filesystem synchronization.
+See the [export plan](archive/native-api/2026-11-09-log-export.md) for resource changes and validation limits.
 
 ## Live context exploration
 

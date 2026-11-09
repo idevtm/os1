@@ -1,0 +1,107 @@
+{
+  "baseline_revision": "7fd618ad8b6e79b5f32e242ff5b9e507e35a1d83",
+  "candidate": "Reviewed working tree, identified by generated source identity",
+  "identity": "#pragma once\n#define OS1_LOG_REVISION \"7fd618ad8b6e79b5f32e242ff5b9e507e35a1d83\"\n#define OS1_LOG_IMAGE \"cd92a3081e4e46d1ae5af989758f10c169826c68ee85fdfacc9f08dcac10f2ce\"\n",
+  "config": {
+    "host": "Apple M4 Max, macOS 26.6.2",
+    "compiler": "x86_64-elf GCC 11.2.0",
+    "qemu": "11.1.3, TCG, q35, four CPUs, 128 MiB",
+    "build": "Debug, OS1_KMEM_DEBUG=ON, OS1_QEMU_DEBUGCON=ON"
+  },
+  "profiles": {
+    "before": {
+      "artifacts": {
+        "kernel_bios.elf": {
+          "bytes": 430336,
+          "sha256": "86a5431d896f9f46c1ba5be7838c11d94ab26b4bade65b7d44bc80e3bd240afb"
+        },
+        "kernel.elf": {
+          "bytes": 576400,
+          "sha256": "a7d2cd0c1f56f9c4a823f2ad980e55c5d38de3744792f8dda24bbb412adff648"
+        },
+        "os1.iso": {
+          "bytes": 4448256,
+          "sha256": "b88a94b718be85a74e2abd8fb40abfc469394196360b889360db9066c8a69d48"
+        },
+        "os1.raw": {
+          "bytes": 1474560,
+          "sha256": "3cb04068cc61575a67d08988bac88d6a59bd41e61ab165fd620ff2b6490edb85"
+        }
+      },
+      "segments": [
+        {
+          "flags": 5,
+          "virtual": 18446744071563116544,
+          "physical": 1048576,
+          "file_bytes": 348160,
+          "memory_bytes": 348160,
+          "loaded_sha256": "efa58e2696ec4367a8184dd6fa17a832365733e83e01dc942222a0bdefb0d69d"
+        },
+        {
+          "flags": 4,
+          "virtual": 18446744071563464704,
+          "physical": 1396736,
+          "file_bytes": 49152,
+          "memory_bytes": 49152,
+          "loaded_sha256": "40c7cbd6ba059b729b018ada9da8776be10992bbbd31959a1423734694effceb"
+        },
+        {
+          "flags": 6,
+          "virtual": 18446744071563513856,
+          "physical": 1445888,
+          "file_bytes": 32768,
+          "memory_bytes": 229376,
+          "loaded_sha256": "0d0810a89718855179da9171a4b017f18a0370fe0c85a69a1202cd89fec4fc52"
+        }
+      ]
+    },
+    "after": {
+      "artifacts": {
+        "kernel_bios.elf": {
+          "bytes": 429192,
+          "sha256": "544e67b23080cbf766e0fa6fd3b08e585cd707c9eedfaebc168f6ae49d9151a9"
+        },
+        "kernel.elf": {
+          "bytes": 575256,
+          "sha256": "b277019b43d1b9d5c99b9a3ef70c805f36cd65de49f71e43f124b56c37c8d3fb"
+        },
+        "os1.iso": {
+          "bytes": 4446208,
+          "sha256": "916e9c95ae239ea1284a878cb44b41b1d8619faa4356e1d12aca4a468cc43f14"
+        },
+        "os1.raw": {
+          "bytes": 1474560,
+          "sha256": "4d28f2662d4d53c7000c1f4ccdc805396e0fb243ee982b09e1f6a72d09927d4b"
+        }
+      },
+      "segments": [
+        {
+          "flags": 5,
+          "virtual": 18446744071563116544,
+          "physical": 1048576,
+          "file_bytes": 348160,
+          "memory_bytes": 348160,
+          "loaded_sha256": "efa58e2696ec4367a8184dd6fa17a832365733e83e01dc942222a0bdefb0d69d"
+        },
+        {
+          "flags": 4,
+          "virtual": 18446744071563464704,
+          "physical": 1396736,
+          "file_bytes": 49152,
+          "memory_bytes": 49152,
+          "loaded_sha256": "7d5349c47718c8a90fe6b9a4354ea354ba7722ecc029661b302c44a50e8468cd"
+        },
+        {
+          "flags": 6,
+          "virtual": 18446744071563513856,
+          "physical": 1445888,
+          "file_bytes": 31624,
+          "memory_bytes": 229376,
+          "loaded_sha256": "0d0810a89718855179da9171a4b017f18a0370fe0c85a69a1202cd89fec4fc52"
+        }
+      ]
+    }
+  },
+  "baseline_embedded_revision": "d0662a1e27e9b1320eedc7170ef702d477cbc7a9",
+  "baseline_source_fingerprint": "55f937e376db59033188c073344dd7231bc0b71aa046fa1a2efc268524ee81ea"
+}

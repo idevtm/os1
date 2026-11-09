@@ -6,6 +6,7 @@
 #include "console/console.hpp"
 #include "console/console_input.hpp"
 #include "debug/log.hpp"
+#include "debug/log_export.hpp"
 #include "fs/initrd.hpp"
 #include "mm/kmem.hpp"
 #include "platform/system_control.hpp"
@@ -642,6 +643,25 @@ void invoke_log(OpenInstance&,
         result.application_status = OS1_ERR_ACCESS;
         return;
     }
+    if(request.member == OS1_LOG_EXPORT_INFO && !request.payload_bytes)
+    {
+        auto information = log_export::info();
+        memcpy(result.payload, &information, sizeof(information));
+        result.payload_bytes = sizeof(information);
+        return;
+    }
+    if(request.member == OS1_LOG_EXPORT)
+    {
+        os1_log_export_request args{};
+        if(!(rights & OS1_RIGHT_SYSTEM_CONTROL))
+            result.application_status = OS1_ERR_ACCESS;
+        else if(!decode(request, args) || args.version != 1 || args.size != sizeof(args) ||
+                args.reserved)
+            result.application_status = OS1_ERR_INVALID;
+        else
+            result.application_status = log_export::run(args.target);
+        return;
+    }
     if(request.member == OS1_LOG_INFO && !request.payload_bytes)
     {
         auto information = diagnostic_log::info();
@@ -666,8 +686,12 @@ void invoke_log(OpenInstance&,
         result.payload_bytes = sizeof(record);
     }
 }
-const KernelProvider log_provider{
-    OS1_LOG_INTERFACE_ID, 1, OS1_OBJECT_DIRECTORY, OS1_RIGHT_LOG_READ, system_root, invoke_log};
+const KernelProvider log_provider{OS1_LOG_INTERFACE_ID,
+                                  1,
+                                  OS1_OBJECT_DIRECTORY,
+                                  OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL,
+                                  system_root,
+                                  invoke_log};
 const KernelProvider system_provider{OS1_SYSTEM_INTERFACE_ID,
                                      1,
                                      OS1_OBJECT_DIRECTORY,
