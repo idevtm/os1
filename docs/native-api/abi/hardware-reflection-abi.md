@@ -133,6 +133,10 @@ Path length remains 256 bytes; resolution and alias traversal remain bounded to 
 Runtime refresh invalidates discovery cursors even though the boot catalog remains unchanged.
 
 Hardware fields evaluate to typed data and can be copied into shell bindings.
+The `context` command also displays their cached values beside field types.
+Integer values use unsigned decimal notation. Strings use the sanitized observation text.
+Empty collections print `(no children)`; the default QEMU run has no attached USB controller or devices.
+Inspection does not invoke members, run property getters, or change device state.
 Object nodes are inspection targets; this slice does not return retained device-control objects.
 `echo` and `out.print` retain their String parameter contract.
 Use direct evaluation for numeric fields.

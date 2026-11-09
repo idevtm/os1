@@ -53,17 +53,16 @@ inline void message(const char* text)
 {
     put(2, text, length(text));
 }
-inline void number(int fd, size_t n)
+inline bool number(int fd, size_t n)
 {
     char digits[24];
-    size_t used = 0;
+    size_t start = sizeof(digits);
     do
     {
-        digits[used++] = char('0' + n % 10);
+        digits[--start] = char('0' + n % 10);
         n /= 10;
     } while(n);
-    while(used)
-        put(fd, digits + --used, 1);
+    return put(fd, digits + start, sizeof(digits) - start);
 }
 struct Line
 {

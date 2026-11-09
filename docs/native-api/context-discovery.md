@@ -68,7 +68,10 @@ This support does not imply general invocation of arbitrary discovered provider 
 `View` supports `resolve`, `container`, and `enumerate`.
 `Member.value` indexes the copied environment when the member describes environment data.
 List children use decimal indices, such as `process.environment.path.0`.
-The text inspector prints member kinds and signatures; it does not print arbitrary property values.
+The text inspector prints member kinds and signatures.
+For hardware fields, it also prints the value from the copied boot observation.
+It does not invoke methods or arbitrary property getters.
+An empty collection prints `(no children)` after its heading.
 Typed clients can inspect copied environment values directly.
 
 | Bound | Value |

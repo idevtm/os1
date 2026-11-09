@@ -1634,6 +1634,7 @@ Physical topology and class views share canonical boot-local record IDs.
 Driver bindings are captured before user execution. Queries perform no hardware access or firmware evaluation.
 xHCI retains normal-boot port outcomes in the existing bounded USB diagnostic array. Overflow increments an exposed loss counter.
 The user runtime caches one page and keeps external nodes outside its fixed registry.
+The context inspector prints cached hardware field values and identifies empty collections without invoking members.
 Hardware nodes do not grant device control. Functional input, display, and block interfaces remain planned.
 
 ## Live context exploration
