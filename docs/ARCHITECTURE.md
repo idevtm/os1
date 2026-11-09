@@ -50,6 +50,15 @@ Milestone implementation status (not a claim that all correctness or hardware-va
 
 The [documentation index](README.md) groups current contracts by topic and separates historical records in the archive.
 
+## Boot profile selection
+
+Limine presents `os1` and `os1 diagnostics` in ISO and fresh USB images.
+The second entry passes `os1.log=diagnostic` through the existing `BootInfo` command line.
+The kernel uses this option for ring capacity, API tracing, and export cadence.
+Capture-image builds additionally pass `os1.bootdiag` for their reset-and-harvest workflow.
+The custom BIOS loader retains build-selected diagnostics without an interactive menu.
+See the [boot-menu record](archive/boot/2026-11-09-boot-menu.md) for limits and validation.
+
 ## Native objects and OS services
 
 The Native API has implemented descriptor authority and bounded IPC between user programs.

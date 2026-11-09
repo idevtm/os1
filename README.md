@@ -16,6 +16,10 @@ The 2026-05-10 integration replaced the previous AML interpreter with upstream A
 ACPICA supports table discovery, namespace loading, device enumeration, `_PRT` routing, resource parsing, and device power transitions.
 `/disk/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose cached route information through passive userland observation.
 
+Fresh UEFI images show two boot entries: `os1` and `os1 diagnostics`.
+The second entry enables the [accepted diagnostic logging budgets](docs/native-api/context-diagnostics.md#accepted-defaults--2026-11-08).
+The normal entry starts automatically after ten seconds.
+
 The boot frontends are peers: `src/boot/bios/` owns the legacy raw-image path, and `src/boot/limine/` owns the UEFI shim.
 Kernel directories separate these responsibilities:
 

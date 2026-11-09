@@ -96,14 +96,22 @@ pre-loader plus the diagnostic USB menu. The UEFI ISO remains an ordinary boot
 image. Keep the two build directories separate so the normal image is not
 mistaken for an image that writes logs to its boot media.
 
-On the diagnostic USB image, choose:
+All maintained Limine menus contain these two entries:
 
 | Menu entry | Behavior |
 | --- | --- |
-| `os1` | Ordinary sustained kernel boot; no RAM capture or diagnostic watchdog. |
-| `os1 (capture only, no watchdog)` | `os1.bootlog`: retain the debug stream in RAM, without screen/scancode diagnostics or an automatic reset. |
-| `os1 (diagnostics, automatic log harvest)` | `os1.bootdiag`: capture plus the screen mirror, first 32 scancodes, and watchdog reset to harvest the log. |
-| Diagnostic entries disabling xHCI or SMP | Same diagnostics, with `os1.noxhci` and optionally `os1.nosmp` to isolate bring-up failures. |
+| `os1` | Normal memory logging and export budgets |
+| `os1 diagnostics` | Diagnostic memory logging and export budgets; capture builds also enable `os1.bootdiag` |
+
+Normal images pass only `os1.log=diagnostic` for the second entry.
+This enables the accepted logging profile without enabling the reset-and-harvest watchdog.
+Capture builds add `os1.bootdiag` for the screen mirror, scancode diagnostics, and watchdog reset.
+Generic menus default to `os1` after ten seconds.
+The keyboard-diagnostic image immediately selects `os1 diagnostics` for unattended collection.
+
+The previous capture-only, no-xHCI, and one-CPU entries are historical.
+Their kernel command-line options remain available through the Limine editor.
+See the [menu implementation record](../archive/boot/2026-11-09-boot-menu.md) for scope and validation.
 
 The pre-loader itself is selected when the diagnostic image is built, before
 the menu is shown. It therefore still reserves a window and updates the journal

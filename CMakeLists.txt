@@ -156,7 +156,7 @@ set(OS1_LIMINE_BOOTX64 "${OS1_LIMINE_DIR}/BOOTX64.EFI")
 set(OS1_LIMINE_UEFI_CD "${OS1_LIMINE_DIR}/limine-uefi-cd.bin")
 set(OS1_LIMINE_PROTOCOL_HEADER "${OS1_LIMINE_DIR}/limine.h")
 set(OS1_LIMINE_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine.conf")
-# The USB stick offers bring-up variants (boot options) in a Limine menu.
+# Both Limine entries select an existing runtime logging profile.
 set(OS1_LIMINE_USB_CONFIG_SOURCE "${PROJECT_SOURCE_DIR}/src/boot/limine/limine-usb.conf")
 set(OS1_USB_PRELOADER_ARGS)
 set(OS1_USB_PRELOADER_DEPENDS)
@@ -852,6 +852,8 @@ os1_register_menu_target(
 )
 
 if(BUILD_TESTING)
+  add_test(NAME os1_boot_menu_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_boot_menu_config.py")
   add_test(NAME os1_usb_menu_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_usb_menu.py")
   add_test(NAME os1_smoke_settle_contract
@@ -1837,6 +1839,15 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
       set(file_test_firmware)
     endif()
     if(OS1_DEBUGFS_EXECUTABLE AND OS1_E2FSCK_EXECUTABLE)
+      if(boot STREQUAL "uefi")
+        add_test(NAME os1_smoke_boot_menu_uefi
+          COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_boot_menu.py"
+            --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+            --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-boot-menu.log"
+            --debugfs "${OS1_DEBUGFS_EXECUTABLE}" ${file_test_firmware})
+        set_tests_properties(os1_smoke_boot_menu_uefi PROPERTIES TIMEOUT 180)
+        list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_boot_menu_uefi)
+      endif()
       add_test(NAME os1_smoke_log_export_${boot}
         COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_log_export.py"
           --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"

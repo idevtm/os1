@@ -201,6 +201,9 @@ The first stage must report this limit rather than imply that every command surv
 
 The user accepted these defaults before implementation. The export ABI now implements bounded export and retention.
 
+The `os1 diagnostics` Limine entry selects this diagnostic profile through `os1.log=diagnostic`.
+Normal images leave watchdog reset-and-harvest behavior disabled.
+
 | Setting | Normal boot | Diagnostic boot |
 | --- | --- | --- |
 | Capture | Lifecycle, device identification, warnings, errors, API failures, resource changes | All instrumented API entries and completions |
