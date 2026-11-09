@@ -143,6 +143,10 @@ set(runner_command
   --send-delay
   "${SMOKE_SEND_DELAY_SECONDS}"
 )
+if(DEFINED ISO_IMAGE AND NOT NO_UART)
+  # The guarded selector stops at kernel startup and does not delay shell input.
+  list(APPEND runner_command --boot-menu-entry 1)
+endif()
 foreach(marker IN LISTS EXPECTED_MARKERS)
   list(APPEND runner_command --marker "${marker}")
 endforeach()

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from boot_menu import BootMenu
 
 sys.dont_write_bytecode = True
 
@@ -61,14 +62,13 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     pending = bytearray()
     transcript = bytearray()
     started = time.monotonic()
-    menu_selected = False
+    menu = BootMenu(getattr(args, 'boot_menu_entry', 1) if args.code else None)
 
     rescue = any(getattr(args, name, False) for name in ('readonly', 'stall_init', 'missing_disk', 'rescue'))
     prompt = b'rescue> ' if rescue else b'os1> '
 
     def expect(marker=None, timeout=60, allow_errors=False):
         marker = prompt if marker is None else marker
-        nonlocal menu_selected
         end = time.monotonic() + timeout
         while marker not in pending:
             if time.monotonic() > end:
@@ -80,12 +80,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 raise AssertionError(f'QEMU exited: {child.poll()}')
             transcript.extend(data)
             pending.extend(data.replace(b'\r', b''))
-            if getattr(args, 'boot_menu_entry', None) and not menu_selected:
-                plain = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', bytes(transcript))
-                if b'os1 diagnostics' in plain:
-                    child.stdin.write(b'\x1b[B' * (args.boot_menu_entry - 1) + b'\r')
-                    child.stdin.flush()
-                    menu_selected = True
+            menu.feed(data, child.stdin)
         at = pending.index(marker) + len(marker)
         result = bytes(pending[:at])
         del pending[:at]
@@ -97,6 +92,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
         return result
 
     def run(text, marker=None, allow_errors=False, timeout=60):
+        if text == 'reboot':
+            menu.reset()
         child.stdin.write((text + '\n').encode())
         child.stdin.flush()
         out = expect(allow_errors=allow_errors, timeout=timeout)
@@ -108,8 +105,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
         if before_boot is not None:
             before_boot()
         startup = expect()
-        if getattr(args, 'boot_menu_entry', None):
-            assert menu_selected, 'shell started without selecting the requested menu entry'
+        if args.code and getattr(args, 'boot_menu_entry', 1) is not None:
+            assert menu.selected, 'shell started without selecting the requested menu entry'
         if getattr(args, 'readonly', False) or getattr(args, 'stall_init', False):
             rejected = b'ehci: storage rejected' if args.transport == 'ehci' else b'usb-storage: unsupported or failed device'
             if getattr(args, 'stall_init', False) and args.transport == 'ehci':

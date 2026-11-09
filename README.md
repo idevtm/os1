@@ -305,12 +305,23 @@ Or run the full registered CTest suite, including script contracts:
 ctest --test-dir build --output-on-failure --no-tests=error
 ```
 
-With `BUILD_TESTING=ON`, QEMU, and OVMF available, CTest registers eleven QEMU
-smokes and four script contracts.
-The contracts cover HMP acknowledgement, smoke settling, USB kernel updates, and USB menus. `OS1_QEMU_DEBUGCON=ON` adds the no-UART smoke, giving the CI
-configuration 12 QEMU smokes and 16 CTest cases. `smoke_all` runs only the QEMU
-smokes. Missing QEMU/OVMF reduces registration; CI sets
-`OS1_REQUIRE_UEFI_SMOKE=ON` to reject a missing UEFI smoke environment.
+CTest registers checks according to the available build tools and firmware.
+Use `ctest --test-dir build -N` to inspect the current list.
+The suite includes boot, storage, lifecycle, shell, discovery, and script contract checks.
+`OS1_QEMU_DEBUGCON=ON` adds the no-UART check.
+CI requires UEFI coverage through `OS1_REQUIRE_UEFI_SMOKE=ON`.
+
+```text
+ordinary UEFI checks -> select os1 immediately -> existing guest assertions
+dedicated menu check -> automatic countdown and both explicit entries
+BIOS / no-UART / boot measurements -> existing boot behavior
+```
+
+Ordinary serial tests select the packaged `os1` entry when its menu appears.
+The dedicated menu check verifies automatic boot and both logging profiles.
+The packaged ten-second countdown remains unchanged.
+QEMU tests remain serial because they share artifacts.
+See the [CI duration record](docs/archive/tooling/2026-11-09-ci-duration.md) for measurements and validation limits.
 
 After `cmake --build build`, the registered smokes have their required images.
 They check boot, shell, passive ACPI observation, SMP balance, child-launch, and exec markers through serial logs.

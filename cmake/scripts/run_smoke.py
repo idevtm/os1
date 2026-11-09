@@ -18,6 +18,10 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tests/scripts'))
+from boot_menu import BootMenu
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 MAX_MATCH_BUFFER_CHARS = 1024 * 1024
@@ -143,6 +147,8 @@ def parse_args():
                         help="Extra time to keep streaming after all required markers are seen.")
     parser.add_argument("--send-delay", type=float, default=0.0,
                         help="Optional delay in seconds before writing a matched --send-after payload.")
+    parser.add_argument("--boot-menu-entry", type=int, choices=(1, 2),
+                        help="Select a packaged Limine entry before kernel startup.")
     parser.add_argument("--marker", action="append", default=[],
                         help="Required marker substring (repeatable, order-independent).")
     parser.add_argument("--reject-marker", action="append", default=[],
@@ -207,6 +213,7 @@ def main():
     deadline = time.monotonic() + args.timeout
     settle_deadline = None
     reader_finished_at = None
+    boot_menu = BootMenu(args.boot_menu_entry)
 
     with open(args.log, "w", encoding="utf-8", errors="replace") as log_file:
         proc = subprocess.Popen(
@@ -230,6 +237,10 @@ def main():
                     output_lines.append(line)
                     log_file.write(line)
                     log_file.flush()
+                    try:
+                        boot_menu.feed(line, proc.stdin)
+                    except BrokenPipeError:
+                        pass  # Preserve output even when a failed guest cannot accept input.
                     match_buffer = (match_buffer + line)[-MAX_MATCH_BUFFER_CHARS:]
                     sent_serial_texts = [event.text for event in send_events if event.sent]
                     marker_noise = [marker for marker in markers if marker in match_buffer]

@@ -9,16 +9,20 @@ RUNNER = Path(__file__).resolve().parents[2] / "cmake/scripts/run_smoke.py"
 
 
 class SettleTests(unittest.TestCase):
-    def run_smoke(self, program, settle="0.2", timeout="2", events=(), rejected="BROKEN", marker="READY"):
+    def run_smoke(self, program, settle="0.2", timeout="2", events=(), rejected="BROKEN", marker="READY", boot_menu=None):
         with tempfile.TemporaryDirectory() as directory:
             event_args = [arg for event in events for arg in ("--send-after", event)]
-            return subprocess.run(
+            if boot_menu is not None:
+                event_args += ['--boot-menu-entry', str(boot_menu)]
+            result = subprocess.run(
                 [sys.executable, str(RUNNER), "--log", str(Path(directory) / "log"),
                  "--timeout", timeout, "--settle-after-markers", settle,
                  "--marker", marker, "--reject-marker", rejected, *event_args, "--",
                  sys.executable, "-u", "-c", program],
                 capture_output=True, text=True, timeout=6,
             )
+            result.log = (Path(directory) / 'log').read_text()
+            return result
 
     def test_menu_without_newline_accepts_input(self):
         result = self.run_smoke(
@@ -37,6 +41,31 @@ class SettleTests(unittest.TestCase):
             events=("méthod::\\r",),
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_guarded_menu_accepts_input_without_newline(self):
+        result = self.run_smoke(
+            "import os,time; os.write(1,b'os1\\x1b[2;1H diagnostics'); "
+            "assert os.read(0,1)==b'\\r'; print('READY',flush=True); time.sleep(1)",
+            boot_menu=1,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_guarded_menu_does_not_send_after_coalesced_kernel_start(self):
+        result = self.run_smoke(
+            "import os,select,time; os.write(1,b'os1 diagnostics\\n[kernel64] hello\\nREADY\\n'); "
+            "print('BROKEN' if select.select([0],[],[],.1)[0] else 'safe',flush=True); time.sleep(1)",
+            boot_menu=1,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_guarded_menu_preserves_output_when_input_is_closed(self):
+        result = self.run_smoke(
+            "import os,time; os.close(0); os.write(1,b'os1 diagnostics\\nDEVICE FAILURE\\n'); time.sleep(1)",
+            boot_menu=1,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('DEVICE FAILURE', result.stderr)
+        self.assertIn('DEVICE FAILURE', result.log)
 
     def test_immediate_eof_is_failure(self):
         result = self.run_smoke("print('READY')")

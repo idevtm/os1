@@ -857,6 +857,9 @@ os1_register_menu_target(
 )
 
 if(BUILD_TESTING)
+  add_test(NAME os1_boot_menu_helper_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
+      -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_boot_menu_helper.py)
   add_test(NAME os1_boot_menu_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${CMAKE_SOURCE_DIR}/tests/scripts/test_boot_menu_config.py")
   add_test(NAME os1_usb_menu_contract
@@ -1340,8 +1343,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_UEFI_SPAWN_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
-      # Select normal boot explicitly; other checks cover the automatic menu wait.
-      "-DSERIAL_INPUT_EVENTS=os1 diagnostics::\\r;${OS1_SHELL_SPAWN_INPUT_EVENTS}"
+      "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_SPAWN_INPUT_EVENTS}"
       "-DPROGRAM_DISK=${OS1_PROGRAM_TEST_DISK}"
       "-DVIRTIO_TEST_DISK=${OS1_VIRTIO_TEST_DISK}"
       "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"

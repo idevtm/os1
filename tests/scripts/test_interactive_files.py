@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from boot_menu import BootMenu
 
 
 def main():
@@ -38,6 +39,7 @@ def main():
     selector.register(child.stdout, selectors.EVENT_READ)
     pending = bytearray()
     transcript = bytearray()
+    menu = BootMenu(1 if args.code else None)
 
     def send(data):
         child.stdin.write(data.encode() if isinstance(data, str) else data)
@@ -55,6 +57,7 @@ def main():
                 raise AssertionError(f'QEMU exited {child.poll()}')
             transcript.extend(data)
             pending.extend(data.replace(b'\r', b''))
+            menu.feed(data, child.stdin)
         at = pending.index(marker) + len(marker)
         result = bytes(pending[:at])
         del pending[:at]
