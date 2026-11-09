@@ -16,3 +16,5 @@ Use the [documentation index](../../README.md) for current guidance.
 | 2026-11-04 | [Console Descriptor Implementation Plan — 2026-11-04](2026-11-04-console-descriptor-implementation-plan.md) |
 
 - [2026-11-09: log export and persistence](2026-11-09-log-export.md)
+
+- [2026-11-09: physical log export validation](2026-11-09-log-hardware-validation.md)

@@ -1,0 +1,130 @@
+{
+  "partition_sha256": "562b2920727304ee2f278cf1849ee648acad254debb6bf8057cb726bac62ff49",
+  "files": {
+    "kernel-0000000000000002-0000000000000004.bin": {
+      "bytes": 43776,
+      "sha256": "bf4770e1c0d4de1fc38fb80f1c3becc66640b491460a7cc611044b3edfa380c3"
+    },
+    "kernel-0000000000000002-0000000000000001.bin": {
+      "bytes": 259840,
+      "sha256": "3f650c4c3ec8978098468e4f5800d97163777dd8acc57aa831b21a48c88d4842"
+    },
+    "kernel-0000000000000002-0000000000000003.bin": {
+      "bytes": 261120,
+      "sha256": "29788479c989d3214379914a5120539f40b4fc6efc002e0a42675c42b08743cd"
+    },
+    "kernel-0000000000000003-0000000000000001.bin": {
+      "bytes": 87040,
+      "sha256": "0f1bfddae0839a7ca224c943c0245da1c12e8ce92897c8d600cc97810fc6cf38"
+    },
+    "kernel-0000000000000004-0000000000000003.bin": {
+      "bytes": 196864,
+      "sha256": "b83d31907f44324b8e944c4138d4d20485a980baf09ad558ddfa04014bf50377"
+    },
+    "kernel-0000000000000004-0000000000000001.bin": {
+      "bytes": 214272,
+      "sha256": "5cca14e3d3b9c360e7c89ec61ceb345f262475e63cdcad14fa210b64195baa3a"
+    },
+    "kernel-0000000000000001-0000000000000001.bin": {
+      "bytes": 211968,
+      "sha256": "db430c4a08571ffa65d04447f3ff9c101fd431f3a4f89eb405b23fd1121bde0d"
+    },
+    "kernel-0000000000000004-0000000000000004.bin": {
+      "bytes": 206848,
+      "sha256": "96a93c2ceef0b4094a59026f08542ad2a3ab96fa8c062f7cad660c7e547fdc53"
+    },
+    "shell-0000000000000004-0000000000000003-0000000000000002.bin": {
+      "bytes": 9472,
+      "sha256": "d96487d5c382e4f26cf3dd301dad89262c33943432551e73f46efd50f067f9cb"
+    },
+    "kernel-0000000000000004-0000000000000005.bin": {
+      "bytes": 97792,
+      "sha256": "c4374cef9dccb5e4d02fec6ee7361c2e0c2cd981a6323377f52a2d1d600f1006"
+    },
+    "shell-0000000000000001-0000000000000003-0000000000000002.bin": {
+      "bytes": 16384,
+      "sha256": "e53da373e33a6c6a690a87b2aab9c4aff93c15c7b4bf2cee312a724d1aeb1870"
+    },
+    "shell-0000000000000003-0000000000000003-0000000000000002.bin": {
+      "bytes": 9472,
+      "sha256": "2589793800c001dc02dbd0a931ca80052860e2ab12bc724322e0559e3ea9a895"
+    },
+    "shell-0000000000000002-0000000000000003-0000000000000002.bin": {
+      "bytes": 46336,
+      "sha256": "12c70dcd95c7d04e8a3ca6822dd7cc502f0ccc5e547fd8b02f252106ede9d6c1"
+    }
+  },
+  "boots": {
+    "1": {
+      "diagnostic": 0,
+      "boot_mode": 2,
+      "frames": 37,
+      "kernel_records": 799,
+      "shell_snapshots": 7,
+      "unique_commands": 7,
+      "sequence_first": 1,
+      "sequence_last": 799,
+      "sequence_gaps": [],
+      "dropped": 0,
+      "overwritten": 0,
+      "initial_zero_time_records": 104,
+      "command_pairing_valid": true,
+      "revision": "7eb3cee89c8bd576683cd5e464e154397ae70968",
+      "image": "55f937e376db59033188c073344dd7231bc0b71aa046fa1a2efc268524ee81ea"
+    },
+    "2": {
+      "diagnostic": 0,
+      "boot_mode": 2,
+      "frames": 130,
+      "kernel_records": 2097,
+      "shell_snapshots": 20,
+      "unique_commands": 19,
+      "sequence_first": 1,
+      "sequence_last": 2097,
+      "sequence_gaps": [],
+      "dropped": 0,
+      "overwritten": 1201,
+      "initial_zero_time_records": 79,
+      "command_pairing_valid": true,
+      "revision": "7eb3cee89c8bd576683cd5e464e154397ae70968",
+      "image": "55f937e376db59033188c073344dd7231bc0b71aa046fa1a2efc268524ee81ea"
+    },
+    "3": {
+      "diagnostic": 0,
+      "boot_mode": 2,
+      "frames": 21,
+      "kernel_records": 324,
+      "shell_snapshots": 4,
+      "unique_commands": 4,
+      "sequence_first": 1,
+      "sequence_last": 324,
+      "sequence_gaps": [],
+      "dropped": 0,
+      "overwritten": 0,
+      "initial_zero_time_records": 79,
+      "command_pairing_valid": true,
+      "revision": "7eb3cee89c8bd576683cd5e464e154397ae70968",
+      "image": "55f937e376db59033188c073344dd7231bc0b71aa046fa1a2efc268524ee81ea"
+    },
+    "4": {
+      "diagnostic": 1,
+      "boot_mode": 2,
+      "frames": 75,
+      "kernel_records": 2726,
+      "shell_snapshots": 4,
+      "unique_commands": 4,
+      "sequence_first": 1,
+      "sequence_last": 2726,
+      "sequence_gaps": [],
+      "dropped": 0,
+      "overwritten": 0,
+      "initial_zero_time_records": 79,
+      "command_pairing_valid": true,
+      "revision": "7eb3cee89c8bd576683cd5e464e154397ae70968",
+      "image": "55f937e376db59033188c073344dd7231bc0b71aa046fa1a2efc268524ee81ea"
+    }
+  },
+  "date": "2026-11-09",
+  "user_report": "Normal and diagnostic logging, export, and persistence tests passed on ASUS G74SX and H81M-S1 desktop.",
+  "scope": "Retained files independently cover laptop normal and desktop normal/diagnostic boots; laptop diagnostic evidence is not retained."
+}

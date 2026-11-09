@@ -238,3 +238,8 @@ Each confirmed defect has regression coverage.
 The reviewers changed no project files and ran no tests.
 The implementer ran the recorded checks.
 Final documentation and evidence received a separate read-only review before publication.
+
+## Hardware follow-up
+
+The [2026-11-09 hardware record](2026-11-09-log-hardware-validation.md) separates reported success on both machines from retained log coverage.
+It also records the outstanding CI BIOS-size blocker.
