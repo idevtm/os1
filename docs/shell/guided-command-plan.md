@@ -204,7 +204,8 @@ The fourth review found that guided `source.stream` selection still inserted std
 Source selection now inserts stdin; destination selection inserts stdout.
 The fifth independent review found no remaining defect in this correction or its argument-validation interactions.
 
-Physical hardware requires separate qualification.
+The hardware acceptance record below covers the reported manual checks.
+Other hardware and workloads require separate qualification.
 The complete ASD-STE100 Issue 9 dictionary is unavailable; prose review uses the repository rules.
 
 ### Artifact identity
@@ -251,3 +252,44 @@ The log is `build/guided-evidence/ci-fix-guided-tests.txt`.
 
 An independent read-only review found no defect in the correction or its immediate interactions.
 The reviewer verified host and guest results, executable hashes, and the updated evidence.
+
+## Hardware acceptance — 2026-11-09
+
+The user reported that all five manual test sequences passed on both physical devices.
+This result qualifies the tested guided editing, bindings, and history behavior.
+
+| Device | Reported result |
+| --- | --- |
+| Asus G74SX laptop | All five sequences passed |
+| Gigabyte H81M-S1 desktop with Lenovo Calliope USB G2 keyboard (`17ef:6190`) | All five sequences passed |
+
+The device identities come from earlier hardware reports in this conversation.
+The report follows PR 42 code revision `3faa0a45eb7640fa64c3c00a4bfd9f40debd7d37`.
+The user did not supply an image hash, firmware configuration, or repeat count for this test.
+
+| Sequence | Accepted behavior |
+| --- | --- |
+| Live browsing and invocation | Tab and arrow navigation work; `out.print` expands and executes; local choices update in place |
+| Guided arguments | Tab and Shift-Tab change focus; Ctrl-Space selects the `path` variant; `fs.copy` prints the temporary file |
+| Data and object bindings | Geometry fields, retained Console access, nested `path.search`, dot discovery, and `drop` work |
+| History and editing | Recall supports insertion; Down restores the unfinished draft and its cursor |
+| Exclusive sessions | Scoped release restores input; persistent exclusive acquisition fails without disabling the prompt |
+
+The test file was `/tmp/guided-source`; these checks do not establish persistent-storage behavior.
+The report contains no hardware timing, memory, or CPU measurements.
+It supplements the automated checks and does not replace their coverage.
+
+### Evidence update impact and validation
+
+This documentation update records reported hardware evidence without changing runtime behavior.
+It supports GOALS: Runnable vertical slices and Architecture: Live context exploration.
+The runtime discovery profile and accepted lifetime rules remain unchanged.
+
+Boot, memory, isolation, concurrency, interfaces, and runtime resource use are unaffected because only this record changes.
+Existing measurements retain their original revisions, workload, configuration, and limits.
+No kernel build or new runtime benchmark is required for this documentation update.
+
+CI run [42496728410](https://github.com/idevtm/os1/actions/runs/42496728410) passed for revision `3faa0a4`.
+It passed 561 host tests, 70 smoke tests, and three keyboard-diagnostic checks.
+The manual commands match `tests/scripts/test_guided_shell.py` and the accepted interaction rules above.
+The complete ASD-STE100 Issue 9 dictionary remains unavailable; language review uses the repository rules.
