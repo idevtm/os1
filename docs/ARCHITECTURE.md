@@ -1417,20 +1417,24 @@ The fix closes review R4; it does not explain historical BIOS launch failures.
 
 ### CI
 
-GitHub Actions runs on `ubuntu-24.04` for pushes to `main` and pull requests targeting `main`:
+Local validation provides complete coverage. GitHub Actions checks selected strategic paths for pushes to `main` and pull requests targeting `main`.
 
-- checkout submodules, including vendored GoogleTest
-- install host tools including `cpio`, `xorriso`, `ovmf`, `qemu-system-x86`
-- configure, build, and run the host GoogleTest suite
-- install the `x86_64-elf` cross toolchain through Homebrew
-- configure with `OS1_REQUIRE_UEFI_SMOKE=ON`, `OS1_KMEM_DEBUG=ON`, and `OS1_QEMU_DEBUGCON=ON`
-- build the default modern artifact
-- explicitly build the BIOS compatibility artifact
-- run the 16 QEMU smokes and five script contracts through root `ctest`
+```text
+local check-local.sh -> host tests -> all normal-image tests -> diagnostic-image tests
+GitHub build-and-smoke -> host tests -> six QEMU tests labeled ci
+```
 
-The same single CI job name is kept for local `act` compatibility.
+The [local runner](../scripts/check-local.sh) builds both profiles and retains failures across test phases.
+It requires UEFI firmware and enables allocator checks for host and guest builds.
+The [testing guide](testing.md) defines the exact hosted selection and evidence locations.
+The [mandatory policy](../AGENTS.md#mandatory-local-test-policy) requires local validation before push or completion.
 
-This branch runs build/test commands directly. The unified verification entrypoint, structured result artifacts, and maintenance checks proposed in the separate harness PR are not implemented here.
+GitHub uses `ubuntu-24.04`, the host compiler, and the Homebrew cross toolchain.
+It builds normal UEFI, BIOS, and USB images with debugcon and allocator checks enabled.
+Diagnostic capture runs locally instead of in the GitHub job.
+The job retains its `build-and-smoke` name for `act` compatibility.
+`act` runs the strategic subset; it does not replace the full local command.
+Structured result aggregation remains a tooling follow-up.
 
 ## Current Constraints And Next Step
 

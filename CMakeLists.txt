@@ -857,6 +857,8 @@ os1_register_menu_target(
 )
 
 if(BUILD_TESTING)
+  add_test(NAME os1_local_validation_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_check_local.py")
   add_test(NAME os1_boot_menu_helper_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
       -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_boot_menu_helper.py)
@@ -2121,6 +2123,23 @@ if(OS1_QEMU_SMOKE_TESTS)
       RESOURCE_LOCK os1_qemu_smoke_artifacts
   )
 endif()
+
+# Keep the hosted suite small. The unfiltered local suite retains every test.
+set(OS1_CI_TESTS
+  os1_smoke_spawn
+  os1_smoke_balance_bios
+  os1_smoke_context_keyboard_uefi
+  os1_smoke_bootstrap_uefi
+  os1_smoke_ehci_storage_bios
+  os1_smoke_log_export_uefi
+)
+foreach(test IN LISTS OS1_CI_TESTS)
+  if(TEST ${test})
+    set_property(TEST ${test} APPEND PROPERTY LABELS ci)
+  elseif(OS1_REQUIRE_UEFI_SMOKE AND BUILD_TESTING)
+    message(FATAL_ERROR "Required strategic CI test is unavailable: ${test}")
+  endif()
+endforeach()
 
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(

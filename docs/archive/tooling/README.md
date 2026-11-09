@@ -5,6 +5,7 @@ Use the [documentation index](../../README.md) for current guidance.
 
 | Record | Document |
 | --- | --- |
+| 2026-11-09 | [Strategic CI and mandatory local validation](2026-11-09-strategic-ci.md) |
 | 2026-11-09 | [CI boot-menu duration](2026-11-09-ci-duration.md) |
 | 2026-11-05 | [Documentation reorganization — 2026-11-05](2026-11-05-documentation-reorganization.md) |
 | 2026-04-29 | [Host Test Harness And Unit Test Plan - 2026-04-29](2026-04-29-host-test-harness-plan.md) |

@@ -293,7 +293,36 @@ Legacy BIOS exec smoke:
 cmake --build build --target smoke_exec_bios
 ```
 
-Run the QEMU smoke matrix:
+### Full local validation and strategic CI
+
+Local validation runs the complete suite. GitHub CI runs host unit tests and six strategic QEMU checks.
+
+```text
+./scripts/check-local.sh -> host tests -> full normal-image suite -> diagnostic capture suite
+GitHub CI -> host tests -> six QEMU checks labeled ci
+```
+
+Before pushing code or build changes, run:
+
+```sh
+./scripts/check-local.sh
+```
+
+The script builds both profiles and requires UEFI firmware.
+It continues to later test profiles after a test failure and returns a nonzero status.
+A build failure stops the script because its test artifacts are unavailable.
+Logs are written under `build/local-validation/`; each run replaces these logs.
+Preserve failure logs before another run.
+See the [testing guide](docs/testing.md) for coverage and the [mandatory policy](AGENTS.md#mandatory-local-test-policy) for exceptions.
+
+Run only the hosted QEMU selection locally:
+
+```sh
+ctest --test-dir build --output-on-failure --no-tests=error -L '^ci$'
+```
+
+This subset does not replace full local validation.
+Run the QEMU smoke matrix alone:
 
 ```sh
 cmake --build build --target smoke_all
@@ -364,7 +393,7 @@ Run the UEFI and BIOS interactive checks with `ctest --test-dir build -R '^os1_s
 
 ## Local CI With `act`
 
-The main CI job is still:
+This command reproduces the strategic GitHub job, not the full local suite:
 
 ```sh
 act -j build-and-smoke
