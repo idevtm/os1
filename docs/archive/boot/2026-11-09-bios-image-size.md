@@ -232,3 +232,44 @@ The measurement transcript is `lifecycle-fixture-measurements.txt`.
 ```sh
 ctest --test-dir build --output-on-failure --no-tests=error -R '^os1_smoke_(system_lifecycle|log_export)_(bios|uefi)$'
 ```
+
+## Compound spawn watchdog
+
+The compound spawn workload needs additional headroom on shared TCG runners.
+A separate sixty-second watchdog preserves all functional assertions.
+
+| Spawn watchdog | Before | After | Absolute change | Relative change |
+| --- | ---: | ---: | ---: | ---: |
+| BIOS | 30 seconds | 60 seconds | +30 seconds | +100% |
+| UEFI | 40 seconds | 60 seconds | +20 seconds | +50% |
+
+CI run `42611284503` passes all 583 host tests and 75 of 76 matrix checks, including lifecycle isolation.
+The BIOS spawn workload reaches 54 of 55 markers before its thirty-second watchdog stops the final interface listing.
+The same run completes the UEFI spawn workload in 40.16 seconds, including settlement.
+Earlier successful BIOS spawn runs took 26.23 and 30.92 seconds, including settlement.
+
+The configured smoke limits are watchdog ceilings for shared TCG runners, not product latency requirements.
+The long spawn workload combines descriptor, filesystem, IPC, buffer, activation, and parameter checks in one boot.
+Sixty seconds provides about 50% headroom above the observed forty-second successful run.
+
+All commands, required markers, rejected markers, and the one-second settlement check remain unchanged.
+The other BIOS and UEFI watchdogs remain unchanged.
+The test still exits immediately after successful validation and settlement.
+This change affects only the maximum failure wait for two tests; it changes no production code or resource limits.
+
+Both local spawn checks pass with the unchanged production images and full marker sets.
+The baseline is the preceding `dd571a1` harness run; the candidate changes only the configured watchdog.
+Each configuration has one sample with the same toolchain, firmware, four CPUs, and 128 MiB RAM.
+
+| Workload | Baseline | Candidate | Absolute difference | Relative difference |
+| --- | ---: | ---: | ---: | ---: |
+| UEFI spawn | 27.65 seconds | 31.40 seconds | +3.75 seconds | +13.56% |
+| BIOS spawn | 21.68 seconds | 20.71 seconds | -0.97 seconds | -4.47% |
+
+These single samples show runtime variation; they do not establish a production performance change.
+The watchdog does not delay early completion.
+The transcript is `spawn-watchdog-checks.txt`; the baseline is `line-boundary-checks.txt`.
+
+```sh
+ctest --test-dir build --output-on-failure --no-tests=error -R '^os1_smoke_spawn(_bios)?$'
+```
