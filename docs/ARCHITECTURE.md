@@ -1542,7 +1542,10 @@ flowchart LR
 
 Each step validates handle rights, object identity, and the expected namespace generation.
 The kernel holds the namespace guard only during that step.
-Own mutations advance the generation; other namespace changes stop traversal.
+The shell uses version 2 tree steps with separate source and destination directory tokens.
+Own mutations update the affected parent token; other changes to that directory stop its next step.
+Unrelated log rotation does not invalidate a file command's directory tokens.
+Version 1 retains global namespace-generation checks for existing callers.
 Content operations retain ordinary backend locking and do not form a whole-tree snapshot.
 Boot-local identity tokens remain separate from descriptor authority and persistent inode numbers.
 Recursive policy stays outside the kernel.
@@ -1635,6 +1638,9 @@ Conflicting syscalls yield before side effects and retry `INT 0x80`; queued desc
 This avoids foreground failures from the current nonblocking ext2 guard.
 It adds bounded syscall latency during export; interrupt capture and device completion continue.
 Explicit export requires log-read and system-control authority; status requires log-read authority.
+Its retained Operation waits for admission, with one-millisecond dispatch backoff.
+Other ready requests can proceed while export waits.
+After admission, export executes once; storage errors complete the Operation without automatic replay.
 Filesystem failures suspend automatic export without disabling memory capture.
 Shutdown and reboot attempt a final drain before filesystem synchronization.
 See the [export plan](archive/native-api/2026-11-09-log-export.md) for resource changes and validation limits.

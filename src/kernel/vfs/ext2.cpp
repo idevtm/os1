@@ -265,7 +265,7 @@ long create_locked(VfsNode* base, const char* name, size_t size, uint32_t kind, 
     }
     child->next = p->children;
     p->children = child;
-    vfs_changed();
+    vfs_changed(p, child);
     out = opened.take();
     return 0;
 }
@@ -306,7 +306,7 @@ long remove_locked(VfsNode* base, const char* name, size_t size, uint32_t kind)
     child->next = nullptr;
     child->linked = false;
     __atomic_sub_fetch(&fs.nodes, 1u, __ATOMIC_RELAXED);
-    vfs_changed();
+    vfs_changed(p, child);
     object_release(child);
     return 0;
 }
@@ -352,7 +352,7 @@ long rename(VfsNode* base, const char* from, size_t a, const char* to, size_t b)
     memcpy(child->name, to, b);
     child->name_size = b;
     child->cookie = ++fs.cookie;
-    vfs_changed();
+    vfs_changed(p, child);
     return 0;
 }
 
@@ -426,6 +426,7 @@ long move(VfsNode* from,
     {
         vfs_detach(q, target);
         target->linked = false;
+        vfs_changed(target);
         __atomic_sub_fetch(&fs.nodes, 1u, __ATOMIC_RELAXED);
         object_release(target);
     }
@@ -437,7 +438,7 @@ long move(VfsNode* from,
     child->cookie = ++fs.cookie;
     child->next = q->children;
     q->children = child;
-    vfs_changed();
+    vfs_changed(p, q, child);
     return 0;
 }
 long read(VfsNode* base, uint64_t offset, void* out, size_t size)

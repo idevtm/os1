@@ -89,8 +89,11 @@ It removes children before their parent.
 Other retained ext2 references can prevent removal.
 Tmpfs retains unlinked objects until their final reference closes.
 
-The walker rejects stale namespace generations instead of reusing changed names.
-Any concurrent namespace change can stop a command, including changes outside its tree.
+The walker uses directory-scoped generations and rejects stale names.
+It tracks source and destination directories separately.
+A directory change stops the next step that uses its old token.
+Changes in unrelated directories, including log rotation, do not invalidate these tokens.
+The legacy native profile still provides global-generation checks.
 File contents and accounting are not a whole-tree snapshot.
 On error, the command reports visited objects, completed actions, and processed bytes.
 Creation and completed file copies count as separate actions.

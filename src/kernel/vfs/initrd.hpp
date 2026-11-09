@@ -15,6 +15,7 @@ struct VfsNode : NativeObject
     const VfsOperations* operations;
     uint64_t cookie;
     uint64_t object_id, filesystem_id, archive_bytes;
+    uint64_t namespace_generation;
     bool mount_root;
     bool linked;
     VfsNode* children;

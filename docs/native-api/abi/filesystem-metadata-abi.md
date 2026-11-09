@@ -83,7 +83,11 @@ Process-local descriptor numbers occur only at this syscall boundary, not inside
 | 64 | 256 name bytes, zero-filled after the non-NUL name |
 | 320 | Output `os1_metadata` |
 
-Version is 1 and size is 384.
+Size is 384 for both tree-step versions.
+Version 1 retains global namespace-generation checks.
+Version 2 (`OS1_TREE_SCOPED_VERSION`) checks the input directory's generation.
+The shell walker uses version 2.
+Other metadata and space records retain version 1.
 Names contain 1–255 bytes; mutation backends retain their existing 63-byte limit.
 Names cannot contain NUL or slash, or equal `.` or `..`.
 Set `excluded_fd` to -1 when no exclusion applies.
@@ -117,12 +121,33 @@ This check prevents recursive copies into the source tree.
 
 The namespace guard serializes each step with create, remove, rename, and move publication.
 No guard remains held across user calls.
-The generation changes after each published namespace mutation.
-A mismatch returns `OS1_ERR_CHANGED` (-24), without that step's mutation.
+A generation mismatch returns `OS1_ERR_CHANGED` (-24), without that step's mutation.
 Only `check` permits generation zero to obtain an initial snapshot.
-Successful own mutations return the new generation.
-Any external namespace mutation can stop traversal, including unrelated changes.
-This coarse policy prevents stale-name reuse without an untrusted caller retaining a global lock.
+Successful own mutations return the input object's updated generation.
+
+| Profile | Checked generation | Unrelated log creation or rotation |
+| --- | --- | --- |
+| Version 1 | Global namespace generation | Can stop any traversal; retained for existing callers |
+| Version 2 | Input directory's immediate namespace, or retained file's name identity | Does not stop a different directory's traversal |
+
+Version 2 changes the token after direct child creation, removal, rename, or move.
+Rename and move also change the moved object's token.
+Move changes both parent tokens. Removal invalidates the detached object.
+The global counter supplies token values; version 2 compares the value stored on the input object.
+An unchanged object starts with token 1.
+
+For version 2, `generation` describes the input object.
+The returned `metadata.generation` describes the selected child, or the input object for `check`.
+Standalone metadata calls retain their global-generation meaning.
+Callers must not mix tokens from these profiles.
+
+The walker keeps separate source and destination tokens in each frame.
+It updates only the affected parent token after its own mutation.
+It initializes each child frame from the returned child metadata.
+A directory change is detected when traversal next uses that directory.
+This protects stale names without promising an atomic tree snapshot.
+Changes in completed subtrees need not stop later steps in another directory.
+Traversal inside either log directory still detects its entry replacements and rotation.
 
 File contents are not a snapshot.
 A retained file can change while the walker copies or measures it.

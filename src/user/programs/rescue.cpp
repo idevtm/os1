@@ -176,6 +176,12 @@ int main(int, char**)
             continue;
         }
         if(status)
-            text("rescue: command failed\n");
+        {
+            text("rescue: command failed: status=");
+            if(status < 0)
+                text("-");
+            files::number(1, status < 0 ? uint64_t(-(status + 1)) + 1 : uint64_t(status));
+            text("\n");
+        }
     }
 }

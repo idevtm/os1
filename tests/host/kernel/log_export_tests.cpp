@@ -13,6 +13,7 @@
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
 #include "fs/initrd.hpp"
+#include "ipc/channel.hpp"
 #include "ipc/kernel_provider.hpp"
 #include "log/frame.hpp"
 #include "mm/kmem.hpp"
@@ -206,6 +207,44 @@ protected:
         for(unsigned i = 0; i < n; ++i)
             diagnostic_log::append(r);
     }
+    template<class T>
+    long ipc(unsigned action, int fd, T& value)
+    {
+        EXPECT_TRUE(copy_to_user(frames, thread, kUserImageBase, &value, sizeof(value)));
+        long result = sys_ipc(frames, thread, action, fd, kUserImageBase);
+        EXPECT_TRUE(copy_from_user(frames, thread, kUserImageBase, &value, sizeof(value)));
+        return result;
+    }
+    int log_client()
+    {
+        auto& table = thread->process->descriptors;
+        initrd_namespace_root()->allowed_rights |= OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL;
+        InstanceRef source(open_instance(initrd_namespace_root()));
+        int root = descriptor_install(
+            table, source.get(), OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL, 0);
+        EXPECT_GE(root, 0);
+        os1_ipc_kernel_binding binding{1,
+                                       sizeof(binding),
+                                       OS1_LOG_INTERFACE_ID,
+                                       1,
+                                       OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL};
+        int client = ipc(OS1_IPC_BIND_KERNEL, root, binding);
+        descriptor_close(table, root);
+        return client;
+    }
+    int export_operation(int client, unsigned target = OS1_LOG_EXPORT_TMP)
+    {
+        os1_ipc_message request{};
+        request.version = 1;
+        request.size = sizeof(request);
+        request.interface_id = OS1_LOG_INTERFACE_ID;
+        request.interface_version = 1;
+        request.member = OS1_LOG_EXPORT;
+        os1_log_export_request args{1, sizeof(args), target, 0};
+        request.payload_bytes = sizeof(args);
+        std::memcpy(request.payload, &args, sizeof(args));
+        return ipc(OS1_IPC_SUBMIT, client, request);
+    }
     void verify(const std::vector<uint8_t>& bytes)
     {
         ASSERT_GE(bytes.size(), sizeof(Frame));
@@ -220,6 +259,235 @@ protected:
         EXPECT_EQ(at, bytes.size());
     }
 };
+// The original CI interleavings are forced here; no wall-clock race is required.
+TEST_F(LogExport, ExportDoesNotInvalidateUnrelatedDirectoryWalk)
+{
+    mount();
+    auto* directory = static_cast<VfsNode*>(open("/tmp"));
+    ASSERT_NE(nullptr, directory);
+    DescriptorTable table{};
+    InstanceRef instance(open_instance(directory));
+    object_release(directory);
+    int fd =
+        descriptor_install(table, instance.get(), kTmpDirectoryRights, 0, -1, kNamespaceCeiling);
+    ASSERT_GE(fd, 0);
+    os1_tree_step step{};
+    step.version = OS1_TREE_SCOPED_VERSION;
+    step.size = sizeof(step);
+    step.action = OS1_TREE_CHECK;
+    step.excluded_fd = -1;
+    ASSERT_EQ(0, vfs_tree_step(table, fd, step));
+    os1_tree_step legacy = step;
+    legacy.version = 1;
+    legacy.generation = 0;
+    ASSERT_EQ(0, vfs_tree_step(table, fd, legacy));
+    diagnostic_log::tick(2'000'000'000);
+    log_export::poll();  // Creates /disk/log and the first persistent segment.
+    ASSERT_GT(log_export::info().disk_bytes, 0u);
+    step.action = OS1_TREE_NEXT;
+    EXPECT_EQ(0, vfs_tree_step(table, fd, step));
+    legacy.action = OS1_TREE_NEXT;
+    EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fd, legacy));
+    descriptor_close_all(table);
+}
+TEST_F(LogExport, ScopedWalkRejectsLogEntryChangesButNotSiblingExport)
+{
+    mount();
+    DescriptorTable table{};
+    descriptor_table_initialize(table);
+    auto install = [&](VfsNode* node) -> int {
+        InstanceRef instance(open_instance(node));
+        return descriptor_install(
+            table, instance.get(), kTmpDirectoryRights, 0, -1, kNamespaceCeiling);
+    };
+    auto snapshot = [&](int fd) {
+        os1_tree_step step{};
+        step.version = OS1_TREE_SCOPED_VERSION;
+        step.size = sizeof(step);
+        step.action = OS1_TREE_CHECK;
+        step.excluded_fd = -1;
+        EXPECT_EQ(0, vfs_tree_step(table, fd, step));
+        return step;
+    };
+    for(const char* path : {"/tmp", "/disk"})
+    {
+        auto* base = static_cast<VfsNode*>(open(path));
+        ASSERT_NE(nullptr, base);
+        OpenInstance* made = nullptr;
+        ASSERT_EQ(0, base->operations->create(base, "work", 4, OS1_OBJECT_DIRECTORY, made));
+        InstanceRef work(made);
+        int fd = install(static_cast<VfsNode*>(made->object));
+        ASSERT_GE(fd, 0);
+        auto before = snapshot(fd);
+        long status;
+        ASSERT_TRUE(
+            log_export::try_run(path[1] == 't' ? OS1_LOG_EXPORT_TMP : OS1_LOG_EXPORT_DISK, status));
+        ASSERT_EQ(0, status);
+        before.action = OS1_TREE_NEXT;
+        EXPECT_EQ(0, vfs_tree_step(table, fd, before));
+        object_release(base);
+    }
+    auto* logs = static_cast<VfsNode*>(open("/tmp/log"));
+    ASSERT_NE(nullptr, logs);
+    int fd = install(logs);
+    object_release(logs);
+    auto before = snapshot(fd);
+    shell();  // Adds a new shell snapshot file; rewriting kernel.bin only changes contents.
+    ASSERT_EQ(0, log_export::run(OS1_LOG_EXPORT_TMP));
+    before.action = OS1_TREE_NEXT;
+    EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fd, before));
+    descriptor_close_all(table);
+}
+TEST_F(LogExport, ScopedMoveInvalidatesBothParentsAndMovedObjectOnBothBackends)
+{
+    mount();
+    DescriptorTable table{};
+    descriptor_table_initialize(table);
+    auto install = [&](VfsNode* node) -> int {
+        InstanceRef instance(open_instance(node));
+        return descriptor_install(table, instance.get(), OS1_RIGHT_INSPECT, 0);
+    };
+    auto snapshot = [&](int fd) {
+        os1_tree_step step{};
+        step.version = OS1_TREE_SCOPED_VERSION;
+        step.size = sizeof(step);
+        step.action = OS1_TREE_CHECK;
+        step.excluded_fd = -1;
+        EXPECT_EQ(0, vfs_tree_step(table, fd, step));
+        return step;
+    };
+    for(const char* path : {"/tmp", "/disk"})
+    {
+        auto* base = static_cast<VfsNode*>(open(path));
+        ASSERT_NE(nullptr, base);
+        OpenInstance *a = nullptr, *b = nullptr, *c = nullptr;
+        ASSERT_EQ(0, base->operations->create(base, "left", 4, OS1_OBJECT_DIRECTORY, a));
+        ASSERT_EQ(0, base->operations->create(base, "right", 5, OS1_OBJECT_DIRECTORY, b));
+        InstanceRef left(a), right(b);
+        auto* left_node = static_cast<VfsNode*>(a->object);
+        auto* right_node = static_cast<VfsNode*>(b->object);
+        ASSERT_EQ(0, left_node->operations->create(left_node, "item", 4, OS1_OBJECT_FILE, c));
+        InstanceRef child(c);
+        int fds[] = {
+            install(left_node), install(right_node), install(static_cast<VfsNode*>(c->object))};
+        auto x = snapshot(fds[0]), y = snapshot(fds[1]), z = snapshot(fds[2]);
+        ASSERT_EQ(0,
+                  left_node->operations->move(left_node, "item", 4, right_node, "moved", 5, false));
+        EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fds[0], x));
+        EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fds[1], y));
+        EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fds[2], z));
+        y = snapshot(fds[1]);
+        z = snapshot(fds[2]);
+        ASSERT_EQ(0, right_node->operations->rename(right_node, "moved", 5, "renamed", 7));
+        EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fds[1], y));
+        EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fds[2], z));
+        object_release(base);
+    }
+    descriptor_close_all(table);
+}
+TEST_F(LogExport, ExplicitOperationWaitsForForegroundAdmission)
+{
+    shell();
+    auto& table = thread->process->descriptors;
+    int client = log_client();
+    ASSERT_GE(client, 0);
+    int operation = export_operation(client);
+    ASSERT_GE(operation, 0);
+    {
+        log_export::ForegroundGuard foreground;
+        ASSERT_TRUE(foreground.held);
+        EXPECT_FALSE(ipc_run_kernel_request());
+        os1_ipc_result result{};
+        EXPECT_EQ(OS1_ERR_WOULD_BLOCK, ipc(OS1_IPC_RESULT, operation, result));
+        EXPECT_EQ(0u, log_export::info().tmp_bytes);
+        EXPECT_FALSE(ipc_run_kernel_request());  // The deferred request cannot busy-spin.
+        os1_ipc_message status_request{};
+        status_request.version = 1;
+        status_request.size = sizeof(status_request);
+        status_request.interface_id = OS1_LOG_INTERFACE_ID;
+        status_request.interface_version = 1;
+        status_request.member = OS1_LOG_EXPORT_INFO;
+        int status_op = ipc(OS1_IPC_SUBMIT, client, status_request);
+        ASSERT_GE(status_op, 0);
+        EXPECT_TRUE(
+            ipc_run_kernel_request());  // An unrelated ready request passes the deferred one.
+        EXPECT_EQ(0, ipc(OS1_IPC_RESULT, status_op, result));
+        EXPECT_EQ(0, result.application_status);
+        descriptor_close(table, status_op);
+    }
+    ipc_timer_tick(1'000'000);
+    EXPECT_TRUE(ipc_run_kernel_request());
+    os1_ipc_result result{};
+    EXPECT_EQ(0, ipc(OS1_IPC_RESULT, operation, result));
+    EXPECT_EQ(0, result.application_status);
+    EXPECT_GT(log_export::info().tmp_bytes, 0u);
+    descriptor_close_all(table);
+}
+TEST_F(LogExport, DeferredOperationRetainsSourceAfterCallerClosesDescriptors)
+{
+    shell();
+    auto& table = thread->process->descriptors;
+    auto before = initrd_namespace_root()->references;
+    int client = log_client();
+    ASSERT_GE(client, 0);
+    int operation = export_operation(client);
+    ASSERT_GE(operation, 0);
+    {
+        log_export::ForegroundGuard foreground;
+        ASSERT_TRUE(foreground.held);
+        EXPECT_FALSE(ipc_run_kernel_request());
+        EXPECT_EQ(0, descriptor_close(table, client));
+        EXPECT_EQ(0, descriptor_close(table, operation));
+        EXPECT_GT(initrd_namespace_root()->references, before);
+        thread->user_mode = false;
+        ASSERT_TRUE(ipc_wait_kernel_work(thread));
+        EXPECT_EQ(ThreadWaitReason::Ipc, thread->wait.reason);
+        cancel_ipc_wait(thread);
+        thread->user_mode = true;
+    }
+    ipc_timer_tick(1'000'000);
+    EXPECT_TRUE(ipc_run_kernel_request());
+    EXPECT_GT(log_export::info().tmp_bytes, 0u);
+    EXPECT_EQ(initrd_namespace_root()->references, before);
+    EXPECT_FALSE(ipc_run_kernel_request());
+    descriptor_close_all(table);
+}
+TEST_F(LogExport, AdmittedStorageErrorIsCompletedWithoutReplay)
+{
+    shell();
+    int client = log_client();
+    ASSERT_GE(client, 0);
+    int operation = export_operation(client);
+    ASSERT_GE(operation, 0);
+    {
+        NamespaceGuard namespace_guard;
+        ASSERT_TRUE(namespace_guard.held);
+        EXPECT_TRUE(ipc_run_kernel_request());
+    }
+    os1_ipc_result result{};
+    EXPECT_EQ(0, ipc(OS1_IPC_RESULT, operation, result));
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, result.application_status);
+    EXPECT_EQ(1u, log_export::info().failures);
+    ipc_timer_tick(1'000'000);
+    EXPECT_FALSE(ipc_run_kernel_request());
+    EXPECT_EQ(0u, log_export::info().tmp_bytes);
+    descriptor_close_all(thread->process->descriptors);
+}
+TEST_F(LogExport, InvalidExportCompletesEvenWhenAdmissionIsBusy)
+{
+    shell();
+    int client = log_client();
+    ASSERT_GE(client, 0);
+    int operation = export_operation(client, 999);
+    ASSERT_GE(operation, 0);
+    log_export::ForegroundGuard foreground;
+    ASSERT_TRUE(foreground.held);
+    EXPECT_TRUE(ipc_run_kernel_request());
+    os1_ipc_result result{};
+    EXPECT_EQ(0, ipc(OS1_IPC_RESULT, operation, result));
+    EXPECT_EQ(OS1_ERR_INVALID, result.application_status);
+    descriptor_close_all(thread->process->descriptors);
+}
 TEST_F(LogExport, TemporarySnapshotIsBoundedAndMissingDiskDoesNotStopCapture)
 {
     events(1500);

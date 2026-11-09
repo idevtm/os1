@@ -35,13 +35,15 @@ def main():
         run('help', b'log_export')
         run('x' * 128, b'rescue: input failed or line too long')
         run('help', b'log_export')
-        run('cat /missing', b'cannot open file')
+        failed = run('cat /missing', b'cannot open file', allow_errors=True)
+        assert b'rescue: command failed: status=1\n' in failed, failed
         if not args.missing_disk:
             run('cat /disk/etc/motd', b'os1')
         synced = run('sync')
         assert b'command failed' not in synced, synced
         for _ in range(70):
-            run('ls /missing', b'cannot open directory')
+            failed = run('ls /missing', b'cannot open directory', allow_errors=True)
+            assert b'rescue: command failed: status=1\n' in failed, failed
         run('ls /bin', b'rescue')
         run('usb', b'USB boot snapshot')
         run('retry', b'init: cannot start /disk/bin/sh')

@@ -5,6 +5,7 @@ The [current filesystem index](../../filesystems/README.md) links maintained con
 
 | Record | Scope |
 | --- | --- |
+| [2026-11-09 export and traversal corrections](2026-11-09-export-traversal-fixes.md) | PR 45 failure evidence, scoped tree checks, retained export admission, and validation |
 | [2026-11-09 ext2 shell startup](2026-11-09-ext2-shell-bootstrap.md) | Disk shell, independent rescue, preserving deployment, and validation |
 | [2026-11-08 timestamps](2026-11-08-filesystem-timestamps.md) | RTC wall time, native timestamp methods, full touch behavior, validation, and review |
 | [2026-11-06 USB hardware validation](2026-11-06-usb-hardware-validation.md) | Asus G74SX EHCI hub traversal, ext2 mounting, and user-reported reboot persistence |

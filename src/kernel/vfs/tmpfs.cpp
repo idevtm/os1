@@ -231,7 +231,7 @@ static long create_locked(
             node->next = directory->children;
             directory->children = node;
             stamp(directory, OS1_TIME_MODIFY);
-            vfs_changed();
+            vfs_changed(directory, node);
             result = instance.take();
             return 0;
         }
@@ -270,7 +270,7 @@ static long remove_locked(VfsNode* directory, const char* name, size_t size, uin
         stamp(directory, OS1_TIME_MODIFY);
         stamp(removed, 0);
     }
-    vfs_changed();
+    vfs_changed(directory, removed);
     object_release(removed);
     return 0;
 }
@@ -311,7 +311,7 @@ long tmpfs_rename(VfsNode* directory,
     node->cookie = fs->next_cookie++;
     stamp(directory, OS1_TIME_MODIFY);
     stamp(node, 0);
-    vfs_changed();
+    vfs_changed(directory, node);
     return 0;
 }
 
@@ -339,12 +339,13 @@ long move(VfsNode* from,
     if(!namespace_guard.held)
         return OS1_ERR_WOULD_BLOCK;
     VfsNode* target = nullptr;
+    VfsNode* node = nullptr;
     {
         auto* fs = from->filesystem;
         IrqSpinGuard guard(fs->lock);
         if(!from->linked || !to->linked)
             return OS1_ERR_CLOSED;
-        auto* node = lookup_locked(from, source, a);
+        node = lookup_locked(from, source, a);
         if(!node)
             return OS1_ERR_NOT_FOUND;
         target = lookup_locked(to, destination, b);
@@ -379,7 +380,7 @@ long move(VfsNode* from,
         stamp(to, OS1_TIME_MODIFY);
         stamp(node, 0);
     }
-    vfs_changed();
+    vfs_changed(from, to, node, target);
     object_release(target);
     return 0;
 }

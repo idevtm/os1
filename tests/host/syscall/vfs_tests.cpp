@@ -1698,6 +1698,45 @@ TEST_F(TmpfsContract, TreeRejectsStaleNamesReplacementAndAuthorityAmplification)
     next = tree_request(OS1_TREE_NEXT, check.generation);
     EXPECT_EQ(OS1_ERR_ACCESS, vfs_tree_step(table(), restricted, next));
 }
+TEST_F(TmpfsContract, ScopedTreeSeparatesDirectoryTokensAndRejectsStaleNames)
+{
+    int left = create("left", OS1_OBJECT_DIRECTORY, kTmpDirectoryRights, kNamespaceCeiling);
+    int right = create("right", OS1_OBJECT_DIRECTORY, kTmpDirectoryRights, kNamespaceCeiling);
+    ASSERT_GE(left, 0);
+    ASSERT_GE(right, 0);
+    auto snapshot = [&](int fd) {
+        auto r = tree_request(OS1_TREE_CHECK);
+        r.version = OS1_TREE_SCOPED_VERSION;
+        EXPECT_EQ(0, vfs_tree_step(table(), fd, r));
+        return r;
+    };
+    auto left_before = snapshot(left), right_before = snapshot(right);
+    auto create_child = tree_request(OS1_TREE_CREATE, left_before.generation, "item");
+    create_child.version = OS1_TREE_SCOPED_VERSION;
+    create_child.kind = OS1_OBJECT_FILE;
+    create_child.rights = OS1_RIGHT_INSPECT;
+    int item = vfs_tree_step(table(), left, create_child);
+    ASSERT_GE(item, 0);
+    EXPECT_EQ(0, vfs_tree_step(table(), right, right_before));
+    EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table(), left, left_before));
+    auto next = tree_request(OS1_TREE_NEXT, create_child.generation);
+    next.version = OS1_TREE_SCOPED_VERSION;
+    ASSERT_EQ(1, vfs_tree_step(table(), left, next));
+    auto* left_node = static_cast<VfsNode*>(table().entries[left].instance->object);
+    ASSERT_EQ(0, tmpfs_rename(left_node, "item", 4, "renamed", 7));
+    auto opened = tree_request(OS1_TREE_OPEN, next.generation, "item");
+    opened.version = OS1_TREE_SCOPED_VERSION;
+    opened.object_id = next.object_id;
+    opened.rights = OS1_RIGHT_INSPECT;
+    EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table(), left, opened));
+    auto item_before = snapshot(item);
+    ASSERT_EQ(0, tmpfs_rename(left_node, "renamed", 7, "again", 5));
+    EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table(), item, item_before));
+    auto left_rename = snapshot(left);
+    ASSERT_EQ(0, rename("left", "other"));
+    EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table(), left, left_rename));
+    EXPECT_EQ(0, vfs_tree_step(table(), right, right_before));
+}
 TEST_F(TmpfsContract, TreeOwnMutationsAdvanceGenerationAndExcludeSourceSubtrees)
 {
     auto check = tree_request(OS1_TREE_CHECK);
