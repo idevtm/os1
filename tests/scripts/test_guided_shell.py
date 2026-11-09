@@ -121,6 +121,18 @@ def main():
         bad('persistent = process.streams.input.acquire_input()',b'exclusive result requires a with scope')
         for prefix in ('with s = ', 'with  s = ', 'with s\t= '):
             ok(prefix+'process.streams.input.acquire_input() { s.release; s.release }')
+        ok('with s = process.streams.input.acquire_input options:{handoff:false} { s.release }')
+        ok('with data = {nested:{text:"} {"},items:[{value:7}]} { out.print text:data.nested.text }', b'} {')
+        bad('with s = process.streams.input.acquire_input options:{handoff:false} { s.release', b'unbalanced scope')
+        bad('with s = process.streams.input.acquire_input options:{handoff:false} { s.release } trailing', b'text after scope')
+        ok('with s = process.streams.input.acquire_input options:{handoff:false} { }')
+        send('with s = process.streams.input.acq');expect(b'  > ')
+        key('tab',b'\t');expect(b'Argument:')
+        expect(b'acquire_input options:{handoff:false}')
+        key('esc',b'\x1b');time.sleep(.1)
+        key('end',b'\x1b[F');send(' { s.release }\n')
+        result=expect();assert b'shell: ' not in result,result[-500:]
+        ok('echo "scope-input-restored"',b'scope-input-restored')
         bad('with s = process.streams.input.acquire_input() { escaped = s }',b'exclusive reference cannot escape')
         ok('with s = process.streams.input.acquire_input() { s.release }')
         bad('with s = process.streams.input.acquire_input() { out.print text:<?> }',b'missing required value')

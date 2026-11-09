@@ -293,3 +293,93 @@ CI run [42496728410](https://github.com/idevtm/os1/actions/runs/42496728410) pas
 It passed 561 host tests, 70 smoke tests, and three keyboard-diagnostic checks.
 The manual commands match `tests/scripts/test_guided_shell.py` and the accepted interaction rules above.
 The complete ASD-STE100 Issue 9 dictionary remains unavailable; language review uses the repository rules.
+
+
+## Merge review correction — 2026-11-09
+
+The merge review found that record arguments prevent guided acquisition inside a scope.
+The parser must distinguish acquisition arguments from the final command block.
+
+```text
+with name = method options:{...} { commands }
+                    argument     scope body
+```
+
+The BIOS regression reproduced `shell: text after scope` before correction.
+The scanner selected the first outer brace, which belongs to the options argument.
+The correction selects the final balanced outer block and preserves validation before acquisition.
+
+### Correction impact
+
+Scope and interfaces: preserve the accepted guided command grammar and scoped result contract.
+Memory and isolation: retain input cleanup and bounded parsing; add no allocation or authority.
+Concurrency: keep the existing ownership and cleanup paths.
+Boot and platform: change only shared user-shell parsing; check BIOS and UEFI input paths.
+Resources: compare scoped-call latency, retained memory, CPU time, and image sizes against revision `236a227`.
+Validation: cover flat record arguments, nested records, malformed blocks, guided completion, and cleanup after failures.
+The previous hardware report covers the earlier code; this correction needs separate hardware confirmation if desired.
+
+### Correction measurements and checks
+
+The comparison uses revision `236a227` and the corrected artifacts identified below.
+The host, toolchain, firmware, QEMU settings, and disk match the earlier comparable measurements section.
+Each boot runs ten echo warmups, three trials of 20 parenthesized scoped acquisitions, and three trials of 20 completion selections.
+The scoped command is `with s = process.streams.input.acquire_input() { s.release }`.
+Times include serial input, redraw, IPC, and host scheduling; they do not isolate parser execution.
+
+| Workload | Baseline trials, ms | Corrected trials, ms | Median difference |
+| --- | --- | --- | --- |
+| BIOS, 20 scoped calls | 1937.330, 1922.250, 1904.938 | 1967.734, 1983.072, 1981.992 | +59.743 ms (+3.11%) |
+| BIOS, 20 selections | 62.329, 67.102, 62.915 | 83.623, 82.012, 82.148 | +19.234 ms (+30.57%) |
+| UEFI, 20 scoped calls | 1005.784, 975.206, 986.780 | 984.020, 1047.421, 990.770 | +3.990 ms (+0.40%) |
+| UEFI, 20 selections | 61.630, 59.912, 46.009 | 82.035, 84.036, 51.812 | +22.124 ms (+36.93%) |
+
+Timing variation prevents an isolated parser performance claim.
+All selection medians remain below five milliseconds per update.
+
+| Resource | Baseline | Corrected | Difference |
+| --- | ---: | ---: | ---: |
+| BIOS QEMU CPU time | 7.175839 s | 7.359960 s | +0.184121 s (+2.57%) |
+| UEFI QEMU CPU time | 5.574388 s | 5.676017 s | +0.101629 s (+1.82%) |
+| BIOS used pages | 1070 | 1070 | 0 (0%) |
+| UEFI used pages | 5428 | 5428 | 0 (0%) |
+| Slab pages, both paths | 168 | 168 | 0 (0%) |
+| Live slab objects, both paths | 2335 | 2335 | 0 (0%) |
+| Kernel ELF | 555424 bytes | 555424 bytes | 0 (0%) |
+| Initrd | 143360 bytes | 143360 bytes | 0 (0%) |
+| UEFI ISO | 4425728 bytes | 4425728 bytes | 0 (0%) |
+| BIOS raw image | 1474560 bytes | 1474560 bytes | 0 (0%) |
+
+Memory and CPU values use one observation per revision and boot path.
+The kernel hash is unchanged; the correction adds no retained memory or image-size cost.
+The existing resource bounds remain satisfied.
+Logs are under `build/guided-evidence/scope-fix/`.
+
+```text
+kernel.elf 3bdaa2102c7ce8dc132029b465bc03a4c1a731aba43e78e8535f87e4e551594a
+initrd.cpio 0ca68b256fff9babc50fd77d53afc4c268c7f2ca34de18a71869f48139b747f5
+os1.iso 9c8d78dbb4f99bad87a12396d39641e05727de8ff386a3852d68421e8736fb4a
+os1.raw d1433d695bdca494064afdd1c957d511647f73f09c158dfcaca94342ad63a54f
+```
+
+The GCC 11.2.0 build, scoped formatting check, Python syntax check, and whitespace check passed.
+The first affected run passed 22 of 24 tests in 153.83 seconds.
+Two BIOS tests expected an incorrect focus label; the generated command was correct.
+The revised assertion checks the focus banner and exact expanded command before execution.
+All four final guided tests passed in 60.03 seconds, including BIOS, UEFI, PS/2, and USB keyboard paths.
+The other 20 affected checks passed in the earlier run.
+Host-test code is unchanged; the previous 561-test result remains applicable pending CI.
+
+Commands:
+
+```sh
+cmake --build build
+ctest --test-dir build -R 'os1_smoke_(guided|context|typed_shell|text_tools|pager|memory_logging|system_lifecycle|traversal|files_)' --output-on-failure
+ctest --test-dir build -R '^os1_smoke_guided_' --output-on-failure
+clang-format --dry-run --Werror src/user/include/os1/command_engine.hpp
+git diff --check
+```
+
+The independent correction review found no source or test defect.
+It checked scope cleanup, completion interactions, measurement calculations, and artifact identities.
+The initial blocker is corrected; the earlier hardware result remains scoped to its original revision.

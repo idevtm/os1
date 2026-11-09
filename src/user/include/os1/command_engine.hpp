@@ -1153,20 +1153,22 @@ inline bool scope(const char* line, bool terminal, unsigned nesting)
         }
         if(c == '"' || c == '\'')
             quote = c;
-        else if(c == '(' || c == '[')
+        else if(c == '(' || c == '[' || c == '{')
+        {
+            // Record arguments can precede the final outer command block.
+            if(c == '{' && !depth)
+                brace = at;
             ++depth;
-        else if(c == ')' || c == ']')
+        }
+        else if(c == ')' || c == ']' || c == '}')
         {
             if(!depth)
                 return fail("unbalanced scope");
             --depth;
         }
-        else if(c == '{' && !depth)
-        {
-            brace = at;
-            break;
-        }
     }
+    if(depth || quote)
+        return fail("unbalanced scope");
     if(!brace)
         return fail("with requires a command block");
     char* acquisition = run_frames[nesting].acquisition;
