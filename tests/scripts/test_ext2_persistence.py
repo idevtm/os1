@@ -2,6 +2,7 @@
 """Two independent QEMU processes prove disk execution and durable file contents."""
 import argparse
 import importlib.util
+import json
 import os
 import re
 import selectors
@@ -16,6 +17,9 @@ sys.dont_write_bytecode = True
 
 
 def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_boot=None):
+    entered = time.monotonic()
+    timings = {'phase': phase, 'commands': [], 'completed': False}
+    startup_finished = operation = None
     log = Path(args.log).with_suffix(f'.{phase}.log')
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
@@ -92,14 +96,21 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
         return result
 
     def run(text, marker=None, allow_errors=False, timeout=60):
-        if text == 'reboot':
-            menu.reset()
-        child.stdin.write((text + '\n').encode())
-        child.stdin.flush()
-        out = expect(allow_errors=allow_errors, timeout=timeout)
-        if marker:
-            assert marker in out, out
-        return out
+        command_started = time.monotonic()
+        completed = False
+        try:
+            if text == 'reboot':
+                menu.reset()
+            child.stdin.write((text + '\n').encode())
+            child.stdin.flush()
+            out = expect(allow_errors=allow_errors, timeout=timeout)
+            if marker:
+                assert marker in out, out
+            completed = True
+            return out
+        finally:
+            timings['commands'].append({'command': text, 'completed': completed,
+                                        'seconds': time.monotonic() - command_started})
 
     try:
         if before_boot is not None:
@@ -126,6 +137,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
         if getattr(args, 'coexist', False):
             assert b'xhci: HID keyboard ready' in startup, startup[-4000:]
         boot_seconds = time.monotonic() - started
+        startup_finished = time.monotonic()
         if getattr(args, 'transport', '') == 'ehci':
             snapshot = run('usb', b'USB boot snapshot: controller topology and USB mounts')
             assert b'controller pci=' in snapshot and b'root pci=' in snapshot, snapshot
@@ -178,7 +190,9 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                     transcript.extend(os.read(child.stdout.fileno(), 4096))
             assert child.poll() == 0, bytes(transcript[-4000:])
         print(f'{phase}: boot_seconds={boot_seconds:.6f} workload_seconds={time.monotonic()-operation:.6f}')
+        timings['completed'] = True
     finally:
+        cleanup_started = time.monotonic()
         child.terminate()
         try:
             child.wait(timeout=5)
@@ -187,6 +201,13 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             child.wait()
         selector.close()
         log.write_bytes(transcript)
+        finished = time.monotonic()
+        timings.update(total_seconds=finished - entered,
+                       startup_seconds=None if startup_finished is None else startup_finished - entered,
+                       prelude_seconds=None if operation is None else operation - startup_finished,
+                       workload_seconds=None if operation is None else cleanup_started - operation,
+                       cleanup_seconds=finished - cleanup_started)
+        log.with_suffix('.profile.json').write_text(json.dumps(timings, indent=2) + '\n')
 
 
 def main():

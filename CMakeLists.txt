@@ -857,6 +857,11 @@ os1_register_menu_target(
 )
 
 if(BUILD_TESTING)
+  add_test(NAME os1_qemu_isolation_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
+      -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_qemu_isolation.py)
+  add_test(NAME os1_local_validation_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_check_local.py")
   add_test(NAME os1_boot_menu_helper_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B -m unittest discover
       -s "${PROJECT_SOURCE_DIR}/tests/scripts" -p test_boot_menu_helper.py)
@@ -888,7 +893,6 @@ set(OS1_BIOS_SMOKE_TIMEOUT_SECONDS 30)
 # The compound spawn workload takes up to 40 seconds on shared TCG runners.
 set(OS1_SPAWN_SMOKE_TIMEOUT_SECONDS 60)
 set(OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS 1)
-set(OS1_SMOKE_SEND_DELAY_SECONDS 0.2)
 set(OS1_SMOKE_REJECT_MARKERS
   "shell spawn "
   "shell prompt resumed"
@@ -1010,6 +1014,15 @@ if(OS1_REQUIRE_UEFI_SMOKE)
   endif()
 endif()
 
+# Preserve command arguments, including semicolon-separated CMake marker lists.
+function(os1_add_qemu_test)
+  cmake_parse_arguments(PARSE_ARGV 0 test "" "NAME" "COMMAND")
+  add_test(NAME "${test_NAME}"
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B
+      "${PROJECT_SOURCE_DIR}/tests/scripts/isolated_qemu_test.py"
+      --root "${OS1_ARTIFACT_DIR}/test-runs" --name "${test_NAME}" -- ${test_COMMAND})
+endfunction()
+
 set(OS1_QEMU_SMOKE_TESTS)
 
 set(OS1_ACPICA_SMOKE_MARKERS
@@ -1036,7 +1049,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     usb-kbd,bus=xhci.0
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_xhci
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1060,7 +1073,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
   list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_xhci)
 
   if(OS1_USB_KEYBOARD_DIAGNOSTICS)
-    add_test(NAME os1_smoke_usb_keyboard_absent
+    os1_add_qemu_test(NAME os1_smoke_usb_keyboard_absent
       COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_keyboard_diagnostics.py"
         --program-disk "${OS1_PROGRAM_TEST_DISK}"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_ARTIFACT_DIR}/os1-usb.img"
@@ -1073,7 +1086,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       if(boot STREQUAL "uefi")
         list(APPEND keyboard_firmware_args --code "${OS1_OVMF_CODE}" --vars "${OS1_OVMF_VARS_TEMPLATE}")
       endif()
-      add_test(NAME os1_smoke_usb_keyboard_${boot}
+      os1_add_qemu_test(NAME os1_smoke_usb_keyboard_${boot}
         COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_keyboard_diagnostics.py"
         --program-disk "${OS1_PROGRAM_TEST_DISK}"
           --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_ARTIFACT_DIR}/os1-usb.img"
@@ -1118,7 +1131,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1129,7 +1142,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DLOG_FILE=${OS1_SMOKE_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_UEFI_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_UEFI_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_INPUT_EVENTS}"
@@ -1196,7 +1208,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_observe
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1207,7 +1219,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DLOG_FILE=${OS1_SMOKE_OBSERVE_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_UEFI_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_UEFI_OBSERVE_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_OBSERVE_INPUT_EVENTS}"
@@ -1241,7 +1252,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_balance
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1252,7 +1263,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DLOG_FILE=${OS1_SMOKE_BALANCE_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_UEFI_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_UEFI_BALANCE_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_BALANCE_INPUT_EVENTS}"
@@ -1329,7 +1339,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_spawn
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1340,7 +1350,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DLOG_FILE=${OS1_SMOKE_SPAWN_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_SPAWN_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_UEFI_SPAWN_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_SPAWN_INPUT_EVENTS}"
@@ -1375,7 +1384,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_exec
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1386,7 +1395,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DLOG_FILE=${OS1_SMOKE_EXEC_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_UEFI_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_UEFI_EXEC_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_EXEC_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_EXEC_INPUT_EVENTS}"
@@ -1463,7 +1471,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_bios
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1472,7 +1480,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
       "-DLOG_FILE=${OS1_SMOKE_BIOS_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_BIOS_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_BIOS_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_INPUT_EVENTS}"
@@ -1538,7 +1545,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_observe_bios
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1547,7 +1554,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
       "-DLOG_FILE=${OS1_SMOKE_OBSERVE_BIOS_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_BIOS_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_BIOS_OBSERVE_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_OBSERVE_INPUT_EVENTS}"
@@ -1581,7 +1587,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_balance_bios
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1590,7 +1596,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
       "-DLOG_FILE=${OS1_SMOKE_BALANCE_BIOS_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_BIOS_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_BIOS_BALANCE_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_BALANCE_INPUT_EVENTS}"
@@ -1666,7 +1671,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_spawn_bios
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1675,7 +1680,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
       "-DLOG_FILE=${OS1_SMOKE_SPAWN_BIOS_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_SPAWN_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_BIOS_SPAWN_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_SPAWN_INPUT_EVENTS}"
@@ -1710,7 +1714,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "idle thread online"
   )
 
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_exec_bios
     COMMAND
       "${CMAKE_COMMAND}"
@@ -1719,7 +1723,6 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
       "-DLOG_FILE=${OS1_SMOKE_EXEC_BIOS_LOG}"
       "-DSMOKE_TIMEOUT_SECONDS=${OS1_BIOS_SMOKE_TIMEOUT_SECONDS}"
       "-DSMOKE_SETTLE_AFTER_MARKERS_SECONDS=${OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-      "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_BIOS_EXEC_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_EXEC_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_EXEC_INPUT_EVENTS}"
@@ -1778,7 +1781,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
   set(OS1_NO_UART_INPUT_EVENTS
     "shell prompt ready::sendkey e 1\\nsendkey c 1\\nsendkey h 1\\nsendkey o 1\\nsendkey spc 1\\nsendkey apostrophe 1\\nsendkey n 1\\nsendkey o 1\\nsendkey minus 1\\nsendkey u 1\\nsendkey a 1\\nsendkey r 1\\nsendkey t 1\\nsendkey apostrophe 1\\nsendkey ret 1"
   )
-  add_test(
+  os1_add_qemu_test(
     NAME os1_smoke_no_uart
     COMMAND "${CMAKE_COMMAND}"
       "-DQEMU_EXECUTABLE=${OS1_QEMU_EXECUTABLE}"
@@ -1853,7 +1856,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
     endif()
     if(OS1_DEBUGFS_EXECUTABLE AND OS1_E2FSCK_EXECUTABLE)
       if(boot STREQUAL "uefi")
-        add_test(NAME os1_smoke_boot_menu_uefi
+        os1_add_qemu_test(NAME os1_smoke_boot_menu_uefi
           COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_boot_menu.py"
             --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
             --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-boot-menu.log"
@@ -1861,7 +1864,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         set_tests_properties(os1_smoke_boot_menu_uefi PROPERTIES TIMEOUT 180)
         list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_boot_menu_uefi)
       endif()
-      add_test(NAME os1_smoke_log_export_${boot}
+      os1_add_qemu_test(NAME os1_smoke_log_export_${boot}
         COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_log_export.py"
           --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
           --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-log-export-${boot}.log"
@@ -1870,49 +1873,49 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
       set_tests_properties(os1_smoke_log_export_${boot} PROPERTIES TIMEOUT 180)
       list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_log_export_${boot})
     endif()
-    add_test(NAME os1_smoke_memory_logging_${boot}
+    os1_add_qemu_test(NAME os1_smoke_memory_logging_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_memory_logging.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-memory-logging-${boot}.log"
         ${file_test_firmware})
     set_tests_properties(os1_smoke_memory_logging_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_memory_logging_${boot})
-    add_test(NAME os1_smoke_guided_shell_${boot}
+    os1_add_qemu_test(NAME os1_smoke_guided_shell_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_guided_shell.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-guided-shell-${boot}.log"
         ${file_test_firmware})
     set_tests_properties(os1_smoke_guided_shell_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_guided_shell_${boot})
-    add_test(NAME os1_smoke_context_${boot}
+    os1_add_qemu_test(NAME os1_smoke_context_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_context_completion.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-context-${boot}.log"
         ${file_test_firmware})
     set_tests_properties(os1_smoke_context_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_context_${boot})
-    add_test(NAME os1_smoke_system_lifecycle_${boot}
+    os1_add_qemu_test(NAME os1_smoke_system_lifecycle_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_system_lifecycle.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --utility "${OS1_USER_DISKUTIL_ELF}" --manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --log "${OS1_ARTIFACT_DIR}/smoke-system-lifecycle-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_system_lifecycle_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_system_lifecycle_${boot})
-    add_test(NAME os1_smoke_typed_shell_${boot}
+    os1_add_qemu_test(NAME os1_smoke_typed_shell_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_typed_shell.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}"
         --log "${OS1_ARTIFACT_DIR}/smoke-typed-shell-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_typed_shell_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_typed_shell_${boot})
-    add_test(NAME os1_smoke_text_tools_${boot}
+    os1_add_qemu_test(NAME os1_smoke_text_tools_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_text_tools.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}"
         --log "${OS1_ARTIFACT_DIR}/smoke-text-tools-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_text_tools_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_text_tools_${boot})
-    add_test(NAME os1_smoke_pager_${boot}
+    os1_add_qemu_test(NAME os1_smoke_pager_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_pager.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}"
@@ -1924,67 +1927,67 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
     else()
       set(pager_keyboard usb)
     endif()
-    add_test(NAME os1_smoke_pager_keyboard_${boot}
+    os1_add_qemu_test(NAME os1_smoke_pager_keyboard_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_pager.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}" --keyboard "${pager_keyboard}"
         --log "${OS1_ARTIFACT_DIR}/smoke-pager-keyboard-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_pager_keyboard_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_pager_keyboard_${boot})
-    add_test(NAME os1_smoke_guided_keyboard_${boot}
+    os1_add_qemu_test(NAME os1_smoke_guided_keyboard_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_guided_shell.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}" --keyboard "${pager_keyboard}"
         --log "${OS1_ARTIFACT_DIR}/smoke-guided-keyboard-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_guided_keyboard_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_guided_keyboard_${boot})
-    add_test(NAME os1_smoke_context_keyboard_${boot}
+    os1_add_qemu_test(NAME os1_smoke_context_keyboard_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_context_completion.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}" --keyboard "${pager_keyboard}"
         --log "${OS1_ARTIFACT_DIR}/smoke-context-keyboard-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_context_keyboard_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_context_keyboard_${boot})
-    add_test(NAME os1_smoke_timestamps_${boot}
+    os1_add_qemu_test(NAME os1_smoke_timestamps_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_timestamps.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}"
         --log "${OS1_ARTIFACT_DIR}/smoke-timestamps-${boot}.log" ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
     set_tests_properties(os1_smoke_timestamps_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_timestamps_${boot})
-    add_test(NAME os1_smoke_tree_tools_${boot}
+    os1_add_qemu_test(NAME os1_smoke_tree_tools_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_tree_tools.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}"
         --log "${OS1_ARTIFACT_DIR}/smoke-tree-tools-${boot}.log" ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
     set_tests_properties(os1_smoke_tree_tools_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_tree_tools_${boot})
-    add_test(NAME os1_smoke_bootstrap_${boot}
+    os1_add_qemu_test(NAME os1_smoke_bootstrap_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_shell_bootstrap.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}" --manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --log "${OS1_ARTIFACT_DIR}/smoke-bootstrap-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_bootstrap_${boot} PROPERTIES TIMEOUT 240)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_bootstrap_${boot})
-    add_test(NAME os1_smoke_files_disk_${boot}
+    os1_add_qemu_test(NAME os1_smoke_files_disk_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_interactive_files.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}"
         --log "${OS1_ARTIFACT_DIR}/smoke-files-disk-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_files_disk_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_files_disk_${boot})
-    add_test(NAME os1_smoke_ext2_${boot}
+    os1_add_qemu_test(NAME os1_smoke_ext2_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-ext2-${boot}.log" ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
-    add_test(NAME os1_smoke_deploy_${boot}
+    os1_add_qemu_test(NAME os1_smoke_deploy_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_deployment_boot.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --version1 "${OS1_DEPLOY_PROBE_1}" --version2 "${OS1_DEPLOY_PROBE_2}"
         --log "${OS1_ARTIFACT_DIR}/smoke-deploy-${boot}.log" ${file_test_firmware})
-    add_test(NAME os1_smoke_usb_data_${boot}
+    os1_add_qemu_test(NAME os1_smoke_usb_data_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_data_boot.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_USB_IMAGE}" --utility "${OS1_USER_DISKUTIL_ELF}"
@@ -1992,17 +1995,17 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --log "${OS1_ARTIFACT_DIR}/smoke-usb-data-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_usb_data_${boot} PROPERTIES TIMEOUT 300)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_usb_data_${boot})
-    add_test(NAME os1_smoke_usb_storage_${boot}
+    os1_add_qemu_test(NAME os1_smoke_usb_storage_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-usb-storage-${boot}.log" --transport usb ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
-    add_test(NAME os1_smoke_ehci_storage_${boot}
+    os1_add_qemu_test(NAME os1_smoke_ehci_storage_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-ehci-storage-${boot}.log" --transport ehci ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
-    add_test(NAME os1_smoke_ehci_data_${boot}
+    os1_add_qemu_test(NAME os1_smoke_ehci_data_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_data_boot.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_USB_IMAGE}" --utility "${OS1_USER_DISKUTIL_ELF}"
@@ -2010,20 +2013,20 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --log "${OS1_ARTIFACT_DIR}/smoke-ehci-data-${boot}.log" --transport ehci ${file_test_firmware})
     set_tests_properties(os1_smoke_ehci_data_${boot} PROPERTIES TIMEOUT 300)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_ehci_data_${boot})
-    add_test(NAME os1_smoke_ehci_failure_${boot}
+    os1_add_qemu_test(NAME os1_smoke_ehci_failure_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_storage_failures.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-ehci-failure-${boot}.log" --transport ehci ${file_test_firmware})
     set_tests_properties(os1_smoke_ehci_storage_${boot} os1_smoke_ehci_failure_${boot} PROPERTIES TIMEOUT 240)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_ehci_storage_${boot} os1_smoke_ehci_failure_${boot})
-    add_test(NAME os1_smoke_usb_deploy_${boot}
+    os1_add_qemu_test(NAME os1_smoke_usb_deploy_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_deployment_boot.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --version1 "${OS1_DEPLOY_PROBE_1}" --version2 "${OS1_DEPLOY_PROBE_2}"
         --log "${OS1_ARTIFACT_DIR}/smoke-usb-deploy-${boot}.log" --transport usb ${file_test_firmware})
-    add_test(NAME os1_smoke_usb_failure_${boot}
+    os1_add_qemu_test(NAME os1_smoke_usb_failure_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_storage_failures.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
@@ -2113,19 +2116,29 @@ else()
 endif()
 os1_register_menu_target(smoke_usb_storage "USB persistence and removal" "Test USB storage, deployment, readonly rejection, removal and keyboard coexistence.")
 
-if(OS1_QEMU_SMOKE_TESTS)
-  set_tests_properties(
-    ${OS1_QEMU_SMOKE_TESTS}
-    PROPERTIES
-      RUN_SERIAL TRUE
-      RESOURCE_LOCK os1_qemu_smoke_artifacts
-  )
-endif()
+
+
+# Keep the hosted suite small. The unfiltered local suite retains every test.
+set(OS1_CI_TESTS
+  os1_smoke_spawn
+  os1_smoke_balance_bios
+  os1_smoke_context_keyboard_uefi
+  os1_smoke_bootstrap_uefi
+  os1_smoke_ehci_storage_bios
+  os1_smoke_log_export_uefi
+)
+foreach(test IN LISTS OS1_CI_TESTS)
+  if(TEST ${test})
+    set_property(TEST ${test} APPEND PROPERTY LABELS ci)
+  elseif(OS1_REQUIRE_UEFI_SMOKE AND BUILD_TESTING)
+    message(FATAL_ERROR "Required strategic CI test is unavailable: ${test}")
+  endif()
+endforeach()
 
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(
     smoke_all
-    COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -R "^os1_smoke"
+    COMMAND "${CMAKE_CTEST_COMMAND}" --parallel 2 --output-on-failure -R "^os1_smoke"
     DEPENDS os1_image os1_bios_image os1_usb_image "${OS1_VIRTIO_TEST_DISK}"
     USES_TERMINAL
     VERBATIM

@@ -452,7 +452,8 @@ Suggested goals:
 - smoke success only after the complete observation interval, retaining failures even when retries pass
 
 Current validation uses host tests, CTest scripts, and BIOS/UEFI QEMU checks.
-A unified verification entrypoint and structured result artifacts remain tooling follow-ups; they do not block input or storage work.
+The [local validation entrypoint](docs/testing.md) runs all current test profiles before push.
+GitHub CI runs a strategic subset. Structured result aggregation remains a tooling follow-up.
 
 ### Performance stance
 

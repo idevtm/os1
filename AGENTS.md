@@ -134,6 +134,34 @@ Clearly separate current behavior, accepted plans, proposals, and historical evi
 
 ## Validation
 
+Local validation provides full coverage; GitHub CI provides a small strategic check.
+
+```text
+code or build change -> complete local suite -> independent review -> push
+GitHub CI -> host unit suite and six strategic QEMU checks
+```
+
+### Mandatory local test policy
+
+Before pushing code, tests, build settings, or dependency changes, run `./scripts/check-local.sh` on the final source tree.
+Run it before declaring such work complete, even when no push is requested.
+This command runs all host tests, the unfiltered normal-image suite, and the separate diagnostic-image checks.
+Do not substitute the GitHub subset or `act` for this command.
+Do not disable tests, remove assertions, or retry failures until a passing result hides the original failure.
+Keep the first failure evidence when a diagnostic rerun is necessary.
+
+Record the revision, working-tree changes, commands, results, durations, and log locations in the task report and pull request.
+If a later change affects executable behavior or validation, repeat the full local command.
+After a documentation-only correction, repeat the documentation checks instead.
+Existing failures remain blockers until investigated; a passing GitHub subset does not resolve them.
+If local validation is unavailable or fails, report the reason and obtain an explicit user exception before pushing.
+An exception does not establish passing validation or permission to merge.
+
+For documentation-only changes, run the documentation checks below instead of building images or running runtime tests.
+Changes to test policy also require checks of the documented commands and test selection.
+
+### Checks and evidence
+
 Choose checks from the impact assessment and the [documented build and test workflows](README.md).
 Run affected host tests for logic that can execute outside the kernel.
 Run relevant QEMU smoke tests for guest behavior.
