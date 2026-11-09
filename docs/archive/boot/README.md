@@ -5,6 +5,7 @@ Use the [documentation index](../../README.md) for current guidance.
 
 | Record | Document |
 | --- | --- |
+| 2026-11-09 | [BIOS ELF size correction](2026-11-09-bios-image-size.md) |
 | 2026-11-09 | [Two-entry boot menu](2026-11-09-boot-menu.md) |
 | 2026-11-02 | [ASUS G74SX Bring-Up: Debugging Plan and Handoff](2026-11-02-g74sx-bringup-debug-plan.md) |
 | 2026-04-29 | [Limine Shim Decomposition After Higher-Half Migration - 2026-04-29](2026-04-29-limine-shim-decomposition.md) |

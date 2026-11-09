@@ -874,7 +874,8 @@ endif()
 # UEFI ceiling is intentionally larger because OVMF + ISO + Limine do far more
 # I/O than the direct BIOS path, which matters on shared runners without KVM
 # acceleration (GitHub Actions ubuntu-hosted, in particular).
-set(OS1_UEFI_SMOKE_TIMEOUT_SECONDS 30)
+# Preserve the 30-second smoke-work budget after the 10-second Limine menu.
+set(OS1_UEFI_SMOKE_TIMEOUT_SECONDS 40)
 set(OS1_BIOS_SMOKE_TIMEOUT_SECONDS 30)
 set(OS1_SMOKE_SETTLE_AFTER_MARKERS_SECONDS 1)
 set(OS1_SMOKE_SEND_DELAY_SECONDS 0.2)
@@ -1809,6 +1810,9 @@ if(OS1_E2FSCK_EXECUTABLE)
   set(OS1_EXT2_CHECK_ARGS --e2fsck "${OS1_E2FSCK_EXECUTABLE}")
 endif()
 if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
+  add_test(NAME os1_kernel_elf_padding_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_kernel_elf_padding.py"
+      --assembler "${OS1_NASM_EXECUTABLE}" --linker "${CMAKE_LINKER}" --nm "${CMAKE_NM}")
   add_test(NAME os1_usb_progress_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_progress.py")
   add_test(NAME os1_usb_data_contract

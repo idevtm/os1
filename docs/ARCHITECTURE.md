@@ -540,14 +540,18 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-896`: `kernel_bios.elf`
-- LBA `897-1184`: `initrd.cpio`
+- LBA `65-912`: `kernel_bios.elf`
+- LBA `913-1200`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
 The core ELF uses 256-byte file alignment while kernel memory boundaries remain page-aligned.
 BIOS packaging removes unused section metadata; the diagnostic kernel ELF retains symbols.
+Final `.data` alignment occupies the zero-filled `PT_LOAD` memory tail instead of the file-backed section.
+Both loaders zero the segment memory before copying initialized bytes.
+Page-aligned boundary symbols, segment addresses, permissions, and reserved memory remain unchanged.
+The [BIOS size correction](archive/boot/2026-11-09-bios-image-size.md) records the regression and validation.
 The BIOS loader stages the stripped kernel in `[0xE000,0x78000)` (424 KiB).
 It stages the plain initrd in `[0x78000,0x9C000)` (144 KiB).
 The latest CI correction moves 16 KiB of staging capacity from initrd to the kernel.
