@@ -33,6 +33,65 @@ Record source identity, local changes, tool versions, test results, durations, a
 Follow the [mandatory local policy](../AGENTS.md#mandatory-local-test-policy) before push or completion.
 Documentation-only changes require document checks instead of image builds.
 
+## Test isolation and concurrency
+
+Each QEMU invocation owns its mutable files. The local runner schedules at most two tests concurrently.
+
+```text
+built images and programs -> private invocation directory -> one test's QEMU processes
+                                                        -> retained logs and timings
+```
+
+The wrapper copies boot images, program disks, scratch disks, and firmware-variable templates.
+Tests derive additional writable files from their private log paths.
+Firmware code, executable inputs, and source manifests remain shared read-only inputs.
+Existing deployment locks remain active inside each private test.
+Do not build or deploy shared inputs while tests run.
+
+For a complete normal-image run, use `ctest --test-dir build --parallel 2 --output-on-failure`.
+Use `--parallel 1` for comparable serial measurements or failure isolation.
+Higher concurrency is not qualified.
+
+Evidence is stored under `build/artifacts/test-runs/<test>-<unique>/`.
+Diagnostic evidence uses `build/usb-diagnostics/artifacts/test-runs/`.
+Each invocation retains serial logs, `runner.log`, and `result.json`.
+The result records preparation time, execution time, child CPU time, and the exact command.
+Successful tests remove private binary fixtures after execution.
+Failed tests retain those fixtures for investigation.
+
+Evidence directories accumulate; remove obsolete runs after retaining required failure evidence.
+The former fixed `smoke*.log` paths are historical and can contain stale output.
+
+## Input readiness and timing evidence
+
+Serial smoke commands wait for their triggering output and a subsequent shell prompt.
+The runner sends each command in a batch after a separate prompt.
+It does not use the former 200 ms command delay.
+Serial parsing combines partial lines for at most 5 ms without requiring a newline.
+Required markers, rejection markers, timeouts, and the final settling interval remain unchanged.
+Keyboard release delays, boot countdown tests, and background-log waits retain their existing behavior.
+
+Each generic smoke log has a `.profile.json` companion with chunk counts and matching CPU time.
+Storage boot helpers retain one profile for each guest launch.
+These profiles separate startup, prelude commands, workload, and cleanup.
+They also record command durations and incomplete commands.
+Subtract total guest-launch durations from wrapper execution time to estimate remaining host preparation and inspection time.
+This remainder also includes Python dispatch and profile serialization.
+
+Do not describe command time as pure device I/O time.
+It includes filesystem, shell, scheduling, IPC, and synchronization costs.
+
+To measure the six EHCI checks separately, run:
+
+```sh
+ctest --test-dir build --parallel 1 --output-on-failure \
+  -R '^os1_smoke_ehci_(storage|data|failure)_(bios|uefi)$'
+```
+
+Do not run other QEMU workloads during this measurement.
+Keep the EHCI transport and all failure assertions enabled.
+The [throughput record](archive/tooling/2026-11-09-local-test-throughput.md) contains comparisons, profiles, and validation limits.
+
 ## Strategic GitHub selection
 
 GitHub retains all host unit tests because they run quickly.

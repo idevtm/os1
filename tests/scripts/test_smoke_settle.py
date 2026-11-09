@@ -9,9 +9,11 @@ RUNNER = Path(__file__).resolve().parents[2] / "cmake/scripts/run_smoke.py"
 
 
 class SettleTests(unittest.TestCase):
-    def run_smoke(self, program, settle="0.2", timeout="2", events=(), rejected="BROKEN", marker="READY", boot_menu=None):
+    def run_smoke(self, program, settle="0.2", timeout="2", events=(), rejected="BROKEN", marker="READY", boot_menu=None, ready=False):
         with tempfile.TemporaryDirectory() as directory:
             event_args = [arg for event in events for arg in ("--send-after", event)]
+            if ready:
+                event_args += ["--wait-for-shell-prompt"]
             if boot_menu is not None:
                 event_args += ['--boot-menu-entry', str(boot_menu)]
             result = subprocess.run(
@@ -23,6 +25,32 @@ class SettleTests(unittest.TestCase):
             )
             result.log = (Path(directory) / 'log').read_text()
             return result
+
+    def test_command_waits_for_prompt_after_trigger(self):
+        result = self.run_smoke(
+            "import os,select,time; os.write(1,b'os1> old\\nTRIGGER\\n'); "
+            "assert not select.select([0],[],[],.08)[0]; "
+            "os.write(1,b'os'); time.sleep(.02); os.write(1,b'1> '); "
+            "assert os.read(0,100)==b'help\\n'; print('READY'); time.sleep(1)",
+            events=("TRIGGER::help\\n",), ready=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_batch_waits_for_each_new_prompt(self):
+        result = self.run_smoke(
+            "import os,select,time; os.write(1,b'TRIGGER\\nos1> '); "
+            "assert os.read(0,100)==b'first\\n'; "
+            "assert not select.select([0],[],[],.08)[0]; "
+            "os.write(1,b'first finished\\nos1> '); "
+            "assert os.read(0,100)==b'second\\n'; print('READY'); time.sleep(1)",
+            events=("TRIGGER::first\\nsecond\\n",), ready=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_trigger_without_prompt_never_sends(self):
+        result = self.run_smoke(
+            "import os,select,time; os.write(1,b'TRIGGER\\n'); "
+            "assert not select.select([0],[],[],.15)[0]; print('READY'); time.sleep(1)",
+            events=("TRIGGER::help\\n",), ready=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_menu_without_newline_accepts_input(self):
         result = self.run_smoke(

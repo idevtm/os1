@@ -14,10 +14,6 @@ if(NOT DEFINED SMOKE_SETTLE_AFTER_MARKERS_SECONDS)
   set(SMOKE_SETTLE_AFTER_MARKERS_SECONDS 0)
 endif()
 
-if(NOT DEFINED SMOKE_SEND_DELAY_SECONDS)
-  set(SMOKE_SEND_DELAY_SECONDS 0)
-endif()
-
 if(NOT DEFINED EXPECTED_MARKERS)
   set(EXPECTED_MARKERS "")
 endif()
@@ -140,8 +136,7 @@ set(runner_command
   "${SMOKE_TIMEOUT_SECONDS}"
   --settle-after-markers
   "${SMOKE_SETTLE_AFTER_MARKERS_SECONDS}"
-  --send-delay
-  "${SMOKE_SEND_DELAY_SECONDS}"
+  --wait-for-shell-prompt
 )
 if(DEFINED ISO_IMAGE AND NOT NO_UART)
   # The guarded selector stops at kernel startup and does not delay shell input.
