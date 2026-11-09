@@ -246,9 +246,11 @@ def main():
                             done.set()
                             return
                     for marker in markers:
+                        # Explicit line boundaries must not match partial command echo.
                         if marker not in seen and (
                             marker in line or marker in match_buffer or marker in normalized_match_buffer
-                            or compact_for_marker_matching(marker) in compact_normalized_match_buffer
+                            or (not marker.startswith("\n") and not marker.endswith("\n")
+                                and compact_for_marker_matching(marker) in compact_normalized_match_buffer)
                         ):
                             seen.add(marker)
                     if proc.stdin is not None:

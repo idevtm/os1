@@ -181,3 +181,54 @@ ctest --test-dir build --output-on-failure --no-tests=error -R '^os1_(smoke_exec
 
 The transcripts are `menu-final-checks.txt` and `exec-final-checks.txt` in the local evidence directory.
 These tests use the same production images as the preceding comparison; the follow-up changes only harness behavior and documentation.
+
+## Explicit output-line matching
+
+A final harness check reproduced partial command echo satisfying a required output-line marker.
+The whitespace-compacted fallback discarded the marker's explicit newline boundaries.
+Markers with leading or trailing newlines now require those boundaries in raw or normalized output.
+Other markers retain their existing whitespace-tolerant behavior.
+A regression rejects echoed input without command output; another accepts a real output line split across chunks.
+This correction strengthens test assertions and does not change production images or test deadlines.
+
+All thirteen subprocess cases and sixteen shared-harness checks pass with explicit output-line matching.
+The shared checks take 152.67 seconds versus 153.52 seconds before this assertion correction.
+The difference is -0.85 seconds (-0.55%), with one sample per configuration and unchanged production images.
+This difference does not establish a performance improvement.
+
+## Lifecycle fixture isolation
+
+CI run `42606930354` passes the corrected spawn check but fails the BIOS lifecycle clean-at-prompt assertion.
+All 583 host tests and 75 of 76 matrix checks pass.
+The lifecycle test assumes no writer modifies storage after a shell command completes.
+The accepted export ABI permits background writes with a five-second normal synchronization interval.
+Thus, a dirty superblock at an arbitrary prompt snapshot does not establish failed command-boundary synchronization.
+
+```text
+Lifecycle fixture: /disk/log is a regular file -> export cannot write -> check immediate command synchronization
+Export fixture:    /disk/log is a directory   -> background writes   -> check persistence and final shutdown drain
+```
+
+The lifecycle fixture now reserves `/disk/log` as a regular file before boot.
+It uses the existing deployment manifest and utility payload to create that fixture entry.
+The exporter returns `NOT_DIRECTORY` before identity or frame writes; memory capture continues.
+All immediate clean-state assertions remain unchanged, including the pre-parent-sync check and abrupt-stop check.
+Separate BIOS and UEFI export checks retain active background writes, command traffic, reboot persistence, and shutdown-drain coverage.
+The final shutdown path must still synchronize storage when log export fails.
+
+This correction affects test isolation and fixture disk use, not production storage policy, kernel code, or ABI.
+Validate both lifecycle paths and both active-export paths before committing.
+
+Both lifecycle and both active-export checks pass: four checks in 103.09 seconds.
+Their transcript is `lifecycle-export-checks.txt` in the local evidence directory.
+The fixture comparison uses the same program manifest and local toolchain, with one sample per configuration.
+The additional 5264-byte utility copy consumes 8192 allocated bytes and one inode.
+Allocated blocks increase from 82 to 84 (+2 blocks, +2.44%).
+Allocated inodes increase from 38 to 39 (+1 inode, +2.63%).
+Both disk image files remain 34603008 bytes (0 bytes, 0%).
+The 32 MiB filesystem capacity and guest CPU/memory settings remain unchanged.
+The measurement transcript is `lifecycle-fixture-measurements.txt`.
+
+```sh
+ctest --test-dir build --output-on-failure --no-tests=error -R '^os1_smoke_(system_lifecycle|log_export)_(bios|uefi)$'
+```

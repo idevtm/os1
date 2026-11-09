@@ -9,13 +9,13 @@ RUNNER = Path(__file__).resolve().parents[2] / "cmake/scripts/run_smoke.py"
 
 
 class SettleTests(unittest.TestCase):
-    def run_smoke(self, program, settle="0.2", timeout="2", events=(), rejected="BROKEN"):
+    def run_smoke(self, program, settle="0.2", timeout="2", events=(), rejected="BROKEN", marker="READY"):
         with tempfile.TemporaryDirectory() as directory:
             event_args = [arg for event in events for arg in ("--send-after", event)]
             return subprocess.run(
                 [sys.executable, str(RUNNER), "--log", str(Path(directory) / "log"),
                  "--timeout", timeout, "--settle-after-markers", settle,
-                 "--marker", "READY", "--reject-marker", rejected, *event_args, "--",
+                 "--marker", marker, "--reject-marker", rejected, *event_args, "--",
                  sys.executable, "-u", "-c", program],
                 capture_output=True, text=True, timeout=6,
             )
@@ -81,6 +81,21 @@ class SettleTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("after-exec", result.stderr)
+
+    def test_partial_command_echo_is_not_output_line(self):
+        result = self.run_smoke(
+            "import os,time; print('menu', flush=True); data=os.read(0, 64); "
+            "os.write(1, data.rstrip(b'\\n')); time.sleep(1)",
+            events=("menu::echo 'READY'\\n",), marker="\nREADY\n", timeout="0.5",
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_required_output_line_spans_chunks(self):
+        result = self.run_smoke(
+            "import os,time; os.write(1,b'\\r\\nREA'); time.sleep(0.05); "
+            "os.write(1,b'DY\\r\\n'); time.sleep(1)", marker="\nREADY\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_zero_settle_allows_marker_only(self):
         self.assertEqual(self.run_smoke("print('READY')", settle="0").returncode, 0)

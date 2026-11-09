@@ -2,6 +2,7 @@
 """Check shell supervision, command-boundary durability, and guest power control."""
 import argparse
 import importlib.util
+import json
 import os
 from pathlib import Path
 import selectors
@@ -10,6 +11,7 @@ import signal
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.dont_write_bytecode = True
@@ -29,7 +31,18 @@ def main():
                                                 'cmake/scripts/create_ext2_image.py')
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
-    builder.create(disk, args.utility, reset=True, manifest=args.manifest)
+    # Isolate command-boundary sync from periodic log writes. Export tests cover
+    # active background logging and final shutdown drain on a separate fixture.
+    manifest_path = Path(args.manifest).resolve()
+    manifest = json.loads(manifest_path.read_text())
+    for entry in manifest['programs']:
+        entry['source'] = str((manifest_path.parent / entry['source']).resolve())
+    manifest['programs'].append({'source': str(Path(args.utility).resolve()),
+                                 'destination': '/disk/log'})
+    with tempfile.TemporaryDirectory() as temporary:
+        fixture_manifest = Path(temporary) / 'programs.json'
+        fixture_manifest.write_text(json.dumps(manifest))
+        builder.create(disk, args.utility, reset=True, manifest=fixture_manifest)
 
     def clean():
         with disk.open('rb') as source:
