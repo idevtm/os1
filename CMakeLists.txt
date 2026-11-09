@@ -913,8 +913,7 @@ set(OS1_SMOKE_REJECT_MARKERS
   "[user/copycheck] fail"
 )
 
-# The shell prompt does not terminate with a newline, so the line-buffered
-# smoke runner observes it when the following command output flushes.
+# The streaming smoke runner observes prompts without waiting for a newline.
 # Fully quoted echo arguments distinguish output markers from echoed input.
 set(OS1_SHELL_INPUT_EVENTS
   "shell prompt ready::help\\n"
@@ -966,7 +965,6 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
   "shell prompt ready::exec yield\\n"
-  "[user/yield] tick 2::echo 'after-exec'\\n"
 )
 
 set(OS1_SHELL_BALANCE_INPUT_EVENTS
@@ -976,7 +974,6 @@ set(OS1_SHELL_BALANCE_INPUT_EVENTS
 set(OS1_EXEC_SMOKE_REJECT_MARKERS
   ${OS1_SMOKE_REJECT_MARKERS}
   "shell exec returned"
-  "\nafter-exec\n"
 )
 
 # Preventive: if CI (or any caller) sets OS1_REQUIRE_UEFI_SMOKE=ON, a missing
@@ -1334,7 +1331,8 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DSMOKE_SEND_DELAY_SECONDS=${OS1_SMOKE_SEND_DELAY_SECONDS}"
       "-DEXPECTED_MARKERS=${OS1_UEFI_SPAWN_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
-      "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_SPAWN_INPUT_EVENTS}"
+      # Select normal boot explicitly; other checks cover the automatic menu wait.
+      "-DSERIAL_INPUT_EVENTS=os1 diagnostics::\\r;${OS1_SHELL_SPAWN_INPUT_EVENTS}"
       "-DPROGRAM_DISK=${OS1_PROGRAM_TEST_DISK}"
       "-DVIRTIO_TEST_DISK=${OS1_VIRTIO_TEST_DISK}"
       "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"

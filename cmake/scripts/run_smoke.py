@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Streams QEMU serial output line by line, terminates QEMU as soon as every
+# Streams QEMU serial output as it arrives, terminates QEMU as soon as every
 # expected marker has been seen, and fails cleanly on a wall-clock timeout.
 #
 # Why not just ``execute_process(... TIMEOUT ...)`` in CMake: that model always
@@ -8,6 +8,7 @@
 # exit keeps local iteration fast AND gives CI generous headroom.
 
 import argparse
+import codecs
 from dataclasses import dataclass
 import os
 import re
@@ -45,6 +46,18 @@ class MonitorEvent:
     marker: str
     text: str
     sent: bool = False
+
+
+def read_output_chunks(stream):
+    # Firmware menus can wait for input without producing a newline.
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    while True:
+        data = os.read(stream.fileno(), 4096)
+        text = decoder.decode(data, final=not data)
+        if text:
+            yield text
+        if not data:
+            return
 
 
 def normalize_for_marker_matching(text, sent_serial_texts, marker_noise=()):
@@ -213,14 +226,14 @@ def main():
             nonlocal match_buffer, reader_finished_at
             try:
                 assert proc.stdout is not None
-                for line in proc.stdout:
+                for line in read_output_chunks(proc.stdout):
                     output_lines.append(line)
                     log_file.write(line)
                     log_file.flush()
                     match_buffer = (match_buffer + line)[-MAX_MATCH_BUFFER_CHARS:]
                     sent_serial_texts = [event.text for event in send_events if event.sent]
                     marker_noise = [marker for marker in markers if marker in match_buffer]
-                    normalized_line = normalize_for_marker_matching(line, sent_serial_texts)
+                    normalized_rejection_buffer = normalize_for_marker_matching(match_buffer, sent_serial_texts)
                     normalized_match_buffer = normalize_for_marker_matching(
                         match_buffer,
                         sent_serial_texts,
@@ -228,7 +241,7 @@ def main():
                     )
                     compact_normalized_match_buffer = compact_for_marker_matching(normalized_match_buffer)
                     for marker in reject_markers:
-                        if marker in line or marker in normalized_line:
+                        if marker in match_buffer or marker in normalized_rejection_buffer:
                             nonlocal_rejected[0] = marker
                             done.set()
                             return

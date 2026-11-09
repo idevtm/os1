@@ -495,7 +495,10 @@ The shell runs a line-buffered REPL:
  (return to user via iretq with new frame)
 ```
 
-The `exec` smoke checks for unwanted return to the *old* shell: the rejected-marker list includes `shell exec returned` and an `echo after-exec` probe. This provides bounded transcript evidence. The runner now rejects early exit before its settling interval completes.
+The `exec` smoke rejects `shell exec returned`, which the original shell emits if its replacement call returns.
+After the replacement program exits, init starts a new shell.
+Separate lifecycle checks verify this shell restart.
+The runner rejects early exit before its settling interval completes.
 
 ## Build Outputs And Boot Artifacts
 

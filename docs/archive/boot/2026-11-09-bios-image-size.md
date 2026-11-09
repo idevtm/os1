@@ -109,3 +109,75 @@ Physical machines have not retested this packaging correction.
 The preceding hardware record remains evidence for the original implementation, not this revised artifact.
 The complete ASD-STE100 dictionary was unavailable; prose received active-voice, terminology, sentence-length, and link review.
 
+## CI spawn follow-up
+
+CI run `42600866845` passes the image build, all 583 host tests, and 75 of 76 matrix checks.
+The new linker regression passes with the CI toolchain.
+The UEFI spawn workload reaches 39 of 56 markers before its forty-second deadline.
+Its last completed program is `activationcheck`; the remaining commands have not run.
+The same BIOS workload passes in 30.92 seconds.
+
+```text
+Menu appears -> select default os1 -> run unchanged spawn workload -> check all 56 markers
+```
+
+The follow-up selects normal boot explicitly for the UEFI spawn check.
+It sends Enter when the second menu label appears; the default selection remains the first entry.
+The automatic-boot baseline and separate two-entry menu test retain boot-menu coverage.
+The workload, rejection markers, settlement period, and forty-second deadline remain unchanged.
+
+This test-only change affects validation timing, not kernel behavior, memory, concurrency, interfaces, or image layout.
+The existing impact assessment still applies to the linker correction.
+Validate the generated CTest command, both spawn paths, the packaged menu, and the linker regression.
+Obtain independent review before pushing the correction.
+
+The first selection trial passed its markers but took 38.07 seconds, versus 38.11 seconds without selection.
+That result did not establish successful menu selection.
+Independent review identified the line-buffered runner: it could not dispatch input until the menu produced a newline.
+A new subprocess regression reproduces this failure with a menu that waits for Enter without a newline.
+The runner now reads bounded 4096-byte chunks and preserves split UTF-8 characters with an incremental decoder.
+The new menu regression and the existing settlement checks pass after this correction.
+A second regression checks a menu label with a UTF-8 character split across writes.
+
+This correction affects the shared smoke harness, so validation includes all direct smoke workloads and monitor input.
+It preserves expected markers, rejected markers, process cleanup, and settlement checks.
+It does not modify production software, boot profiles, or resource limits.
+
+Review also identified rejected markers split across output chunks.
+A subprocess regression reproduced acceptance of a split `BROKEN` marker, including ANSI and prompt noise.
+Rejection matching now uses the bounded accumulated buffer before required-marker noise removal.
+All ten settlement and streaming tests pass after this correction.
+The monitor contract passes with local socket permission; its sandbox denial was an environment limitation.
+
+The same local image completes all 56 spawn markers in 29.22 seconds with streaming menu selection.
+The line-buffered selection trial took 38.07 seconds.
+The difference is -8.85 seconds, or -23.25%, from one sample per configuration.
+Both samples use the compiler, firmware, CPU count, and memory settings recorded above.
+These measurements describe test-harness timing; they do not establish a production performance improvement.
+
+Accumulated rejection also exposed a stale exec assertion.
+The old line reader never matched its multiline `after-exec` rejection marker.
+The corrected reader detects that output from the replacement shell, which init must restart after the program exits.
+Both exec checks retain the `shell exec returned` rejection and remove the obsolete echo probe.
+The original shell emits that diagnostic after any return from its replacement call.
+A multiline rejection regression prevents silent loss of this detection behavior.
+The architecture now describes the accepted restart contract accurately.
+
+Review rejected a replacement-shell echo requirement because command echo could satisfy its output marker.
+The final exec check keeps the existing direct no-return diagnostic instead of adding that redundant probe.
+Separate lifecycle checks verify shell restart; the exec check verifies replacement execution and rejects return to the original shell.
+
+The permitted shared-harness run passes all sixteen checks in 153.52 seconds.
+After removal of the echo probe, all five final streaming, exec, and lifecycle checks pass in 57.95 seconds.
+The streaming contract includes eleven subprocess cases.
+The final independent correction review finds no blockers.
+Local file links and whitespace checks pass; the credential-pattern scan finds no matches.
+Full CI must run again on the follow-up commit.
+
+```sh
+ctest --test-dir build --output-on-failure --no-tests=error -R '^os1_(smoke(_bios|_observe|_observe_bios|_spawn|_spawn_bios|_exec|_exec_bios|_balance|_balance_bios|_no_uart)?|smoke_(settle|monitor)_contract|boot_menu_contract|smoke_boot_menu_uefi|kernel_elf_padding_contract)$'
+ctest --test-dir build --output-on-failure --no-tests=error -R '^os1_(smoke_exec(_bios)?|smoke_system_lifecycle_(bios|uefi)|smoke_settle_contract)$'
+```
+
+The transcripts are `menu-final-checks.txt` and `exec-final-checks.txt` in the local evidence directory.
+These tests use the same production images as the preceding comparison; the follow-up changes only harness behavior and documentation.
