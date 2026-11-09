@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from boot_menu import BootMenu
 import selectors
 import shutil
 import signal
@@ -66,6 +67,7 @@ def main():
         selector = selectors.DefaultSelector()
         selector.register(child.stdout, selectors.EVENT_READ)
         pending, transcript = bytearray(), bytearray()
+        menu = BootMenu(1 if args.code else None)
 
         def expect(marker=b'os1> ', timeout=60, allowed_errors=()):
             deadline = time.monotonic() + timeout
@@ -77,6 +79,7 @@ def main():
                 assert data, (child.poll(), bytes(pending[-4000:]))
                 transcript.extend(data)
                 pending.extend(data.replace(b'\r', b''))
+                menu.feed(data, child.stdin)
             end = pending.index(marker) + len(marker)
             result = bytes(pending[:end]); del pending[:end]
             for error in (b'PANIC', b'#GP general protection', b'ext2 mount rejected',
@@ -132,6 +135,7 @@ def main():
             else:
                 run('cat "/disk/lifecycle"', b'durable 4')
                 run('diskutil sync', b'diskutil sync ok')
+                menu.reset()
                 send('reboot')
                 restarted = expect(timeout=60)
                 assert b'shell started' in restarted and b'ext2 mounted /disk' in restarted

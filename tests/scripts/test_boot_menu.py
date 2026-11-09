@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from test_ext2_persistence import boot
 
@@ -26,26 +27,30 @@ def main():
     args.poweroff = True
     disk = Path(args.log).with_suffix('.raw')
     disk.parent.mkdir(parents=True, exist_ok=True)
-    for entry in (1, 2):
+    for entry in (None, 1, 2):
         for sample in range(args.repeat):
             shutil.copyfile(args.program_disk, disk)
             args.boot_menu_entry = entry
             phase = f'entry-{entry}-sample-{sample}'
+            profile = 1 if entry is None else entry
 
             def exercise(run, expect):
+                if entry is None:
+                    assert time.monotonic() - started >= 9, 'automatic menu countdown was bypassed'
                 info = run('os.system.log.info')
-                capacity = 262144 if entry == 1 else 1048576
+                capacity = 262144 if profile == 1 else 1048576
                 assert re.search(fr'capacity_bytes[:=]{capacity}\b'.encode(), info), info
-                assert re.search(fr'diagnostic[:=]{entry-1}\b'.encode(), info), info
+                assert re.search(fr'diagnostic[:=]{profile-1}\b'.encode(), info), info
                 print(phase + ': ' + info.decode().strip())
                 print(run('kmem').decode().strip())
                 run('echo "boot menu profile"')
                 # Syscall-entry tracing is exclusive to the diagnostic profile.
                 trace = run('dmesg kind:2 limit:256')
-                assert (b'kind=2' in trace) == (entry == 2), trace
+                assert (b'kind=2' in trace) == (profile == 2), trace
                 run('os.system.log.export target:"disk"')
                 run('os.system.log.export_info', b'last_status:0')
 
+            started = time.monotonic()
             boot(args, disk, phase, exercise=exercise)
             partition = disk.with_suffix('.ext2')
             partition.write_bytes(disk.read_bytes()[2048 * 512:])
@@ -57,7 +62,7 @@ def main():
                            check=True, capture_output=True)
             frames = [f for path in (destination / 'log').glob('*.bin')
                       for f in reader.frames(io.BytesIO(path.read_bytes()))]
-            assert frames and all(f['diagnostic'] == entry-1 for f in frames), frames
+            assert frames and all(f['diagnostic'] == profile-1 for f in frames), frames
             print(f'{phase}: {len(frames)} frames match the selected profile')
 
 
