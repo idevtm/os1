@@ -46,11 +46,44 @@ Stop QEMU before deployment. Synchronize guest writes with `/disk/diskutil sync`
 The tool rejects an image with an active conflicting lock.
 Do not access the image through a host filesystem mount during deployment.
 
+## Boot and recovery
+
+The normal shell runs from ext2. Initrd provides an independent recovery path.
+
+```text
+kernel mounts storage -> /bin/init -> /disk/bin/sh -> exit -> restart
+                             |
+                             +-- launch failure -> /bin/rescue -> retry
+```
+
+Stop QEMU before you update an existing data image.
+Run `./os1.sh storage_deploy` to install the shell and current programs without erasing other files.
+For a managed USB image, select **Update boot and programs (preserve data)** in the USB menu.
+Create a boot-plus-ext2 image for a new stick.
+A boot-only image starts rescue unless another supported disk supplies `/disk/bin/sh`.
+The full shell is not available from initrd.
+
+Init reports a failed launch or wait status before it starts rescue.
+Rescue accepts `help`, `ls [path]`, `cat path`, `usb`, `retry`, `sync`, `shutdown`, and `reboot`.
+`log_status` shows persistence failures. `log_export` exports available logs to `/tmp/log`.
+File paths are literal text after the command, without quotes or expression evaluation.
+Canonical console input accepts at most 127 content bytes per line.
+An overlong line returns an input error after its newline; rescue does not execute that line.
+Rescue has no aliases, scripts, Tab completion, command history, file editor, or arbitrary program launch.
+The listing and file-reading code is shared with the standalone `ls` and `cat` utilities.
+
+`retry` or end-of-input returns to init and attempts `/disk/bin/sh` again.
+It does not rediscover devices, remount storage, or repair a filesystem.
+Use host deployment to restore a missing or invalid shell, then boot again.
+A shell exit normally starts a fresh shell; it does not enter rescue.
+Kernel drivers remain built into the kernel. Moving programs does not change storage-driver availability.
+
 ## Program manifest
 
-The default manifest installs all optional bundled programs under `/disk/bin`.
+The default manifest installs the full shell and bundled programs under `/disk/bin`.
 It also retains `/disk/diskutil` for existing synchronization workflows.
-Initrd contains only `init`, `sh`, `ls`, `cat`, and `/etc/motd`.
+Initrd contains only `init` and `rescue`.
+The manifest installs `/disk/etc/motd` as a resource default.
 The shell searches `/bin` before `/disk/bin` for bare command names.
 Names containing `/` bypass search. Providers in verification programs use explicit `/disk/bin` paths.
 New QEMU images receive the manifest during creation; an existing image remains unchanged.
@@ -84,6 +117,32 @@ To restore the generated default, run `cmake --preset default -UOS1_STORAGE_MANI
 The default image remains `build/artifacts/persistent-data.raw`; `OS1_PERSISTENT_DISK` selects another image.
 Build externally supplied programs before deployment. The target cannot infer external build commands from a manifest.
 
+### Resource defaults
+
+Version 1 manifests remain supported for executable deployment.
+Version 2 adds a required `resources` list alongside `programs`.
+Both lists share the 64-entry limit and destination validation.
+
+```json
+{
+  "version": 2,
+  "programs": [
+    {"source": "artifacts/user/sh.elf", "destination": "/disk/bin/sh"}
+  ],
+  "resources": [
+    {"source": "motd", "destination": "/disk/etc/motd"}
+  ]
+}
+```
+
+Programs require an x86-64 ELF header and use mode `0755`.
+Resources accept arbitrary bytes, including an empty file, and use mode `0644`.
+Deployment creates a resource only when its destination is absent.
+It preserves an existing regular resource file, including contents and inode metadata.
+A directory at a resource destination rejects deployment.
+Duplicate destinations across both lists also reject deployment.
+The tool does not update existing resource defaults automatically.
+
 ## Preservation contract
 
 | Operation | Behavior |
@@ -111,7 +170,7 @@ The [USB menu](../hardware/usb-image-workflow.md) stages the managed data partit
 ## Bounds and limitations
 
 The [ext2 profile](ext2.md#supported-disk-profile) remains unchanged.
-A manifest contains 1 through 64 programs, each no larger than 4,243,456 bytes.
+A manifest contains 1 through 64 files, each no larger than 4,243,456 bytes.
 Destinations start with `/disk/` and use letters, digits, underscores, dots, and hyphens.
 Each component contains at most 63 characters. The complete destination contains at most 255 characters.
 Dot and dot-dot components are forbidden. A program can have at most 31 parent directories beneath `/disk`.
@@ -128,9 +187,11 @@ Processes that ignore locks or disable QEMU locking are outside this contract.
 This operation does not erase unlisted files, uninstall programs, or migrate filesystem formats.
 A program removed from the manifest remains installed.
 Online installation, configurable search paths, and larger ext2 profiles remain separate work.
-The [packaging record](../archive/filesystems/2026-11-06-minimal-initrd.md) covers the recovery split and validation.
+The [original packaging record](../archive/filesystems/2026-11-06-minimal-initrd.md) describes the historical four-program recovery set.
 
 ## Validation
+
+The [disk-shell startup record](../archive/filesystems/2026-11-09-ext2-shell-bootstrap.md) contains the migration assessment and evidence.
 
 `smoke_storage` runs persistence and deployment tests under BIOS and UEFI.
 `smoke_usb_storage` repeats these checks with the data image attached through xHCI USB storage.

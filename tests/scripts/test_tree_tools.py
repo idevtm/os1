@@ -24,7 +24,7 @@ def exercise(run, expect):
     ok('touch "/tmp/src/empty"')
     ok('stat "/tmp/src/sub/a.txt"', b'logical_bytes:8 allocated_bytes:4096')
     ok('stat "/tmp/src/empty"', b'logical_bytes:0 allocated_bytes:0')
-    ok('stat "/bin/cat"', b'allocated_bytes:unsupported')
+    ok('stat "/bin/init"', b'allocated_bytes:unsupported')
     ok('df "/tmp"', b'total_bytes:262144')
     ok('du "/tmp/src"', b'4096 bytes /tmp/src')
     ok('du "/tmp/src" logical:true', b'8 bytes /tmp/src')

@@ -60,6 +60,7 @@ def main():
     parser.add_argument('--vars', type=Path)
     parser.add_argument('--no-keyboard', action='store_true')
     parser.add_argument('--normal', action='store_true', help='Measure an ordinary image without diagnostic expectations')
+    parser.add_argument('--program-disk', required=True)
     args = parser.parse_args()
     args.log.parent.mkdir(parents=True, exist_ok=True)
     disk = args.log.with_suffix('.img')
@@ -71,6 +72,8 @@ def main():
                '-drive', f'if=none,id=stick,format=raw,file={disk}',
                '-device', 'qemu-xhci,id=xhci',
                '-device', 'usb-storage,bus=xhci.0,drive=stick,bootindex=1']
+    command += ['-drive', f'if=none,id=system,format=raw,file={args.program_disk},snapshot=on',
+                '-device', 'virtio-blk-pci,drive=system,disable-legacy=on']
     if not args.no_keyboard:
         command += ['-device', 'usb-kbd,bus=xhci.0,port=4']
     if args.code:

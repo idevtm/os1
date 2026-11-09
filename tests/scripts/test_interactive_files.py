@@ -90,7 +90,7 @@ def main():
         assert (b'ext2 mounted /disk' in transcript) == bool(args.program_disk)
         listed = run('ls "/bin"')
         lines = re.sub(rb'^root alloc 0x[0-9a-f]+\n', b'', listed, flags=re.M).decode().splitlines()[1:-1]
-        assert set(lines) == {'init', 'sh', 'ls', 'cat'}, listed
+        assert set(lines) == {'init', 'rescue'}, listed
         if not args.program_disk:
             assert b'unknown command: counter' in run('counter')
             assert b'shell: ls failed' in run('ls /disk')
@@ -110,7 +110,7 @@ def main():
         content('/tmp/copy', 'A > B\nsecond\n')
         assert b'duplicate redirection' in run('echo damage > /tmp/copy > /tmp/other')
         content('/tmp/copy', 'A > B\nsecond\n')
-        assert b'redirection failed' in run('echo damage > /etc/motd')
+        assert b'redirection failed' in run('echo damage > /bin/init')
         assert b'restored\n' in run("echo 'restored'")
         send('cat > "/tmp/eof"\n')
         # cat has no prompt; its input echo provides a fresh synchronization point.

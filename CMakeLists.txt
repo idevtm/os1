@@ -419,6 +419,7 @@ add_custom_command(OUTPUT "${OS1_PROGRAM_TEST_DISK}"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/create_ext2_image.py"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/deploy_storage.py"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/ext2_inspect.py"
+    "${PROJECT_SOURCE_DIR}/src/user/data/motd"
   VERBATIM)
 add_custom_target(os1_program_test_disk DEPENDS "${OS1_PROGRAM_TEST_DISK}")
 
@@ -630,6 +631,10 @@ add_custom_command(
   VERBATIM
 )
 add_custom_target(os1_usb_image ALL DEPENDS "${OS1_USB_IMAGE}")
+if(BUILD_TESTING AND OS1_USB_KEYBOARD_DIAGNOSTICS)
+  # Capture tests boot this image with a separate disk containing the full shell.
+  add_dependencies(os1_usb_image os1_program_test_disk)
+endif()
 
 set(OS1_USB_DATA_MIB 128 CACHE STRING "USB ext2 partition capacity in MiB (4..128)")
 add_custom_target(os1_usb_data_image
@@ -946,8 +951,8 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "unknown command: nope::copycheck\\n"
   "[user/copycheck] ok::fdcheck\\n"
   "[user/fdcheck] ok::ls /bin\\necho 'smoke-ls-complete'\\n"
-  "\nsmoke-ls-complete\n::cat /etc/motd\\n"
-  "os1: native initrd file reads work.::vfscheck\\n"
+  "\nsmoke-ls-complete\n::cat /disk/etc/motd\\n"
+  "os1: native file reads work.::vfscheck\\n"
   "[user/vfscheck] ok::ipccheck\\n"
   "[user/ipccheck] ok::buffercheck\\n"
   "[user/buffercheck] ok::intf /disk/bin/textprocessor\\n"
@@ -1042,6 +1047,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DEXPECTED_MARKERS=${OS1_UEFI_XHCI_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DEXTRA_QEMU_ARGS=${OS1_XHCI_QEMU_ARGS}"
+      "-DPROGRAM_DISK=${OS1_PROGRAM_TEST_DISK}"
       "-DVIRTIO_TEST_DISK=${OS1_VIRTIO_TEST_DISK}"
       "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"
       "-DSMOKE_RUNNER=${OS1_SMOKE_RUNNER}"
@@ -1053,6 +1059,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
   if(OS1_USB_KEYBOARD_DIAGNOSTICS)
     add_test(NAME os1_smoke_usb_keyboard_absent
       COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_keyboard_diagnostics.py"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_ARTIFACT_DIR}/os1-usb.img"
         --log "${OS1_ARTIFACT_DIR}/keyboard-absent.log" --no-keyboard
         --code "${OS1_OVMF_CODE}" --vars "${OS1_OVMF_VARS_TEMPLATE}")
@@ -1065,6 +1072,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       endif()
       add_test(NAME os1_smoke_usb_keyboard_${boot}
         COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_keyboard_diagnostics.py"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}"
           --qemu "${OS1_QEMU_EXECUTABLE}" --image "${OS1_ARTIFACT_DIR}/os1-usb.img"
           --log "${OS1_ARTIFACT_DIR}/keyboard-${boot}.log" ${keyboard_firmware_args})
       set_tests_properties(os1_smoke_usb_keyboard_${boot} PROPERTIES TIMEOUT 180)
@@ -1122,6 +1130,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DEXPECTED_MARKERS=${OS1_UEFI_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_INPUT_EVENTS}"
+      "-DPROGRAM_DISK=${OS1_PROGRAM_TEST_DISK}"
       "-DVIRTIO_TEST_DISK=${OS1_VIRTIO_TEST_DISK}"
       "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"
       "-DSMOKE_RUNNER=${OS1_SMOKE_RUNNER}"
@@ -1157,10 +1166,8 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "pci 00:03.0 1af4:1042 class=01:00"
     "pci 00:02.0 1af4:1041 class=02:00"
     "initrd path size"
-    "initrd /bin/sh size="
+    "initrd /bin/rescue size="
     "initrd /bin/init size="
-    "initrd /bin/ls size="
-    "initrd /bin/cat size="
     "device bus id state pci driver"
     "device pci 3 started 3 virtio-blk"
     "device pci 2 started 2 virtio-net"
@@ -1279,7 +1286,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "[user/copycheck] ok"
     "[user/fdcheck] duplicate output"
     "[user/fdcheck] ok"
-    "os1: native initrd file reads work."
+    "os1: native file reads work."
     "[user/vfscheck] restricted child ok"
     "[user/vfscheck] tmpfs native two clients compatibility unlink ok"
     "[user/vfscheck] ok"
@@ -1467,6 +1474,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
       "-DEXPECTED_MARKERS=${OS1_BIOS_SMOKE_MARKERS}"
       "-DREJECTED_MARKERS=${OS1_SMOKE_REJECT_MARKERS}"
       "-DSERIAL_INPUT_EVENTS=${OS1_SHELL_INPUT_EVENTS}"
+      "-DPROGRAM_DISK=${OS1_PROGRAM_TEST_DISK}"
       "-DVIRTIO_TEST_DISK=${OS1_VIRTIO_TEST_DISK}"
       "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"
       "-DSMOKE_RUNNER=${OS1_SMOKE_RUNNER}"
@@ -1502,10 +1510,8 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "pci 00:03.0 1af4:1042 class=01:00"
     "pci 00:02.0 1af4:1041 class=02:00"
     "initrd path size"
-    "initrd /bin/sh size="
+    "initrd /bin/rescue size="
     "initrd /bin/init size="
-    "initrd /bin/ls size="
-    "initrd /bin/cat size="
     "device bus id state pci driver"
     "device pci 3 started 3 virtio-blk"
     "device pci 2 started 2 virtio-net"
@@ -1619,7 +1625,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "[user/copycheck] ok"
     "[user/fdcheck] duplicate output"
     "[user/fdcheck] ok"
-    "os1: native initrd file reads work."
+    "os1: native file reads work."
     "[user/vfscheck] restricted child ok"
     "[user/vfscheck] tmpfs native two clients compatibility unlink ok"
     "[user/vfscheck] ok"
@@ -1785,6 +1791,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
       "-DMONITOR_SOCKET=${OS1_ARTIFACT_DIR}/smoke-no-uart.sock"
       "-DMONITOR_SEND_EVENTS=${OS1_NO_UART_INPUT_EVENTS}"
       "-DNO_UART=ON"
+      "-DPROGRAM_DISK=${OS1_PROGRAM_TEST_DISK}"
       "-DVIRTIO_TEST_DISK=${OS1_VIRTIO_TEST_DISK}"
       "-DPYTHON_EXECUTABLE=${OS1_PYTHON_EXECUTABLE}"
       "-DSMOKE_RUNNER=${OS1_SMOKE_RUNNER}"
@@ -1950,12 +1957,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --log "${OS1_ARTIFACT_DIR}/smoke-tree-tools-${boot}.log" ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
     set_tests_properties(os1_smoke_tree_tools_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_tree_tools_${boot})
-    add_test(NAME os1_smoke_files_${boot}
-      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_interactive_files.py"
+    add_test(NAME os1_smoke_bootstrap_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_shell_bootstrap.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
-        --log "${OS1_ARTIFACT_DIR}/smoke-files-${boot}.log" ${file_test_firmware})
-    set_tests_properties(os1_smoke_files_${boot} PROPERTIES TIMEOUT 180)
-    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_files_${boot})
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --manifest "${OS1_GENERATED_DIR}/storage-programs.json"
+        --log "${OS1_ARTIFACT_DIR}/smoke-bootstrap-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_bootstrap_${boot} PROPERTIES TIMEOUT 240)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_bootstrap_${boot})
     add_test(NAME os1_smoke_files_disk_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_interactive_files.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
@@ -1965,6 +1973,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_files_disk_${boot})
     add_test(NAME os1_smoke_ext2_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
+        --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-ext2-${boot}.log" ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
     add_test(NAME os1_smoke_deploy_${boot}
@@ -1983,10 +1992,12 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_usb_data_${boot})
     add_test(NAME os1_smoke_usb_storage_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
+        --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-usb-storage-${boot}.log" --transport usb ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
     add_test(NAME os1_smoke_ehci_storage_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
+        --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-ehci-storage-${boot}.log" --transport ehci ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
     add_test(NAME os1_smoke_ehci_data_${boot}
@@ -1999,6 +2010,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_ehci_data_${boot})
     add_test(NAME os1_smoke_ehci_failure_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_storage_failures.py"
+        --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-ehci-failure-${boot}.log" --transport ehci ${file_test_firmware})
     set_tests_properties(os1_smoke_ehci_storage_${boot} os1_smoke_ehci_failure_${boot} PROPERTIES TIMEOUT 240)
@@ -2011,6 +2023,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --log "${OS1_ARTIFACT_DIR}/smoke-usb-deploy-${boot}.log" --transport usb ${file_test_firmware})
     add_test(NAME os1_smoke_usb_failure_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_storage_failures.py"
+        --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-usb-failure-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_usb_storage_${boot} os1_smoke_usb_deploy_${boot} os1_smoke_usb_failure_${boot}

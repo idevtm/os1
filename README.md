@@ -10,7 +10,17 @@ For computer architecture and OS terminology, see the categorized
 [Glossary](docs/GLOSSARY.md), including TLB, IST, FADT, PCI, and the other terms
 used throughout the project documents.
 
-Today `os1` uses a shared-kernel, dual-entry boot architecture. The default path is a Limine-based UEFI ISO that enters a thin higher-half shim, normalizes bootloader state into `BootInfo`, then transfers control to the shared higher-half kernel core. The legacy BIOS raw image is still built and tested as a compatibility path, loading the same kernel physically before entering it at its higher-half virtual address. The kernel itself is freestanding `C++20`, runs protected user programs loaded from an initrd `cpio` archive or ext2 executable files, starts a small `/bin/init` that `exec`s `/bin/sh`, exposes `write`/`read`/`observe`/`spawn`/`waitpid`/`exec` through the x86_64 `SYSCALL`/`SYSRET` path, and can present the terminal either through VGA text mode or a minimal framebuffer text renderer. Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives.
+`os1` uses one shared kernel with UEFI and BIOS entry paths.
+The default UEFI path uses Limine and a thin shim to normalize bootloader state into `BootInfo`.
+The BIOS compatibility image loads the same kernel before entering its higher-half virtual address.
+The freestanding C++20 kernel loads protected user programs from initrd or ext2.
+It provides syscall entry through `SYSCALL` and return through `SYSRET`.
+
+The kernel starts `/bin/init`, which supervises `/disk/bin/sh` and the initrd rescue console.
+Console output uses VGA text mode or a framebuffer text renderer.
+The [deployment guide](docs/filesystems/program-deployment.md#boot-and-recovery) describes disk startup and recovery.
+
+Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives.
 
 The 2026-05-10 integration replaced the previous AML interpreter with upstream ACPICA.
 ACPICA supports table discovery, namespace loading, device enumeration, `_PRT` routing, resource parsing, and device power transitions.
@@ -49,7 +59,9 @@ adds directory/file descriptors, `ls`, `cat`, bounded argv/environment handoff,
 explicit child grants, and executable-reference launch. The
 [copied IPC prototype](docs/native-api/abi/copied-ipc-abi.md) adds retained Operations and a private
 `textprocessor` with methods/properties, exercised by `ipccheck`.
-The initrd contains `init`, `sh`, `ls`, `cat`, and `/etc/motd` for recovery without storage.
+Initrd contains `init` and `rescue` for recovery without storage.
+The normal shell, utilities, and resources require ext2.
+See [disk shell startup](docs/filesystems/program-deployment.md#boot-and-recovery) before upgrading an existing image.
 Other bundled programs are installed under `/disk/bin`; the shell initially searches `/bin`, then `/disk/bin`; typed path operations can change that list.
 For an existing QEMU disk, run `./os1.sh storage_deploy` after this upgrade.
 For an existing managed USB stick, select **Update boot and programs (preserve data)**.
@@ -371,7 +383,7 @@ The build writes outputs under `build/artifacts/`:
 - `kernel.elf` — shared higher-half kernel core used by the BIOS path and loaded as a module by the Limine path
 - `kernel_limine.elf` — higher-half Limine frontend that normalizes boot state, loads the shared kernel by physical `PT_LOAD` ranges, and enters it through temporary transition mappings
 - `cpu_start.bin` — AP trampoline blob used for debugging / disassembly
-- `initrd.cpio` — recovery archive containing `/bin/init`, `/bin/sh`, `/bin/ls`, `/bin/cat`, and `/etc/motd`
+- `initrd.cpio` — recovery archive containing `/bin/init` and `/bin/rescue`
 - `virtio-test-disk.raw` — generated raw disk image used to validate the `virtio-blk` path during boot and smoke tests
 - `user/*.elf` — statically linked programs for recovery packaging or ext2 deployment
 - `program-test-disk.raw` — disposable ext2 program fixture; QEMU tests use private overlays

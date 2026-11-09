@@ -4,9 +4,9 @@ The QEMU storage profile mounts a persistent ext2 partition at `/disk`.
 It uses the native File and Directory interfaces and supports disk-backed executable loading.
 
 ```text
-initrd: /bin/init, /bin/sh, /bin/ls, /bin/cat, /etc/motd
+initrd: /bin/init and /bin/rescue
 /tmp:   volatile writable files
-/disk:  persistent files, readme, diskutil, and optional programs in bin/
+/disk:  full shell and programs in bin/, resources in etc/, persistent files
            -> filesystem dispatch -> partition bounds -> virtio or USB block -> host raw file
 ```
 
@@ -77,7 +77,7 @@ Killing QEMU during a command can still leave the volume unclean.
 
 The profile validates allocation counts, metadata ranges, block ownership, directory records, and inode reachability before publication.
 It rejects dirty filesystems instead of mounting them writable.
-Mount failure leaves the recovery shell available and reports `ext2 mount rejected`.
+Mount failure leaves the rescue console available and reports `ext2 mount rejected`.
 The kernel never formats a disk after mount failure.
 General ext2 images can contain unsupported features or layouts even when `e2fsck` considers them valid.
 

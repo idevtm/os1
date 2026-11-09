@@ -122,7 +122,7 @@ def main():
                 run('rmdir "/disk/lifecycle-dir"'); clean()
                 restarted = run('exit', b'shell ended')
                 assert b'shell started' in restarted
-                run('/bin/sh', b'shell started')
+                run('/disk/bin/sh', b'shell started')
                 run('exit', b'shell ended')
                 run('echo "parent alive"', b'parent alive')
                 clean()

@@ -21,6 +21,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
     if getattr(args, 'poweroff', False):
         command.remove('-no-shutdown')
+    if getattr(args, 'allow_reboot', False):
+        command.remove('-no-reboot')
     if getattr(args, 'stall_init', False):
         command[-1] = command[-1].replace(f'file={disk}', f'file=blkdebug::{disk}')
         command += ['-S']
@@ -61,7 +63,11 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     started = time.monotonic()
     menu_selected = False
 
-    def expect(marker=b'os1> ', timeout=60, allow_errors=False):
+    rescue = any(getattr(args, name, False) for name in ('readonly', 'stall_init', 'missing_disk', 'rescue'))
+    prompt = b'rescue> ' if rescue else b'os1> '
+
+    def expect(marker=None, timeout=60, allow_errors=False):
+        marker = prompt if marker is None else marker
         nonlocal menu_selected
         end = time.monotonic() + timeout
         while marker not in pending:
@@ -90,10 +96,10 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             assert forbidden not in result, result[-2000:]
         return result
 
-    def run(text, marker=None, allow_errors=False):
+    def run(text, marker=None, allow_errors=False, timeout=60):
         child.stdin.write((text + '\n').encode())
         child.stdin.flush()
-        out = expect(allow_errors=allow_errors)
+        out = expect(allow_errors=allow_errors, timeout=timeout)
         if marker:
             assert marker in out, out
         return out
@@ -135,9 +141,10 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 protected = next(line for line in snapshot.splitlines() if b' storage-write-protect ' in line)
                 detail = int(protected.split(b'detail=')[1].split()[0], 16)
                 assert detail & 0xffffff80 == 0x1a000080, snapshot
-            run('usb > /tmp/usb')
-            captured = run('cat /tmp/usb')
-            assert b'USB boot snapshot:' in captured and b'controller pci=' in captured, captured
+            if not rescue:
+                run('usb > /tmp/usb')
+                captured = run('cat /tmp/usb')
+                assert b'USB boot snapshot:' in captured and b'controller pci=' in captured, captured
             repeated = run('usb')
             assert snapshot == repeated, 'USB boot diagnostics must be immutable'
 
@@ -193,6 +200,7 @@ def main():
     p.add_argument('--e2fsck')
     p.add_argument('--code')
     p.add_argument('--vars')
+    p.add_argument('--programs-manifest', required=True)
     args = p.parse_args()
     log = Path(args.log)
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +209,7 @@ def main():
     spec = importlib.util.spec_from_file_location('ext2_builder', script)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.create(disk, args.utility, reset=True)
+    module.create(disk, args.utility, reset=True, manifest=args.programs_manifest)
     def check(stage):
         if not args.e2fsck:
             return

@@ -61,7 +61,7 @@ Alias defaults fill omitted parameters; an explicit argument overrides a default
 Aliases do not change the selected interpretation mode.
 A child process cannot change its parent's context through `cd` or `path.add`.
 Context-changing aliases therefore execute inside the current shell.
-Explicit executable paths, such as `/bin/ls`, bypass aliases and program search.
+Explicit executable paths, such as `/disk/bin/ls`, bypass aliases and program search.
 
 ## Copy and file creation
 

@@ -299,7 +299,7 @@ The diagram below is the end-to-end picture of a running `os1` system: the two b
 |                                                                             |
 |  kmem-backed Process/Thread registries + remote wakeups + round-robin       |
 |                                                                             |
-|  initrd (cpio newc) --> ELF64 load /bin/init --> exec /bin/sh               |
+|  initrd --> ELF64 load /bin/init --> spawn /disk/bin/sh                    |
 +--------------------------------+----------------+---------------------------+
                                  |                |
                       SYSCALL    |                |   reads from console_input
@@ -308,7 +308,7 @@ The diagram below is the end-to-end picture of a running `os1` system: the two b
                          +-------+----------------+-------+
                          |  Ring-3 user processes          |
                          |                                 |
-                         |  /bin/init -> /bin/sh           |
+                         |  /bin/init -> /disk/bin/sh       |
                          |  /disk/bin/yield  /disk/bin/fault         |
                          |  /disk/bin/balanceworker            |
                          |  /disk/bin/busyyield /disk/bin/smpcheck  |
@@ -396,7 +396,8 @@ The shared entry runs one deterministic sequence:
 16. `enter_first_thread(...)` enters the boot-sequence kernel thread. That thread
   runs the threaded block smoke, spawns the kernel SMP ping threads, loads
   `/bin/init` from the initrd, marks the first user thread ready, and exits.
-  `/bin/init` replaces itself with `/bin/sh` through `exec`.
+  `/bin/init` starts `/disk/bin/sh` and waits for its exit.
+  It restarts the shell after exit, or starts `/bin/rescue` if launch fails.
 
 ### Phase 4 — ACPI, PCIe, driver binding, and storage probe
 
@@ -1008,7 +1009,8 @@ A separate authorized power diagnostic interface remains deferred pending driver
 
 The event ring currently stores 256 overwrite-on-full records with monotonic sequence numbers and direct `pid` / `tid` fields. Current event types cover traps, scheduler transitions, IRQs, block I/O, PCI binds, user-copy failures, smoke markers used by the observe smokes, the chosen scheduler timer source (PIT vs LAPIC), `kmem` corruption, NIC RX completions, AP-online / AP-tick events, reschedule / TLB-shootdown IPIs, kernel-thread ping markers, thread migration, and run-queue depth changes.
 
-`/bin/sh events` is a snapshot command. Continuous streaming and `Ctrl-C` cancellation are intentionally deferred until the console/process layer has nonblocking input, cancellation, or signal-like infrastructure.
+At the shell prompt, `events` prints an event snapshot.
+Continuous event streaming and its cancellation remain deferred.
 
 The ring-3 shell consumes most records through built-ins such as `sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, and `irqs`; `/disk/bin/acpiprobe` consumes the ACPICA snapshot. Keeping these paths explicit avoids turning observability into parsed boot logs.
 
@@ -1108,24 +1110,26 @@ Live-reader and shared read/write modes remain proposals.
 
 The initrd is a `cpio newc` archive built from `src/user`.
 
-The [packaging record](archive/filesystems/2026-11-06-minimal-initrd.md) defines the recovery and disk sets.
+The [deployment guide](filesystems/program-deployment.md#boot-and-recovery) defines the recovery and disk sets.
 
 | Location | Contents |
 | --- | --- |
-| Initrd `/bin` | `init`, `sh`, `ls`, and `cat` |
-| Initrd `/etc` | `motd` |
-| Ext2 `/disk/bin` | Verification programs, providers, examples, `intf`, and `diskutil` |
+| Initrd `/bin` | `init` and `rescue` |
+| Ext2 `/disk/etc` | Default `motd` resource |
+| Ext2 `/disk/bin` | Full shell, file utilities, verification programs, providers, examples, `intf`, and `diskutil` |
 | Ext2 `/disk/diskutil` | Compatibility copy for existing synchronization commands |
 
-The shell, editor, file-writing commands, and observers remain available without ext2.
+The full shell requires ext2. Rescue remains available without storage.
+The kernel initializes storage and its namespace before it starts init.
 Bare external commands search `/bin` first, then `/disk/bin`.
 Names containing `/` are explicit paths and bypass search.
 An access or I/O failure stops search; only NOT_FOUND permits the next directory.
 
 Current user programs:
 
-- `/bin/init` — minimal init process that `exec`s `/bin/sh`
-- `/bin/sh` — the ring-3 shell built from [`src/user/programs/sh.cpp`](../src/user/programs/sh.cpp)
+- `/bin/init` — supervisor for the normal shell and rescue console
+- `/bin/rescue` — independent recovery console
+- `/disk/bin/sh` — the ring-3 shell built from [`src/user/programs/sh.cpp`](../src/user/programs/sh.cpp)
 - `/disk/bin/yield` — cooperative yield probe built from [`src/user/programs/yield.cpp`](../src/user/programs/yield.cpp)
 - `/disk/bin/balanceworker` — busy worker used by the SMP balance smoke, built from [`src/user/programs/balanceworker.cpp`](../src/user/programs/balanceworker.cpp)
 - `/disk/bin/busyyield` — mixed busy/yield probe used by SMP observability smokes, built from [`src/user/programs/busyyield.cpp`](../src/user/programs/busyyield.cpp)
@@ -1136,13 +1140,18 @@ Current user programs:
 - `/disk/bin/buffercheck` exercises exclusive loans, same-buffer processing, distinct outputs, and recovery. See [the Buffer ABI](native-api/abi/buffer-loans-abi.md).
 - `/disk/bin/activation` and `/disk/bin/activationcheck` — explicitly registered Counter activation, copied capability transfer, class-controlled singleton construction, and independent clients. See [the shared activation ABI](native-api/abi/shared-activation-abi.md).
 - `/disk/bin/counter` and `/disk/bin/countercheck` — a second IPC protocol, typed constructor metadata/CLI conversion, event broadcast/overflow/unsubscribe, deadline waits, and restricted provider supervision. See [the phase ABI](native-api/abi/counter-events-abi.md).
-- `/bin/ls`, `/bin/cat`, and `/disk/bin/vfscheck` — directory/file operations, argument forwarding, and restricted native child launch.
+- `/disk/bin/ls`, `/disk/bin/cat`, and `/disk/bin/vfscheck` — directory/file operations, argument forwarding, and restricted native child launch.
 - `/disk/bin/fdcheck` and `/disk/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
 - `/disk/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
 - `/disk/bin/acpiprobe` — ACPICA observe probe built from [`src/user/programs/acpiprobe.cpp`](../src/user/programs/acpiprobe.cpp)
 - `/disk/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify 8x16 font rendering on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
 
-The kernel keeps its fixed `/bin/init` boot contract, but init is now a real first user process rather than an alias for the shell. It immediately calls `exec("/bin/sh")`, so later init responsibilities can grow without changing the kernel boot path. The kernel parses the initrd, finds those paths, and loads ELF64 `ET_EXEC` images with `PT_LOAD` segments only. It maps segment permissions from ELF flags and zero-fills `memsz - filesz` for `.bss`.
+The kernel retains its fixed `/bin/init` boot contract.
+Init starts `/disk/bin/sh` through the existing filesystem-backed loader.
+If launch fails, init reports the error and starts `/bin/rescue`.
+Rescue retry returns to init; it does not mount storage or probe hardware.
+The loader accepts ELF64 `ET_EXEC` images with `PT_LOAD` segments.
+It maps segment permissions from ELF flags and zero-fills `.bss`.
 
 The user stack is non-executable. ELF segment flags control writable/executable permissions, but the loader does not reject a segment requesting both: strict user-image W^X is not enforced.
 

@@ -163,8 +163,8 @@ and variant cases from the schema; colon supplies the selected value:
 ```text
 counter initial:10 ceiling:100
 process source.text:"hello world" options.limit:10
-process source.file:{path:"/etc/motd", offset:0}
-process source.file.path:"/etc/motd" source.file.offset:0
+process source.file:{path:"/disk/etc/motd", offset:0}
+process source.file.path:"/disk/etc/motd" source.file.offset:0
 process source.stdin
 ```
 

@@ -44,12 +44,14 @@ On macOS, install it with `brew install e2fsprogs`.
 
 ## Upgrade from the full initrd
 
-The initrd now keeps only `init`, `sh`, `ls`, `cat`, and `/etc/motd`.
+Initrd contains only `init` and `rescue`.
+The normal shell and default resources reside on ext2.
 Other programs live under `/disk/bin`; the shell finds them by name.
 Select **Update boot and programs (preserve data)** when upgrading an existing managed boot-plus-ext2 stick.
 A boot-only update preserves data but does not install the moved programs.
-Boot-only and diagnostic images retain the recovery tools, editor, and built-in observers.
-They do not contain the optional verification programs.
+Boot-only images provide the rescue console when no usable ext2 shell is available.
+Use a boot-plus-ext2 image for the normal shell, editor, and guided observers.
+Boot-only images do not contain the optional verification programs.
 
 ## Keyboard-independent diagnostics
 
