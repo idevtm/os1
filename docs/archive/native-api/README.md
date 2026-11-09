@@ -5,6 +5,7 @@ Use the [documentation index](../../README.md) for current guidance.
 
 | Record | Document |
 | --- | --- |
+| 2026-11-09 | [Hardware reflection implementation and validation](2026-11-09-hardware-reflection.md) |
 | 2026-11-05 | [Capability attachments and shared activation — 2026-11-05](2026-11-05-shared-activation-implementation-plan.md) |
 | 2026-11-05 | [Exclusive Buffer implementation plan](2026-11-05-exclusive-buffer-plan.md) |
 | 2026-11-05 | [Exclusive Buffer implementation record](2026-11-05-exclusive-buffer-implementation.md) |

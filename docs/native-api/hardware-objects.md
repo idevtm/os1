@@ -42,7 +42,7 @@ These functional interfaces remain accepted designs, not implemented ABI profile
 
 ## First reflection slice
 
-The implementation plan is in [the task record](hardware-reflection-plan.md).
+The implementation plan is in [the task record](../archive/native-api/2026-11-09-hardware-reflection.md).
 The slice exposes cached PCI, USB, ACPI, and processor records through bounded discovery pages.
 It must not probe hardware, execute firmware methods, construct objects, or activate drivers during exploration.
 Tab navigation and explicit field evaluation use the same descriptions.
