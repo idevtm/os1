@@ -87,7 +87,7 @@ The existing command workload shows small timing variation; these runs do not es
 No run reports an allocator failure. Allocator observations vary with asynchronous cleanup and log export.
 Hardware metadata queries allocate no kernel memory and issue no storage I/O.
 Large physical inventories and hardware-query latency remain unmeasured on physical devices.
-The BIOS kernel has 888 bytes of file-slot headroom. The initrd has no remaining file-slot headroom.
+The corrected local BIOS kernel has 5496 bytes of file-slot headroom. The initrd has no remaining file-slot headroom.
 Both remain within unchanged layout gates. Future shell growth needs an explicit image-layout or size-reduction decision.
 
 Reproduce timing measurements with `tests/scripts/measure_hardware_reflection.py`.
@@ -109,6 +109,19 @@ A combined host-test run then identified shared diagnostic-array state between t
 A test-only reset and RAII cleanup corrected that isolation defect; the same sequence now passes.
 A third independent review approved the correction. The final host suite passes 589 tests.
 All reviews were read-only and covered the complete implementation plus correction interactions.
-Final guest results and corrected-revision timing measurements remain pending.
+Final validation identified two additional blockers after the third review.
+CI produced a 437640-byte BIOS kernel, which exceeded the 434176-byte slot by 3464 bytes.
+The framebuffer test also assumed two `os` children, although hardware reflection exposes four.
+
+The linker now places `.text` and `.rodata` alignment tails in zero-filled memory.
+It preserves initialized bytes, segment addresses, permissions, memory extents, and page-aligned boundary symbols.
+Unused text padding changes from alignment instructions to zero bytes.
+The local BIOS kernel decreases from 433288 to 428680 bytes; the staging limits remain unchanged.
+An identical-object comparison verifies the loaded content before each alignment tail.
+Two linker fixture checks cover aligned sections, short sections, zero-filled tails, and the existing layout gate.
+The framebuffer test derives its cleared-row expectation from live `os` children.
+Both BIOS and UEFI framebuffer checks pass after this correction.
+These changes require shared-boot validation and another independent review.
+Final guest results, CI qualification, and corrected-revision timing measurements remain pending.
 Physical hardware behavior remains unmeasured until the user tests the new image.
 The complete ASD-STE100 Issue 9 dictionary is unavailable locally; prose receives a manual clarity and sentence-length review.

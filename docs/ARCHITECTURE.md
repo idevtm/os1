@@ -551,7 +551,7 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 [CMakeLists.txt](../CMakeLists.txt) defines the kernel, initrd, and loader sector counts.
 The core ELF uses 256-byte file alignment while kernel memory boundaries remain page-aligned.
 BIOS packaging removes unused section metadata; the diagnostic kernel ELF retains symbols.
-Final `.data` alignment occupies the zero-filled `PT_LOAD` memory tail instead of the file-backed section.
+Final `.text`, `.rodata`, and `.data` alignment occupies zero-filled `PT_LOAD` memory tails instead of file-backed sections.
 Both loaders zero the segment memory before copying initialized bytes.
 Page-aligned boundary symbols, segment addresses, permissions, and reserved memory remain unchanged.
 The [BIOS size correction](archive/boot/2026-11-09-bios-image-size.md) records the regression and validation.

@@ -86,6 +86,9 @@ def main():
         assert b'expected' not in expect()
         roots = run('context')
         assert b'os [object]' in roots and b'process [object]' in roots, roots
+        os_members = run('context os')
+        os_child_count = len(re.findall(rb'^\w+ \[object\]', os_members, re.MULTILINE))
+        assert 0 < os_child_count < 8, os_members
         members = run('context os.system.log')
         assert b'read [method, native]' in members and b'print [method]' in members, members
         hardware = run('context os.devices')
@@ -182,7 +185,7 @@ def main():
         shorter_screen = screen('shorter')
         if original_screen:
             assert pixels[:history_bytes] == shorter_screen[2][:history_bytes], 'descent scrolled console history'
-            blank = shorter_screen[2][width * (height - 7 * 16) * 3:width * (height - 16) * 3]
+            blank = shorter_screen[2][width * (height - (9 - os_child_count) * 16) * 3:width * (height - 16) * 3]
             assert not any(blank), 'shorter menu left stale rows'
         key('esc', b'\x1b')
         expect(b'  > os.')
