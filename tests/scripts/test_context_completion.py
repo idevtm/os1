@@ -86,9 +86,37 @@ def main():
         assert b'expected' not in expect()
         roots = run('context')
         assert b'os [object]' in roots and b'process [object]' in roots, roots
+        os_members = run('context os')
+        os_child_count = len(re.findall(rb'^\w+ \[object\]', os_members, re.MULTILINE))
+        assert 0 < os_child_count < 8, os_members
         members = run('context os.system.log')
         assert b'read [method, native]' in members and b'print [method]' in members, members
-        assert b'unavailable' in run('context os.devices')
+        hardware = run('context os.devices')
+        assert b'inventory [object]' in hardware and b'topology [object]' in hardware, hardware
+        pci = run('context os.devices.inventory.pci')
+        assert b'pci_0 [object]' in pci, pci
+        fields = run('context os.devices.inventory.pci.pci_0')
+        assert b'vendor_id [field] Integer' in fields, fields
+        assert b'vendor_id [field] Integer = 32902\n' in fields, fields
+        assert b'name [field] String = PCI function\n' in fields, fields
+        assert b'vendor_id [field] Integer = 32902\n' in run('context os.devices.inventory.pci.pci_0.vendor_id')
+        if args.keyboard != 'usb':
+            assert b'(no children)\n' in run('context os.devices.inventory.usb')
+        # Inspection must describe this mutating method without executing it.
+        assert b'shutdown [method' in run('context os.system.shutdown')
+        assert b'after-inspection\n' in run('echo "after-inspection"')
+        assert b'32902\n' in run('os.devices.inventory.pci.pci_0.vendor_id')
+        assert b'PCI function\n' in run('echo os.devices.inventory.pci.pci_0.name')
+        run('vendor = os.devices.inventory.pci.pci_0.vendor_id')
+        assert b'32902\n' in run('vendor')
+        run('drop vendor')
+        assert b'cpu_0 [object]' in run('context os.system.processors')
+        assert b'acpi_' in run('context os.firmware.acpi')
+        send('os.devices.inventory.pci.pci_0.ven\t\n')
+        assert b'32902\n' in expect()
+        if args.keyboard == 'usb':
+            usb = run('context os.devices.classes.input')
+            assert b'usb_' in usb, usb
         run('process.environment.config = {enabled:true, label:"sample"}')
         fields = run('context process.environment.config')
         assert b'enabled [field] Boolean' in fields and b'label [field] String' in fields, fields
@@ -165,7 +193,7 @@ def main():
         shorter_screen = screen('shorter')
         if original_screen:
             assert pixels[:history_bytes] == shorter_screen[2][:history_bytes], 'descent scrolled console history'
-            blank = shorter_screen[2][width * (height - 7 * 16) * 3:width * (height - 16) * 3]
+            blank = shorter_screen[2][width * (height - (9 - os_child_count) * 16) * 3:width * (height - 16) * 3]
             assert not any(blank), 'shorter menu left stale rows'
         key('esc', b'\x1b')
         expect(b'  > os.')

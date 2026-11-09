@@ -1,3 +1,4 @@
+#include "platform/hardware.hpp"
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
 // Shared kernel entry and bring-up sequencing. Boot-frontends normalize their
@@ -445,6 +446,7 @@ bool prepare_scheduler_timer()
             " s to save this boot log")();
     }
     debug.set_mirror(nullptr);
+    hardware_freeze_bindings();
     write_console_line("starting first user process");
     mark_thread_ready(init_thread);
     finish_boot_sequence_thread(0);

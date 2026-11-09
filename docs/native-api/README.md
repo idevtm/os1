@@ -19,6 +19,7 @@ flowchart TD
 
 | Document | Authority and status |
 | --- | --- |
+| [Hardware objects](hardware-objects.md) | Combined topology and functional-object architecture accepted; passive reflection implemented. |
 | [Reflective OS hierarchy](object-hierarchy.md) | Option B selected on 2026-11-07; proposed service roots and discovery; bounded typed context is now implemented. |
 | [Context discovery and diagnostics](context-diagnostics.md) | Memory logs, bounded export, and fixed live inspection are implemented; general reflection remains planned. |
 | [Native object contract](object-contract.md) | Shared semantic direction. Its approved decisions and implemented subsets are identified explicitly. |
@@ -41,6 +42,7 @@ Documents can contain proposals after promotion, provided their scope and status
 
 | Capability | Current contract |
 | --- | --- |
+| Passive hardware records and bounded discovery pages | [Hardware reflection ABI](abi/hardware-reflection-abi.md) |
 | Fixed live context descriptions, typed calls, bindings, and guided completion | [Runtime discovery profile](context-discovery.md) |
 | Bounded temporary snapshots and persistent log segments | [Log export ABI](abi/log-export-abi.md) |
 | Memory logs and command correlation | [Memory log ABI](abi/memory-log-abi.md) |

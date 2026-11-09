@@ -23,6 +23,11 @@ SECTIONS
     code = .; _code = .; __code = .;
     __kernel_text_start = .;
     *(.text*)
+  } :text
+
+  /* Keep page alignment in zero-filled memory, not in file-backed padding. */
+  .text_padding (NOLOAD) : AT(ADDR(.text_padding) - KERNEL_VIRTUAL_OFFSET)
+  {
     . = ALIGN(4096);
     __kernel_text_end = .;
   } :text
@@ -33,6 +38,10 @@ SECTIONS
     *(.rodata*)
     *(.eh_frame*)
     *(.gcc_except_table*)
+  } :rodata
+
+  .rodata_padding (NOLOAD) : AT(ADDR(.rodata_padding) - KERNEL_VIRTUAL_OFFSET)
+  {
     . = ALIGN(4096);
     __kernel_rodata_end = .;
   } :rodata

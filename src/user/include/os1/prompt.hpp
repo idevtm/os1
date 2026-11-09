@@ -27,12 +27,28 @@ inline bool output(int fd, const char* text)
 {
     return files::put(fd, text, files::length(text));
 }
-inline bool describe(int fd, const os1::discovery::Member& member)
+inline bool describe(int fd, unsigned id)
 {
-    return output(fd, member.name) && output(fd, " [") &&
-           output(fd, os1::discovery::kind_name(member.kind)) &&
-           output(fd, member.flags & os1::discovery::Native ? ", native] " : "] ") &&
-           output(fd, member.signature) && output(fd, "\n");
+    const auto member = view.member(id);
+    if(!output(fd, member.name) || !output(fd, " [") ||
+       !output(fd, os1::discovery::kind_name(member.kind)) ||
+       !output(fd, member.flags & os1::discovery::Native ? ", native] " : "] ") ||
+       !output(fd, member.signature))
+        return false;
+    if(member.kind == os1::discovery::Kind::Field && (member.flags & os1::discovery::External))
+    {
+        Os1HardwareNode node{};
+        if(!hardware::describe(id, node) || !output(fd, " = "))
+            return false;
+        if(node.type == OS1_HARDWARE_INTEGER)
+        {
+            if(!files::number(fd, node.integer))
+                return false;
+        }
+        else if(node.type != OS1_HARDWARE_STRING || !output(fd, node.text))
+            return false;
+    }
+    return output(fd, "\n");
 }
 inline long inspect(const char* path, int fd)
 {
@@ -44,19 +60,21 @@ inline long inspect(const char* path, int fd)
     if(!output(fd, "context ") || !output(fd, *path ? path : "<root>") || !output(fd, "\n"))
         return OS1_ERR_FAULT;
     if(!view.container(id))
-        return describe(fd, view.nodes[id]) ? 0 : OS1_ERR_FAULT;
+        return describe(fd, id) ? 0 : OS1_ERR_FAULT;
     os1::discovery::Cursor cursor{};
     os1::discovery::Page page{};
+    unsigned children = 0;
     do
     {
         long r = view.enumerate(id, cursor, page);
         if(r < 0)
             return r;
         for(unsigned i = 0; i < page.count; ++i)
-            if(!describe(fd, view.nodes[page.ids[i]]))
+            if(!describe(fd, page.ids[i]))
                 return OS1_ERR_FAULT;
+        children += page.count;
     } while(!page.end);
-    return 0;
+    return children || output(fd, "(no children)\n") ? 0 : OS1_ERR_FAULT;
 }
 struct Display
 {

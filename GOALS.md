@@ -509,7 +509,10 @@ The [latest review](docs/latest-review.md) separates completed corrections from 
 [Live context discovery and diagnostics](docs/native-api/context-diagnostics.md) now form a parallel proposed work track.
 It includes inspection without activation, shell completion, bounded kernel and shell logs, and staged `/tmp` and USB exports.
 The [fixed discovery profile](docs/native-api/context-discovery.md) now implements bounded live inspection and Tab completion.
-Bounded log exports are implemented; general provider discovery remains pending.
+Bounded log exports and [passive hardware reflection](docs/native-api/hardware-objects.md) are implemented.
+General provider discovery and functional device interfaces remain pending.
+The accepted sequence is hardware reflection, Keyboard/Pointer interfaces, basic display output, and a GUI provider.
+Automated physical-device diagnostic bundles remain planned.
 Physical log-export failure qualification remains pending.
 These facilities support physical-device diagnosis without replacing the input and storage milestones.
 Generated bindings, userspace drivers, and a compositor remain later extensions.

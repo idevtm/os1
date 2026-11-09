@@ -124,7 +124,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             assert b'xhci: HID keyboard ready' in startup, startup[-4000:]
         boot_seconds = time.monotonic() - started
         if getattr(args, 'transport', '') == 'ehci':
-            snapshot = run('usb', b'USB boot snapshot: EHCI topology and USB mounts')
+            snapshot = run('usb', b'USB boot snapshot: controller topology and USB mounts')
             assert b'controller pci=' in snapshot and b'root pci=' in snapshot, snapshot
             if not (getattr(args, 'readonly', False) or getattr(args, 'stall_init', False)):
                 assert b'storage-ready' in snapshot and b'mount mounted status=0x0' in snapshot, snapshot

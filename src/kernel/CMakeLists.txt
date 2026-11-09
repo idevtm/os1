@@ -95,6 +95,7 @@ set(KERNEL_PLATFORM_SOURCES
   platform/system_power.cpp
   platform/acpica_ec.cpp
   platform/rtc.cpp
+  platform/hardware.cpp
   platform/pci.cpp
   platform/pci_capability.cpp
   platform/pci_config.cpp

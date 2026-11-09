@@ -50,14 +50,15 @@ inline bool member_path(const View& view, unsigned id, char* out, unsigned capac
     while(id && count < 16)
     {
         stack[count++] = id;
-        id = view.nodes[id].parent;
+        id = view.member(id).parent;
     }
     if(id)
         return false;
     unsigned used = 0;
     while(count)
     {
-        const char* name = view.nodes[stack[--count]].name;
+        const auto member = view.member(stack[--count]);
+        const char* name = member.name;
         if(used)
         {
             if(used + 1 >= capacity)
@@ -203,6 +204,6 @@ inline Definition definition(const View& view, unsigned id)
     char path[path_limit]{};
     if(!member_path(view, id, path, sizeof(path)))
         return Definition{};
-    return definition(path, view.nodes[id].interface_id, view.nodes[id].member);
+    return definition(path, view.member(id).interface_id, view.member(id).member);
 }
 }  // namespace os1::discovery

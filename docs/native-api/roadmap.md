@@ -36,7 +36,7 @@ flowchart TD
 | Typed metadata | Offline interfaces; bounded rich constructor/method inputs and CLI conversion | Stable service schemas; broader output/event descriptions and generated bindings later |
 | Bulk data | Exclusive zero-copy Buffer loans, returned input identity, distinct output objects | Kernel-service integration; separate DMA ownership and quiescence rules for devices |
 | Files | Immutable initrd, writable `/tmp`, persistent ext2, disk execution, native mutation, and capability-relative lookup | Kernel Buffer transfers, public mounts, larger ext2 profiles, and broader physical qualification |
-| Devices | Internal block requests; xHCI keyboard/storage; EHCI storage and bounded high-speed hubs | Native device endpoints, usable mouse events, keyboard diagnosis, and broader hardware qualification |
+| Devices | Cached hardware reflection; internal block requests; xHCI keyboard/storage; EHCI storage and bounded high-speed hubs | Native device endpoints, usable mouse events, and broader hardware qualification |
 
 The descriptor decision no longer blocks VFS, sockets, PTYs, or redirection at the foundational level.
 Each subsystem still needs its own semantic contract and implementation.
@@ -76,7 +76,8 @@ Permissions and links remain deferred.
 | Stage | Scope |
 | --- | --- |
 | First context slice, implemented | Typed path, validated cwd, explicit stream grants, independent child state, and fixed filesystem bindings |
-| Reflection, proposed | Bounded type descriptions, child enumeration, explicit acquisition, and output schemas |
+| Reflection, implemented | Bounded live descriptions, child enumeration, guided completion, and cached hardware records |
+| Reflection extensions, proposed | General provider publication, scoped inspection grants, and broader output schemas |
 | Broader services, proposed | Dynamic registration, device interfaces, and application resource contexts |
 
 The minimal initrd and disk-program split is implemented; see its [record](../archive/filesystems/2026-11-06-minimal-initrd.md).
@@ -392,3 +393,15 @@ No new numerical benchmark claim or exact image-hash attribution is made here.
 
 The complete ASD-STE100 Issue 9 standard and dictionary were unavailable for this review.
 Prose was checked against the repository's stated rules; full standard compliance is not established.
+
+## Hardware reflection and functional devices
+
+The [accepted hardware architecture](hardware-objects.md) uses shared identities across topology and functional views.
+The [first reflection slice](abi/hardware-reflection-abi.md) exposes passive records through context discovery and Tab navigation.
+
+```text
+passive reflection -> Keyboard / Pointer -> basic display -> GUI provider
+```
+
+Native device-control interfaces remain future work. They require explicit authority, removal behavior, and event-loss recovery.
+Automated physical-device diagnostic bundles remain planned and can use these hardware descriptions.

@@ -98,6 +98,7 @@ add_library(os1_host_support
   support/block_device_stub.cpp
   "${OS1_REPO_ROOT}/src/kernel/syscall/vfs.cpp"
   "${OS1_REPO_ROOT}/src/kernel/syscall/observe.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/platform/hardware.cpp"
   "${OS1_REPO_ROOT}/src/kernel/proc/startup.cpp"
   "${OS1_REPO_ROOT}/src/kernel/console/console_input.cpp"
   "${OS1_REPO_ROOT}/src/kernel/resource/descriptor.cpp"
@@ -175,6 +176,7 @@ target_include_directories(os1_host_support SYSTEM PUBLIC
 add_executable(os1_host_tests
   common/context_tests.cpp
   common/discovery_tests.cpp
+  common/hardware_tests.cpp
   common/presentation_tests.cpp
   common/guided_tests.cpp
   common/shell_tests.cpp

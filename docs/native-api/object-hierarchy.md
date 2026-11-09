@@ -89,6 +89,13 @@ The hierarchy is not a second filesystem.
 Service discovery and file lookup retain separate protocols, even when both support child enumeration.
 The same object can appear under multiple names; a discovery path is not stable object identity.
 
+## Hardware reflection and functional objects
+
+The [hardware architecture](hardware-objects.md) selects one inventory with topology and class views.
+Drivers will publish typed functional objects with separate operation authority.
+The [first reflection profile](abi/hardware-reflection-abi.md) exposes cached records through live discovery and Tab navigation.
+Keyboard, Pointer, Display, and BlockDevice interfaces remain accepted designs.
+
 ## Mapping the current system
 
 | Proposed location | Existing foundation | Missing public contract |

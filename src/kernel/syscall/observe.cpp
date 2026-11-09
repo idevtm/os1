@@ -1,6 +1,7 @@
 #include "syscall/observe.hpp"
 
 #include <os1/observe.h>
+#include <os1/resource.h>
 
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "core/kernel_state.hpp"
@@ -12,6 +13,7 @@
 #include "mm/dma.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
+#include "platform/hardware.hpp"
 #include "platform/platform.hpp"
 #include "platform/topology.hpp"
 #include "proc/thread.hpp"
@@ -899,6 +901,18 @@ long sys_observe(const ObserveContext& context, uint64_t kind, uint64_t user_buf
 
     switch(kind)
     {
+        case OS1_OBSERVE_HARDWARE: {
+            Os1HardwareQuery request{};
+            if(length != sizeof(request) || !context.frames ||
+               !copy_from_user(*context.frames, thread, user_buffer, &request, sizeof(request)))
+                return OS1_ERR_INVALID;
+            long result = hardware_query(request);
+            if(result < 0)
+                return result;
+            return copy_to_user(*context.frames, thread, user_buffer, &request, sizeof(request))
+                       ? 0
+                       : OS1_ERR_FAULT;
+        }
         case OS1_OBSERVE_SYSTEM:
             return sys_observe_system(context, thread, user_buffer, length);
         case OS1_OBSERVE_PROCESSES:

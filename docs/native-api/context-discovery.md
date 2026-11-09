@@ -22,14 +22,17 @@ existing resource grants + typed environment
 
 ## Snapshot contract
 
-This implemented profile uses a fixed registry in [view.hpp](../../src/common/discovery/view.hpp).
-It is a user-runtime API, not a new syscall or a general remote discovery protocol.
+This implemented profile uses a fixed registry and an external hardware-description adapter.
+The fixed registry is in [view.hpp](../../src/common/discovery/view.hpp).
+It is a user-runtime API, not a general remote discovery protocol.
+Hardware pages use the [hardware observation profile](abi/hardware-reflection-abi.md).
 The [refresh helper](../../src/user/include/os1/discovery.hpp) queries existing descriptor metadata and copies the current environment.
 It does not open paths, bind providers, activate classes, read file contents, or invoke arbitrary getters.
 Refresh performs no filesystem writes and starts no processes.
 
 | Path | Available content |
 | --- | --- |
+| `os.devices`, `os.firmware.acpi`, `os.system.processors` | Passive boot hardware descriptions under the existing observation disclosure policy |
 | `os.fs`, alias `fs` | Existing filesystem helpers, filtered by root lookup and descendant rights |
 | `os.system` | Existing synchronization and power methods when SYSTEM_CONTROL is granted |
 | `os.system.log` | Native log descriptions and shell printing when LOG_READ is granted |
@@ -44,7 +47,8 @@ Refresh performs no filesystem writes and starts no processes.
 | `text`, `pager` | Existing shell text and pager helpers; absent from ordinary process views |
 
 The registry does not enumerate arbitrary open descriptors or runtime provider registrations.
-It does not expose unactivated applications, devices, network services, or class files as live objects.
+It does not expose unactivated applications, network services, or class files as live objects.
+Hardware nodes describe cached records; they do not grant device-control interfaces.
 Resource inspection requires the existing INSPECT right for QUERY and FILE_INFO.
 A grant without INSPECT is omitted, even when the process can invoke operations through that grant.
 Discovery does not weaken inspection authority to expose those hidden bindings.
@@ -64,12 +68,17 @@ This support does not imply general invocation of arbitrary discovered provider 
 `View` supports `resolve`, `container`, and `enumerate`.
 `Member.value` indexes the copied environment when the member describes environment data.
 List children use decimal indices, such as `process.environment.path.0`.
-The text inspector prints member kinds and signatures; it does not print arbitrary property values.
+The text inspector prints member kinds and signatures.
+For hardware fields, it also prints the value from the copied boot observation.
+It does not invoke methods or arbitrary property getters.
+An empty collection prints `(no children)` after its heading.
 Typed clients can inspect copied environment values directly.
 
 | Bound | Value |
 | --- | --- |
-| Snapshot nodes | 256 |
+| Fixed snapshot nodes | 256; hardware children use external pages |
+| Hardware page cache | 1512 bytes |
+| Completion matches | 2048 IDs; eight displayed choices |
 | Members per page or displayed page | 8 |
 | Name storage | 64 bytes, including terminator |
 | Signature storage | 96 bytes, including terminator |

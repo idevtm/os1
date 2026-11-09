@@ -2135,3 +2135,10 @@ if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
   add_test(NAME os1_log_reader_contract COMMAND "${OS1_PYTHON_EXECUTABLE}" -B -m unittest discover
     -s "${PROJECT_SOURCE_DIR}/tools/tests" -p test_log_dump.py)
 endif()
+
+if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
+  add_test(NAME os1_kernel_padding_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_kernel_padding.py"
+      --nasm "${OS1_NASM_EXECUTABLE}" --ld "${OS1_TOOLCHAIN_LD}"
+      --linker "${PROJECT_SOURCE_DIR}/src/kernel/linker/kernel_core.ld")
+endif()

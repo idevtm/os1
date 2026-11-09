@@ -6,8 +6,8 @@
 #include "debug/debug.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/boot_mapping.hpp"
-#include "platform/pci_config.hpp"
 #include "mm/virtual_memory.hpp"
+#include "platform/pci_config.hpp"
 #include "util/string.h"
 
 namespace
@@ -134,6 +134,8 @@ void size_pci_bars(PciDevice& device)
     device.subclass = pci_config_read8(config_physical, 0x0A);
     device.class_code = pci_config_read8(config_physical, 0x0B);
     device.header_type = pci_config_read8(config_physical, 0x0E);
+    if((device.header_type & 0x7f) == 1)
+        device.secondary_bus = pci_config_read8(config_physical, 0x19);
     device.interrupt_line = pci_config_read8(config_physical, 0x3C);
     device.interrupt_pin = pci_config_read8(config_physical, 0x3D);
 

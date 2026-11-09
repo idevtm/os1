@@ -141,6 +141,7 @@ struct PciDevice
     uint8_t slot;
     uint8_t function;
     uint8_t header_type;
+    uint8_t secondary_bus;
     uint8_t class_code;
     uint8_t subclass;
     uint8_t prog_if;

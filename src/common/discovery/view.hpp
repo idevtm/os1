@@ -21,11 +21,13 @@ enum : uint32_t
     Local = 1,
     Native = 2,
     Alias = 4,
-    Shell = 8
+    Shell = 8,
+    External = 16
 };
 struct Member
 {
-    uint16_t parent = 0, target = 0, value = 0;
+    uint32_t parent = 0, target = 0;
+    uint16_t value = 0;
     Kind kind = Kind::Object;
     uint8_t type = 0;
     uint32_t flags = 0, rights = 0, member = 0, interface_version = 0;
@@ -98,6 +100,17 @@ struct View
     Member nodes[node_limit]{};
     os1::context::Data environment{};
     bool failed = false;
+    bool (*external_member)(const View&, unsigned, Member&) = nullptr;
+    long (*external_page)(const View&, unsigned, Cursor&, Page&) = nullptr;
+    Member member(unsigned id) const
+    {
+        if(id < count)
+            return nodes[id];
+        Member result{};
+        if(external_member)
+            external_member(*this, id, result);
+        return result;
+    }
     unsigned add(unsigned parent,
                  const char* name,
                  Kind kind = Kind::Object,
@@ -135,7 +148,10 @@ struct View
         for(unsigned depth = 0; depth < 16; ++depth)
         {
             if(id >= count)
-                return -1;
+            {
+                Member result{};
+                return external_member && external_member(*this, id, result) ? int(id) : -1;
+            }
             if(!(nodes[id].flags & Alias))
                 return id;
             id = nodes[id].target;
@@ -145,16 +161,37 @@ struct View
     bool container(unsigned id) const
     {
         int n = effective(id);
-        return n >= 0 && (nodes[n].kind == Kind::Object || nodes[n].type == OS1_VALUE_RECORD ||
-                          nodes[n].type == OS1_VALUE_LIST);
+        if(n < 0)
+            return false;
+        const auto value = member(n);
+        return value.kind == Kind::Object || value.type == OS1_VALUE_RECORD ||
+               value.type == OS1_VALUE_LIST;
     }
     int child(unsigned parent, const char* name, unsigned bytes) const
     {
         int p = effective(parent);
         if(p < 0 || !container(parent))
             return -1;
+        if(unsigned(p) >= count)
+        {
+            Cursor cursor{};
+            Page page{};
+            do
+            {
+                if(enumerate(p, cursor, page) < 0)
+                    return -1;
+                for(unsigned i = 0; i < page.count; ++i)
+                {
+                    const auto value = member(page.ids[i]);
+                    if(os1::context::same(
+                           value.name, os1::context::length(value.name), name, bytes))
+                        return page.ids[i];
+                }
+            } while(!page.end);
+            return -1;
+        }
         for(unsigned i = 1; i < count; ++i)
-            if(nodes[i].parent == p &&
+            if(nodes[i].parent == unsigned(p) &&
                os1::context::same(nodes[i].name, os1::context::length(nodes[i].name), name, bytes))
                 return i;
         return -1;
@@ -190,6 +227,12 @@ struct View
         int p = effective(parent);
         if(p < 0 || !container(parent))
             return OS1_ERR_INVALID;
+        if(unsigned(p) >= count)
+        {
+            cursor.generation = generation;
+            cursor.parent = parent;
+            return external_page ? external_page(*this, p, cursor, page) : OS1_ERR_INVALID;
+        }
         if(cursor.next > count)
             return OS1_ERR_INVALID;
         cursor.generation = generation;
@@ -197,7 +240,7 @@ struct View
         for(unsigned i = cursor.next ? cursor.next : 1; i < count; ++i)
         {
             cursor.next = i + 1;
-            if(nodes[i].parent == p)
+            if(nodes[i].parent == unsigned(p))
                 page.ids[page.count++] = i;
             if(page.count == page_limit)
                 return 0;
@@ -215,6 +258,8 @@ struct View
     bool build(const Grants& g, const os1::context::Data& data, uint64_t epoch)
     {
         count = 0;
+        external_member = nullptr;
+        external_page = nullptr;
         failed = false;
         generation = epoch;
         if(!epoch || !os1::context::validate(data) || !data.version)

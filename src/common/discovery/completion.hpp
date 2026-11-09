@@ -9,7 +9,7 @@ struct Completion
     char line[os1::shell::line_capacity]{};
     unsigned cursor = 0;
     unsigned size = 0, start = 0, prefix = 0, selected = 0, matches = 0;
-    unsigned ids[node_limit]{};
+    unsigned ids[2048]{};
     uint64_t generation = 0;
     bool open = false, detail = false;
     int leaf = -1;
@@ -294,7 +294,7 @@ struct Completion
         unsigned begin = end;
         while(begin && token(line[begin - 1]))
             --begin;
-        const auto& method = view.nodes[f.method];
+        const auto& method = view.member(f.method);
         if(method.interface_id == OS1_CONSOLE_INTERFACE_ID &&
            method.member == OS1_CONSOLE_ACQUIRE_INPUT &&
            os1::context::same(line + begin, end - begin, "handoff", 7))
@@ -442,10 +442,14 @@ struct Completion
             for(unsigned j = 0; j < page.count; ++j)
             {
                 unsigned id = page.ids[j];
-                if(os1::context::length(view.nodes[id].name) >= cursor - prefix &&
+                if(os1::context::length(view.member(id).name) >= cursor - prefix &&
                    os1::context::same(
-                       view.nodes[id].name, cursor - prefix, line + prefix, cursor - prefix))
+                       view.member(id).name, cursor - prefix, line + prefix, cursor - prefix))
+                {
+                    if(matches == 2048)
+                        return false;
                     ids[matches++] = id;
+                }
             }
         } while(!page.end);
         replace_end = cursor;
@@ -475,7 +479,7 @@ struct Completion
                 cancel();
         }
         else if(begin(view) && matches == 1 &&
-                os1::context::length(view.nodes[ids[0]].name) == cursor - prefix)
+                os1::context::length(view.member(ids[0]).name) == cursor - prefix)
             cancel();
     }
     void move(int direction)
@@ -536,8 +540,8 @@ struct Completion
             return true;
         }
         unsigned id = ids[selected];
-        bool object = view.container(id) && view.nodes[id].kind != Kind::Method &&
-                      view.nodes[id].kind != Kind::Property;
+        bool object = view.container(id) && view.member(id).kind != Kind::Method &&
+                      view.member(id).kind != Kind::Property;
         char replacement[1024]{};
         unsigned length = 0;
         auto append = [&](const char* s) {
@@ -545,12 +549,12 @@ struct Completion
                 replacement[length++] = *s++;
             return !*s;
         };
-        if(!append(view.nodes[id].name))
+        if(!append(view.member(id).name))
             return false;
         unsigned first = prefix;
         if(descend && object)
             append(".");
-        bool method = view.nodes[id].kind == Kind::Method;
+        bool method = view.member(id).kind == Kind::Method;
         bool nested =
             start > 0 && line[start - 1] != '=' && !(start >= 2 && line[start - 2] == '=');
         unsigned arguments_begin = first + length;
