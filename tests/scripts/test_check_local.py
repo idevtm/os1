@@ -59,6 +59,8 @@ class LocalCheckContract(unittest.TestCase):
             self.assertNotIn('-R', call)
             self.assertNotIn('-L', call)
         self.assertIn('^os1_smoke_usb_keyboard_', tests[2])
+        for call in tests[1:]:
+            self.assertEqual(call[call.index('--parallel') + 1], '2')
 
     def test_each_test_failure_is_retained_and_later_profiles_run(self):
         for profile in ('build-host-tests', 'build', 'build/usb-diagnostics'):

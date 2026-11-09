@@ -1425,7 +1425,11 @@ GitHub build-and-smoke -> host tests -> six QEMU tests labeled ci
 ```
 
 The [local runner](../scripts/check-local.sh) builds both profiles and retains failures across test phases.
+It schedules two isolated QEMU tests concurrently.
+A host wrapper owns each test's mutable images, firmware variables, logs, and sockets.
+Guest code and storage transports remain unchanged.
 It requires UEFI firmware and enables allocator checks for host and guest builds.
+
 The [testing guide](testing.md) defines the exact hosted selection and evidence locations.
 The [mandatory policy](../AGENTS.md#mandatory-local-test-policy) requires local validation before push or completion.
 

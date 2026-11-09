@@ -349,7 +349,10 @@ BIOS / no-UART / boot measurements -> existing boot behavior
 Ordinary serial tests select the packaged `os1` entry when its menu appears.
 The dedicated menu check verifies automatic boot and both logging profiles.
 The packaged ten-second countdown remains unchanged.
-QEMU tests remain serial because they share artifacts.
+
+The local validation script runs two QEMU tests concurrently.
+Each invocation owns its mutable images, firmware variables, logs, and sockets.
+See the [test ownership rules](docs/testing.md#test-isolation-and-concurrency) before changing concurrency.
 See the [CI duration record](docs/archive/tooling/2026-11-09-ci-duration.md) for measurements and validation limits.
 
 After `cmake --build build`, the registered smokes have their required images.
@@ -431,13 +434,9 @@ The build writes outputs under `build/artifacts/`:
 - `os1.raw` — legacy BIOS raw disk image
 - `os1.log` — serial log from the last display-first UEFI `run`
 - `os1-bios.log` — serial log from the last display-first BIOS `run_bios`
-- `smoke.log` / `smoke-bios.log` — captured baseline shell smoke serial logs
-- `smoke-observe.log` / `smoke-observe-bios.log` — captured observability smoke serial logs
-- `smoke-balance.log` / `smoke-balance-bios.log` — captured SMP balance smoke serial logs
-- `smoke-spawn.log` / `smoke-spawn-bios.log` — captured child-launch smoke serial logs
-- `smoke-exec.log` / `smoke-exec-bios.log` — captured exec smoke serial logs
-- `smoke-xhci.log` — captured xHCI + USB-keyboard smoke serial log (UEFI only)
-- `smoke-no-uart.log` — captured no-UART debugcon log (when enabled)
+- `test-runs/<test>-<unique>/guest*.log` — serial evidence for each QEMU test invocation
+- `test-runs/<test>-<unique>/runner.log` — test output and assertion failures
+- `test-runs/<test>-<unique>/result.json` — invocation status, arguments, preparation time, and child CPU time
 
 For BIOS compatibility, `os1.raw` reserves fixed slots for `kernel16.bin`, `kernel.elf`, and `initrd.cpio`. Those slot sizes are defined by `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [CMakeLists.txt](CMakeLists.txt). The kernel BIOS slot now matches the reserved low-physical kernel window, and the build fails before writing `os1.raw` if `kernel.elf` no longer fits its disk slot, its low-memory staging buffer, or its reserved execution window. `initrd.cpio` is still checked against its configured slot. To expand BIOS storage space, raise the corresponding sector-count or reserved-window value and rebuild; the generated BIOS layout follows those values automatically while the raw image stays padded to 1 MiB.
 
