@@ -366,6 +366,23 @@ struct View
             unsigned log = add(
                 system, "log", Kind::Object, "NativeLog", OS1_RIGHT_LOG_READ, OS1_LOG_INTERFACE_ID);
             add(log,
+                "export_info",
+                Kind::Property,
+                "LogExportInfo",
+                OS1_RIGHT_LOG_READ,
+                OS1_LOG_INTERFACE_ID,
+                OS1_LOG_EXPORT_INFO,
+                Native);
+            if(g.root.rights & OS1_RIGHT_SYSTEM_CONTROL)
+                add(log,
+                    "export",
+                    Kind::Method,
+                    "target:ExportTarget=tmp",
+                    OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL,
+                    OS1_LOG_INTERFACE_ID,
+                    OS1_LOG_EXPORT,
+                    Native);
+            add(log,
                 "read",
                 Kind::Method,
                 "LogQuery -> LogRecord",
@@ -543,9 +560,26 @@ struct View
                                      "flags",
                                      "cpu",
                                      "text"};
-                fields_count = nodes[i].member == OS1_LOG_INFO ? 9 : 17;
+                const char* exported[] = {"enabled",
+                                          "suspended",
+                                          "last_status",
+                                          "boot_id",
+                                          "disk_bytes",
+                                          "tmp_bytes",
+                                          "failures",
+                                          "closing_lost",
+                                          "kernel_cursor",
+                                          "last_drain_ns",
+                                          "last_sync_ns",
+                                          "consecutive_failures"};
+                fields_count = nodes[i].member == OS1_LOG_EXPORT        ? 0
+                               : nodes[i].member == OS1_LOG_EXPORT_INFO ? 12
+                               : nodes[i].member == OS1_LOG_INFO        ? 9
+                                                                        : 17;
                 for(unsigned j = 0; j < fields_count; ++j)
-                    fields[j] = nodes[i].member == OS1_LOG_INFO ? info[j] : row[j];
+                    fields[j] = nodes[i].member == OS1_LOG_EXPORT_INFO ? exported[j]
+                                : nodes[i].member == OS1_LOG_INFO      ? info[j]
+                                                                       : row[j];
             }
             if(fields_count)
                 nodes[i].type = OS1_VALUE_RECORD;

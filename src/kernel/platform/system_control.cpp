@@ -4,6 +4,7 @@
 #include <os1/tmpfs.h>
 
 #include "console/console.hpp"
+#include "debug/log_export.hpp"
 #include "freestanding/string.hpp"
 #include "platform/acpica_diagnostics.hpp"
 #include "platform/system_power.hpp"
@@ -40,6 +41,8 @@ long system_control(unsigned member)
     }
     AcpicaDiagnosticCapture acpi_output(member == OS1_SYSTEM_SHUTDOWN);
     PowerDiagnostic diagnostic{"storage-sync", "failed"};
+    if(transition)
+        log_export::final_drain();
     long result = ext2_system_sync(transition);
     if(result == 0 && transition)
     {

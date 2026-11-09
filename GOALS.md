@@ -509,7 +509,8 @@ The [latest review](docs/latest-review.md) separates completed corrections from 
 [Live context discovery and diagnostics](docs/native-api/context-diagnostics.md) now form a parallel proposed work track.
 It includes inspection without activation, shell completion, bounded kernel and shell logs, and staged `/tmp` and USB exports.
 The [fixed discovery profile](docs/native-api/context-discovery.md) now implements bounded live inspection and Tab completion.
-General provider discovery and log exports remain pending.
+Bounded log exports are implemented; general provider discovery remains pending.
+Physical log-export failure qualification remains pending.
 These facilities support physical-device diagnosis without replacing the input and storage milestones.
 Generated bindings, userspace drivers, and a compositor remain later extensions.
 

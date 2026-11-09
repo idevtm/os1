@@ -74,3 +74,25 @@ static_assert(sizeof(os1_log_record) == 256);
 static_assert(sizeof(os1_log_history_record) == 2048);
 
 #endif
+
+#define OS1_LOG_EXPORT 3u
+#define OS1_LOG_EXPORT_INFO 4u
+#define OS1_LOG_EXPORT_TMP 1u
+#define OS1_LOG_EXPORT_DISK 2u
+struct os1_log_export_request
+{
+    uint32_t version, size, target, reserved;
+};
+struct os1_log_export_info
+{
+    uint32_t version, size, enabled, suspended;
+    int64_t last_status;
+    uint64_t boot_id, disk_bytes, tmp_bytes, failures, closing_lost;
+    uint64_t kernel_cursor, last_drain_ns, last_sync_ns;
+    uint32_t consecutive_failures, reserved;
+};
+
+#ifdef __cplusplus
+static_assert(sizeof(os1_log_export_request) == 16);
+static_assert(sizeof(os1_log_export_info) == 96);
+#endif

@@ -952,6 +952,20 @@ Terminal processing includes software policy as well as a hardware path; a [line
 | Module / class library | A reusable software unit, or a collection of types and operations shared by programs and language runtimes. |
 | `os` object / capability context | The shell proposal's facade over explicitly supplied roots, streams, and service grants. It does not reacquire an unrestricted global namespace or administrative authority. |
 
+## Diagnostic log storage
+
+These terms describe the implemented [log export profile](native-api/abi/log-export-abi.md).
+
+| Term | Meaning |
+| --- | --- |
+| Log frame | A bounded binary header and record payload with a checksum. Readers validate each complete frame before using its records. |
+| Log segment | One managed file that contains identity and data frames. The exporter rotates these files within retention limits. |
+| CRC32 | A 32-bit cyclic redundancy check. The log profile uses polynomial `0xedb88320` to detect accidental frame changes. |
+| Retention budget | A limit on stored bytes, files, or boots. The exporter removes the oldest managed segments to enforce these limits. |
+| Source fingerprint | A hash of selected source files and build settings. It is distinct from a hash of the complete boot image. |
+| Export admission | Coordination that excludes foreground filesystem entry while an export operation accesses storage. |
+| Clock anchor | A recorded relation between monotonic time and available wall time. Export anchors are approximate samples. |
+
 ## Development and reference notation
 
 ### Languages, compilation, and binary inspection

@@ -397,9 +397,65 @@ inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false);
     }
     if(m.interface_id == OS1_LOG_INTERFACE_ID)
     {
-        files::Handle client(logs::bind());
+        files::Handle client(logs::bind(m.member == OS1_LOG_EXPORT));
         if(client.fd < 0)
             return fail("log binding failed", client.fd);
+        if(m.member == OS1_LOG_EXPORT)
+        {
+            char target[16]{};
+            if(!f.string(0, target, sizeof(target)))
+                return fail("invalid export target");
+            os1_log_export_request request{
+                1,
+                sizeof(request),
+                same(target, "tmp") ? OS1_LOG_EXPORT_TMP : OS1_LOG_EXPORT_DISK,
+                0};
+            long r = logs::call(client.fd, m.member, &request, sizeof(request), nullptr, 0);
+            return r < 0 ? fail("log export failed", r) : true;
+        }
+        if(m.member == OS1_LOG_EXPORT_INFO)
+        {
+            os1_log_export_info info{};
+            long r = logs::call(client.fd, m.member, nullptr, 0, &info, sizeof(info));
+            if(r < 0)
+                return fail("log export status failed", r);
+            out.clear();
+            int root = os1::context::add(out.data, 0, "value", 5, OS1_VALUE_RECORD);
+            const char* names[] = {"enabled",
+                                   "suspended",
+                                   "last_status",
+                                   "boot_id",
+                                   "disk_bytes",
+                                   "tmp_bytes",
+                                   "failures",
+                                   "closing_lost",
+                                   "kernel_cursor",
+                                   "last_drain_ns",
+                                   "last_sync_ns",
+                                   "consecutive_failures"};
+            uint64_t values[] = {info.enabled,
+                                 info.suspended,
+                                 static_cast<uint64_t>(info.last_status),
+                                 info.boot_id,
+                                 info.disk_bytes,
+                                 info.tmp_bytes,
+                                 info.failures,
+                                 info.closing_lost,
+                                 info.kernel_cursor,
+                                 info.last_drain_ns,
+                                 info.last_sync_ns,
+                                 info.consecutive_failures};
+            for(unsigned i = 0; i < 12; ++i)
+                os1::context::add(out.data,
+                                  root,
+                                  names[i],
+                                  files::length(names[i]),
+                                  OS1_VALUE_INTEGER,
+                                  nullptr,
+                                  0,
+                                  values[i]);
+            return true;
+        }
         if(m.member == OS1_LOG_INFO)
         {
             os1_log_info info{};

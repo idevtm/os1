@@ -1,4 +1,5 @@
 #include "debug/log.hpp"
+#include "debug/log_export.hpp"
 // Shared kernel entry and bring-up sequencing. Boot-frontends normalize their
 // native firmware/bootloader state into BootInfo, then both paths arrive here.
 #include <stdbool.h>
@@ -424,6 +425,7 @@ bool prepare_scheduler_timer()
         write_console_line("invalid initrd namespace");
         finish_boot_sequence_thread(1);
     }
+    log_export::initialize();
     Thread* init_thread =
         load_user_program(page_frames, g_kernel_root_cr3, "/bin/init", nullptr, false);
     if(nullptr == init_thread)

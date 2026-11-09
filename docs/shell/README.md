@@ -8,6 +8,7 @@ The richer language below remains a proposal.
 
 | Document | Status |
 | --- | --- |
+| [Log export](../native-api/abi/log-export-abi.md) | Bounded snapshots, persistent segments, status, and host recovery |
 | [Typed context and basic commands](typed-context.md) | Implemented first stage, startup v3, rooted navigation, and same-filesystem moves |
 | [Metadata and recursive tools](filesystem-tools.md) | Implemented metadata, traversal, copy/removal, search, and usage |
 | [Completion redraw](completion-redraw-plan.md) | Local row replacement, serial output, validation, and measurements |

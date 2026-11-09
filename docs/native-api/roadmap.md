@@ -348,7 +348,12 @@ The [design proposal](context-diagnostics.md) records options and acceptance cri
 
 The [first memory logging slice](abi/memory-log-abi.md) implements bounded capture and command correlation.
 The [fixed discovery slice](context-discovery.md) implements live descriptions and Tab completion.
-General provider discovery and staged persistence remain planned.
+Bounded staged persistence is implemented in the [log export ABI](abi/log-export-abi.md).
+General provider discovery and physical export-failure qualification remain planned.
+The export profile exposes a storage cost: each 256-byte file write can update several ext2 blocks.
+Next, qualify log export on physical USB storage and measure command latency during export.
+Then evaluate bounded block-sized writes and finer filesystem admission to reduce I/O amplification and syscall delays.
+Preserve frame recovery, foreground file correctness, and the accepted retention limits during that work.
 The existing native input milestone and hardware acceptance remain active.
 Keep full API tracing configurable until its overhead and retention costs are measured.
 

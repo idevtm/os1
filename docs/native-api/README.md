@@ -20,7 +20,7 @@ flowchart TD
 | Document | Authority and status |
 | --- | --- |
 | [Reflective OS hierarchy](object-hierarchy.md) | Option B selected on 2026-11-07; proposed service roots and discovery; bounded typed context is now implemented. |
-| [Context discovery and diagnostics](context-diagnostics.md) | Memory logs and fixed live inspection are implemented; general reflection and staged persistence remain planned. |
+| [Context discovery and diagnostics](context-diagnostics.md) | Memory logs, bounded export, and fixed live inspection are implemented; general reflection remains planned. |
 | [Native object contract](object-contract.md) | Shared semantic direction. Its approved decisions and implemented subsets are identified explicitly. |
 | [Service roadmap](roadmap.md) | Current gaps, dependencies, milestone acceptance, and deferred work. Proposed interfaces have no assigned ABI yet. |
 | Implemented ABI profiles below | Exact current records, rights, limits, operations, and failure rules. UAPI headers and tests establish implementation evidence. |
@@ -42,6 +42,7 @@ Documents can contain proposals after promotion, provided their scope and status
 | Capability | Current contract |
 | --- | --- |
 | Fixed live context descriptions, typed calls, bindings, and guided completion | [Runtime discovery profile](context-discovery.md) |
+| Bounded temporary snapshots and persistent log segments | [Log export ABI](abi/log-export-abi.md) |
 | Memory logs and command correlation | [Memory log ABI](abi/memory-log-abi.md) |
 | System synchronization and power control | [SystemControl ABI](abi/system-control-abi.md) |
 | Filesystem timestamps and current-time mutation | [Timestamp ABI](abi/filesystem-times-abi.md) |

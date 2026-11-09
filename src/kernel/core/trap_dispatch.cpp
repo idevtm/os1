@@ -1,4 +1,6 @@
 #include "debug/log.hpp"
+#include "debug/log_export.hpp"
+#include "sched/scheduler.hpp"
 // C trap entry reached from architecture assembly after a TrapFrame has been
 // saved on the current kernel stack.
 #include <os1/syscall_numbers.h>
@@ -20,6 +22,14 @@ extern "C" Thread* trap_dispatch(TrapFrame* frame)
     Thread* next = nullptr;
     if(frame->vector == T_SYSCALL)
     {
+        // The x86-64 UAPI enters through the two-byte INT 0x80 instruction.
+        // Retry before any side effect when background export owns filesystem admission.
+        log_export::ForegroundGuard foreground;
+        if(!foreground.held)
+        {
+            frame->rip -= 2;
+            return schedule_next(true);
+        }
         if(before)
             diagnostic_log::syscall_begin(
                 before, frame->rax, frame->rax == os1_sys_ipc ? frame->rdi : frame->rsi);

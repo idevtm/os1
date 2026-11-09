@@ -18,6 +18,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
                '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
+    if getattr(args, 'poweroff', False):
+        command.remove('-no-shutdown')
     if getattr(args, 'stall_init', False):
         command[-1] = command[-1].replace(f'file={disk}', f'file=blkdebug::{disk}')
         command += ['-S']
@@ -97,6 +99,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 rejected = b'ehci: controller retired'
             assert rejected in startup, startup[-4000:]
             assert b'ext2 mounted /disk' not in startup
+        elif getattr(args, 'missing_disk', False):
+            assert b'ext2 mounted /disk' not in startup
         else:
             assert b'ext2 mounted /disk' in startup, startup[-2000:]
         if getattr(args, 'transport', 'virtio') == 'usb':
@@ -150,6 +154,14 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             out = run('echo damage > /disk/diskutil')
             assert b'failed' in out or b'error' in out, out
             run('/disk/diskutil verify', b'diskutil verify ok')
+        if getattr(args, 'poweroff', False):
+            child.stdin.write(b'shutdown\n')
+            child.stdin.flush()
+            deadline = time.monotonic() + 60
+            while child.poll() is None and time.monotonic() < deadline:
+                if selector.select(.1):
+                    transcript.extend(os.read(child.stdout.fileno(), 4096))
+            assert child.poll() == 0, bytes(transcript[-4000:])
         print(f'{phase}: boot_seconds={boot_seconds:.6f} workload_seconds={time.monotonic()-operation:.6f}')
     finally:
         child.terminate()

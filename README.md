@@ -417,8 +417,9 @@ See [USB workflow and validation](docs/hardware/usb-image-workflow.md) for const
 ## Real-Hardware Boot Logs
 
 `build/artifacts/os1-usb.img` is a fresh image targeting legacy BIOS and UEFI.
-Normal builds do not capture logs or arm a diagnostic watchdog. To build a
-USB image while preserving a verified base, use `os1_usb_kernel_update`.
+Normal builds enable runtime memory logs and bounded export.
+They do not enable the separate diagnostic boot recorder or watchdog.
+To preserve a verified base image, use `os1_usb_kernel_update`.
 This operation was tested on the **ASUS G74SX** using the round-6 layout. The
 fresh FAT rebuild used in round 7 was not offered by this laptop's firmware;
 round 8's kernel-only update booted successfully.
@@ -527,3 +528,12 @@ The top-level shell restarts after `exit`. Shells print start and end messages o
 The shell prints a numeric status for failed power commands. Failures inside the system-control handler also produce a kernel stage report.
 Capture both lines when present. If an `acpica: shutdown diagnostics` block appears, capture that block too.
 See the [SystemControl contract](docs/native-api/abi/system-control-abi.md) for authority and platform limits.
+
+## Runtime log export
+
+Memory logs can be exported without a diagnostic boot image.
+Run `os.system.log.export target:"tmp"` to refresh bounded snapshots under `/tmp/log`.
+Run `os.system.log.export target:"disk"` to drain and synchronize persistent segments under `/disk/log`.
+`os.system.log.export_info` reports status and failure counters.
+Automatic disk export uses bounded retention and stops after repeated failures.
+See the [log export ABI](docs/native-api/abi/log-export-abi.md) for recovery, privacy, and storage limits.

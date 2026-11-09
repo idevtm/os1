@@ -180,11 +180,11 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
-# Rebalance the existing low-memory window: 416 KiB kernel, 144 KiB initrd.
+# Rebalance the existing low-memory window: 424 KiB kernel, 144 KiB initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x76000)
+set(OS1_INITRD_LOAD_ADDRESS 0x78000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
-set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x198000)
+set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x1A0000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
 set(OS1_KERNEL_SHIM_VIRTUAL_BASE 0xFFFFFFFF90000000)
 set(OS1_DIRECT_MAP_BASE 0xFFFF800000000000)
@@ -207,7 +207,7 @@ math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
 set(OS1_INITRD_IMAGE_SECTOR_COUNT 288)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
-set(OS1_INITRD_LOAD_LIMIT 0x9A000)
+set(OS1_INITRD_LOAD_LIMIT 0x9C000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
 if(OS1_INITRD_LOAD_END GREATER OS1_INITRD_LOAD_LIMIT)
   message(FATAL_ERROR "BIOS initrd exceeds its low-memory load window")
@@ -1801,6 +1801,7 @@ os1_register_menu_target(smoke_no_uart
   "Remove COM1 and verify a shell command through debugcon and PS/2."
 )
 
+find_program(OS1_DEBUGFS_EXECUTABLE NAMES debugfs HINTS /opt/homebrew/opt/e2fsprogs/sbin /usr/sbin)
 find_program(OS1_E2FSCK_EXECUTABLE NAMES e2fsck HINTS /opt/homebrew/opt/e2fsprogs/sbin /usr/sbin)
 if(OS1_E2FSCK_EXECUTABLE)
   set(OS1_EXT2_CHECK_ARGS --e2fsck "${OS1_E2FSCK_EXECUTABLE}")
@@ -1834,6 +1835,16 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
     else()
       set(file_test_image "${OS1_RAW_IMAGE}")
       set(file_test_firmware)
+    endif()
+    if(OS1_DEBUGFS_EXECUTABLE AND OS1_E2FSCK_EXECUTABLE)
+      add_test(NAME os1_smoke_log_export_${boot}
+        COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_log_export.py"
+          --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+          --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-log-export-${boot}.log"
+          --debugfs "${OS1_DEBUGFS_EXECUTABLE}" --e2fsck "${OS1_E2FSCK_EXECUTABLE}"
+          ${file_test_firmware})
+      set_tests_properties(os1_smoke_log_export_${boot} PROPERTIES TIMEOUT 180)
+      list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_log_export_${boot})
     endif()
     add_test(NAME os1_smoke_memory_logging_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_memory_logging.py"
@@ -2104,3 +2115,8 @@ os1_write_target_menu_manifest()
 message(STATUS "Artifacts will be written to ${OS1_ARTIFACT_DIR}")
 message(STATUS "Default image: ${OS1_ISO_IMAGE}")
 message(STATUS "Legacy BIOS image: ${OS1_RAW_IMAGE}")
+
+if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
+  add_test(NAME os1_log_reader_contract COMMAND "${OS1_PYTHON_EXECUTABLE}" -B -m unittest discover
+    -s "${PROJECT_SOURCE_DIR}/tools/tests" -p test_log_dump.py)
+endif()

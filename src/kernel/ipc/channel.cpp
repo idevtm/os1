@@ -7,6 +7,7 @@
 #include "buffer/buffer.hpp"
 #include "console/console_input.hpp"
 #include "debug/log.hpp"
+#include "debug/log_export.hpp"
 #include "ipc/kernel_provider.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
@@ -1567,7 +1568,7 @@ bool ipc_wait_kernel_work(Thread* thread)
     thread->wait = {};
     thread->wait.reason = ThreadWaitReason::Ipc;
     thread->wait.ipc = {};
-    thread->wait.ipc.deadline_ns = UINT64_MAX;
+    thread->wait.ipc.deadline_ns = monotonic_ns + 250000000;
     thread->state = ThreadState::Blocked;
     thread->process->state = ProcessState::Ready;
     wait_queue_enqueue_locked(waiters, thread);
@@ -1580,6 +1581,7 @@ void kernel_provider_worker()
 {
     for(;;)
     {
+        log_export::poll();
         if(ipc_run_kernel_request() || !ipc_wait_kernel_work(current_thread()))
             continue;
         while(current_thread()->wait.reason == ThreadWaitReason::Ipc)

@@ -2567,7 +2567,7 @@ TEST(LogProvider, RequiresDistinctAuthority)
 {
     auto* provider = kernel_provider(OS1_LOG_INTERFACE_ID, 1);
     ASSERT_NE(nullptr, provider);
-    EXPECT_EQ(OS1_RIGHT_LOG_READ, provider->allowed_rights);
+    EXPECT_EQ(OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL, provider->allowed_rights);
     OpenInstance source{};
     DescriptorEntry output{};
     os1_ipc_message request{};

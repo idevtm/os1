@@ -14,3 +14,5 @@ Use the [documentation index](../../README.md) for current guidance.
 | 2026-11-04 | [Initrd VFS and native startup plan — 2026-11-04](2026-11-04-initrd-vfs-implementation-plan.md) |
 | 2026-11-04 | [Copied IPC and private TextProcessor plan — 2026-11-04](2026-11-04-copied-ipc-implementation-plan.md) |
 | 2026-11-04 | [Console Descriptor Implementation Plan — 2026-11-04](2026-11-04-console-descriptor-implementation-plan.md) |
+
+- [2026-11-09: log export and persistence](2026-11-09-log-export.md)

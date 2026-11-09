@@ -2,7 +2,8 @@
 
 This proposal connects live context inspection with kernel and shell diagnostics for physical-device tests.
 The user requested these capabilities on 2026-11-08 and accepted the defaults below.
-The [memory log ABI](abi/memory-log-abi.md) defines the first implemented subset; discovery and export remain proposals.
+The [memory ABI](abi/memory-log-abi.md), [export ABI](abi/log-export-abi.md), and [discovery profile](context-discovery.md) define implemented subsets.
+General provider reflection remains proposed.
 
 ```mermaid
 flowchart LR
@@ -198,7 +199,7 @@ The first stage must report this limit rather than imply that every command surv
 
 ## Accepted defaults — 2026-11-08
 
-The user accepted these defaults before implementation. Later slices implement export and retention.
+The user accepted these defaults before implementation. The export ABI now implements bounded export and retention.
 
 | Setting | Normal boot | Diagnostic boot |
 | --- | --- | --- |
@@ -240,7 +241,7 @@ The ordering below is a recommendation for discussion.
 | --- | --- | --- |
 | 1 | Shared record envelope, memory rings, authorized queries, command correlation | Bounded capture, explicit loss, cross-CPU ordering rules, and command/request correlation tests |
 | 2 | [Implemented fixed descriptions and completion](context-discovery.md) | Enumerate the granted hierarchy without activation; test stale pages, authority, cancellation, and hostile names |
-| 3 | `/tmp` snapshots and bounded USB exports | Recover valid frames; test full disks, missing mounts, partial writes, rotation, and shell exit |
+| 3, implemented | `/tmp` snapshots and bounded USB exports | Recover valid frames; test full disks, missing mounts, partial writes, rotation, and shell exit |
 | 4 | Automated physical-device diagnostic bundles | Match kernel and shell records by build, boot, command, and request; preserve failure and loss evidence |
 
 Memory logging should help diagnose reflection and input implementations before persistent export is required.

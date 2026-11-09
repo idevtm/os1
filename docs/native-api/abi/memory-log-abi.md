@@ -1,7 +1,8 @@
 # Memory log ABI
 
-This profile implements bounded memory logs and command correlation. It does not implement persistence or general context discovery.
-The [proposal](../context-diagnostics.md) retains accepted budgets for later export stages.
+This profile defines bounded memory logs and command correlation.
+The [export ABI](log-export-abi.md) adds temporary snapshots and persistent segments.
+General provider reflection remains separate.
 
 ```text
 kernel events and debug fragments -> normal / warning partitions -> Native Log.read
@@ -12,7 +13,7 @@ shell history -> own-process query -> escaped text
 ## Authority and interfaces
 
 Native Log uses interface `OS1_LOG_INTERFACE_ID`, version 1, on the true namespace root.
-Binding requires `OS1_RIGHT_LOG_READ`, bit 13, separate from system-control authority.
+Read access requires `OS1_RIGHT_LOG_READ`, bit 13. Export also requires system-control authority.
 Bootstrap grants this right on the root descriptor; delegation can remove it.
 Providers cannot use the local-context syscall under the private-provider restriction.
 Startup ABI version 3 and existing observation record layouts remain unchanged.
@@ -77,9 +78,9 @@ Records contain identifiers and status, never request payloads or file contents.
 Time uses BSP elapsed scheduling time with 1 ms nominal resolution and the COARSE flag.
 Early boot records can have time zero; clock resolution does not imply high-resolution measurement accuracy.
 `info` provides a current wall-clock sample when available.
-A paired monotonic/wall-clock export anchor remains part of the persistence design.
-Its TSC-derived boot discriminator is best-effort and is not a persistent or cryptographic identity.
-Cross-boot identity allocation must be completed before persistent export.
+The export profile records approximate monotonic and wall-clock anchors.
+The memory profile uses a best-effort TSC-derived boot discriminator. It is not a persistent or cryptographic identity.
+Persistent export allocates a separate disk-local boot number.
 
 ## Command context and history
 
@@ -103,7 +104,8 @@ History uses 32 fixed 2 KiB slots per shell, allocated on demand.
 At most four histories coexist, enforcing the 256 KiB payload ceiling; bookkeeping is additional.
 History allocation failure does not prevent command identity assignment or shell operation.
 The shell reports unavailable history once at startup.
-History disappears when its process is reaped; no persistence is claimed.
+Process reaping transfers history to the exporter when export is enabled.
+The exporter releases it after draining or recording a closing-history loss.
 
 The shell records command lines before parsing and stores normalized success/failure status, 0 or 1.
 An active command has the PENDING flag.

@@ -1,6 +1,7 @@
 #include "syscall/vfs.hpp"
 
 #include "arch/x86_64/cpu/cpu.hpp"
+#include "debug/log_export.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "util/memory.h"
@@ -469,6 +470,9 @@ void cancel_vfs_wait(Thread* thread)
 }
 void wake_vfs_waiters(PageFrameContainer& frames)
 {
+    log_export::ForegroundGuard foreground;
+    if(!foreground.held)
+        return;
     size_t count = wait_queue_count(waiters);
     if(count > 64)
         count = 64;

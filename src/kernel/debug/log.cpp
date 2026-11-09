@@ -24,13 +24,16 @@ Spinlock lock{"diagnostic-log"};
 os1::log::Ring ring;
 uint64_t dropped = 0, identity = 1, boot_id = 0, clock_ns = 0;
 unsigned histories = 0;
-bool enabled = false, diagnostic = false;
+bool enabled = false, diagnostic = false, exporting = false;
+uint64_t errors = 0;
 os1_log_record text_record{};
 struct History
 {
     os1_log_history_record records[32]{};
-    uint64_t next = 1, overwritten = 0;
+    uint64_t next = 1, overwritten = 0, session = 0;
+    bool closing = false;
 };
+History* registered[4]{};
 uint64_t now()
 {
     return __atomic_load_n(&clock_ns, __ATOMIC_RELAXED);
@@ -58,6 +61,8 @@ unsigned cpu_id()
 }
 void append_locked(os1_log_record r)
 {
+    if(r.level >= OS1_LOG_ERROR)
+        ++errors;
     r.time_ns = now();
     r.flags |= OS1_LOG_COARSE;
     r.cpu = cpu_id();
@@ -91,6 +96,8 @@ void test_reset()
     identity = 1;
     clock_ns = 0;
     text_record = {};
+    exporting = false;
+    errors = 0;
 }
 #endif
 void initialize(bool trace)
@@ -201,15 +208,82 @@ void inherit(Process* child, const Process* parent)
     }
     append(origin(child, OS1_LOG_PROCESS_START));
 }
+uint64_t monotonic()
+{
+    return now();
+}
+uint64_t error_sequence()
+{
+    IrqSpinGuard guard(lock);
+    return errors;
+}
+void enable_export(bool value)
+{
+    IrqSpinGuard guard(lock);
+    exporting = value;
+}
+bool history_state(unsigned slot, HistoryState& out)
+{
+    IrqSpinGuard guard(lock);
+    if(slot >= 4 || !registered[slot])
+        return false;
+    auto& h = *registered[slot];
+    out = {h.session, h.next - 1, h.overwritten, h.closing};
+    return true;
+}
+long history_read(unsigned slot,
+                  uint64_t session,
+                  const os1_log_query& q,
+                  os1_log_history_record& out)
+{
+    IrqSpinGuard guard(lock);
+    if(slot >= 4 || !registered[slot] || registered[slot]->session != session)
+        return 0;
+    auto& h = *registered[slot];
+    uint64_t end = q.through && q.through < h.next ? q.through : h.next - 1;
+    uint64_t first = h.next > 32 ? h.next - 32 : 1;
+    for(uint64_t seq = first; seq <= end; ++seq)
+        if(seq > q.after && os1::log::matches(h.records[(seq - 1) % 32].record, q))
+        {
+            out = h.records[(seq - 1) % 32];
+            return 1;
+        }
+    return 0;
+}
+void retire_history(unsigned slot, uint64_t session)
+{
+    History* h = nullptr;
+    {
+        IrqSpinGuard guard(lock);
+        if(slot >= 4 || !registered[slot] || registered[slot]->session != session ||
+           !registered[slot]->closing)
+            return;
+        h = registered[slot];
+        registered[slot] = nullptr;
+        --histories;
+    }
+    kfree(h);
+}
 void cleanup(Process* p)
 {
     if(!p || !p->log_history)
         return;
-    auto* h = p->log_history;
-    p->log_history = nullptr;
-    kfree(h);
-    IrqSpinGuard guard(lock);
-    --histories;
+    History* release = nullptr;
+    {
+        IrqSpinGuard guard(lock);
+        auto* h = static_cast<History*>(p->log_history);
+        p->log_history = nullptr;
+        h->closing = true;
+        if(!exporting)
+        {
+            for(auto& entry : registered)
+                if(entry == h)
+                    entry = nullptr;
+            --histories;
+            release = h;
+        }
+    }
+    kfree(release);
 }
 void process_exec(Process* p)
 {
@@ -217,6 +291,7 @@ void process_exec(Process* p)
         return;
     if(p->log_history)
     {
+        IrqSpinGuard guard(lock);
         auto& h = *static_cast<History*>(p->log_history);
         for(auto& row : h.records)
             if(row.record.command_id == p->log_command)
@@ -389,7 +464,17 @@ long context(PageFrameContainer& frames, Thread* t, uint64_t op, uint64_t pointe
             return OS1_ERR_NO_MEMORY;
         }
         h->next = 1;
-        p->log_history = h;
+        h->session = p->pid;
+        {
+            IrqSpinGuard guard(lock);
+            for(auto& entry : registered)
+                if(!entry)
+                {
+                    entry = h;
+                    break;
+                }
+            p->log_history = h;
+        }
         return 0;
     }
     if(op == OS1_LOG_CONTEXT_INFO)
@@ -398,6 +483,7 @@ long context(PageFrameContainer& frames, Thread* t, uint64_t op, uint64_t pointe
         r.dropped = 0;
         if(p->log_history)
         {
+            IrqSpinGuard guard(lock);
             auto& h = *static_cast<History*>(p->log_history);
             r.latest = h.next - 1;
             r.overwritten = h.overwritten;
@@ -434,6 +520,7 @@ long context(PageFrameContainer& frames, Thread* t, uint64_t op, uint64_t pointe
             p->log_command = command.command_id;
             if(p->log_history)
             {
+                IrqSpinGuard guard(lock);
                 auto& h = *static_cast<History*>(p->log_history);
                 auto& row = h.records[(h.next - 1) % 32];
                 row = {};
@@ -464,6 +551,7 @@ long context(PageFrameContainer& frames, Thread* t, uint64_t op, uint64_t pointe
             return OS1_ERR_INVALID;
         if(p->log_history)
         {
+            IrqSpinGuard guard(lock);
             auto& h = *static_cast<History*>(p->log_history);
             for(auto& row : h.records)
                 if(row.record.command_id == command.command_id)
@@ -493,19 +581,16 @@ long context(PageFrameContainer& frames, Thread* t, uint64_t op, uint64_t pointe
             return OS1_ERR_INVALID;
         if(!p->log_history)
             return 0;
-        auto& h = *static_cast<History*>(p->log_history);
-        auto& q = result.query;
-        uint64_t end = q.through && q.through < h.next ? q.through : h.next - 1;
-        uint64_t first = h.next > 32 ? h.next - 32 : 1;
-        for(uint64_t seq = first; seq <= end; ++seq)
+        long found = 0;
+        for(unsigned slot = 0; slot < 4; ++slot)
         {
-            auto& row = h.records[(seq - 1) % 32];
-            if(seq <= q.after || !os1::log::matches(row.record, q))
-                continue;
-            result.result = row;
-            return copy_to_user(frames, t, pointer, &result, sizeof(result)) ? 1 : OS1_ERR_FAULT;
+            found = history_read(slot, p->pid, result.query, result.result);
+            if(found)
+                break;
         }
-        return 0;
+        return found
+                   ? (copy_to_user(frames, t, pointer, &result, sizeof(result)) ? 1 : OS1_ERR_FAULT)
+                   : 0;
     }
     return OS1_ERR_UNSUPPORTED;
 }
