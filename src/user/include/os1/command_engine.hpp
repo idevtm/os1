@@ -831,7 +831,7 @@ inline bool invoke(const Tree& tree, unsigned id, Value& out, unsigned depth, bo
     int method = (*view_pointer).resolve(path);
     if(method < 0)
         return fail("method unavailable");
-    auto member = (*view_pointer).nodes[method];
+    auto member = (*view_pointer).member(method);
     if(member.kind != os1::discovery::Kind::Method && member.kind != os1::discovery::Kind::Property)
         return fail("member is not callable");
     char canonical[256]{};
@@ -1096,9 +1096,27 @@ inline bool evaluate(const Tree& tree, unsigned id, Value& out, unsigned depth, 
         if(!refresh())
             return fail("context unavailable");
         int member = (*view_pointer).resolve(token);
-        if(member >= 0 && ((*view_pointer).nodes[member].kind == os1::discovery::Kind::Property ||
-                           (*view_pointer).nodes[member].kind == os1::discovery::Kind::Method))
+        if(member >= 0 && ((*view_pointer).member(member).kind == os1::discovery::Kind::Property ||
+                           (*view_pointer).member(member).kind == os1::discovery::Kind::Method))
             return invoke(tree, id, out, depth, scoped);
+        if(member >= 0 && ((*view_pointer).member(member).flags & os1::discovery::External))
+        {
+            Os1HardwareNode value{};
+            if(!hardware::describe(member, value))
+                return fail("hardware description unavailable");
+            if(value.type == OS1_HARDWARE_OBJECT)
+                return fail("use context to inspect hardware children");
+            int added = os1::context::add(
+                out.data,
+                0,
+                "value",
+                5,
+                value.type == OS1_HARDWARE_STRING ? OS1_VALUE_STRING : OS1_VALUE_INTEGER,
+                value.type == OS1_HARDWARE_STRING ? value.text : nullptr,
+                value.type == OS1_HARDWARE_STRING ? os1::context::length(value.text) : 0,
+                value.integer);
+            return added >= 0 || fail("hardware value budget exceeded");
+        }
         unsigned first = 0;
         while(token[first] && token[first] != '.')
             ++first;
@@ -1115,7 +1133,7 @@ inline bool evaluate(const Tree& tree, unsigned id, Value& out, unsigned depth, 
                 __builtin_memcpy(parent, token, cut - 1);
                 int property = (*view_pointer).resolve(parent);
                 if(property >= 0 &&
-                   (*view_pointer).nodes[property].kind == os1::discovery::Kind::Property)
+                   (*view_pointer).member(property).kind == os1::discovery::Kind::Property)
                 {
                     Tree& getter = frames[depth].getter_tree;
                     if(!getter.parse(parent, false) ||
@@ -1431,7 +1449,7 @@ inline bool run(const char* input, bool terminal, unsigned nesting, bool scope_r
             __builtin_memcpy(path, tree.text + n.begin, n.end - n.begin);
             int id = (*view_pointer).resolve(path);
             method_result =
-                id >= 0 && (*view_pointer).nodes[id].kind == os1::discovery::Kind::Method;
+                id >= 0 && (*view_pointer).member(id).kind == os1::discovery::Kind::Method;
         }
     }
     if(!evaluate(tree, tree.root, result, 0, scope_result))
@@ -1469,6 +1487,10 @@ inline bool handles(const char* line)
         return true;
     if(os1::discovery::starts(line, "echo "))
     {
+        if(os1::discovery::starts(line + 5, "os.devices.") ||
+           os1::discovery::starts(line + 5, "os.firmware.") ||
+           os1::discovery::starts(line + 5, "os.system.processors."))
+            return true;
         for(const char* p = line + 5; *p; ++p)
             if(*p == '(')
                 return true;

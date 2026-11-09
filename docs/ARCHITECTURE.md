@@ -1622,6 +1622,20 @@ Filesystem failures suspend automatic export without disabling memory capture.
 Shutdown and reboot attempt a final drain before filesystem synchronization.
 See the [export plan](archive/native-api/2026-11-09-log-export.md) for resource changes and validation limits.
 
+## Passive hardware reflection
+
+The [hardware reflection ABI](native-api/abi/hardware-reflection-abi.md) exposes cached PCI, USB, ACPI, and processor descriptions.
+
+```text
+boot records -> observe(HARDWARE) -> bounded external discovery pages -> context and Tab
+```
+
+Physical topology and class views share canonical boot-local record IDs.
+Driver bindings are captured before user execution. Queries perform no hardware access or firmware evaluation.
+xHCI retains normal-boot port outcomes in the existing bounded USB diagnostic array. Overflow increments an exposed loss counter.
+The user runtime caches one page and keeps external nodes outside its fixed registry.
+Hardware nodes do not grant device control. Functional input, display, and block interfaces remain planned.
+
 ## Live context exploration
 
 The [runtime discovery profile](native-api/context-discovery.md) exposes fixed bindings and copied environment data without activation.

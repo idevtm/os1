@@ -44,7 +44,7 @@ inline long inspect(const char* path, int fd)
     if(!output(fd, "context ") || !output(fd, *path ? path : "<root>") || !output(fd, "\n"))
         return OS1_ERR_FAULT;
     if(!view.container(id))
-        return describe(fd, view.nodes[id]) ? 0 : OS1_ERR_FAULT;
+        return describe(fd, view.member(id)) ? 0 : OS1_ERR_FAULT;
     os1::discovery::Cursor cursor{};
     os1::discovery::Page page{};
     do
@@ -53,7 +53,7 @@ inline long inspect(const char* path, int fd)
         if(r < 0)
             return r;
         for(unsigned i = 0; i < page.count; ++i)
-            if(!describe(fd, view.nodes[page.ids[i]]))
+            if(!describe(fd, view.member(page.ids[i])))
                 return OS1_ERR_FAULT;
     } while(!page.end);
     return 0;

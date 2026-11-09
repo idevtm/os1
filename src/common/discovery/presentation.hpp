@@ -71,7 +71,7 @@ struct Presentation
                         if(state.values)
                             line.append(state.choices[index]);
                         else
-                            line.member(view.nodes[state.ids[index]]);
+                            line.member(view.member(state.ids[index]));
                     }
                 }
             }

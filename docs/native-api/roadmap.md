@@ -392,3 +392,15 @@ No new numerical benchmark claim or exact image-hash attribution is made here.
 
 The complete ASD-STE100 Issue 9 standard and dictionary were unavailable for this review.
 Prose was checked against the repository's stated rules; full standard compliance is not established.
+
+## Hardware reflection and functional devices
+
+The [accepted hardware architecture](hardware-objects.md) uses shared identities across topology and functional views.
+The [first reflection slice](abi/hardware-reflection-abi.md) exposes passive records through context discovery and Tab navigation.
+
+```text
+passive reflection -> Keyboard / Pointer -> basic display -> GUI provider
+```
+
+Native device-control interfaces remain future work. They require explicit authority, removal behavior, and event-loss recovery.
+Automated physical-device diagnostic bundles remain planned and can use these hardware descriptions.

@@ -688,7 +688,7 @@ void run_usb()
         write_observe_failure("usb");
         return;
     }
-    write_string("USB boot snapshot: EHCI topology and USB mounts\n");
+    write_string("USB boot snapshot: controller topology and USB mounts\n");
     for(uint32_t i = 0; i < count; ++i)
     {
         const auto& r = records[i];
@@ -735,7 +735,7 @@ void run_usb()
         write_char('\n');
     }
     if(!count)
-        write_string("No captured EHCI topology or USB mount attempts\n");
+        write_string("No captured USB topology or mount attempts\n");
 }
 
 void run_devices()

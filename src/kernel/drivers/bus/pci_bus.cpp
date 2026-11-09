@@ -5,11 +5,13 @@
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "freestanding/string.hpp"
+#include "platform/hardware.hpp"
 #include "platform/platform.hpp"
 #include "platform/types.hpp"
 
 bool pci_bus_probe_all(VirtualMemory& kernel_vm, PageFrameContainer& frames)
 {
+    hardware_reset_bindings();
     const PciDevice* devices = platform_pci_devices();
     const size_t device_count = platform_pci_device_count();
     // Early drivers complete before ordinary devices, regardless of PCI BDF order.
@@ -42,6 +44,7 @@ bool pci_bus_probe_all(VirtualMemory& kernel_vm, PageFrameContainer& frames)
                     devices[device_index].bus, 16, 2)(":")(devices[device_index].slot, 16, 2)(".")(
                     devices[device_index].function, 16, 1)("; continuing without it")();
                 (void)device_binding_set_state(id, DeviceState::Failed);
+                hardware_record_probe_failure(device_index, driver->name);
                 break;
             }
         }

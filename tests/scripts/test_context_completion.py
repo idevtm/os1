@@ -88,7 +88,24 @@ def main():
         assert b'os [object]' in roots and b'process [object]' in roots, roots
         members = run('context os.system.log')
         assert b'read [method, native]' in members and b'print [method]' in members, members
-        assert b'unavailable' in run('context os.devices')
+        hardware = run('context os.devices')
+        assert b'inventory [object]' in hardware and b'topology [object]' in hardware, hardware
+        pci = run('context os.devices.inventory.pci')
+        assert b'pci_0 [object]' in pci, pci
+        fields = run('context os.devices.inventory.pci.pci_0')
+        assert b'vendor_id [field] Integer' in fields, fields
+        assert b'32902\n' in run('os.devices.inventory.pci.pci_0.vendor_id')
+        assert b'PCI function\n' in run('echo os.devices.inventory.pci.pci_0.name')
+        run('vendor = os.devices.inventory.pci.pci_0.vendor_id')
+        assert b'32902\n' in run('vendor')
+        run('drop vendor')
+        assert b'cpu_0 [object]' in run('context os.system.processors')
+        assert b'acpi_' in run('context os.firmware.acpi')
+        send('os.devices.inventory.pci.pci_0.ven\t\n')
+        assert b'32902\n' in expect()
+        if args.keyboard == 'usb':
+            usb = run('context os.devices.classes.input')
+            assert b'usb_' in usb, usb
         run('process.environment.config = {enabled:true, label:"sample"}')
         fields = run('context process.environment.config')
         assert b'enabled [field] Boolean' in fields and b'label [field] String' in fields, fields

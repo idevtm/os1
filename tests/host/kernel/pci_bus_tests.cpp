@@ -9,6 +9,8 @@
 #include "mm/virtual_memory.hpp"
 #include "platform/irq_registry.hpp"
 #include "platform/state.hpp"
+#include "platform/hardware.hpp"
+#include "hardware/tree.hpp"
 #include "support/physical_memory.hpp"
 
 #include <gtest/gtest.h>
@@ -226,6 +228,19 @@ TEST(PciBus, MatchingProbeFailureDoesNotStopLaterDevices)
     EXPECT_TRUE(pci_bus_probe_all(kernel_vm, frames));
     EXPECT_EQ(1u, g_probe_harness.failing_probe_calls);
     EXPECT_EQ(nullptr, device_binding_find(DeviceId{DeviceBus::Pci, 0}));
+    hardware_freeze_bindings();
+    Os1HardwareQuery description{};
+    description.version = 1;
+    description.operation = OS1_HARDWARE_DESCRIBE;
+    description.id = os1::hardware::object_id(os1::hardware::Pci, 0) + 3;
+    ASSERT_EQ(0, hardware_query(description));
+    EXPECT_STREQ("failed", description.nodes[0].text);
+    description = {};
+    description.version = 1;
+    description.operation = OS1_HARDWARE_DESCRIBE;
+    description.id = os1::hardware::object_id(os1::hardware::Pci, 0) + 4;
+    ASSERT_EQ(0, hardware_query(description));
+    EXPECT_STREQ("virtio-blk", description.nodes[0].text);
     EXPECT_EQ(1u, g_probe_harness.second_probe_calls);
     EXPECT_EQ(1u, g_probe_harness.last_probe_id.index);
     const DeviceBinding* binding = device_binding_find(DeviceId{DeviceBus::Pci, 1});

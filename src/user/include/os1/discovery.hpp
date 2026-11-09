@@ -1,4 +1,5 @@
 #pragma once
+#include <os1/hardware.hpp>
 #include <os1/vfs.hpp>
 
 #include "discovery/view.hpp"
@@ -23,6 +24,6 @@ inline bool refresh(os1::discovery::View& view, bool shell = false)
     // Refresh invalidates prior cursors, even if grants and data happen to match.
     uint64_t next = view.generation + 1;
     return next && view.build(grants, environment_data, next) &&
-           (!shell || !extend || extend(view));
+           (!shell || !extend || extend(view)) && hardware::attach(view);
 }
 }  // namespace os1::user::discovery
