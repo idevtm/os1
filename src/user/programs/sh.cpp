@@ -2,9 +2,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <os1/command_engine.hpp>
 #include <os1/line_editor.hpp>
 #include <os1/log.hpp>
 #include <os1/parameter_client.hpp>
+#include <os1/prompt.hpp>
 #include <os1/shell_runtime.hpp>
 #include <os1/syscall.hpp>
 #include <os1/system.hpp>
@@ -15,7 +17,7 @@
 
 namespace
 {
-constexpr size_t kShellLineBytes = 128;
+constexpr size_t kShellLineBytes = os1::shell::line_capacity;
 constexpr size_t kShellMaxTokens = 16;
 int output_fd = 1;
 bool output_failed = false;
@@ -169,12 +171,6 @@ size_t normalize_line(char* buffer, long count)
     }
     buffer[length] = 0;
     return length;
-}
-
-void write_prompt()
-{
-    DiagnosticOutput diagnostic_output;
-    write_string("os1> ");
 }
 
 void write_observe_failure(const char* command)
@@ -459,6 +455,7 @@ bool observe(uint32_t kind, const Record*& records, uint32_t& record_count)
 
 void run_help()
 {
+    write_string("context [object.path]; Tab explores, Up/Down selects, Enter accepts\n");
     write_string("files: touch path; write [--append|--replace] path; edit path\n");
     write_string(
         "text: head source lines:10; tail source lines:10; grep pattern source; wc source; file "
@@ -1205,6 +1202,7 @@ struct ShellLifetime
     }
     ~ShellLifetime()
     {
+        os1::user::commands::clear_bindings();
         os1::user::write(2, "shell ended\n", 12);
     }
 };
@@ -1218,8 +1216,10 @@ struct CommandRecord
     {
         record.version = 1;
         record.size = sizeof(record);
+        if(interactive)
+            record.flags |= OS1_LOG_INTERACTIVE;
         if(!history_enabled || (interactive && line[0] == ' '))
-            record.flags = OS1_LOG_SUPPRESSED;
+            record.flags |= OS1_LOG_SUPPRESSED;
         if(!(record.flags & OS1_LOG_SUPPRESSED))
         {
             size_t n = string_length(line);
@@ -1487,6 +1487,16 @@ bool may_write(os1::user::shell_runtime::Method method)
 int main(int argc_main, char** argv_main)
 {
     ShellLifetime lifetime;
+    os1::user::commands::initialize();
+    os1::user::discovery::extend = os1::user::commands::extend;
+    os1::user::commands::extra_call = [](const char* name, const char* text) -> long {
+        static os1::shell::Command command;
+        if(!os1::shell::parse(text, command))
+            return OS1_ERR_INVALID;
+        run_log(
+            os1::discovery::same(name, "process.shell.history.print"), command.argc, command.argv);
+        return command_failed ? OS1_ERR_INVALID : 0;
+    };
     if(os1::user::logs::context(OS1_LOG_CONTEXT_OPEN) < 0)
         os1::user::files::message("shell: history capture unavailable\n");
     char line[kShellLineBytes];
@@ -1518,9 +1528,8 @@ int main(int argc_main, char** argv_main)
     {
         output_failed = false;
         command_failed = false;
-        if(console_input)
-            write_prompt();
-        long input_status = reader.line(input);
+        long input_status =
+            console_input ? os1::user::prompt::read(reader, input) : reader.line(input);
         if(input_status < 0)
         {
             os1::user::files::message("shell read failed\n");
@@ -1540,7 +1549,28 @@ int main(int argc_main, char** argv_main)
             line[i] = input.bytes[i];
         normalize_line(line, input.size);
         CommandRecord command_record(line, console_input);
-        os1::shell::Command parsed;
+        if(os1::user::commands::handles(line))
+        {
+            command_record.executed = true;
+            os1::user::commands::error = nullptr;
+            os1::user::commands::last_status = 0;
+            os1::user::commands::mutated = false;
+            if(!os1::user::commands::run(line, console_input))
+            {
+                os1::user::shell_runtime::diagnostic(
+                    os1::user::commands::error ? os1::user::commands::error : "command failed");
+                command_failed = true;
+                if(console_input && os1::user::prompt::last_guided)
+                    os1::user::prompt::retain(line);
+            }
+            CommandSync command_sync(os1::user::commands::mutated);
+            if(!command_sync.finish())
+                command_failed = true;
+            if(command_failed && !console_input)
+                return 1;
+            continue;
+        }
+        static os1::shell::Command parsed;
         if(!os1::shell::parse(line, parsed))
         {
             os1::user::files::message(parsed.error);
@@ -1556,6 +1586,11 @@ int main(int argc_main, char** argv_main)
         {
             continue;
         }
+        // These are existing system-control commands under their discovery paths.
+        if(os1::user::shell_runtime::prefix(tokens[0], "os.system.") &&
+           (strings_equal(tokens[0] + 10, "sync") || strings_equal(tokens[0] + 10, "shutdown") ||
+            strings_equal(tokens[0] + 10, "reboot")))
+            tokens[0] += 10;
 
         static os1::user::shell_runtime::Call call;
         if(!call.prepare(parsed, !console_input))
@@ -1577,11 +1612,15 @@ int main(int argc_main, char** argv_main)
             continue;
         }
         const bool log_command = strings_equal(tokens[0], "dmesg") ||
+                                 strings_equal(tokens[0], "context") ||
+                                 strings_equal(tokens[0], "process.context.list") ||
                                  strings_equal(tokens[0], "os.system.log.print") ||
                                  strings_equal(tokens[0], "history") ||
                                  strings_equal(tokens[0], "process.shell.history.print");
         bool external = call.method == os1::user::shell_runtime::Method::Unknown;
-        const char* builtins[] = {"write",
+        const char* builtins[] = {"context",
+                                  "process.context.list",
+                                  "write",
                                   "edit",
                                   "help",
                                   "pid",
@@ -1711,9 +1750,26 @@ int main(int argc_main, char** argv_main)
         if(copy_source == 1 && streams.active[1])
             call.streams[os1::user::shell_runtime::source_slot(call.method)] = streams.saved[1].fd;
         command_record.executed = true;
-        if(strings_equal(tokens[0], "dmesg") || strings_equal(tokens[0], "os.system.log.print") ||
-           strings_equal(tokens[0], "history") ||
-           strings_equal(tokens[0], "process.shell.history.print"))
+        if(strings_equal(tokens[0], "context") || strings_equal(tokens[0], "process.context.list"))
+        {
+            const char* path = argc == 2 ? tokens[1] : "";
+            if(os1::user::shell_runtime::prefix(path, "path:"))
+                path += 5;
+            // Reflection paths contain only identifiers and decimal list indexes.
+            bool valid = argc <= 2;
+            for(const char* p = path; *p; ++p)
+                valid = valid && ((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
+                                  *p == '_' || *p == '.');
+            if(!valid || os1::user::prompt::inspect(path, output_fd) < 0)
+            {
+                os1::user::files::message("context: unavailable or invalid path\n");
+                command_failed = true;
+            }
+        }
+        else if(strings_equal(tokens[0], "dmesg") ||
+                strings_equal(tokens[0], "os.system.log.print") ||
+                strings_equal(tokens[0], "history") ||
+                strings_equal(tokens[0], "process.shell.history.print"))
             run_log(strings_equal(tokens[0], "history") ||
                         strings_equal(tokens[0], "process.shell.history.print"),
                     argc,

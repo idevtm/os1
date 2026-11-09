@@ -10,6 +10,7 @@ The richer language below remains a proposal.
 | --- | --- |
 | [Typed context and basic commands](typed-context.md) | Implemented first stage, startup v3, rooted navigation, and same-filesystem moves |
 | [Metadata and recursive tools](filesystem-tools.md) | Implemented metadata, traversal, copy/removal, search, and usage |
+| [Completion redraw](completion-redraw-plan.md) | Local row replacement, serial output, validation, and measurements |
 | [Interactive pager](pager.md) | Implemented bounded paging, input ownership, and cleanup |
 | [Text utilities](text-utilities.md) | Implemented line selection, literal search, counts, classification, and stream limits |
 | [Pager implementation record](../archive/shell/2026-11-07-interactive-pager.md) | Scope, impact, validation, measurements, and review |
@@ -27,3 +28,5 @@ The richer language below remains a proposal.
 
 The proposed language does not define a second object ownership or authorization model.
 It builds on the [Native API](../native-api/README.md).
+
+- [Guided commands, bindings, and lifetime rules](guided-command-plan.md)

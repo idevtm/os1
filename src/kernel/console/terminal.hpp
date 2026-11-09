@@ -31,6 +31,12 @@ public:
 
     // Move the logical cursor and refresh the attached display when present.
     void move_cursor(int row, int col);
+    unsigned cursor_column() const
+    {
+        return col_;
+    }
+    bool set_column(unsigned column);
+    bool redraw_line(int delta, const char* text, unsigned bytes);
     // write a nul-terminated string at the current cursor.
     void write(const char* str);
     // write one character at the current cursor.

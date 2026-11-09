@@ -122,7 +122,7 @@ This stage does not claim that all legacy commands use reflective argument bindi
 
 | Bound | Current value |
 | --- | --- |
-| Shell input | 127 bytes plus NUL; at most 16 command tokens |
+| Shell input | 1023 bytes plus NUL; legacy commands retain the 16-token limit |
 | Environment | 48 nodes, 2048 text bytes, depth eight |
 | Shell path values | 255 bytes; backend component limits still apply |
 | Copy chunk | 256 bytes through copied File/stream calls |
@@ -134,3 +134,5 @@ The remaining [utility profile](file-utilities.md) remains accepted future work.
 The [text utilities](text-utilities.md) and [pager](pager.md) are implemented.
 Timestamp mutation remains a subsequent stage.
 Permissions and links remain deferred. General OS service discovery and generated bindings are separate Native API work.
+
+The [guided command extension](guided-command-plan.md) adds nested calls, shell-local bindings, and interactive history.

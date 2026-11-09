@@ -88,7 +88,7 @@ Premature EOF or collection failure prevents output creation or truncation.
 After an overlong line or storage failure, collection drains to the marker or EOF.
 Temporary storage is released when the command finishes or preparation fails.
 
-Commands permit 127 bytes and 16 arguments.
+Commands permit 1023 bytes; legacy commands retain the 16-argument limit.
 The parser rejects duplicate stream redirections, incomplete quotes, and missing operands before changing files.
 Pipes, command chaining, background execution, and numbered descriptor redirection are not implemented.
 

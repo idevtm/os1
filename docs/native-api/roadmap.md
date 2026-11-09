@@ -347,7 +347,8 @@ The [design proposal](context-diagnostics.md) records options and acceptance cri
 | Hardware automation | Correlate commands, kernel work, and device observations | Export build identity, boot identity, clock quality, records, and loss evidence |
 
 The [first memory logging slice](abi/memory-log-abi.md) implements bounded capture and command correlation.
-Discovery, completion, and staged persistence remain planned.
+The [fixed discovery slice](context-discovery.md) implements live descriptions and Tab completion.
+General provider discovery and staged persistence remain planned.
 The existing native input milestone and hardware acceptance remain active.
 Keep full API tracing configurable until its overhead and retention costs are measured.
 

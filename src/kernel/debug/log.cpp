@@ -281,7 +281,8 @@ bool trace_ipc(const os1_log_record& r)
 {
     if(diagnostic)
         return true;
-    if(r.interface_id == OS1_CONSOLE_INTERFACE_ID)
+    if(r.interface_id == OS1_CONSOLE_INTERFACE_ID ||
+       r.interface_id == OS1_CONSOLE_INPUT_INTERFACE_ID)
         return false;
     if(r.interface_id == OS1_FILE_INTERFACE_ID)
         return r.arg0 == OS1_FILE_WRITE || r.arg0 == OS1_FILE_APPEND ||
@@ -311,6 +312,9 @@ void ipc_end(const os1_log_record& origin_record, int64_t status)
 {
     if(!origin_record.kind)
         return;
+    if(!diagnostic && origin_record.interface_id == OS1_CONSOLE_INPUT_INTERFACE_ID &&
+       status == OS1_ERR_WOULD_BLOCK)
+        return;  // An empty key queue is normal while an interactive shell waits.
     auto r = origin_record;
     r.kind = OS1_LOG_IPC_END;
     r.status = status;
@@ -411,7 +415,7 @@ long context(PageFrameContainer& frames, Thread* t, uint64_t op, uint64_t pointe
         if(!copy_from_user(frames, t, pointer, &command, sizeof(command)))
             return OS1_ERR_FAULT;
         if(command.version != 1 || command.size != sizeof(command) || command.reserved ||
-           (command.flags & ~OS1_LOG_SUPPRESSED))
+           (command.flags & ~(OS1_LOG_SUPPRESSED | OS1_LOG_INTERACTIVE)))
             return OS1_ERR_INVALID;
         if(op == OS1_LOG_COMMAND_BEGIN)
         {

@@ -20,7 +20,7 @@ flowchart TD
 | Document | Authority and status |
 | --- | --- |
 | [Reflective OS hierarchy](object-hierarchy.md) | Option B selected on 2026-11-07; proposed service roots and discovery; bounded typed context is now implemented. |
-| [Context discovery and diagnostics](context-diagnostics.md) | Requested capabilities; proposed live inspection, completion, bounded logs, and staged persistence. |
+| [Context discovery and diagnostics](context-diagnostics.md) | Memory logs and fixed live inspection are implemented; general reflection and staged persistence remain planned. |
 | [Native object contract](object-contract.md) | Shared semantic direction. Its approved decisions and implemented subsets are identified explicitly. |
 | [Service roadmap](roadmap.md) | Current gaps, dependencies, milestone acceptance, and deferred work. Proposed interfaces have no assigned ABI yet. |
 | Implemented ABI profiles below | Exact current records, rights, limits, operations, and failure rules. UAPI headers and tests establish implementation evidence. |
@@ -41,6 +41,7 @@ Documents can contain proposals after promotion, provided their scope and status
 
 | Capability | Current contract |
 | --- | --- |
+| Fixed live context descriptions, typed calls, bindings, and guided completion | [Runtime discovery profile](context-discovery.md) |
 | Memory logs and command correlation | [Memory log ABI](abi/memory-log-abi.md) |
 | System synchronization and power control | [SystemControl ABI](abi/system-control-abi.md) |
 | Filesystem timestamps and current-time mutation | [Timestamp ABI](abi/filesystem-times-abi.md) |
@@ -63,6 +64,9 @@ The [approved object-handle model](object-contract.md#object-handles-and-interop
 The current encoding remains `fd`; general typed owning/borrowed C++ wrappers remain SDK work.
 
 ## Latest implementation
+
+The [runtime discovery profile](context-discovery.md) adds bounded inspection and shell completion without activation.
+The [implementation record](context-completion-plan.md) contains its checks, measurements, and limitations.
 
 The [timestamp ABI](abi/filesystem-times-abi.md) adds native time inspection and current-time updates for `touch`.
 
@@ -87,3 +91,5 @@ USB persistence is implemented; physical preserving updates and broader failure 
 Console bindings capture method-specific authority; each additional service needs its own policy.
 Generated SDKs, `.so` bindings, a reflective shell, userspace drivers, and shared-memory rings are not prerequisites for those milestones.
 Class code continues to select new or existing object instances; ordinary callers receive no creation-policy override.
+
+The [guided command record](../shell/guided-command-plan.md) defines command editing and shell-local object lifetimes.

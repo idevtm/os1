@@ -919,12 +919,13 @@ set(OS1_SHELL_INPUT_EVENTS
   "\nshell-echo-ok\n::pid\\n"
 )
 
+# Read boot records before prompt IPC activity overwrites the bounded event ring.
 set(OS1_SHELL_OBSERVE_INPUT_EVENTS
-  "shell prompt ready::sys\\n"
+  "shell prompt ready::events\\n"
+  "events complete::sys\\n"
   "sys boot=::ps\\n"
   "pid tid pstate tstate mode cr3 name::cpu\\n"
-  "cpu slot apic bsp booted pid tid::events\\n"
-  "events complete::pci\\n"
+  "cpu slot apic bsp booted pid tid::pci\\n"
   "pci 00:03.0 1af4:1042::initrd\\n"
   "initrd complete::devices\\n"
   "devices complete::irqs\\n"
@@ -1841,6 +1842,20 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         ${file_test_firmware})
     set_tests_properties(os1_smoke_memory_logging_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_memory_logging_${boot})
+    add_test(NAME os1_smoke_guided_shell_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_guided_shell.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-guided-shell-${boot}.log"
+        ${file_test_firmware})
+    set_tests_properties(os1_smoke_guided_shell_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_guided_shell_${boot})
+    add_test(NAME os1_smoke_context_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_context_completion.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-context-${boot}.log"
+        ${file_test_firmware})
+    set_tests_properties(os1_smoke_context_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_context_${boot})
     add_test(NAME os1_smoke_system_lifecycle_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_system_lifecycle.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
@@ -1881,6 +1896,20 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --log "${OS1_ARTIFACT_DIR}/smoke-pager-keyboard-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_pager_keyboard_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_pager_keyboard_${boot})
+    add_test(NAME os1_smoke_guided_keyboard_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_guided_shell.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --keyboard "${pager_keyboard}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-guided-keyboard-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_guided_keyboard_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_guided_keyboard_${boot})
+    add_test(NAME os1_smoke_context_keyboard_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_context_completion.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --keyboard "${pager_keyboard}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-context-keyboard-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_context_keyboard_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_context_keyboard_${boot})
     add_test(NAME os1_smoke_timestamps_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_timestamps.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"

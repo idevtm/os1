@@ -34,7 +34,7 @@ void destroy_input_session(NativeObject* object)
     console_input_release(object);
     kfree(object);
 }
-long acquire_input_session(DescriptorEntry& output)
+long acquire_input_session(DescriptorEntry& output, bool handoff)
 {
     auto* object = session_allocation_allowed()
                        ? static_cast<NativeObject*>(kcalloc(1, sizeof(NativeObject)))
@@ -43,7 +43,7 @@ long acquire_input_session(DescriptorEntry& output)
         return OS1_ERR_NO_MEMORY;
     constexpr uint32_t rights = OS1_RIGHT_READ | OS1_RIGHT_INSPECT;
     *object = {1, OS1_OBJECT_CONSOLE_INPUT_SESSION, 0, rights, destroy_input_session};
-    long status = console_input_acquire(object);
+    long status = console_input_acquire(object, handoff);
     if(status < 0)
     {
         object_release(object);
@@ -100,6 +100,8 @@ void invoke_console(OpenInstance& source,
     uint32_t required;
     switch(request.member)
     {
+        case OS1_CONSOLE_SET_CURSOR:
+        case OS1_CONSOLE_REDRAW_LINE:
         case OS1_CONSOLE_CLEAR:
         case OS1_CONSOLE_WRITE:
             required = OS1_RIGHT_WRITE;
@@ -123,15 +125,25 @@ void invoke_console(OpenInstance& source,
     }
     if(request.member >= OS1_CONSOLE_GET_GEOMETRY && request.member <= OS1_CONSOLE_ACQUIRE_INPUT)
     {
+        os1_console_input_options options{};
+        if(request.payload_bytes && (request.member != OS1_CONSOLE_ACQUIRE_INPUT ||
+                                     request.payload_bytes != sizeof(options)))
+        {
+            result.application_status = OS1_ERR_INVALID;
+            return;
+        }
         if(request.payload_bytes)
+            memcpy(&options, request.payload, sizeof(options));
+        if(options.flags & ~OS1_CONSOLE_INPUT_HANDOFF)
         {
             result.application_status = OS1_ERR_INVALID;
             return;
         }
         if(request.member == OS1_CONSOLE_ACQUIRE_INPUT)
-            result.application_status = object->reserve_read == console_input_reserve
-                                            ? acquire_input_session(output)
-                                            : OS1_ERR_UNSUPPORTED;
+            result.application_status =
+                object->reserve_read == console_input_reserve
+                    ? acquire_input_session(output, options.flags & OS1_CONSOLE_INPUT_HANDOFF)
+                    : OS1_ERR_UNSUPPORTED;
         else if(!object->write_bytes)
             result.application_status = OS1_ERR_UNSUPPORTED;
         else if(request.member == OS1_CONSOLE_CLEAR)
@@ -141,6 +153,37 @@ void invoke_console(OpenInstance& source,
             auto geometry = console_geometry();
             memcpy(result.payload, &geometry, sizeof(geometry));
             result.payload_bytes = sizeof(geometry);
+        }
+        return;
+    }
+    if(request.member == OS1_CONSOLE_SET_CURSOR)
+    {
+        uint32_t column = 0;
+        if(!object->write_bytes)
+            result.application_status = OS1_ERR_UNSUPPORTED;
+        else if(request.payload_bytes != sizeof(column))
+            result.application_status = OS1_ERR_INVALID;
+        else
+        {
+            memcpy(&column, request.payload, sizeof(column));
+            result.application_status = set_console_column(column);
+        }
+        return;
+    }
+    if(request.member == OS1_CONSOLE_REDRAW_LINE)
+    {
+        if(!object->write_bytes)
+            result.application_status = OS1_ERR_UNSUPPORTED;
+        else if(request.payload_bytes < sizeof(os1_console_redraw))
+            result.application_status = OS1_ERR_INVALID;
+        else
+        {
+            os1_console_redraw row{};
+            memcpy(&row, request.payload, sizeof(row));
+            result.application_status =
+                redraw_console_line(row.row_delta,
+                                    reinterpret_cast<const char*>(request.payload + sizeof(row)),
+                                    request.payload_bytes - sizeof(row));
         }
         return;
     }

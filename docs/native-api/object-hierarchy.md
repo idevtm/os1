@@ -132,7 +132,8 @@ Service activation requires an explicit operation and must remain distinct from 
 Offline ELF descriptions and runtime descriptions should use compatible type and interface identities.
 Metadata describes behavior; it does not contain an executable method implementation.
 The [ELF profile](elf-interface.md) remains authoritative for implemented offline metadata.
-General runtime reflection is not implemented.
+The [fixed runtime profile](context-discovery.md) implements bounded reflection over grants and copied environment data.
+General runtime provider reflection remains planned.
 The [context diagnostics proposal](context-diagnostics.md#live-context) details live-only enumeration and shell completion without activation.
 
 ## Typed process environment

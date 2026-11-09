@@ -79,9 +79,31 @@ inline long console_clear(int client)
     os1_ipc_result result{};
     return console_call(client, OS1_CONSOLE_INTERFACE_ID, OS1_CONSOLE_CLEAR, result);
 }
-inline long console_acquire_input(int client)
+inline long console_redraw_line(int client, int delta, const char* text, unsigned bytes)
+{
+    if(bytes > OS1_CONSOLE_REDRAW_MAX || (bytes && !text))
+        return OS1_ERR_INVALID;
+    auto request = console_request(OS1_CONSOLE_REDRAW_LINE);
+    os1_console_redraw row{delta};
+    request.payload_bytes = sizeof(row) + bytes;
+    for(unsigned i = 0; i < sizeof(row); ++i)
+        request.payload[i] = reinterpret_cast<const uint8_t*>(&row)[i];
+    for(unsigned i = 0; i < bytes; ++i)
+        request.payload[sizeof(row) + i] = text[i];
+    os1_ipc_result result{};
+    long status = ipc_call(client, request, result);
+    return status < 0                ? status
+           : result.transport_status ? result.transport_status
+                                     : result.application_status;
+}
+inline long console_acquire_input(int client, bool handoff = false)
 {
     auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
+    if(handoff)
+    {
+        request.payload_bytes = sizeof(os1_console_input_options);
+        request.payload[0] = OS1_CONSOLE_INPUT_HANDOFF;
+    }
     long operation = ipc(OS1_IPC_SUBMIT, client, &request);
     if(operation < 0)
         return operation;
@@ -106,7 +128,10 @@ inline long console_input_bind(int session)
         1, sizeof(binding), OS1_CONSOLE_INPUT_INTERFACE_ID, 1, OS1_RIGHT_READ};
     return ipc(OS1_IPC_BIND_KERNEL, session, &binding);
 }
-inline long console_read_key(int session, int client, unsigned& byte)
+inline long console_read_key(int session,
+                             int client,
+                             unsigned& byte,
+                             uint64_t deadline = UINT64_MAX)
 {
     for(;;)
     {
@@ -115,7 +140,7 @@ inline long console_read_key(int session, int client, unsigned& byte)
             client, OS1_CONSOLE_INPUT_INTERFACE_ID, OS1_CONSOLE_INPUT_TRY_READ_KEY, result);
         if(status == OS1_ERR_WOULD_BLOCK)
         {
-            status = ipc_wait(session);
+            status = deadline == UINT64_MAX ? ipc_wait(session) : ipc_wait_until(session, deadline);
             if(status < 0)
                 return status;
             continue;

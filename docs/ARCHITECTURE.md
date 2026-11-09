@@ -1585,4 +1585,36 @@ Capture uses a nonblocking lock attempt; contention increments a loss counter.
 The clock advances once per BSP scheduler tick, independent of CPU count.
 A retained Operation owns its origin record until completion or failure.
 History allocation counts against a system-wide ceiling and is released when its process is reaped.
-No log capture performs filesystem I/O. Export and general context reflection remain later slices.
+No log capture performs filesystem I/O. Export and general provider reflection remain later slices.
+
+## Live context exploration
+
+The [runtime discovery profile](native-api/context-discovery.md) exposes fixed bindings and copied environment data without activation.
+The shell shares this profile between `context` inspection and Tab completion.
+
+```text
+resource metadata + environment + shell bindings -> bounded View -> context / completion
+parameter definitions -> guided values -> expression evaluator -> local helper / native IPC
+Console input session -> prompt editing -> explicit release -> canonical command input
+```
+
+The user runtime filters members by existing descriptor grants and descendant rights.
+It performs no file opens, provider activation, hardware probes, or arbitrary property reads during discovery.
+Snapshot generations reject stale cursors; aliases and paths have bounded traversal.
+Native descriptions retain interface identity, while local helpers remain distinct from native wire protocols.
+
+The prompt uses an exclusive input session with opt-in typeahead handoff.
+The Console `redraw_line` method replaces bounded local rows while keeping serial output sequential.
+The shell reserves one completion area and clears it when completion closes.
+Each redraw uses the output lock; a sequence of rows does not create an exclusive display lease.
+Existing pager sessions retain discard-on-release behavior.
+Script and redirected input retain their existing reader.
+PS/2 and USB navigation keys share byte codes; the prompt decodes serial navigation sequences separately.
+Executable parameter definitions connect the fixed registry to guided command expansion and typed invocation.
+The evaluator runs nested calls once, from left to right, and releases temporary references on error.
+Named bindings retain data or ordinary object references inside the shell.
+Exclusive input results require a lexical scope or the existing foreground handoff.
+Scope cleanup releases input ownership before the prompt returns.
+Large evaluation buffers use bounded shell storage instead of recursive stack allocations.
+History recall reuses the command log and excludes scripts, pending records, and suppressed records.
+See the [guided command record](shell/guided-command-plan.md) for bounds, validation, and measured resource costs.

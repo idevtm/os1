@@ -31,7 +31,8 @@ flowchart LR
 
 The [hierarchy proposal](object-hierarchy.md#reflection-and-child-discovery) already separates description, child enumeration, reads, and acquisition.
 The [typed context](../shell/typed-context.md) supplies inherited plain data and separate resource grants.
-General runtime reflection and this completion interface remain unimplemented.
+The [fixed runtime profile](context-discovery.md) now implements live inspection and shell completion.
+General provider reflection remains planned.
 
 The kernel has a 256-record [event ring](../../src/kernel/debug/event_ring.cpp), protected by an IRQ spin guard.
 Its records contain sequence numbers, scheduling ticks, CPU identity, process identity, and event arguments.
@@ -67,9 +68,9 @@ Discovery must distinguish an existing reference from a service name that requir
 ## Completion
 
 The OS provides reflection; the shell owns key bindings, filtering, and presentation.
-These bindings are proposed defaults, separate from the shell expression grammar.
+The [fixed runtime profile](context-discovery.md#shell-controls) implements these keys independently of the shell expression grammar.
 
-| Key | Proposed action |
+| Key | Action |
 | --- | --- |
 | Tab at an empty expression | Show available roots, including `os` and `process` when granted |
 | Up or Down while the list is open | Select a candidate |
@@ -83,7 +84,7 @@ Exploring an event shows its schema; it does not subscribe.
 Exploring a property shows its type; it does not evaluate an arbitrary getter.
 A later Enter with the list closed follows normal command execution rules.
 Unavailable or slow providers must not prevent cancellation or ordinary line editing.
-Outside completion, existing history navigation can retain its own key bindings.
+History navigation remains separate work; the current prompt supports editing at the line end.
 
 ## Log objects
 
@@ -238,7 +239,7 @@ The ordering below is a recommendation for discussion.
 | Slice | Work | Acceptance |
 | --- | --- | --- |
 | 1 | Shared record envelope, memory rings, authorized queries, command correlation | Bounded capture, explicit loss, cross-CPU ordering rules, and command/request correlation tests |
-| 2 | Fixed live context descriptions and shell completion | Enumerate the granted hierarchy without activation; test stale pages, authority, cancellation, and hostile names |
+| 2 | [Implemented fixed descriptions and completion](context-discovery.md) | Enumerate the granted hierarchy without activation; test stale pages, authority, cancellation, and hostile names |
 | 3 | `/tmp` snapshots and bounded USB exports | Recover valid frames; test full disks, missing mounts, partial writes, rotation, and shell exit |
 | 4 | Automated physical-device diagnostic bundles | Match kernel and shell records by build, boot, command, and request; preserve failure and loss evidence |
 

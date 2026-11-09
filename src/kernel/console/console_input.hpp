@@ -29,7 +29,7 @@ bool console_input_reserve(char* buffer, size_t capacity, size_t& count, long* s
 void console_input_finish(size_t delivered, bool commit = true);
 
 // Identity is a retained kernel object, never a user-visible token.
-long console_input_acquire(const void* owner);
+long console_input_acquire(const void* owner, bool handoff = false);
 void console_input_release(const void* owner);
 long console_input_key(const void* owner, unsigned& byte);
 bool console_input_ready(const void* owner);

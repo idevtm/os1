@@ -1692,10 +1692,15 @@ protected:
 class ConsoleSession : public KernelConsole
 {
 protected:
-    long acquire()
+    long acquire(bool handoff = false)
     {
         int input = bind(0, OS1_RIGHT_READ);
         auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
+        if(handoff)
+        {
+            request.payload_bytes = sizeof(os1_console_input_options);
+            request.payload[0] = OS1_CONSOLE_INPUT_HANDOFF;
+        }
         int operation = call(OS1_IPC_SUBMIT, input, request);
         descriptor_close(table(), input);
         auto result = complete(operation);
@@ -2595,4 +2600,182 @@ TEST_F(LogIpc, ExecReleasesScopeButRetainsOriginForReplacement)
     ASSERT_EQ(1, context(OS1_LOG_HISTORY_READ, q));
     EXPECT_TRUE(q.result.record.flags & OS1_LOG_REPLACED);
     EXPECT_FALSE(q.result.record.flags & OS1_LOG_PENDING);
+}
+
+TEST_F(ConsoleSession, PromptReleasePreservesTypeaheadForCanonicalReader)
+{
+    int session = acquire(true);
+    ASSERT_GE(session, 0);
+    for(char byte : std::string("echo later\n"))
+        console_input_on_keyboard_char(byte);
+    descriptor_close(table(), session);
+    char text[128]{};
+    size_t count = 0;
+    long status = 0;
+    ASSERT_TRUE(console_input_reserve(text, sizeof(text), count, &status));
+    EXPECT_EQ(0, status);
+    EXPECT_EQ("echo later\n", std::string(text, count));
+    console_input_finish(count);
+}
+TEST_F(ConsoleSession, PromptOverflowCannotExecuteTruncatedTypeahead)
+{
+    int session = acquire(true);
+    ASSERT_GE(session, 0);
+    for(unsigned i = 0; i < 257; ++i)
+        console_input_on_keyboard_char('x');
+    descriptor_close(table(), session);
+    char text[128]{};
+    size_t count = 0;
+    long status = 0;
+    ASSERT_TRUE(console_input_reserve(text, sizeof(text), count, &status));
+    EXPECT_EQ(OS1_ERR_RANGE, status);
+    EXPECT_EQ(0, count);
+    console_input_finish(0);
+}
+
+TEST_F(NormalLogIpc, InteractiveKeyPollingPreservesErrorCapacity)
+{
+    os1_log_query query{};
+    query.version = 1;
+    query.size = sizeof(query);
+    query.after = diagnostic_log::info().latest;
+    os1_log_record origin{}, record{};
+    diagnostic_log::ipc_begin(
+        origin, thread->process, OS1_CONSOLE_INPUT_INTERFACE_ID, OS1_CONSOLE_INPUT_TRY_READ_KEY);
+    diagnostic_log::ipc_end(origin, OS1_ERR_WOULD_BLOCK);
+    EXPECT_EQ(0, diagnostic_log::read(query, record));
+    diagnostic_log::ipc_end(origin, 0);
+    EXPECT_EQ(0, diagnostic_log::read(query, record));
+    diagnostic_log::ipc_end(origin, OS1_ERR_ACCESS);
+    ASSERT_EQ(1, diagnostic_log::read(query, record));
+    EXPECT_EQ(OS1_LOG_WARNING, record.level);
+}
+
+TEST_F(ConsoleSession, AcquireRejectsUnknownOptionsAndMalformedSize)
+{
+    int input = bind(0, OS1_RIGHT_READ);
+    auto request = console_request(OS1_CONSOLE_ACQUIRE_INPUT);
+    request.payload_bytes = sizeof(os1_console_input_options);
+    request.payload[0] = 2;
+    int operation = call(OS1_IPC_SUBMIT, input, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    request.payload[0] = 0;
+    request.payload_bytes = sizeof(os1_console_input_options) - 1;
+    operation = call(OS1_IPC_SUBMIT, input, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    descriptor_close(table(), input);
+    int session = acquire();
+    ASSERT_GE(session, 0);
+    descriptor_close(table(), session);
+}
+
+TEST_F(ConsoleSession, ConsumedOverflowStillDiscardsTruncatedTypeaheadOnRelease)
+{
+    int session = acquire(true);
+    ASSERT_GE(session, 0);
+    int client = session_bind(session);
+    ASSERT_GE(client, 0);
+    console_input_on_keyboard_char('\n');
+    for(unsigned i = 0; i < 256; ++i)
+        console_input_on_keyboard_char('x');
+    EXPECT_EQ(OS1_ERR_RANGE, action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY).application_status);
+    auto key = action(client, OS1_CONSOLE_INPUT_TRY_READ_KEY);
+    EXPECT_EQ(0, key.application_status);
+    EXPECT_EQ('\n', key.payload[0]);
+    EXPECT_EQ(0, action(client, OS1_CONSOLE_INPUT_RELEASE).application_status);
+    descriptor_close(table(), client);
+    descriptor_close(table(), session);
+    char text[128]{};
+    size_t count = 0;
+    long status = 0;
+    ASSERT_TRUE(console_input_reserve(text, sizeof(text), count, &status));
+    EXPECT_EQ(OS1_ERR_RANGE, status);
+    EXPECT_EQ(0, count);
+    console_input_finish(0);
+    console_input_on_keyboard_char('\n');
+    ASSERT_TRUE(console_input_reserve(text, sizeof(text), count, &status));
+    EXPECT_EQ(0, status);
+    EXPECT_EQ("\n", std::string(text, count));
+    console_input_finish(count);
+}
+
+TEST_F(KernelConsole, RedrawChecksRightsPayloadAndRetainsEmptyResult)
+{
+    int client = bind();
+    ASSERT_GE(client, 0);
+    auto request = console_request(OS1_CONSOLE_REDRAW_LINE);
+    int operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    os1_console_redraw row{-1};
+    request.payload_bytes = sizeof(row) + 3;
+    std::memcpy(request.payload, &row, sizeof(row));
+    std::memcpy(request.payload + sizeof(row), "new", 3);
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    auto result = complete(operation);
+    EXPECT_EQ(0, result.application_status);
+    EXPECT_EQ(0u, result.payload_bytes);
+    EXPECT_EQ("\nnew", host_console_output());
+    os1_ipc_result repeated{};
+    EXPECT_EQ(0, call(OS1_IPC_RESULT, operation, repeated));
+    EXPECT_EQ("\nnew", host_console_output());
+    descriptor_close(table(), operation);
+    row.row_delta = OS1_CONSOLE_ROW_DELTA_MAX + 1;
+    std::memcpy(request.payload, &row, sizeof(row));
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    EXPECT_EQ("\nnew", host_console_output());
+    row.row_delta = 0;
+    std::memcpy(request.payload, &row, sizeof(row));
+    request.payload_bytes = sizeof(row) + 80;
+    std::memset(request.payload + sizeof(row), 'x', 80);
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    EXPECT_EQ("\nnew", host_console_output());
+    request.payload_bytes = sizeof(row) + 3;
+    std::memset(request.payload + sizeof(row), 0, sizeof(request.payload) - sizeof(row));
+    request.payload[sizeof(row)] = '\n';
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_INVALID, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    descriptor_close(table(), client);
+    client = bind(1, OS1_RIGHT_INSPECT);
+    operation = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_ACCESS, complete(operation).application_status);
+    descriptor_close(table(), operation);
+    descriptor_close(table(), client);
+}
+
+TEST_F(KernelConsole, CursorPositionChecksAuthorityAndColumnBounds)
+{
+    auto request = console_request(OS1_CONSOLE_SET_CURSOR);
+    int client = bind();
+    ASSERT_GE(client, 0);
+    for(unsigned bytes : {0u, 3u, 5u})
+    {
+        request.payload_bytes = bytes;
+        int op = call(OS1_IPC_SUBMIT, client, request);
+        EXPECT_EQ(OS1_ERR_INVALID, complete(op).application_status);
+        descriptor_close(table(), op);
+    }
+    request.payload_bytes = sizeof(uint32_t);
+    for(uint32_t column : {0u, 79u, 80u, UINT32_MAX})
+    {
+        std::memcpy(request.payload, &column, sizeof(column));
+        int op = call(OS1_IPC_SUBMIT, client, request);
+        auto result = complete(op);
+        EXPECT_EQ(column < 80 ? 0 : OS1_ERR_INVALID, result.application_status);
+        EXPECT_EQ(0u, result.payload_bytes);
+        descriptor_close(table(), op);
+    }
+    descriptor_close(table(), client);
+    client = bind(1, OS1_RIGHT_INSPECT);
+    int op = call(OS1_IPC_SUBMIT, client, request);
+    EXPECT_EQ(OS1_ERR_ACCESS, complete(op).application_status);
+    descriptor_close(table(), op);
+    descriptor_close(table(), client);
 }

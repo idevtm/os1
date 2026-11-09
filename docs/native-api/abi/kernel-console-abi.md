@@ -57,7 +57,9 @@ All fields use the current x86-64 little-endian ABI.
 | Read-only property `info` | 3 | INSPECT | Empty | `os1_console_info`, 16 bytes |
 | Read-only property `geometry` | 4 | INSPECT | Empty | `os1_console_geometry`, 8 bytes |
 | Method `clear` | 5 | WRITE | Empty | Empty |
-| Method `acquire_input` | 6 | READ | Empty | One owned ConsoleInputSession through RESULT_CAPS |
+| Method `acquire_input` | 6 | READ | Empty or `os1_console_input_options` | One owned ConsoleInputSession through RESULT_CAPS |
+| Method `redraw_line` | 7 | WRITE | `os1_console_redraw` and printable text | Empty |
+| Method `set_cursor` | 8 | WRITE | One `u32 column` | Empty |
 
 `info` contains four `u32` fields: `rights`, `max_write_bytes`, `max_read_bytes`, and `flags`.
 `rights` reports captured service rights.
@@ -85,6 +87,35 @@ Missing method authority produces application status ACCESS.
 Malformed method input produces application status INVALID.
 These errors appear in a successfully completed Operation with transport status zero.
 Envelope errors, descriptor errors, and admission failures occur before acceptance.
+
+## Local row redraw
+
+`redraw_line` replaces one local display row and emits sequential text on serial.
+It does not parse terminal escape sequences or change input ownership.
+
+```text
+copied row request -> WRITE validation -> output lock -> local cell replacement
+                                                   -> serial newline and text
+```
+
+The four-byte header contains signed `i32 row_delta` at offset zero.
+The remaining payload contains zero through 252 printable ASCII bytes, without a terminator.
+`row_delta` must be between -200 and 200.
+Text must fit within `columns - 1` cells; control bytes, non-ASCII bytes, and excessive lengths return INVALID.
+Validation precedes display or serial changes.
+
+The local cursor moves by `row_delta` rows, clamped to the screen bounds.
+The operation clears that row, writes the supplied text, and leaves the cursor after the text.
+It never wraps or scrolls the local terminal.
+One operation holds the existing output lock and presents the cell buffer once.
+The serial sink receives a newline followed by the text, without cursor-control sequences.
+Without a local terminal, validation uses the existing 80-column fallback.
+
+The source must be an output Console with captured WRITE authority.
+The normal retained-result contract applies; reading RESULT again does not redraw another row.
+The operation creates no display lease and does not reserve a multirow region.
+Concurrent output can move the shared cursor between requests.
+The shell owns [completion area management](../../shell/completion-redraw-plan.md).
 
 ## Interactive input session
 
@@ -121,7 +152,17 @@ Acquisition returns WOULD_BLOCK while another owner, pending canonical text, com
 While owned, the shared keyboard/serial path queues raw decoded bytes without echo or canonical delivery.
 This is a byte interface, not a physical key-event interface.
 
-The queue holds 64 bytes.
+Empty acquisition requests retain the original discard-on-release policy.
+An optional four-byte `os1_console_input_options` contains `u32 flags` at offset zero.
+Only `OS1_CONSOLE_INPUT_HANDOFF` (1) is defined; unknown bits or other input sizes return INVALID.
+The flag selects canonical handoff on release and a 256-byte queue for prompt typeahead.
+Default sessions retain a 64-byte queue limit.
+The shared backing array has 256 bytes; each session enforces its selected limit.
+
+Navigation bytes are `0x80` Up, `0x81` Down, `0x82` Left, and `0x83` Right.
+Home, End, and Delete use `0x84`, `0x85`, and `0x86`.
+These bytes apply to decoded PS/2 and USB input.
+Serial escape sequences remain bytes; user programs decode them when needed.
 Overflow drops new bytes and sets an error flag.
 The next read returns RANGE and clears that flag; earlier queued bytes remain available.
 An empty owned queue returns WOULD_BLOCK.
@@ -137,11 +178,30 @@ Native wait rights, deadlines, cancellation, and lifetime pins retain their exis
 The kernel worker never blocks on a key; timer readiness checks use the existing deferred SMP wake path.
 Input producers hold the input lock only and never acquire the IPC lock.
 
-Explicit release or final resource destruction restores canonical input and discards session keys.
+Explicit release or final resource destruction restores canonical input.
+Default sessions discard queued keys.
+Handoff sessions replay remaining bytes through the canonical input path, including echo and existing line limits.
+Any overflow during a handoff session discards its remaining queued bytes and publishes one canonical RANGE record.
+Reading the earlier key RANGE notification does not clear this handoff loss state.
+Replay holds the input lock and processes at most 256 bytes.
+The canonical eight-record queue retains its existing drop-new behavior when full.
 Bindings, Operations, and wait pins retain resource lifetime; closing one descriptor alone may not release ownership.
 Existing process cleanup cancels waits and closes descriptors.
 No session pointer or ownership token crosses the ABI.
 The [pager](../../shell/pager.md) uses this contract; it adds no console event subscription or exclusive display lease.
+
+## Horizontal cursor placement
+
+`set_cursor` moves the local cursor within its current row.
+It uses the console output lock and does not scroll or change cells.
+The column must be less than the current console width.
+Invalid columns or payload sizes return INVALID without changing the cursor.
+Serial output uses a separate caret line when the cursor moves within a command.
+It requires no serial cursor-control capability.
+
+Shift-Tab produces `OS1_CONSOLE_KEY_BACKTAB` (`0x87`).
+Ctrl-Space produces `OS1_CONSOLE_KEY_COMPLETE` (`0x88`).
+The prompt also accepts serial `ESC [ Z` and NUL for these actions.
 
 ## Dispatch, bounds, and lifetime
 

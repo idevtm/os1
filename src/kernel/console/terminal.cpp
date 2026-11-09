@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 #include "drivers/display/text_display.hpp"
+#include "terminal/line.hpp"
 #include "util/memory.h"
 
 namespace
@@ -77,6 +78,22 @@ void Terminal::move_cursor(int row, int col)
     {
         present_text_display(display_, buffer_, width_, height_, col_, row_);
     }
+}
+
+bool Terminal::set_column(unsigned column)
+{
+    if(column >= width_)
+        return false;
+    move_cursor(row_, column);
+    return true;
+}
+
+bool Terminal::redraw_line(int delta, const char* text, unsigned bytes)
+{
+    if(!os1::terminal::redraw_line(buffer_, width_, height_, row_, col_, delta, text, bytes))
+        return false;
+    move_cursor(row_, col_);
+    return true;
 }
 
 void Terminal::write(const char* str)

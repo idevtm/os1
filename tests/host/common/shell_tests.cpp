@@ -43,7 +43,7 @@ TEST(ShellCommand, RejectsIncompleteAmbiguousAndUnsupportedCommands)
         EXPECT_NE(nullptr, c.error);
     }
     Command c;
-    EXPECT_FALSE(parse(std::string(128, 'a').c_str(), c));
+    EXPECT_FALSE(parse(std::string(line_capacity, 'a').c_str(), c));
     EXPECT_FALSE(parse("x a b c d e f g h i j k l m n o p", c));
 }
 TEST(ShellCommand, EmptyQuotedArgumentsAndEscapedOperators)
@@ -126,7 +126,9 @@ TEST(Ps2Modifiers, ExtendedKeypadEnterAndSlashRemainPrintable)
         EXPECT_FALSE(m.press(code | 0x80, key));
     }
     EXPECT_FALSE(m.press(0xe0, key));
-    EXPECT_FALSE(m.press(0x48, key));
+    EXPECT_TRUE(m.press(0x48, key));
+    EXPECT_TRUE(m.keypad);
+    EXPECT_EQ(OS1_CONSOLE_KEY_UP, os1::input::navigation_key(key));
     EXPECT_TRUE(m.press(0x20, key));
     EXPECT_FALSE(m.keypad);
 }

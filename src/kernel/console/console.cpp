@@ -2,9 +2,12 @@
 // write plumbing.
 #include "console/console.hpp"
 
+#include <os1/resource.h>
+
 #include "core/kernel_state.hpp"
 #include "debug/debug.hpp"
 #include "sync/smp.hpp"
+#include "terminal/line.hpp"
 
 namespace
 {
@@ -26,6 +29,38 @@ void clear_console()
             debug.write_unmirrored(c);
     if(active_terminal)
         active_terminal->clear();
+}
+
+long set_console_column(unsigned column)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    if(column >= (active_terminal ? active_terminal->columns() : 80))
+        return OS1_ERR_INVALID;
+    bool indicator = active_terminal && active_terminal->cursor_column() != column;
+    if(active_terminal && !active_terminal->set_column(column))
+        return OS1_ERR_INVALID;
+    if(indicator)
+    {
+        debug.write_unmirrored('\n');
+        for(unsigned i = 0; i < column; ++i)
+            debug.write_unmirrored(' ');
+        debug.write_unmirrored('^');
+    }
+    return 0;
+}
+long redraw_console_line(int delta, const char* text, size_t bytes)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    unsigned columns = active_terminal ? active_terminal->columns() : 80;
+    if(!os1::terminal::valid_line(columns, delta, text, bytes))
+        return OS1_ERR_INVALID;
+    if(active_terminal && !active_terminal->redraw_line(delta, text, bytes))
+        return OS1_ERR_INVALID;
+    // Serial terminals need no cursor capability. Keep a sequential transcript.
+    debug.write_unmirrored('\n');
+    for(size_t i = 0; i < bytes; ++i)
+        debug.write_unmirrored(text[i]);
+    return 0;
 }
 
 void write_console_bytes(const char* data, size_t length)
