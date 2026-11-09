@@ -1,7 +1,9 @@
 #include "platform/hardware.hpp"
 
 #include "drivers/bus/device.hpp"
+#include "drivers/bus/driver_registry.hpp"
 #include "drivers/usb/diagnostics.hpp"
+#include "freestanding/string.hpp"
 #include "hardware/tree.hpp"
 #include "platform/platform.hpp"
 #include "platform/state.hpp"
@@ -11,10 +13,32 @@ namespace
 using namespace os1::hardware;
 struct Binding
 {
-    char name[32]{};
-    unsigned state = 0;
+    uint8_t name = 0;
+    uint8_t state = 0;
 };
 Binding bindings[kPlatformMaxPciDevices]{};
+char driver_names[kMaxPciDrivers][32]{};
+unsigned driver_name_count = 0;
+bool driver_names_overflow = false;
+static_assert(kMaxPciDrivers < 256);
+static_assert(sizeof(bindings) + sizeof(driver_names) <= 1024);
+uint8_t retain_driver_name(const char* name)
+{
+    char text[32]{};
+    copy(text, sizeof(text), name);
+    if(!text[0])
+        return 0;
+    for(unsigned i = 0; i < driver_name_count; ++i)
+        if(freestanding::strings_equal(text, driver_names[i]))
+            return static_cast<uint8_t>(i + 1);
+    if(driver_name_count == kMaxPciDrivers)
+    {
+        driver_names_overflow = true;
+        return 0;
+    }
+    copy(driver_names[driver_name_count], sizeof(driver_names[0]), text);
+    return static_cast<uint8_t>(++driver_name_count);
+}
 unsigned count(unsigned source)
 {
     switch(source)
@@ -40,7 +64,9 @@ bool read(unsigned source, unsigned index, Record& out)
     {
         const auto& p = g_platform.devices[index];
         copy(out.name, sizeof(out.name), "PCI function");
-        copy(out.driver, sizeof(out.driver), bindings[index].name);
+        copy(out.driver,
+             sizeof(out.driver),
+             bindings[index].name ? driver_names[bindings[index].name - 1] : "");
         static constexpr const char* states[] = {
             "discovered", "probing", "bound", "started", "stopping", "removed", "failed"};
         copy(out.state,
@@ -158,6 +184,8 @@ bool read(unsigned source, unsigned index, Record& out)
 }  // namespace
 void hardware_reset_bindings()
 {
+    driver_name_count = 0;
+    driver_names_overflow = false;
     for(auto& binding : bindings)
         binding = {};
 }
@@ -165,8 +193,8 @@ void hardware_record_probe_failure(unsigned pci_index, const char* driver)
 {
     if(pci_index >= kPlatformMaxPciDevices)
         return;
-    os1::hardware::copy(bindings[pci_index].name, sizeof(bindings[pci_index].name), driver);
-    bindings[pci_index].state = static_cast<unsigned>(DeviceState::Failed);
+    bindings[pci_index].name = retain_driver_name(driver);
+    bindings[pci_index].state = static_cast<uint8_t>(DeviceState::Failed);
 }
 void hardware_freeze_bindings()
 {
@@ -175,13 +203,14 @@ void hardware_freeze_bindings()
         const auto& b = device_bindings()[i];
         if(b.active && b.id.bus == DeviceBus::Pci && b.pci_index < kPlatformMaxPciDevices)
         {
-            os1::hardware::copy(
-                bindings[b.pci_index].name, sizeof(bindings[b.pci_index].name), b.driver_name);
-            bindings[b.pci_index].state = static_cast<unsigned>(b.state);
+            bindings[b.pci_index].name = retain_driver_name(b.driver_name);
+            bindings[b.pci_index].state = static_cast<uint8_t>(b.state);
         }
     }
 }
 long hardware_query(Os1HardwareQuery& request)
 {
+    if(driver_names_overflow)
+        return OS1_ERR_LIMIT;
     return os1::hardware::query({count, read, usb::diagnostics::dropped}, request);
 }

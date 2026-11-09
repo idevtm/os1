@@ -27,6 +27,8 @@ No query performs hardware transactions, firmware evaluation, driver activation,
 
 The catalog describes boot-discovered records, not hotplug state.
 Driver names and states are captured before the first user process starts.
+The snapshot stores up to 16 distinct driver names, matching the existing PCI driver registry limit.
+It copies each name once and retains a small name index and state for each PCI function.
 CPU records describe firmware discovery, not current scheduler activity.
 USB records describe captured port and enumeration outcomes.
 Normal and diagnostic boots retain xHCI outcomes.
@@ -117,6 +119,7 @@ The immutable catalog uses generation 1 within the current boot.
 A different generation returns `CANCELLED`.
 Invalid versions, operations, reserved fields, payloads, or cursor positions return `INVALID`.
 Unknown IDs return `NOT_FOUND`. Source counts above 1024 return `LIMIT` during enumeration.
+A driver-name snapshot overflow makes hardware queries return `LIMIT` until the snapshot is reset.
 A failed user-buffer copy returns an error; no kernel address enters the response.
 
 ## Runtime integration and limits

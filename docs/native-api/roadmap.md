@@ -36,7 +36,7 @@ flowchart TD
 | Typed metadata | Offline interfaces; bounded rich constructor/method inputs and CLI conversion | Stable service schemas; broader output/event descriptions and generated bindings later |
 | Bulk data | Exclusive zero-copy Buffer loans, returned input identity, distinct output objects | Kernel-service integration; separate DMA ownership and quiescence rules for devices |
 | Files | Immutable initrd, writable `/tmp`, persistent ext2, disk execution, native mutation, and capability-relative lookup | Kernel Buffer transfers, public mounts, larger ext2 profiles, and broader physical qualification |
-| Devices | Internal block requests; xHCI keyboard/storage; EHCI storage and bounded high-speed hubs | Native device endpoints, usable mouse events, keyboard diagnosis, and broader hardware qualification |
+| Devices | Cached hardware reflection; internal block requests; xHCI keyboard/storage; EHCI storage and bounded high-speed hubs | Native device endpoints, usable mouse events, and broader hardware qualification |
 
 The descriptor decision no longer blocks VFS, sockets, PTYs, or redirection at the foundational level.
 Each subsystem still needs its own semantic contract and implementation.
@@ -76,7 +76,8 @@ Permissions and links remain deferred.
 | Stage | Scope |
 | --- | --- |
 | First context slice, implemented | Typed path, validated cwd, explicit stream grants, independent child state, and fixed filesystem bindings |
-| Reflection, proposed | Bounded type descriptions, child enumeration, explicit acquisition, and output schemas |
+| Reflection, implemented | Bounded live descriptions, child enumeration, guided completion, and cached hardware records |
+| Reflection extensions, proposed | General provider publication, scoped inspection grants, and broader output schemas |
 | Broader services, proposed | Dynamic registration, device interfaces, and application resource contexts |
 
 The minimal initrd and disk-program split is implemented; see its [record](../archive/filesystems/2026-11-06-minimal-initrd.md).

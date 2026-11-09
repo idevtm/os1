@@ -8,6 +8,8 @@
 
 class VirtualMemory;
 
+constexpr size_t kMaxPciDrivers = 16;
+
 constexpr uint8_t kPciMatchVendorId = 1u << 0;
 constexpr uint8_t kPciMatchDeviceId = 1u << 1;
 constexpr uint8_t kPciMatchClassCode = 1u << 2;

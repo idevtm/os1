@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "discovery/completion.hpp"
+#include "drivers/bus/driver_registry.hpp"
 #include "drivers/usb/diagnostics.hpp"
 #include "hardware/tree.hpp"
 #include "platform/hardware.hpp"
@@ -235,4 +236,42 @@ TEST(Hardware, UsbParentsFiltersAndCaptureOverflow)
 }
 static_assert(sizeof(Os1HardwareNode) == 184);
 static_assert(sizeof(Os1HardwareQuery) == 1512);
+TEST(Hardware, BindingNamesAreCopiedDeduplicatedAndBounded)
+{
+    struct Reset
+    {
+        ~Reset()
+        {
+            hardware_reset_bindings();
+            platform_reset_state();
+        }
+    } reset;
+    hardware_reset_bindings();
+    platform_reset_state();
+    g_platform.device_count = kPlatformMaxPciDevices;
+    char name[] = "driver-a";
+    for(unsigned i = 0; i < kPlatformMaxPciDevices; ++i)
+        hardware_record_probe_failure(i, name);
+    name[0] = 'X';
+    auto q = request(hardware::object_id(hardware::Pci, kPlatformMaxPciDevices - 1) + 4,
+                     OS1_HARDWARE_DESCRIBE);
+    ASSERT_EQ(0, hardware_query(q));
+    EXPECT_STREQ("driver-a", q.nodes[0].text);
+    for(unsigned i = 1; i < kMaxPciDrivers; ++i)
+    {
+        char distinct[] = "driver-a";
+        distinct[7] = static_cast<char>('a' + i);
+        hardware_record_probe_failure(i, distinct);
+    }
+    q = request(hardware::object_id(hardware::Pci, kMaxPciDrivers - 1) + 4, OS1_HARDWARE_DESCRIBE);
+    ASSERT_EQ(0, hardware_query(q));
+    EXPECT_STREQ("driver-p", q.nodes[0].text);
+    hardware_record_probe_failure(0, "one-too-many");
+    q = request(OS1_HARDWARE_DRIVERS);
+    EXPECT_EQ(OS1_ERR_LIMIT, hardware_query(q));
+    hardware_reset_bindings();
+    q = request(OS1_HARDWARE_DRIVERS);
+    EXPECT_EQ(0, hardware_query(q));
+    EXPECT_EQ(0u, q.count);
+}
 }  // namespace

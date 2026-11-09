@@ -5,8 +5,6 @@
 
 namespace
 {
-constexpr size_t kMaxPciDrivers = 16;
-
 PciDriver g_pci_drivers[kMaxPciDrivers];
 size_t g_pci_driver_count = 0;
 

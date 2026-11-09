@@ -37,7 +37,7 @@ Hardware observation retains the existing global observation disclosure policy; 
 ## Validation evidence
 
 The normal and diagnostic builds pass their image-layout checks.
-The corrected host suite passes all 589 tests.
+The corrected host suite passes all 590 tests.
 BIOS and UEFI context tests pass, including typed hardware fields, bindings, and Tab selection.
 All three diagnostic keyboard checks pass. The complete guest matrix remains in progress.
 
@@ -76,8 +76,12 @@ Each firmware and revision has three runs. Values below are medians.
 | UEFI workload, seconds | 0.912563 | 0.898159 | -0.014404 | -1.58% |
 | BIOS boot, seconds | 0.461637 | 0.463690 | +0.002053 | +0.44% |
 | UEFI boot, seconds | 12.134339 | 12.144762 | +0.010423 | +0.09% |
-| Kernel BSS, bytes | 196608 | 204800 | +8192 | +4.17% |
-| BIOS kernel file, bytes | 429192 | 433288 | +4096 | +0.95% |
+| Kernel `.bss`, bytes | 196608 | 196608 | 0 | 0.00% |
+| Kernel load memory, bytes | 626688 | 630784 | +4096 | +0.65% |
+| BIOS kernel file, bytes | 429192 | 428936 | -256 | -0.06% |
+| UEFI ISO, bytes | 4446208 | 4450304 | +4096 | +0.09% |
+| BIOS raw image, bytes | 1474560 | 1474560 | 0 | 0.00% |
+| Shell ELF, bytes | 162344 | 165536 | +3192 | +1.97% |
 | Initrd, bytes | 144896 | 147456 | +2560 | +1.77% |
 | Runtime View, bytes | 52392 | 54456 | +2064 | +3.94% |
 | Completion state, bytes | 3640 | 10808 | +7168 | +196.92% |
@@ -87,7 +91,7 @@ The existing command workload shows small timing variation; these runs do not es
 No run reports an allocator failure. Allocator observations vary with asynchronous cleanup and log export.
 Hardware metadata queries allocate no kernel memory and issue no storage I/O.
 Large physical inventories and hardware-query latency remain unmeasured on physical devices.
-The corrected local BIOS kernel has 5496 bytes of file-slot headroom. The initrd has no remaining file-slot headroom.
+The corrected local BIOS kernel has 5240 bytes of file-slot headroom. The initrd has no remaining file-slot headroom.
 Both remain within unchanged layout gates. Future shell growth needs an explicit image-layout or size-reduction decision.
 
 Reproduce timing measurements with `tests/scripts/measure_hardware_reflection.py`.
@@ -121,7 +125,15 @@ An identical-object comparison verifies the loaded content before each alignment
 Two linker fixture checks cover aligned sections, short sections, zero-filled tails, and the existing layout gate.
 The framebuffer test derives its cleared-row expectation from live `os` children.
 Both BIOS and UEFI framebuffer checks pass after this correction.
-These changes require shared-boot validation and another independent review.
+The fourth read-only review found no blocking defects in these corrections or their interactions with the complete slice.
+It independently passed both linker fixtures and checked both loader implementations.
+The next CI run passed file-size validation but exceeded the reserved kernel memory window by 4096 bytes.
+Repeated driver-name storage accounted for 9216 bytes of static snapshot data.
+The corrected snapshot uses 1024 bytes for names and references, plus small counters.
+It retains sixteen distinct copied names, matching the existing PCI driver registry capacity.
+Capacity overflow returns `LIMIT`; it cannot silently report incomplete binding names.
+A regression covers all PCI slots, caller-string mutation, shared names, overflow, and reset.
+The reserved memory window and post-image reserve remain unchanged.
 Final guest results, CI qualification, and corrected-revision timing measurements remain pending.
 Physical hardware behavior remains unmeasured until the user tests the new image.
 The complete ASD-STE100 Issue 9 dictionary is unavailable locally; prose receives a manual clarity and sentence-length review.
