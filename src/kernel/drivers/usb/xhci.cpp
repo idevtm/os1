@@ -1,4 +1,5 @@
 #include "drivers/usb/diagnostics.hpp"
+#include "platform/hardware_catalog.hpp"
 #include "util/fixed_string.hpp"
 // Early xHCI PCI driver. This owns controller reset, MMIO resource claims,
 // DMA ring allocation, interrupter 0 setup, and lifecycle teardown.
@@ -179,6 +180,7 @@ struct XhciDeviceState
     usb::storage::Interface storage_interface{};
     usb::storage::Device storage{};
     BlockDevice block{};
+    unsigned catalog_id{};
     DmaBuffer bulk_in_ring_dma{}, bulk_out_ring_dma{}, bulk_buffer_dma{};
     xhci::CommandRingInfo bulk_in_ring{}, bulk_out_ring{};
     uint8_t synchronous_endpoint = 1;
@@ -1488,7 +1490,10 @@ bool initialize_storage(PageFrameContainer& frames,
     return true;
 }
 
-bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller, uint8_t port_id)
+bool initialize_port(PageFrameContainer& frames,
+                     XhciControllerState& controller,
+                     uint8_t port_id,
+                     unsigned catalog_port)
 {
     xhci::PortStatus status{};
     if(!xhci::read_port_status(controller.controller, port_id, status) || !status.connected)
@@ -1511,6 +1516,9 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
     observation.record.pci_index = controller.pci_index;
     observation.record.root_port = observation.record.port = port_id;
     observation.record.status = status.raw;
+    const unsigned speeds[] = {0, 120, 15, 4800, 50000};
+    unsigned catalog_device = hardware_catalog::usb_device(
+        catalog_port, port_id, port_id, status.speed < 5 ? speeds[status.speed] : 0);
 
     if(!status.powered)
     {
@@ -1545,6 +1553,7 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
     }
 
     *device = {};
+    device->catalog_id = catalog_device;
     device->present = true;
     device->controller = &controller;
     device->slot_id = slot_id;
@@ -1589,6 +1598,7 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
         debug("usbdiag: device pci=")(controller.pci_index)(" port=")(port_id)(" id=")(
             descriptor.vendor_id, 16, 4)(":")(
             descriptor.product_id, 16, 4)(" speed=")(device->speed)();
+    hardware_catalog::usb_descriptor(catalog_device, &descriptor, sizeof(descriptor));
     observation.record.detail = uint32_t(descriptor.vendor_id) << 16 | descriptor.product_id;
     observation.stage = "configuration-failed";
     uint8_t config_header[sizeof(UsbConfigurationDescriptor)]{};
@@ -1626,9 +1636,18 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
                            0u,
                            device->control_buffer_dma.virtual_address,
                            configuration->total_length,
-                           actual_length) ||
-       !xhci::valid_configuration_descriptors(device->control_buffer_dma.virtual_address,
-                                              actual_length))
+                           actual_length))
+    {
+        release_device(frames, controller, *device);
+        return false;
+    }
+    bool descriptor_valid = xhci::valid_configuration_descriptors(
+        device->control_buffer_dma.virtual_address, actual_length);
+    hardware_catalog::usb_configuration(catalog_device,
+                                        device->control_buffer_dma.virtual_address,
+                                        actual_length,
+                                        descriptor_valid);
+    if(!descriptor_valid)
     {
         release_device(frames, controller, *device);
         return false;
@@ -1639,10 +1658,15 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
     {
         if(initialize_storage(frames, controller, *device, storage))
         {
+            auto interface_id = hardware_catalog::usb_bind(
+                catalog_device, storage.configuration, storage.number, "usb-bot", true);
+            hardware_catalog::block(device->block, interface_id);
             observation.stage = "storage-ready";
             observation.record.sectors = device->storage.sectors;
             return true;
         }
+        hardware_catalog::usb_bind(
+            catalog_device, storage.configuration, storage.number, "usb-bot", false);
         observation.stage = "storage-failed";
         debug("usb-storage: unsupported or failed device port=")(port_id)();
         release_device(frames, controller, *device);
@@ -1661,6 +1685,8 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
         debug("usbdiag: HID port=")(port_id)(" interface=")(hid.interface_number)(" protocol=")(
             static_cast<uint8_t>(hid.protocol))(" ep=0x")(
             hid.endpoint_address, 16)(" mps=")(hid.max_packet_size)(" interval=")(hid.interval)();
+    hardware_catalog::usb_bind(
+        catalog_device, hid.configuration_value, hid.interface_number, "usb-hid", false);
     observation.stage = "hid-configuration-failed";
     device->protocol = hid.protocol;
     device->configuration_value = hid.configuration_value;
@@ -1697,6 +1723,8 @@ bool initialize_port(PageFrameContainer& frames, XhciControllerState& controller
     debug("xhci: HID ")((HidBootProtocol::Keyboard == device->protocol) ? "keyboard" : "mouse")(
         " ready port=")(port_id)(" slot=")(device->slot_id)(" ep=0x")(
         device->endpoint_address, 16, 2)(" mps=")(device->endpoint_max_packet_size)();
+    hardware_catalog::usb_bind(
+        catalog_device, hid.configuration_value, hid.interface_number, "usb-hid", true);
     observation.stage = "hid-ready";
     return true;
 }
@@ -1717,12 +1745,14 @@ void enumerate_ports(PageFrameContainer& frames, XhciControllerState& controller
                           sizeof(port_record.stage),
                           status.connected ? "connected" : "disconnected");
         usb::diagnostics::append(port_record);
+        unsigned catalog_port =
+            hardware_catalog::usb_port(controller.pci_index, port_id, status.connected);
         if(status.connected)
         {
             if(bootlog_diagnostics_enabled())
                 debug("usbdiag: enumerate pci=")(controller.pci_index)(" port=")(
                     port_id)(" raw=0x")(status.raw, 16)(" speed=")(status.speed)();
-            const bool initialized = initialize_port(frames, controller, port_id);
+            const bool initialized = initialize_port(frames, controller, port_id, catalog_port);
             if(bootlog_diagnostics_enabled())
                 debug("usbdiag: enumeration pci=")(controller.pci_index)(" port=")(port_id)(" ok=")(
                     initialized)();
@@ -1977,6 +2007,22 @@ BlockDevice* xhci_storage_block_device(size_t index)
             }
     }
     return nullptr;
+}
+
+void xhci_capture_catalog_state()
+{
+    // Boot thread only. IRQ handlers publish failure flags, never catalog records.
+    IrqSpinGuard guard(g_event_lock);
+    for(auto* controller : g_xhci_controllers)
+    {
+        if(!controller)
+            continue;
+        for(auto& device : controller->devices)
+            if((device.configured || device.storage_published) &&
+               (__atomic_load_n(&device.failed, __ATOMIC_ACQUIRE) ||
+                __atomic_load_n(&controller->failed, __ATOMIC_ACQUIRE)))
+                hardware_catalog::unavailable(device.catalog_id);
+    }
 }
 
 void xhci_poll_input()

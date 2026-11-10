@@ -4,13 +4,28 @@
 #include "drivers/bus/driver_registry.hpp"
 #include "drivers/usb/diagnostics.hpp"
 #include "freestanding/string.hpp"
+#include "hardware/names.hpp"
 #include "hardware/tree.hpp"
+#include "mm/kmem.hpp"
+#include "platform/hardware_catalog.hpp"
+#include "platform/hardware_facts.hpp"
 #include "platform/platform.hpp"
 #include "platform/state.hpp"
+#include "storage/block_device.hpp"
 
 namespace
 {
 using namespace os1::hardware;
+os1::hardware::Catalog* catalog{};
+unsigned capture_lost{};
+bool catalog_frozen{};
+Record platform_records[3]{};
+bool platform_captured{};
+uint32_t firmware_associations[kPlatformMaxPciDevices]{};
+unsigned catalog_lost()
+{
+    return capture_lost + (catalog ? catalog->dropped : 0);
+}
 struct Binding
 {
     uint8_t name = 0;
@@ -41,6 +56,10 @@ uint8_t retain_driver_name(const char* name)
 }
 unsigned count(unsigned source)
 {
+    if(source >= UsbDevice && source <= UsbPort)
+        return catalog ? catalog->counts[source] : 0;
+    if(source >= CpuIdentity && source <= BootPlatform)
+        return platform_captured ? 1 : 0;
     switch(source)
     {
         case Pci:
@@ -58,12 +77,21 @@ unsigned count(unsigned source)
 bool read(unsigned source, unsigned index, Record& out)
 {
     out = {};
+    out.category = OS1_HARDWARE_OTHER;
     if(index >= count(source))
         return false;
+    if(source >= CpuIdentity && source <= BootPlatform)
+    {
+        out = platform_records[source - CpuIdentity];
+        return true;
+    }
+    if(source >= UsbDevice && source <= UsbPort)
+        return catalog && catalog->read(source, index, out);
     if(source == Pci)
     {
         const auto& p = g_platform.devices[index];
-        copy(out.name, sizeof(out.name), "PCI function");
+        names::describe(out.name, p.vendor_id, p.device_id, p.class_code, p.subclass, false);
+        out.association = firmware_associations[index];
         copy(out.driver,
              sizeof(out.driver),
              bindings[index].name ? driver_names[bindings[index].name - 1] : "");
@@ -155,6 +183,9 @@ bool read(unsigned source, unsigned index, Record& out)
     else if(source == Acpi)
     {
         const auto& a = platform_acpi_devices()[index];
+        for(unsigned i = 0; i < g_platform.device_count; ++i)
+            if(firmware_associations[i] == object_id(Acpi, index))
+                out.association = object_id(Pci, i);
         copy(out.name, sizeof(out.name), a.path);
         copy(out.identifier, sizeof(out.identifier), a.hardware_id);
         copy(out.state,
@@ -184,6 +215,13 @@ bool read(unsigned source, unsigned index, Record& out)
 }  // namespace
 void hardware_reset_bindings()
 {
+    kfree(catalog);
+    catalog = nullptr;
+    capture_lost = 0;
+    catalog_frozen = false;
+    platform_captured = false;
+    for(auto& id : firmware_associations)
+        id = 0;
     driver_name_count = 0;
     driver_names_overflow = false;
     for(auto& binding : bindings)
@@ -196,8 +234,45 @@ void hardware_record_probe_failure(unsigned pci_index, const char* driver)
     bindings[pci_index].name = retain_driver_name(driver);
     bindings[pci_index].state = static_cast<uint8_t>(DeviceState::Failed);
 }
+void hardware_capture_platform(const BootInfo& boot)
+{
+    if(catalog_frozen)
+        return;
+    hardware_facts::Cpuid reader = nullptr;
+#if !defined(OS1_HOST_TEST)
+    reader = [](uint32_t leaf, uint32_t (&w)[4]) {
+        asm volatile("cpuid" : "=a"(w[0]), "=b"(w[1]), "=c"(w[2]), "=d"(w[3]) : "a"(leaf), "c"(0));
+    };
+#endif
+    platform_records[0] = hardware_facts::cpu(reader);
+    platform_records[1] = hardware_facts::memory(boot);
+    auto& r = platform_records[2];
+    r = {};
+    copy(r.name, sizeof(r.name), boot_source_name(boot.source));
+    copy(r.identifier, sizeof(r.identifier), boot.bootloader_name);
+    copy(r.state, sizeof(r.state), "observed");
+    r.known = 3;
+    r.values[0] = boot.rsdp_physical != 0;
+    r.values[1] = boot.smbios_physical != 0;
+    if(boot.framebuffer.physical_address)
+    {
+        r.known |= 28;
+        r.values[2] = boot.framebuffer.width;
+        r.values[3] = boot.framebuffer.height;
+        r.values[4] = boot.framebuffer.bits_per_pixel;
+    }
+    platform_captured = true;
+}
 void hardware_freeze_bindings()
 {
+    hardware_facts::associate(platform_acpi_devices(),
+                              platform_acpi_device_count(),
+                              g_platform.devices,
+                              g_platform.device_count,
+                              firmware_associations);
+    catalog_frozen = true;
+    if(catalog)
+        catalog->frozen = true;
     for(unsigned i = 0; i < device_binding_count(); ++i)
     {
         const auto& b = device_bindings()[i];
@@ -212,5 +287,224 @@ long hardware_query(Os1HardwareQuery& request)
 {
     if(driver_names_overflow)
         return OS1_ERR_LIMIT;
-    return os1::hardware::query({count, read, usb::diagnostics::dropped}, request);
+    return os1::hardware::query({count, read, usb::diagnostics::dropped, catalog_lost}, request);
 }
+
+namespace hardware_catalog
+{
+unsigned add(unsigned kind, const os1::hardware::Record& r)
+{
+    if(catalog_frozen)
+        return 0;
+    if(!catalog)
+        catalog = static_cast<os1::hardware::Catalog*>(
+            kmalloc(sizeof(os1::hardware::Catalog), KmallocFlags::Zero));
+    if(!catalog)
+    {
+        ++capture_lost;
+        return 0;
+    }
+    return catalog->add(kind, r);
+}
+os1::hardware::Record* edit(unsigned id)
+{
+    return catalog ? catalog->edit(id) : nullptr;
+}
+unsigned usb_port(unsigned pci, unsigned port, bool connected)
+{
+    Record r{};
+    r.parent = object_id(Pci, pci);
+    r.known = 3;
+    r.category = OS1_HARDWARE_CONTROLLERS;
+    copy(r.name, sizeof(r.name), "USB port");
+    copy(r.state, sizeof(r.state), connected ? "connected" : "disconnected");
+    r.values[0] = port;
+    r.values[1] = connected;
+    return add(UsbPort, r);
+}
+unsigned usb_device(unsigned parent, unsigned root, unsigned port, unsigned speed)
+{
+    Record r{};
+    r.category = OS1_HARDWARE_OTHER;
+    r.parent = parent;
+    r.known = (1u << 8) | (1u << 9);
+    r.values[8] = root;
+    r.values[9] = port;
+    if(speed)
+    {
+        r.values[6] = speed;
+        r.known |= 1u << 6;
+    }
+    copy(r.name, sizeof(r.name), "USB device");
+    copy(r.state, sizeof(r.state), "enumeration_failed");
+    return add(UsbDevice, r);
+}
+unsigned usb_unenumerated(unsigned parent, unsigned root, unsigned port, unsigned speed)
+{
+    unsigned id = usb_device(parent, root, port, speed);
+    if(auto* record = edit(id))
+        copy(record->state, sizeof(record->state), speed ? "unsupported_speed" : "not_enumerated");
+    return id;
+}
+void usb_descriptor(unsigned id, const void* bytes, unsigned length)
+{
+    auto* r = edit(id);
+    auto* b = static_cast<const uint8_t*>(bytes);
+    if(!r || !b || length < 18 || b[0] < 18 || b[1] != 1)
+        return;
+    r->values[0] = b[8] | unsigned(b[9]) << 8;
+    r->values[1] = b[10] | unsigned(b[11]) << 8;
+    r->values[2] = b[2] | unsigned(b[3]) << 8;
+    r->values[3] = b[4];
+    r->values[4] = b[5];
+    r->values[5] = b[6];
+    r->known |= 63;
+    names::describe(r->name, r->values[0], r->values[1], b[4], b[5], true);
+    if(b[4] == 9)
+        r->category = OS1_HARDWARE_CONTROLLERS;
+    copy(r->state, sizeof(r->state), "described");
+}
+void usb_configuration(unsigned id, const void* bytes, unsigned length, bool descriptor_valid)
+{
+    if(catalog && catalog->interfaces(id, descriptor_valid ? bytes : nullptr, length) < 0)
+        if(auto* r = edit(id))
+            copy(r->state, sizeof(r->state), "descriptor_invalid");
+}
+unsigned usb_bind(unsigned id, unsigned config, unsigned number, const char* driver, bool ready)
+{
+    if(auto* r = edit(id))
+    {
+        if(ready)
+        {
+            r->values[10] = config;
+            r->known |= 1u << 10;
+        }
+        copy(r->state, sizeof(r->state), ready ? "configured" : "configuration_failed");
+    }
+    return catalog ? catalog->bind_interface(id, config, number, driver, ready) : 0;
+}
+void unavailable(unsigned id)
+{
+    auto* record = edit(id);
+    if(!record)
+        return;
+    copy(record->state, sizeof(record->state), "unavailable");
+    // Bounded propagation also handles an unexpected relationship cycle.
+    for(unsigned pass = 0; pass < catalog->used; ++pass)
+    {
+        bool changed = false;
+        for(unsigned i = 0; i < catalog->used; ++i)
+        {
+            auto& r = catalog->entries[i].record;
+            auto* backing = edit(r.backing);
+            if(backing && freestanding::strings_equal(backing->state, "unavailable") &&
+               !freestanding::strings_equal(r.state, "unavailable"))
+            {
+                copy(r.state, sizeof(r.state), "unavailable");
+                changed = true;
+            }
+        }
+        if(!changed)
+            break;
+    }
+}
+void block(BlockDevice& b, unsigned backing)
+{
+    if(b.catalog_id)
+        return;
+    Record r{};
+    r.backing = backing;
+    r.category = OS1_HARDWARE_STORAGE;
+    r.known = 0x1b;
+    copy(r.name, sizeof(r.name), b.name);
+    copy(r.driver, sizeof(r.driver), b.name);
+    copy(r.state, sizeof(r.state), "ready");
+    r.values[0] = b.sector_count;
+    r.values[1] = b.sector_size;
+    if(b.sector_size && b.sector_count <= ~uint64_t(0) / b.sector_size)
+    {
+        r.values[2] = b.sector_count * b.sector_size;
+        r.known |= 4;
+    }
+    r.values[3] = b.max_sectors_per_request;
+    r.values[4] = b.queue_depth;
+    b.catalog_id = add(Block, r);
+}
+void partitions(BlockDevice& b, const uint8_t* mbr)
+{
+    if(!b.catalog_id || mbr[510] != 0x55 || mbr[511] != 0xaa)
+        return;
+    for(unsigned i = 0; i < 4; ++i)
+    {
+        auto* p = mbr + 446 + 16 * i;
+        if(!p[4])
+            continue;
+        Record r{};
+        r.backing = b.catalog_id;
+        r.category = OS1_HARDWARE_STORAGE;
+        r.known = 31;
+        auto u32 = [](const uint8_t* v) {
+            return uint32_t(v[0]) | uint32_t(v[1]) << 8 | uint32_t(v[2]) << 16 |
+                   uint32_t(v[3]) << 24;
+        };
+        r.values[0] = i + 1;
+        r.values[1] = p[4];
+        r.values[2] = u32(p + 8);
+        r.values[3] = u32(p + 12);
+        r.values[4] = r.values[3] * b.sector_size;
+        bool valid = r.values[3] && r.values[2] < b.sector_count &&
+                     r.values[3] <= b.sector_count - r.values[2];
+        copy(r.name, sizeof(r.name), "MBR partition");
+        copy(r.state, sizeof(r.state), valid ? "observed" : "invalid_bounds");
+        add(Partition, r);
+    }
+}
+void mounted(BlockDevice& b, unsigned partition, const uint8_t* super)
+{
+    if(!catalog || !b.catalog_id)
+        return;
+    unsigned backing = 0;
+    for(unsigned i = 0; i < catalog->used; ++i)
+    {
+        auto& e = catalog->entries[i];
+        if((e.id - record_base) >> 16 == Partition && e.record.backing == b.catalog_id &&
+           e.record.values[0] == partition)
+        {
+            backing = e.id;
+            break;
+        }
+    }
+    if(!backing)
+        return;
+    Record r{};
+    r.backing = backing;
+    r.category = OS1_HARDWARE_STORAGE;
+    r.known = 7;
+    copy(r.name, sizeof(r.name), "ext2");
+    copy(r.driver, sizeof(r.driver), "ext2");
+    copy(r.state, sizeof(r.state), "mounted");
+    r.values[0] = 4096;
+    r.values[1] = uint32_t(super[4]) | uint32_t(super[5]) << 8 | uint32_t(super[6]) << 16 |
+                  uint32_t(super[7]) << 24;
+    r.values[2] = r.values[0] * r.values[1];
+    const char hex[] = "0123456789abcdef";
+    unsigned n = 0;
+    for(unsigned i = 0; i < 16; ++i)
+    {
+        if(i == 4 || i == 6 || i == 8 || i == 10)
+            r.identifier[n++] = '-';
+        r.identifier[n++] = hex[super[104 + i] >> 4];
+        r.identifier[n++] = hex[super[104 + i] & 15];
+    }
+    unsigned fs = add(Filesystem, r);
+    if(!fs)
+        return;
+    r = {};
+    r.backing = fs;
+    r.category = OS1_HARDWARE_STORAGE;
+    r.known = 0;
+    copy(r.name, sizeof(r.name), "/disk");
+    copy(r.state, sizeof(r.state), "mounted");
+    add(Mount, r);
+}
+}  // namespace hardware_catalog

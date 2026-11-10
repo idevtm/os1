@@ -56,7 +56,9 @@ constexpr uint64_t kApStartupIdtSizeBytes = 6;
 // work. It sits immediately above the reserved kernel window so it avoids the
 // BIOS kernel/initrd staging buffers while still fitting inside the initial
 // BIOS identity map. One bit per page means 512 KiB covers 16 GiB of RAM.
-constexpr uint64_t kPageFrameBitmapBaseAddress = 0x1A0000;
+constexpr uint64_t kPageFrameBitmapBaseAddress = kKernelReservedPhysicalEnd;
+static_assert(kKernelReservedPhysicalEnd <= kPageFrameBitmapBaseAddress,
+              "kernel reservation overlaps the page-frame bitmap");
 constexpr uint64_t kPageFrameBitmapSizeBytes = 0x80000;
 constexpr uint64_t kPageFrameBitmapQwordLimit = kPageFrameBitmapSizeBytes / sizeof(uint64_t);
 

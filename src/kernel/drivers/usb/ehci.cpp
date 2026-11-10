@@ -12,6 +12,7 @@
 #include "handoff/memory_layout.h"
 #include "mm/boot_mapping.hpp"
 #include "mm/dma.hpp"
+#include "platform/hardware_catalog.hpp"
 #include "platform/pci_config.hpp"
 #include "platform/state.hpp"
 #include "storage/block_device.hpp"
@@ -38,6 +39,7 @@ struct Device
     usb::storage::Interface interface{};
     usb::storage::Device storage{};
     BlockDevice block{};
+    unsigned catalog_id{};
     const char* stage = "allocated";
     uint32_t last_status{}, last_detail{};
 };
@@ -55,6 +57,7 @@ struct Controller
     uint32_t root_before[15]{}, root_after[15]{};
     const char* root_stage[15]{};
     bool probing = true;
+    unsigned catalog_ports[15]{};
 };
 alignas(Controller) uint8_t pool[max_controllers][sizeof(Controller)]{};
 Controller* controllers[max_controllers]{};
@@ -92,6 +95,7 @@ void retire(Controller& c)
     {
         d.failed = true;
         d.storage.invalidate();
+        hardware_catalog::unavailable(d.catalog_id);
     }
     if(c.pci)
         pci_set_command_bits(*c.pci, 0, 4);
@@ -217,6 +221,7 @@ Transfer transfer(Device& d,
             return {Status::Stall, 0};
         d.failed = true;
         d.storage.invalidate();
+        hardware_catalog::unavailable(d.catalog_id);
         return {Status::Failed, 0};
     }
     uint32_t residual = bytes ? ehci::remaining(td[payload].token) : 0;
@@ -281,9 +286,14 @@ bool hub_child(void* p, uint8_t port)
     return !hub.controller->failed && control(hub, 0x23, 1, 1, port, nullptr, 0) &&
            control(hub, 0xa3, 0, 0, port, status, sizeof(status)) && !(status[0] & 0x12);
 }
+void hub_unsupported(void* p, uint8_t port, unsigned speed)
+{
+    auto& hub = *static_cast<Device*>(p);
+    hardware_catalog::usb_unenumerated(hub.catalog_id, hub.root, port, speed);
+}
 usb::hub::Transport hub_transport(Device& d)
 {
-    return {&d, hub_control, delay_ms, hub_child};
+    return {&d, hub_control, delay_ms, hub_child, hub_unsupported};
 }
 bool path_connected(Device& d)
 {
@@ -354,6 +364,7 @@ bool submit(BlockDevice& block, BlockRequest& request)
     {
         d.failed = true;
         d.storage.invalidate();
+        hardware_catalog::unavailable(d.catalog_id);
     }
     __atomic_store_n(&c.busy, 0, __ATOMIC_RELEASE);
     block_request_complete(request,
@@ -371,15 +382,23 @@ bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
     d.port = port;
     d.parent = parent;
     d.depth = parent ? parent->depth + 1 : 0;
+    d.catalog_id = hardware_catalog::usb_device(
+        parent ? parent->catalog_id : c.catalog_ports[root - 1], root, port, 4800);
     d.stage = "device-descriptor";
     uint8_t descriptor[18]{};
     if(!control(d, 0x80, 6, 0x100, 0, descriptor, sizeof(descriptor)) || descriptor[0] != 18 ||
        descriptor[1] != 1 || descriptor[7] != 64 || !descriptor[17])
         return false;
+    hardware_catalog::usb_descriptor(d.catalog_id, descriptor, sizeof(descriptor));
     d.stage = "set-address";
     if(!control(d, 0, 5, c.count, 0, nullptr, 0))
         return false;
     d.address = c.count;
+    if(auto* record = hardware_catalog::edit(d.catalog_id))
+    {
+        record->values[7] = d.address;
+        record->known |= 1u << 7;
+    }
     delay_ms(nullptr, 2);
     d.stage = "config-header";
     auto* config = c.configuration;
@@ -390,6 +409,7 @@ bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
     if(length < 9 || length > sizeof(c.configuration) ||
        !control(d, 0x80, 6, 0x200, 0, config, length))
         return false;
+    hardware_catalog::usb_configuration(d.catalog_id, config, length);
     uint8_t hub_configuration = 0;
     if(descriptor[4] == 9 && usb::hub::configuration(config, length, hub_configuration))
     {
@@ -403,6 +423,12 @@ bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
            !usb::hub::parse_descriptor(hub_descriptor, actual, hub))
             return false;
         d.hub = true;
+        // Hub interface number comes from its descriptor, not an assumed interface zero.
+        for(unsigned at = 0; at + 2 <= length && config[at] >= 2 && config[at] <= length - at;
+            at += config[at])
+            if(config[at + 1] == 4 && config[at] >= 9 && config[at + 5] == 9)
+                hardware_catalog::usb_bind(
+                    d.catalog_id, hub_configuration, config[at + 2], "usb-hub", true);
         debug("ehci: hub address=")(d.address)(" root=")(root)(" ports=")(hub.ports)(" depth=")(
             d.depth)();
         d.stage = "hub-ports";
@@ -419,6 +445,8 @@ bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
        d.interface.in_packet != 512 || d.interface.out_packet != 512 ||
        !control(d, 0, 9, d.interface.configuration, 0, nullptr, 0))
         return false;
+    unsigned interface_id = hardware_catalog::usb_bind(
+        d.catalog_id, d.interface.configuration, d.interface.number, "ehci-bot", false);
     d.stage = "storage-probe";
     debug("ehci: storage probe address=")(d.address)();
     if(!d.storage.initialize({&d, bulk, clear_halt, reset_storage}))
@@ -429,6 +457,9 @@ bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
         return false;
     }
     d.block = {"ehci-bot", d.storage.sectors, 512, 8, 1, &d, submit, submit};
+    hardware_catalog::usb_bind(
+        d.catalog_id, d.interface.configuration, d.interface.number, "ehci-bot", true);
+    hardware_catalog::block(d.block, interface_id);
     d.published = true;
     d.stage = d.storage.probe_stage;
     debug("ehci: storage ready address=")(d.address)(" root=")(root)(" hub=")(
@@ -596,6 +627,8 @@ bool probe(VirtualMemory& vm,
     {
         c.root_before[port - 1] = c.op[17 + port - 1];
         c.root_after[port - 1] = c.root_before[port - 1];
+        c.catalog_ports[port - 1] =
+            hardware_catalog::usb_port(pci_index, port, c.root_before[port - 1] & 1);
         c.root_stage[port - 1] = "disconnected";
         if(!(c.op[17 + port - 1] & 1))
             continue;
@@ -614,6 +647,8 @@ bool probe(VirtualMemory& vm,
         if(!ehci::root_usable(c.root_after[port - 1]))
         {
             c.root_stage[port - 1] = "not-usable";
+            if(c.root_after[port - 1] & 1)
+                hardware_catalog::usb_unenumerated(c.catalog_ports[port - 1], port, port, 0);
             debug("ehci: unsupported root speed port=")(port)();
             continue;
         }

@@ -383,3 +383,10 @@ git diff --check
 The independent correction review found no source or test defect.
 It checked scope cleanup, completion interactions, measurement calculations, and artifact identities.
 The initial blocker is corrected; the earlier hardware result remains scoped to its original revision.
+
+## Complete names with shared prefixes
+
+Automatic refinement closes the menu when the typed object or field name matches exactly.
+A longer name with the same prefix does not prevent command execution.
+For example, `usb_interfaces` does not keep the menu open after the user types `usb`.
+Explicit Tab can reopen the alternatives. Partial names retain the completion menu.

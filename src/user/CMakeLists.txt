@@ -115,6 +115,11 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/parameter_client.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/elf/elf64.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/ipc.hpp"
+      "${PROJECT_SOURCE_DIR}/src/uapi/os1/hardware.h"
+      "${PROJECT_SOURCE_DIR}/src/common/hardware/tree.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/hardware/presentation.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/hardware.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/hardware_tools.hpp"
       "${USER_LINKER_SCRIPT}"
     VERBATIM
   )
@@ -164,6 +169,10 @@ os1_add_user_cxx_program(activationcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/a
 os1_add_user_cxx_program(diskutil "${CMAKE_CURRENT_SOURCE_DIR}/programs/diskutil.cpp" OS1_USER_DISKUTIL_ELF)
 add_custom_target(os1_diskutil ALL DEPENDS "${OS1_USER_DISKUTIL_ELF}")
 set(OS1_USER_DISKUTIL_ELF "${OS1_USER_DISKUTIL_ELF}" PARENT_SCOPE)
+
+foreach(name IN ITEMS lshw lspci lsusb lsblk)
+  os1_add_user_cxx_program(${name} "${CMAKE_CURRENT_SOURCE_DIR}/programs/${name}.cpp" utility_elf)
+endforeach()
 
 # Keep the recovery set explicit. All other programs are deployed onto ext2.
 set(recovery_programs init rescue)

@@ -99,6 +99,7 @@ References: [CPU manuals](REFERENCES.md#cpu-architecture-abi-and-binary-formats)
 | SYSCALL, SYSRET | x86 instructions for fast entry to and return from a system-call handler. Kernel entry software must manage the stack and validate the return state required by this mechanism. |
 | IRET, IRETQ | Interrupt-return instructions; IRETQ is the 64-bit form. They restore a saved interrupt/trap return context, including privilege-dependent state. |
 | SWAPGS | Instruction that exchanges the active GS base with the kernel GS-base MSR. It supports switching between user and kernel GS-based data without saving the bases in ordinary registers. |
+| BCD | Binary-Coded Decimal: an encoding that stores each decimal digit in four bits. USB version fields use this encoding. |
 | CPUID | An instruction reporting processor identification, capabilities, and selected topology information. Software must test the relevant feature bits before relying on optional facilities. |
 | CLI, STI | Clear Interrupt Flag and Set Interrupt Flag: instructions controlling local maskable-interrupt acceptance. They are not cross-CPU locks. |
 | HLT, PAUSE | HLT stops instruction execution until an appropriate wake event; PAUSE hints that execution is in a spin-wait loop. Neither is a complete scheduler wait protocol by itself. |
@@ -481,6 +482,7 @@ Related references: [timing and SMP](REFERENCES.md#memory-management-interrupts-
 | CMOS | Complementary Metal-Oxide-Semiconductor; PC “CMOS” commonly means battery-backed configuration storage associated with the real-time clock. |
 | D0; D1; D2; D3 | Device power states: D0 is fully operational; D1/D2 are intermediate states; D3 is the deepest off-like state. |
 | D3hot; D3cold | PCI device-power distinctions: D3hot retains power for configuration access; D3cold removes the relevant main power supply. |
+| DIMM | Dual In-line Memory Module: a circuit board that holds memory chips. Boot memory maps do not describe individual modules. |
 | DRAM | Dynamic Random-Access Memory: volatile memory whose stored charge must be refreshed. |
 | GCS | General Control and Status: an Intel chipset register name; the bring-up notes use it for a register containing `NO_REBOOT`. |
 | HPET | High Precision Event Timer: a platform counter with timer comparators, usable for timing and interrupt generation. |

@@ -50,6 +50,7 @@ struct BlockDevice
     void* driver_state = nullptr;
     BlockSubmit submit = nullptr;
     BlockFlush flush = nullptr;
+    uint32_t catalog_id = 0;
 };
 
 inline bool block_request_succeeded(const BlockRequest& request)

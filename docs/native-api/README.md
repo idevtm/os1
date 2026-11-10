@@ -42,7 +42,7 @@ Documents can contain proposals after promotion, provided their scope and status
 
 | Capability | Current contract |
 | --- | --- |
-| Passive hardware records and bounded discovery pages | [Hardware reflection ABI](abi/hardware-reflection-abi.md) |
+| Passive hardware records, normalized USB/storage relationships, and bounded discovery pages | [Hardware reflection ABI](abi/hardware-reflection-abi.md) |
 | Fixed live context descriptions, typed calls, bindings, and guided completion | [Runtime discovery profile](context-discovery.md) |
 | Bounded temporary snapshots and persistent log segments | [Log export ABI](abi/log-export-abi.md) |
 | Memory logs and command correlation | [Memory log ABI](abi/memory-log-abi.md) |

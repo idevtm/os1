@@ -478,9 +478,17 @@ struct Completion
             if(matches == 1 && os1::context::length(choices[0]) == bytes)
                 cancel();
         }
-        else if(begin(view) && matches == 1 &&
-                os1::context::length(view.member(ids[0]).name) == cursor - prefix)
-            cancel();
+        else if(begin(view))
+        {
+            // A complete name must remain executable when a longer name shares its prefix.
+            // Explicit Tab can reopen the choices after this automatic refinement.
+            for(unsigned i = 0; i < matches; ++i)
+                if(os1::context::length(view.member(ids[i]).name) == cursor - prefix)
+                {
+                    cancel();
+                    break;
+                }
+        }
     }
     void move(int direction)
     {

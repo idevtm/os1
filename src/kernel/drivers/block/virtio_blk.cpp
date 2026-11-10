@@ -13,6 +13,7 @@
 #include "drivers/virtio/virtqueue.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/dma.hpp"
+#include "platform/hardware_catalog.hpp"
 #include "platform/irq_registry.hpp"
 #include "platform/pci_config.hpp"
 #include "platform/state.hpp"
@@ -671,6 +672,8 @@ bool probe_virtio_blk_device(VirtualMemory& kernel_vm,
     g_virtio_blk_device.driver_state = &state;
     g_virtio_blk_device.submit = virtio_blk_submit_request;
     g_virtio_blk_device.flush = virtio_blk_flush;
+    hardware_catalog::block(g_virtio_blk_device,
+                            os1::hardware::object_id(os1::hardware::Pci, device_index));
 
     (void)device_binding_publish(
         state.owner, static_cast<uint16_t>(device_index), "virtio-blk", &state);

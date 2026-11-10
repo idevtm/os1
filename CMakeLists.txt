@@ -180,11 +180,11 @@ foreach(OS1_VENDOR_FILE
 endforeach()
 
 set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
-# Rebalance the existing low-memory window: 424 KiB kernel, 144 KiB initrd.
+# Rebalance the existing low-memory window: 504 KiB kernel, 64 KiB rescue initrd.
 # Keep the firmware ceiling and all file/overlap checks unchanged.
-set(OS1_INITRD_LOAD_ADDRESS 0x78000)
+set(OS1_INITRD_LOAD_ADDRESS 0x8C000)
 set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
-set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x1A0000)
+set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x1C0000)
 set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
 set(OS1_KERNEL_SHIM_VIRTUAL_BASE 0xFFFFFFFF90000000)
 set(OS1_DIRECT_MAP_BASE 0xFFFF800000000000)
@@ -205,7 +205,7 @@ math(EXPR OS1_KERNEL_IMAGE_START_LBA "${OS1_LOADER16_IMAGE_START_LBA} + ${OS1_LO
 # plus the post-image reserve fit inside the higher-half reserved kernel window.
 math(EXPR OS1_KERNEL_IMAGE_SECTOR_COUNT "${OS1_KERNEL_IMAGE_STAGING_BUFFER_BYTES} / 512")
 math(EXPR OS1_INITRD_IMAGE_START_LBA "${OS1_KERNEL_IMAGE_START_LBA} + ${OS1_KERNEL_IMAGE_SECTOR_COUNT}")
-set(OS1_INITRD_IMAGE_SECTOR_COUNT 288)
+set(OS1_INITRD_IMAGE_SECTOR_COUNT 128)
 # Keep the enlarged initrd below conventional-memory firmware/video space.
 set(OS1_INITRD_LOAD_LIMIT 0x9C000)
 math(EXPR OS1_INITRD_LOAD_END "${OS1_INITRD_LOAD_ADDRESS} + ${OS1_INITRD_IMAGE_SECTOR_COUNT} * 512")
@@ -1887,6 +1887,15 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         ${file_test_firmware})
     set_tests_properties(os1_smoke_guided_shell_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_guided_shell_${boot})
+    foreach(transport IN ITEMS virtio usb ehci)
+      os1_add_qemu_test(NAME os1_smoke_catalog_${transport}_${boot}
+        COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_hardware_catalog.py"
+          --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+          --program-disk "${OS1_PROGRAM_TEST_DISK}" --transport "${transport}"
+          --log "${OS1_ARTIFACT_DIR}/smoke-catalog-${transport}-${boot}.log" ${file_test_firmware})
+      set_tests_properties(os1_smoke_catalog_${transport}_${boot} PROPERTIES TIMEOUT 180)
+      list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_catalog_${transport}_${boot})
+    endforeach()
     os1_add_qemu_test(NAME os1_smoke_context_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_context_completion.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"

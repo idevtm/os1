@@ -51,6 +51,48 @@ The first inventory describes boot-discovered hardware. It does not claim hotplu
 Missing firmware associations and unsupported device details remain unknown.
 Physical RAM-module discovery, general provider publication, and usable input and display interfaces remain later work.
 
+## Normalized catalog and storage relationships
+
+The accepted model uses one catalog with typed relationships and several discovery views.
+The [implementation plan](hardware-catalog-plan.md) defines this extension and its acceptance checks.
+
+```text
+physical attachment: PCI controller -> USB port -> USB device
+logical backing: USB device <- interface <- block device <- partition <- filesystem <- mount
+views: inventory / topology / classes / drivers / storage / mounts
+```
+
+A physical device, USB interface, block device, partition, filesystem, and mount have separate identities.
+Each view references the same canonical records. A path is not an identity or capability.
+`attachment` points to a known physical parent. `children` returns known physical children.
+`backing` points to a provider or backing resource. `consumers` returns the reverse relationship.
+A zero relationship ID means that the relationship is unknown or absent.
+Firmware associations remain separate until discovery can establish them reliably.
+
+Enumerators publish bus facts. Drivers add binding state and supported functions.
+Storage layers publish block geometry, observed partitions, and successful mount relationships.
+USB descriptors remain visible when no supported driver binds their interfaces.
+A future functional object can implement several typed interfaces without a separate process per object.
+The current catalog contains descriptions; it does not provide device-control capabilities.
+
+Common inspection must remain passive. Cached records must identify their scope and information source.
+Unknown numeric fields must remain absent instead of displaying an invented zero.
+Numeric bus identifiers remain authoritative; optional user-space naming databases can supply readable labels later.
+
+The normalized profile describes the first USB configuration read by existing enumeration.
+It includes interface descriptors and endpoint counts. Detailed endpoint records remain future work.
+SMBIOS, physical memory modules, additional CPU details, and vendor databases remain future work.
+
+## Hotplug limitation and follow-up
+
+The implemented catalog describes boot observations, including binding and mount outcomes.
+It does not track later disconnection, reconnection, driver failure, or mount availability.
+Context coverage and utility output identify this limitation.
+
+The [hotplug plan](hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) requires deferred enumeration, generation changes, and lifetime-specific identities.
+It also requires bounded notifications, missed-event recovery, and safe driver teardown.
+Inspection will continue to read published data without initiating hardware operations.
+
 ## Sequence
 
 1. Publish passive hardware reflection through live context discovery.

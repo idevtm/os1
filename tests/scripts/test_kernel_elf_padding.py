@@ -73,7 +73,7 @@ resb 0x30000
         subprocess.run([sys.executable, str(ROOT / 'cmake/scripts/assert_kernel_boot_contract.py'),
                         '--elf', str(image), '--disk-slot-bytes', '434176',
                         '--staging-buffer-bytes', '434176', '--reserved-start', '0x100000',
-                        '--reserved-end', '0x1a0000', '--post-image-reserve-bytes', '0x4000',
+                        '--reserved-end', '0x1c0000', '--post-image-reserve-bytes', '0x4000',
                         '--kernel-virtual-offset', '0xffffffff80000000'], check=True)
         print('Kernel ELF alignment: initialized bytes, zero-fill, permissions, addresses, and slot checks pass')
 

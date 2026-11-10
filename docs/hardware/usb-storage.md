@@ -128,6 +128,9 @@ Connection, reset, enable, or other port changes reject the old storage identity
 Low/full-speed transfers and split transactions are not implemented.
 UHCI/OHCI companion controllers and EHCI interrupt endpoints remain separate work.
 Thus this EHCI storage driver does not provide USB keyboard or mouse support.
+The hardware catalog retains anonymous `unsupported_speed` records for stable low/full-speed hub children.
+Connected unusable root ports retain `not_enumerated` records with unknown speed.
+These records do not enable transfers or replace runtime hotplug detection.
 
 `devices` reports a started EHCI controller when probing succeeds.
 Boot diagnostics report hub addresses, root and downstream ports, storage capacity, and failures.

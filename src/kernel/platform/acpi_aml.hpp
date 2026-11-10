@@ -22,6 +22,9 @@ constexpr uint16_t kAcpiDeviceHasPrt = 1u << 5;
 constexpr uint16_t kAcpiDeviceHasPs0 = 1u << 6;
 constexpr uint16_t kAcpiDeviceHasPs3 = 1u << 7;
 
+constexpr uint16_t kAcpiDevicePciRoot = 1u << 8;
+constexpr uint16_t kAcpiDeviceRootLocation = 1u << 9;
+
 enum class AcpiResourceKind : uint8_t
 {
     Irq = 1,
@@ -54,6 +57,7 @@ struct AcpiDeviceInfo
     uint64_t uid;
     uint64_t adr;
     uint8_t bus_number;
+    uint16_t pci_segment;
     char name[5];
     char hardware_id[kAcpiHardwareIdBytes];
     char path[kAcpiDevicePathBytes];

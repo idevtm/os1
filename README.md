@@ -438,7 +438,11 @@ The build writes outputs under `build/artifacts/`:
 - `test-runs/<test>-<unique>/runner.log` — test output and assertion failures
 - `test-runs/<test>-<unique>/result.json` — invocation status, arguments, preparation time, and child CPU time
 
-For BIOS compatibility, `os1.raw` reserves fixed slots for `kernel16.bin`, `kernel.elf`, and `initrd.cpio`. Those slot sizes are defined by `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [CMakeLists.txt](CMakeLists.txt). The kernel BIOS slot now matches the reserved low-physical kernel window, and the build fails before writing `os1.raw` if `kernel.elf` no longer fits its disk slot, its low-memory staging buffer, or its reserved execution window. `initrd.cpio` is still checked against its configured slot. To expand BIOS storage space, raise the corresponding sector-count or reserved-window value and rebuild; the generated BIOS layout follows those values automatically while the raw image stays padded to 1 MiB.
+For BIOS compatibility, `os1.raw` reserves fixed loader, kernel, and initrd slots.
+[CMakeLists.txt](CMakeLists.txt) defines their sizes and checks file bounds, staging limits, execution bounds, and overlap.
+The kernel staging slot provides 504 KiB. The rescue initrd slot provides 64 KiB.
+The raw image remains 2880 sectors (1.44 MB), including the unchanged boot-log area.
+
 
 The smoke targets cover both boot paths, including the baseline shell, observability, SMP balance, `exec`, and `spawn` flows, so higher-half regressions are exercised on both UEFI and BIOS.
 
@@ -592,3 +596,27 @@ Run `os.system.log.export target:"disk"` to drain and synchronize persistent seg
 `os.system.log.export_info` reports status and failure counters.
 Automatic disk export uses bounded retention and stops after repeated failures.
 See the [log export ABI](docs/native-api/abi/log-export-abi.md) for recovery, privacy, and storage limits.
+
+## Hardware inspection utilities
+
+The ext2 deployment includes `lshw`, `lspci`, `lsusb`, and `lsblk`.
+They use the same passive catalog as `context` and Tab navigation.
+Use `-v` for all scalar fields or `-t` for relationships.
+Default summaries show readable device names, conventional bus IDs, and readable capacities.
+`lshw` includes cached CPU identity and boot memory totals under `os.system.platform`.
+`lsusb -t` starts at controllers and prints each record once.
+Unsupported connected EHCI devices can appear with unknown identity; this does not enable device transfers.
+
+```text
+context os.system.platform
+context os.system.platform.cpu
+context os.system.platform.memory
+lsblk -v
+lsusb -t
+context os.storage.devices
+context os.fs.mounts.mount_0.backing
+```
+
+These views describe boot observations. They do not update after device removal or reconnection.
+The [hardware profile](docs/native-api/abi/hardware-reflection-abi.md#version-2-normalized-profile) defines coverage, commands, and limits.
+The [hotplug plan](docs/native-api/hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) records the next lifecycle extension.
