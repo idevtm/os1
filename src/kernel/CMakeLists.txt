@@ -35,7 +35,6 @@ set(KERNEL_CONSOLE_SOURCES
 )
 
 set(KERNEL_DRIVER_SOURCES
-  drivers/net/arp_cache.cpp
   drivers/block/virtio_blk.cpp
   drivers/bus/device.cpp
   drivers/bus/driver_registry.cpp
@@ -43,7 +42,8 @@ set(KERNEL_DRIVER_SOURCES
   drivers/bus/resource.cpp
   drivers/display/text_display.cpp
   drivers/input/ps2_keyboard.cpp
-  drivers/net/virtio_net.cpp
+  drivers/module/loader.cpp
+  drivers/module/virtio_host.cpp
   drivers/timer/pit.cpp
   drivers/timer/tsc_clock.cpp
   drivers/watchdog/intel_tco.cpp
@@ -226,11 +226,40 @@ target_compile_options(
 add_custom_target(os1_log_build_identity
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/log_build_identity.py"
           --root "${PROJECT_SOURCE_DIR}" --output "${OS1_GENERATED_DIR}/log_build_identity.hpp"
-          --profile "${CMAKE_BUILD_TYPE}:${CMAKE_CXX_COMPILER_ID}:${CMAKE_CXX_COMPILER_VERSION}:${CMAKE_CXX_FLAGS}:${OS1_KMEM_DEBUG}"
+          --profile "${CMAKE_BUILD_TYPE}:${CMAKE_CXX_COMPILER_ID}:${CMAKE_CXX_COMPILER_VERSION}:${CMAKE_CXX_FLAGS}:${OS1_KMEM_DEBUG}:${OS1_QEMU_DEBUGCON}:${OS1_BOOT_DIAGNOSTICS}:${OS1_USB_KEYBOARD_DIAGNOSTICS}"
   BYPRODUCTS "${OS1_GENERATED_DIR}/log_build_identity.hpp"
   VERBATIM)
+# The disk module has no imported ELF symbols. Kernel services enter through one ABI table.
+set(OS1_DRIVER_ELF "${OS1_ARTIFACT_DIR}/drivers/virtio-net.elf")
+set(OS1_DRIVER_METADATA "${OS1_GENERATED_DIR}/driver-package.json")
+add_custom_command(OUTPUT "${OS1_DRIVER_ELF}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}/drivers"
+  COMMAND "${CMAKE_CXX_COMPILER}" -std=gnu++20 -ffreestanding -mno-red-zone
+    -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -no-pie -Os
+    -fno-stack-protector -fno-exceptions -fno-rtti -fno-threadsafe-statics
+    -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nostartfiles
+    "-I${PROJECT_SOURCE_DIR}/src/common" "-I${OS1_GENERATED_DIR}"
+    "-Wl,-T,${PROJECT_SOURCE_DIR}/src/drivers/virtio-net/linker.ld"
+    -Wl,--build-id=none -Wl,-z,max-page-size=4096
+    "${PROJECT_SOURCE_DIR}/src/drivers/virtio-net/driver.cpp" -o "${OS1_DRIVER_ELF}"
+  DEPENDS os1_log_build_identity "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+    "${PROJECT_SOURCE_DIR}/src/drivers/virtio-net/driver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/drivers/virtio-net/linker.ld"
+    "${PROJECT_SOURCE_DIR}/src/common/driver/abi.h"
+  VERBATIM)
+add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/driver_trust.hpp" "${OS1_DRIVER_METADATA}"
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
+    --image "${OS1_DRIVER_ELF}" --identity "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+    --header "${OS1_GENERATED_DIR}/driver_trust.hpp" --metadata "${OS1_DRIVER_METADATA}"
+  DEPENDS "${OS1_DRIVER_ELF}" "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
+  VERBATIM)
+add_custom_target(os1_driver_package ALL
+  DEPENDS "${OS1_GENERATED_DIR}/driver_trust.hpp" "${OS1_DRIVER_METADATA}")
+set(OS1_DRIVER_ELF "${OS1_DRIVER_ELF}" PARENT_SCOPE)
+set(OS1_DRIVER_METADATA "${OS1_DRIVER_METADATA}" PARENT_SCOPE)
 add_library(kernel_core_objects OBJECT ${KERNEL_CXX_SOURCES})
-add_dependencies(kernel_core_objects os1_log_build_identity)
+add_dependencies(kernel_core_objects os1_log_build_identity os1_driver_package)
 target_include_directories(kernel_core_objects PRIVATE
   "${PROJECT_SOURCE_DIR}/src/common"
   "${OS1_ACPICA_CUSTOM_INCLUDE_DIR}"

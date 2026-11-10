@@ -45,5 +45,11 @@ with tempfile.TemporaryDirectory() as temporary:
 assert not any('/disk/bin/' + name in [e['destination'] for e in programs] for name in ('init', 'rescue'))
 assert {'/disk/bin/sh', '/disk/bin/ls', '/disk/bin/cat', '/disk/bin/textprocessor', '/disk/bin/counter', '/disk/bin/activation', '/disk/bin/intf',
         '/disk/bin/paramdemo', '/disk/bin/buffercheck', '/disk/bin/lshw', '/disk/bin/lspci', '/disk/bin/lsusb', '/disk/bin/lsblk'} <= {e['destination'] for e in programs}
-assert {e['destination'] for e in resources} == {'/disk/etc/motd'}
+packages = [e for e in resources if e['destination'].startswith('/disk/system/drivers/')]
+assert len(packages) == 1 and packages[0]['destination'].endswith('/virtio-net/manifest.json')
+package = json.loads(Path(packages[0]['source']).read_text())
+assert package['abi'] == 1 and package['pci'] == {'vendor': 0x1af4, 'device': 0x1041}
+assert package['image'] in {e['destination'] for e in programs}
+assert installed[package['image'].removeprefix('/disk')][1] == package['sha256']
+assert {e['destination'] for e in resources} == {'/disk/etc/motd', packages[0]['destination']}
 print(f'Two recovery executables; {len(programs)} complete disk ELFs; {len(resources)} resource defaults')

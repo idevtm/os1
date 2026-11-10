@@ -55,6 +55,9 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             command += ['-device', 'qemu-xhci,id=xhci', '-device', 'usb-kbd,bus=xhci.0']
     else:
         command += ['-device', 'virtio-blk-pci,drive=data,disable-legacy=on']
+    if getattr(args, 'driver_network', False):
+        command += ['-netdev', 'user,id=module-net', '-device',
+                    'virtio-net-pci,netdev=module-net,disable-legacy=on']
     if args.code:
         variables = log.with_suffix('.vars.fd')
         shutil.copyfile(args.vars, variables)

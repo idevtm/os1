@@ -17,7 +17,7 @@ The [service roadmap](native-api/roadmap.md) defines the next integration milest
 - one kernel-facing boot contract: `BootInfo`
 - an ACPICA-backed ACPI platform-discovery layer on both boot frontends
 - PCIe enumeration through ACPI `MCFG` and ECAM
-- a minimal static PCI driver model with binding, BAR ownership, IRQ route
+- a bounded PCI driver model with shared lifecycle admission, disk modules, binding, BAR ownership, IRQ route
   ownership, DMA records, and remove hooks
 - dynamic IRQ vector allocation plus MSI-X, MSI, and IOAPIC INTx fallback for
   PCI devices
@@ -25,7 +25,7 @@ The [service roadmap](native-api/roadmap.md) defines the next integration milest
 - a direct-map-backed kernel small-object allocator with real kernel consumers
 - shared virtio PCI transport and virtqueue helpers
 - an interrupt-driven modern `virtio-blk` path with reads and writes
-- a modern `virtio-net` path with ARP-level smoke coverage
+- a disk-loaded `virtio-net` path with ARP-level smoke coverage
 - an xHCI USB path with HID boot-keyboard input
 - an EHCI storage path with bounded high-speed hub discovery
 - a freestanding `C++20` kernel core with narrow assembly boundaries
@@ -220,7 +220,7 @@ Current kernel folders:
 | [../src/kernel/sync/](../src/kernel/sync) | Cross-subsystem synchronization primitives: atomics, BSP/SMP helper vocabulary, wait queues, and completions used by blocking paths. | `atomic.hpp`, `smp.*`, `wait_queue.*` |
 | [../src/kernel/syscall/](../src/kernel/syscall) | User/kernel ABI numbers, register-level dispatch, and individual syscall bodies. | `abi.hpp`, `dispatch.hpp`, `process.hpp`, `console_read.hpp`, `wait.hpp`, `observe.hpp`; syscall numbers live in [../src/uapi/os1/syscall_numbers.h](../src/uapi/os1/syscall_numbers.h) |
 | [../src/kernel/console/](../src/kernel/console) | Logical terminals, console byte streams, serial/keyboard line input, and terminal switching policy. | `terminal.*`, `console.*`, `console_input.*`, `terminal_switcher.*`, `pty/README.md` |
-| [../src/kernel/drivers/](../src/kernel/drivers) | Device-specific hardware drivers plus the minimal bus/virtio helper layers. Driver folders must not own platform-wide discovery policy. | `bus/`, `virtio/`, `block/virtio_blk.*`, `net/virtio_net.*`, `usb/xhci.*`, `display/text_display.*`, `input/ps2_keyboard.*`, `timer/pit.*` |
+| [../src/kernel/drivers/](../src/kernel/drivers) | Device-specific hardware drivers plus the minimal bus/virtio helper layers. Driver folders must not own platform-wide discovery policy. | `bus/`, `virtio/`, `block/virtio_blk.*`, `module/`, `usb/xhci.*`, `display/text_display.*`, `input/ps2_keyboard.*`, `timer/pit.*` |
 | [../src/kernel/platform/](../src/kernel/platform) | ACPI/PCI machine discovery, normalized platform state, CPU/APIC topology publication, IRQ routing records, PCI config/capability helpers, MSI/MSI-X programming, and device-probe sequencing. | `platform.hpp`, `types.hpp`, `state.hpp`, `init.cpp`, `acpi.hpp`, `pci.hpp`, `pci_config.hpp`, `pci_capability.hpp`, `pci_msi.hpp`, `irq_registry.hpp`, `irq_routing.hpp`, `device_probe.hpp` |
 | [../src/kernel/storage/](../src/kernel/storage) | Generic request-shaped block abstractions above concrete block drivers. | `block_device.hpp`, `README.md` |
 | [../src/kernel/fs/](../src/kernel/fs) | Concrete filesystem/archive parsers. Today this is the boot initrd CPIO parser, not a general namespace. | `initrd.*` |
@@ -231,7 +231,10 @@ Current kernel folders:
 | [../src/kernel/util/](../src/kernel/util) | Small generic helpers with no subsystem ownership. | `assert.hpp`, `align.hpp`, `ctype.hpp`, `fixed_string.hpp`, `memory.h`, `string.*` |
 | [../src/kernel/linker/](../src/kernel/linker) | Kernel linker scripts and link-layout variants. | `kernel_core.ld`, `kernel_limine.ld` |
 
-The split is intentionally monolithic at link time. These folders express ownership and readability, not a module ABI or loadable-driver boundary.
+Boot-critical drivers remain linked into the kernel.
+The optional virtio-net module loads from ext2 after storage startup.
+The [driver architecture](hardware/driver-architecture.md) separates packages, bindings, and functional objects.
+The [initial module profile](hardware/driver-module-abi.md) defines trusted loading and its limits.
 
 ## System Diagram
 
@@ -381,7 +384,7 @@ The shared entry runs one deterministic sequence:
   allocator, and registers exception handlers; `ipi_initialize()` then
   allocates the reschedule and TLB-shootdown vectors.
 12. `platform_probe_devices(kvm)` registers the static PCI drivers, probes PCI
-  devices, binds `virtio-blk`, `virtio-net`, and xHCI as available, claims
+  devices, binds built-in storage and USB drivers as available, claims
   BAR/DMA/IRQ resources, enables MSI-X/MSI/INTx as available, and runs the
   read/write block smoke.
 13. The keyboard and console-input subsystems are initialized, and ISA IRQs for
@@ -1251,7 +1254,7 @@ The kernel now:
   best-effort fallback
 - allocates coherent DMA buffers with explicit owner, virtual address, physical
   address, direction, page count, and active state
-- binds drivers through a static PCI registry and publishes device binding state
+- binds built-in and disk-loaded drivers through a bounded PCI registry and shared lifecycle admission
 - marks a failed PCI probe as failed and continues probing other devices
 - probes a modern `virtio-blk` PCI device through the shared virtio transport,
   publishes a request-shaped `BlockDevice`, completes reads and writes through
@@ -1707,3 +1710,20 @@ Scope cleanup releases input ownership before the prompt returns.
 Large evaluation buffers use bounded shell storage instead of recursive stack allocations.
 History recall reuses the command log and excludes scripts, pending records, and suppressed records.
 See the [guided command record](shell/guided-command-plan.md) for bounds, validation, and measured resource costs.
+
+## Disk-loaded driver boundary
+
+The boot worker loads optional drivers after mounting ext2 and before starting the first user process.
+It matches trusted PCI metadata before reading a bounded package snapshot.
+The kernel embeds the expected digest; discovery cannot authorize or initiate loading.
+Validated ELF segments use supervisor RX, R, or RW/NX mappings in a reserved module window.
+The existing synchronous TLB retirement path completes permission publication before module execution.
+
+A C-compatible host table supplies bounded virtio queues, DMA, interrupts, timing, and diagnostics.
+The module owns virtio-net packet and ARP behavior.
+The shared PCI lifecycle rejects duplicate probes and requires a quiescence result before removal.
+Failed bindings remain visible; uncertain DMA remains retained.
+Module code and the first transport's resources remain resident until reboot.
+
+This profile does not implement userspace driver isolation, runtime USB hotplug, general dependency resolution, or native network sessions.
+See the [module contract](hardware/driver-module-abi.md) and [implementation plan](hardware/driver-lifecycle-plan.md).

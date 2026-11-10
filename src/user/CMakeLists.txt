@@ -192,7 +192,18 @@ foreach(program IN LISTS OS1_USER_PROGRAM_FILES)
 endforeach()
 # Retain the published path used by older images and deployment workflows.
 string(APPEND program_manifest ",{\"source\":\"${OS1_USER_DISKUTIL_ELF}\",\"destination\":\"/disk/diskutil\"}],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/disk/etc/motd\"}]}\n")
-file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json" CONTENT "${program_manifest}")
+file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs-base.json" CONTENT "${program_manifest}")
+add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json"
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"
+    --base "${OS1_GENERATED_DIR}/storage-programs-base.json"
+    --metadata "${OS1_DRIVER_METADATA}" --image "${OS1_DRIVER_ELF}"
+    --output "${OS1_GENERATED_DIR}/storage-programs.json"
+  DEPENDS "${OS1_GENERATED_DIR}/storage-programs-base.json" "${OS1_DRIVER_METADATA}"
+    "${OS1_DRIVER_ELF}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
+  VERBATIM)
+add_custom_target(os1_storage_manifest ALL DEPENDS "${OS1_GENERATED_DIR}/storage-programs.json")
+list(APPEND OS1_USER_PROGRAM_FILES "${OS1_DRIVER_ELF}" "${OS1_GENERATED_DIR}/storage-programs.json")
 set(OS1_USER_PROGRAM_FILES "${OS1_USER_PROGRAM_FILES}" PARENT_SCOPE)
 
 add_custom_command(

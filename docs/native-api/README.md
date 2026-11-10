@@ -19,6 +19,7 @@ flowchart TD
 
 | Document | Authority and status |
 | --- | --- |
+| [Driver architecture](../hardware/driver-architecture.md) | Accepted disk-module, lifecycle, hotplug, and functional-object direction |
 | [Hardware objects](hardware-objects.md) | Combined topology and functional-object architecture accepted; passive reflection implemented. |
 | [Reflective OS hierarchy](object-hierarchy.md) | Option B selected on 2026-11-07; proposed service roots and discovery; bounded typed context is now implemented. |
 | [Context discovery and diagnostics](context-diagnostics.md) | Memory logs, bounded export, and fixed live inspection are implemented; general reflection remains planned. |
@@ -67,6 +68,9 @@ The [approved object-handle model](object-contract.md#object-handles-and-interop
 The current encoding remains `fd`; general typed owning/borrowed C++ wrappers remain SDK work.
 
 ## Latest implementation
+
+The [driver module profile](../hardware/driver-module-abi.md) defines the first disk-loaded kernel driver.
+This internal boundary does not change native application interfaces.
 
 The [runtime discovery profile](context-discovery.md) adds bounded inspection and shell completion without activation.
 The [implementation record](context-completion-plan.md) contains its checks, measurements, and limitations.

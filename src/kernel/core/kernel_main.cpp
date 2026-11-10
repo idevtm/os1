@@ -28,6 +28,7 @@
 #include "debug/event_ring.hpp"
 #include "drivers/block/virtio_blk.hpp"
 #include "drivers/display/text_display.hpp"
+#include "drivers/module/loader.hpp"
 #include "drivers/timer/pit.hpp"
 #include "drivers/usb/xhci.hpp"
 #include "drivers/watchdog/intel_tco.hpp"
@@ -426,6 +427,7 @@ bool prepare_scheduler_timer()
         write_console_line("invalid initrd namespace");
         finish_boot_sequence_thread(1);
     }
+    load_boot_drivers();
     log_export::initialize();
     Thread* init_thread =
         load_user_program(page_frames, g_kernel_root_cr3, "/bin/init", nullptr, false);

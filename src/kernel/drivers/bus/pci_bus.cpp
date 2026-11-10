@@ -9,6 +9,39 @@
 #include "platform/platform.hpp"
 #include "platform/types.hpp"
 
+namespace
+{
+bool probe_one(VirtualMemory& vm, PageFrameContainer& frames, const PciDriver& driver, size_t index)
+{
+    DeviceId id{DeviceBus::Pci, static_cast<uint16_t>(index)};
+    auto admission = device_binding_begin_probe(id, static_cast<uint16_t>(index), driver.name);
+    if(admission == BindingAdmission::Existing)
+        return false;
+    if(admission == BindingAdmission::NoMemory)
+    {
+        hardware_record_probe_failure(index, driver.name);
+        debug("pci: ")(driver.name)(" binding allocation failed")();
+        return false;
+    }
+    bool success = driver.probe(vm, frames, platform_pci_devices()[index], index, id);
+    (void)device_binding_finish_probe(id, success);
+    if(!success)
+    {
+        hardware_record_probe_failure(index, driver.name);
+        debug("pci: ")(driver.name)(" probe failed; resources require driver retirement")();
+    }
+    return success;
+}
+}  // namespace
+bool pci_bus_probe_driver(VirtualMemory& vm, PageFrameContainer& frames, const PciDriver& driver)
+{
+    bool success = true;
+    for(size_t i = 0; i < platform_pci_device_count(); ++i)
+        if(pci_driver_matches_device(driver, platform_pci_devices()[i]))
+            success = probe_one(vm, frames, driver, i) && success;
+    return success;
+}
+
 bool pci_bus_probe_all(VirtualMemory& kernel_vm, PageFrameContainer& frames)
 {
     hardware_reset_bindings();
@@ -19,7 +52,6 @@ bool pci_bus_probe_all(VirtualMemory& kernel_vm, PageFrameContainer& frames)
     {
         for(size_t device_index = 0; device_index < device_count; ++device_index)
         {
-            DeviceId id{DeviceBus::Pci, static_cast<uint16_t>(device_index)};
             for(size_t driver_index = 0; driver_index < pci_driver_count(); ++driver_index)
             {
                 const PciDriver* driver = pci_driver_at(driver_index);
@@ -31,20 +63,7 @@ bool pci_bus_probe_all(VirtualMemory& kernel_vm, PageFrameContainer& frames)
 
                 if(driver->probe_early != (phase == 0u))
                     break;  // The first matching driver retains ownership in either phase.
-                (void)device_binding_set_state(id, DeviceState::Probing);
-
-                if(driver->probe(kernel_vm, frames, devices[device_index], device_index, id))
-                {
-                    break;
-                }
-
-                // One misbehaving device must not stop bring-up: real machines carry
-                // controllers that emulator-tested drivers have never seen.
-                debug("pci: ")(driver->name)(" probe failed for ")(
-                    devices[device_index].bus, 16, 2)(":")(devices[device_index].slot, 16, 2)(".")(
-                    devices[device_index].function, 16, 1)("; continuing without it")();
-                (void)device_binding_set_state(id, DeviceState::Failed);
-                hardware_record_probe_failure(device_index, driver->name);
+                (void)probe_one(kernel_vm, frames, *driver, device_index);
                 break;
             }
         }
@@ -62,6 +81,11 @@ bool pci_bus_remove_device(DeviceId id)
             if((nullptr != driver) && (nullptr != driver->remove) &&
                freestanding::strings_equal(binding->driver_name, driver->name))
             {
+                if(!driver->quiesce || !device_binding_begin_remove(id))
+                    return false;
+                bool retired = driver->quiesce(id);
+                if(!device_binding_finish_remove(id, retired) || !retired)
+                    return false;
                 driver->remove(id);
                 device_binding_remove(id);
                 return true;

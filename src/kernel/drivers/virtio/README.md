@@ -19,4 +19,4 @@ Current limits:
 - MSI-X/MSI/INTx selection is delegated to the PCI interrupt layer.
 - The transport is intentionally protocol-agnostic; block request headers and
   status handling stay in `drivers/block/virtio_blk.cpp`, and network framing
-  stays in `drivers/net/virtio_net.cpp`.
+  stays in the disk-loaded `src/drivers/virtio-net/driver.cpp` module.

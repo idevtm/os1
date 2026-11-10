@@ -21,11 +21,13 @@ def main():
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--workload', choices=('context', 'utilities'), default='context')
     parser.add_argument('--transport', choices=('virtio', 'usb'), default='virtio')
+    parser.add_argument('--driver-network', action='store_true')
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     report = {'machine': 'q35', 'cpus': 4, 'ram_mib': 128, 'repeat_count': 3,
               'workload': args.workload, 'transport': args.transport,
+              'driver_network': args.driver_network,
               'samples': [], 'artifacts': {}}
     for label in ('baseline', 'candidate'):
         root = Path(getattr(args, label))
@@ -41,6 +43,7 @@ def main():
                 disk = stem.with_suffix('.raw')
                 shutil.copyfile(root / 'program-test-disk.raw', disk)
                 run = SimpleNamespace(qemu=args.qemu, transport=args.transport,
+                    driver_network=args.driver_network,
                     image=str(root / ('os1.raw' if firmware == 'bios' else 'os1.iso')),
                     code=args.code if firmware == 'uefi' else None,
                     vars=args.vars if firmware == 'uefi' else None, log=str(stem.with_suffix('.log')))

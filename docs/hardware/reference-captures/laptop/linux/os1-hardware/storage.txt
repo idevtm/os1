@@ -1,0 +1,28 @@
+NAME   TYPE   SIZE FSTYPE   MODEL                  TRAN
+loop0  loop     4K squashfs                        
+loop1  loop  66.8M squashfs                        
+loop2  loop  66.8M squashfs                        
+loop3  loop    20M squashfs                        
+loop4  loop  14.2M squashfs                        
+loop5  loop 260.3M squashfs                        
+loop6  loop 614.5M squashfs                        
+loop7  loop 262.2M squashfs                        
+loop8  loop  91.7M squashfs                        
+loop9  loop  16.5M squashfs                        
+loop10 loop  12.7M squashfs                        
+loop11 loop   1.5M squashfs                        
+loop12 loop 615.3M squashfs                        
+loop13 loop   1.5M squashfs                        
+loop14 loop  18.8M squashfs                        
+loop15 loop  18.4M squashfs                        
+loop16 loop   402M squashfs                        
+loop17 loop  11.8M squashfs                        
+loop18 loop  50.1M squashfs                        
+loop19 loop  44.7M squashfs                        
+loop20 loop   828K squashfs                        
+sda    disk 476.9G          SPCC Solid State Disk  sata
+├─sda1 part     1G vfat                            
+└─sda2 part 475.9G ext4                            
+sdb    disk 698.6G          WDC WD7500BPKT-80PK4T0 sata
+└─sdb1 part 698.6G ntfs                            
+sr0    rom   1024M          SlimtypeDVD A DS8A5SH  sata

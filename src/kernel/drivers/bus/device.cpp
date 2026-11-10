@@ -1,6 +1,8 @@
 // Bound device records stored in platform state.
 #include "drivers/bus/device.hpp"
 
+#include "driver/lifecycle.hpp"
+#include "freestanding/string.hpp"
 #include "mm/kmem.hpp"
 #include "platform/state.hpp"
 #include "sync/smp.hpp"
@@ -11,6 +13,7 @@ namespace
 struct DeviceBindingNode
 {
     DeviceBinding binding{};
+    driver::Lifecycle lifecycle{};
     DeviceBindingNode* next = nullptr;
 };
 
@@ -76,7 +79,8 @@ using DeviceBindingGuard = IrqSpinGuard<Spinlock>;
 DeviceBindingNode* find_binding_node_locked(DeviceId id, DeviceBindingNode** previous = nullptr)
 {
     DeviceBindingNode* prior = nullptr;
-    for(DeviceBindingNode* node = g_device_binding_registry.head; nullptr != node; node = node->next)
+    for(DeviceBindingNode* node = g_device_binding_registry.head; nullptr != node;
+        node = node->next)
     {
         if(device_id_equal(node->binding.id, id))
         {
@@ -138,37 +142,44 @@ void device_binding_registry_reset()
     g_device_binding_registry.snapshot_capacity = 0;
 }
 
-bool device_binding_publish(DeviceId id,
-                            uint16_t pci_index,
-                            const char* driver_name,
-                            void* driver_state)
+static BindingAdmission publish_binding(
+    DeviceId id, uint16_t pci_index, const char* driver_name, void* driver_state, bool probing)
 {
     DeviceBindingGuard guard(g_device_binding_registry.lock);
     if(DeviceBindingNode* existing = find_binding_node_locked(id))
     {
+        if(probing || !freestanding::strings_equal(existing->binding.driver_name, driver_name) ||
+           (existing->lifecycle.state() != driver::State::starting &&
+            existing->lifecycle.state() != driver::State::ready))
+            return BindingAdmission::Existing;
         existing->binding.active = true;
         existing->binding.pci_index = pci_index;
         existing->binding.driver_name = driver_name;
         existing->binding.driver_state = driver_state;
         existing->binding.state = DeviceState::Bound;
-        return true;
+        return BindingAdmission::Published;
     }
 
-    if(!ensure_snapshot_capacity(g_device_binding_registry.count + 1u) || !ensure_device_binding_cache())
+    if(!ensure_snapshot_capacity(g_device_binding_registry.count + 1u) ||
+       !ensure_device_binding_cache())
     {
-        return false;
+        return BindingAdmission::NoMemory;
     }
 
     auto* node = static_cast<DeviceBindingNode*>(
         kmem_cache_alloc(g_device_binding_registry.cache, KmallocFlags::Zero));
     if(nullptr == node)
     {
-        return false;
+        return BindingAdmission::NoMemory;
     }
 
+    node->lifecycle = driver::Lifecycle{};
+    (void)node->lifecycle.start();
+    if(!probing)
+        (void)node->lifecycle.started(true);
     node->binding.active = true;
     node->binding.id = id;
-    node->binding.state = DeviceState::Bound;
+    node->binding.state = probing ? DeviceState::Probing : DeviceState::Bound;
     node->binding.pci_index = pci_index;
     node->binding.driver_name = driver_name;
     node->binding.driver_state = driver_state;
@@ -183,7 +194,16 @@ bool device_binding_publish(DeviceId id,
     }
     g_device_binding_registry.tail = node;
     ++g_device_binding_registry.count;
-    return true;
+    return BindingAdmission::Published;
+}
+
+bool device_binding_publish(DeviceId id, uint16_t pci_index, const char* name, void* state)
+{
+    return publish_binding(id, pci_index, name, state, false) == BindingAdmission::Published;
+}
+BindingAdmission device_binding_begin_probe(DeviceId id, uint16_t pci_index, const char* name)
+{
+    return publish_binding(id, pci_index, name, nullptr, true);
 }
 
 bool device_binding_set_state(DeviceId id, DeviceState state)
@@ -234,9 +254,38 @@ const DeviceBinding* device_bindings()
     }
 
     size_t index = 0;
-    for(DeviceBindingNode* node = g_device_binding_registry.head; nullptr != node; node = node->next)
+    for(DeviceBindingNode* node = g_device_binding_registry.head; nullptr != node;
+        node = node->next)
     {
         g_device_binding_registry.snapshot[index++] = node->binding;
     }
     return g_device_binding_registry.snapshot;
+}
+
+bool device_binding_finish_probe(DeviceId id, bool success)
+{
+    DeviceBindingGuard guard(g_device_binding_registry.lock);
+    auto* node = find_binding_node_locked(id);
+    if(!node || !node->lifecycle.started(success))
+        return false;
+    node->binding.state = success ? DeviceState::Started : DeviceState::Failed;
+    return true;
+}
+bool device_binding_begin_remove(DeviceId id)
+{
+    DeviceBindingGuard guard(g_device_binding_registry.lock);
+    auto* node = find_binding_node_locked(id);
+    if(!node || !node->lifecycle.stop())
+        return false;
+    node->binding.state = DeviceState::Stopping;
+    return true;
+}
+bool device_binding_finish_remove(DeviceId id, bool retired)
+{
+    DeviceBindingGuard guard(g_device_binding_registry.lock);
+    auto* node = find_binding_node_locked(id);
+    if(!node || !node->lifecycle.stopped(retired))
+        return false;
+    node->binding.state = retired ? DeviceState::Removed : DeviceState::Failed;
+    return true;
 }

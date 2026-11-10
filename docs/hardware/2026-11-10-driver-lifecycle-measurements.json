@@ -1,0 +1,567 @@
+{
+  "machine": "q35",
+  "cpus": 4,
+  "ram_mib": 128,
+  "repeat_count": 3,
+  "workload": "utilities",
+  "transport": "virtio",
+  "driver_network": true,
+  "samples": [
+    {
+      "revision": "baseline",
+      "firmware": "bios",
+      "repeat": 0,
+      "boot_seconds": 0.472041,
+      "workload_seconds": 1.857924,
+      "qemu_cpu_seconds": 2.500635,
+      "pages_before": [
+        31586,
+        32732
+      ],
+      "pages_after": [
+        31585,
+        32732
+      ],
+      "kmem_before": [
+        14,
+        171,
+        569,
+        2349,
+        0
+      ],
+      "kmem_after": [
+        14,
+        172,
+        569,
+        2352,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "candidate",
+      "firmware": "bios",
+      "repeat": 0,
+      "boot_seconds": 0.476488,
+      "workload_seconds": 1.824524,
+      "qemu_cpu_seconds": 2.475461,
+      "pages_before": [
+        31581,
+        32732
+      ],
+      "pages_after": [
+        31580,
+        32732
+      ],
+      "kmem_before": [
+        13,
+        172,
+        463,
+        2354,
+        0
+      ],
+      "kmem_after": [
+        13,
+        173,
+        463,
+        2357,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "baseline",
+      "firmware": "bios",
+      "repeat": 1,
+      "boot_seconds": 0.468983,
+      "workload_seconds": 1.845064,
+      "qemu_cpu_seconds": 2.4811650000000003,
+      "pages_before": [
+        31586,
+        32732
+      ],
+      "pages_after": [
+        31585,
+        32732
+      ],
+      "kmem_before": [
+        14,
+        171,
+        569,
+        2349,
+        0
+      ],
+      "kmem_after": [
+        14,
+        172,
+        569,
+        2352,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "candidate",
+      "firmware": "bios",
+      "repeat": 1,
+      "boot_seconds": 0.473982,
+      "workload_seconds": 1.853069,
+      "qemu_cpu_seconds": 2.5072399999999986,
+      "pages_before": [
+        31581,
+        32732
+      ],
+      "pages_after": [
+        31580,
+        32732
+      ],
+      "kmem_before": [
+        13,
+        172,
+        463,
+        2354,
+        0
+      ],
+      "kmem_after": [
+        13,
+        173,
+        463,
+        2357,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "baseline",
+      "firmware": "bios",
+      "repeat": 2,
+      "boot_seconds": 0.488251,
+      "workload_seconds": 1.933193,
+      "qemu_cpu_seconds": 2.6126449999999997,
+      "pages_before": [
+        31586,
+        32732
+      ],
+      "pages_after": [
+        31585,
+        32732
+      ],
+      "kmem_before": [
+        14,
+        171,
+        569,
+        2349,
+        0
+      ],
+      "kmem_after": [
+        14,
+        172,
+        569,
+        2352,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "candidate",
+      "firmware": "bios",
+      "repeat": 2,
+      "boot_seconds": 0.473863,
+      "workload_seconds": 1.850786,
+      "qemu_cpu_seconds": 2.524876,
+      "pages_before": [
+        31581,
+        32732
+      ],
+      "pages_after": [
+        31580,
+        32732
+      ],
+      "kmem_before": [
+        13,
+        172,
+        463,
+        2354,
+        0
+      ],
+      "kmem_after": [
+        13,
+        173,
+        463,
+        2357,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "baseline",
+      "firmware": "uefi",
+      "repeat": 0,
+      "boot_seconds": 1.924388,
+      "workload_seconds": 0.733261,
+      "qemu_cpu_seconds": 2.7402120000000014,
+      "pages_before": [
+        19160,
+        24676
+      ],
+      "pages_after": [
+        19160,
+        24676
+      ],
+      "kmem_before": [
+        14,
+        171,
+        569,
+        2349,
+        0
+      ],
+      "kmem_after": [
+        14,
+        171,
+        569,
+        2349,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "candidate",
+      "firmware": "uefi",
+      "repeat": 0,
+      "boot_seconds": 1.951379,
+      "workload_seconds": 0.721004,
+      "qemu_cpu_seconds": 2.753751999999999,
+      "pages_before": [
+        19154,
+        24676
+      ],
+      "pages_after": [
+        19154,
+        24676
+      ],
+      "kmem_before": [
+        13,
+        172,
+        463,
+        2354,
+        0
+      ],
+      "kmem_after": [
+        13,
+        172,
+        463,
+        2354,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "baseline",
+      "firmware": "uefi",
+      "repeat": 1,
+      "boot_seconds": 1.942407,
+      "workload_seconds": 0.732467,
+      "qemu_cpu_seconds": 2.7562229999999976,
+      "pages_before": [
+        19160,
+        24676
+      ],
+      "pages_after": [
+        19160,
+        24676
+      ],
+      "kmem_before": [
+        14,
+        171,
+        569,
+        2349,
+        0
+      ],
+      "kmem_after": [
+        14,
+        171,
+        569,
+        2349,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "candidate",
+      "firmware": "uefi",
+      "repeat": 1,
+      "boot_seconds": 1.939058,
+      "workload_seconds": 0.725624,
+      "qemu_cpu_seconds": 2.7423150000000005,
+      "pages_before": [
+        19154,
+        24676
+      ],
+      "pages_after": [
+        19154,
+        24676
+      ],
+      "kmem_before": [
+        13,
+        172,
+        463,
+        2354,
+        0
+      ],
+      "kmem_after": [
+        13,
+        172,
+        463,
+        2354,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "baseline",
+      "firmware": "uefi",
+      "repeat": 2,
+      "boot_seconds": 1.955052,
+      "workload_seconds": 0.827391,
+      "qemu_cpu_seconds": 2.8847050000000007,
+      "pages_before": [
+        19160,
+        24676
+      ],
+      "pages_after": [
+        19159,
+        24676
+      ],
+      "kmem_before": [
+        14,
+        171,
+        569,
+        2349,
+        0
+      ],
+      "kmem_after": [
+        14,
+        172,
+        570,
+        2351,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    },
+    {
+      "revision": "candidate",
+      "firmware": "uefi",
+      "repeat": 2,
+      "boot_seconds": 1.981242,
+      "workload_seconds": 0.722295,
+      "qemu_cpu_seconds": 2.7712459999999983,
+      "pages_before": [
+        19154,
+        24676
+      ],
+      "pages_after": [
+        19154,
+        24676
+      ],
+      "kmem_before": [
+        13,
+        172,
+        463,
+        2354,
+        0
+      ],
+      "kmem_after": [
+        13,
+        172,
+        463,
+        2354,
+        0
+      ],
+      "utility_output_bytes": {
+        "lspci": 1090,
+        "lsusb -t": 149,
+        "lsblk": 445,
+        "lshw": 4314
+      }
+    }
+  ],
+  "artifacts": {
+    "baseline": {
+      "kernel.elf": {
+        "bytes": 593256,
+        "sha256": "35b9433ec023e36173112accf32a912f29ee89f982c49ed1caaa31c7c1ef45c2"
+      },
+      "initrd.cpio": {
+        "bytes": 7680,
+        "sha256": "1972890b7f4e9c5366fbdb99287c9f18ce4a1f8371dd1bd8ae42f59c7be20103"
+      },
+      "os1.raw": {
+        "bytes": 1474560,
+        "sha256": "a94e9a9c7ed2b2b5b427efa0d905d7ad589d29bcf665e5ce887c6cc6f3e24e90"
+      },
+      "os1.iso": {
+        "bytes": 4327424,
+        "sha256": "0ae819d59ec70e381140430396437ff83925da40f07c4a0f59b086865387709c"
+      },
+      "program-test-disk.raw": {
+        "bytes": 34603008,
+        "sha256": "8a5b48e799e847091dba9374ebea308b7eddb820e0c881daae7fd4d2b6f6b124"
+      }
+    },
+    "candidate": {
+      "kernel.elf": {
+        "bytes": 595816,
+        "sha256": "eb6d3589079da31f7cf44005bb41cdbfe6f26d0d200e3c2409a2e8ad44c57ae1"
+      },
+      "initrd.cpio": {
+        "bytes": 7680,
+        "sha256": "ca4317f20859a796119f04b349c1679d15aed7414b5da8a9881fd907e1321c79"
+      },
+      "os1.raw": {
+        "bytes": 1474560,
+        "sha256": "275e6ad9a4a5a8c252cde08632a60e54e827ad09ed9ca14c7eb3e457d6bf83a3"
+      },
+      "os1.iso": {
+        "bytes": 4329472,
+        "sha256": "5bc2593da466b2973fe084f73c3ce175577feb313c602fa339f5828d23d81958"
+      },
+      "program-test-disk.raw": {
+        "bytes": 34603008,
+        "sha256": "1c3839b894c57f4725401644dc72c556b4f02769cc8afd9ccb4e53f689a8ba19"
+      }
+    }
+  },
+  "baseline_revision": "10cb464876619959bf5dc84c69cebb1a3613465e",
+  "candidate": "codex/loadable-driver-lifecycle working tree based on 10cb464876619959bf5dc84c69cebb1a3613465e",
+  "module": {
+    "version": 1,
+    "driver": "virtio-net",
+    "kernel_build": "e41197f22ea01483eae157025a9022647581cbd39c896cc21e67063f1137cfb7",
+    "sha256": "14da356628211f5a005c19fd243ee0647adf71d54408d9fd486a5f9fc8486b1c",
+    "abi": 1,
+    "pci": {
+      "vendor": 6900,
+      "device": 4161
+    },
+    "dependencies": [
+      "kernel.virtio_queue.v1"
+    ],
+    "firmware": [],
+    "image": "/disk/system/drivers/e41197f22ea01483/virtio-net/driver.elf"
+  },
+  "environment": {
+    "host": "Apple M4 Max, 64 GiB, macOS 26.6.2 (25G83)",
+    "qemu": "11.1.3, TCG",
+    "compiler": "x86_64-elf-g++ 11.2.0",
+    "cmake": "4.4.5",
+    "profile": "Debug; KMEM_DEBUG=ON; QEMU_DEBUGCON=ON; BOOT_DIAGNOSTICS=OFF; USB_KEYBOARD_DIAGNOSTICS=OFF",
+    "module_optimization": "-Os",
+    "kernel_optimization": "C++ -Os; C -O1; Limine frontend -O0",
+    "qemu_concurrency": 1
+  },
+  "firmware": {
+    "edk2-x86_64-code.fd": {
+      "path": "/opt/homebrew/share/qemu/edk2-x86_64-code.fd",
+      "sha256": "33090cc07675baa5190d9f1e84bf5176b33bcbfa9bacac522961150cdb6dbb2a"
+    },
+    "edk2-i386-vars.fd": {
+      "path": "/opt/homebrew/share/qemu/edk2-i386-vars.fd",
+      "sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+    }
+  },
+  "storage": {
+    "baseline": {
+      "used_blocks": 136,
+      "used_inodes": 47,
+      "block_bytes": 4096
+    },
+    "candidate": {
+      "used_blocks": 144,
+      "used_inodes": 53,
+      "block_bytes": 4096
+    }
+  },
+  "tests": {
+    "command": "./scripts/check-local.sh",
+    "exit_status": 0,
+    "host": {
+      "passed": 629,
+      "seconds": 21.49
+    },
+    "normal": {
+      "passed": 88,
+      "seconds": 394.21
+    },
+    "diagnostic": {
+      "passed": 3,
+      "seconds": 5.87
+    },
+    "log": "build/driver-lifecycle/full-local-final.log",
+    "first_attempt": "build/driver-lifecycle/full-local-1.log"
+  },
+  "review": {
+    "blocking_findings": 0,
+    "corrected": [
+      "Restore PCI_BIND event",
+      "Report binding allocation failure"
+    ],
+    "retracted": [
+      "Test extraction collision: wrapper provides per-invocation directories"
+    ]
+  }
+}

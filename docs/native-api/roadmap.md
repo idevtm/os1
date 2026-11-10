@@ -424,3 +424,11 @@ Low/full-speed EHCI transfers and class drivers remain separate work.
 The first profile remains a boot snapshot. Runtime device removal does not update reflected state.
 The [hotplug follow-up](hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) requires detection, deferred publication, generations, notifications, and safe teardown.
 SMBIOS, detailed endpoints, broader partition formats, and vendor naming databases remain separate extensions.
+
+## Driver lifecycle and package sequence
+
+The [driver architecture](../hardware/driver-architecture.md) consolidates detection, disk packages, hotplug, and functional objects.
+The [first slice](../hardware/driver-lifecycle-plan.md) adds shared PCI lifetime and a disk-loaded virtio-net driver.
+Boot-storage drivers remain built in; optional modules execute inside the kernel.
+USB hotplug and input services follow this foundation.
+Internal storage, fixed display output, power events, wired networking, and advanced devices follow the recorded priorities.
