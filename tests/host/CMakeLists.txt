@@ -214,6 +214,7 @@ add_executable(os1_host_tests
   kernel/ehci_tests.cpp
   kernel/usb_storage_tests.cpp
   kernel/hid_keyboard_tests.cpp
+  kernel/ipi_tests.cpp
   kernel/ext2_tests.cpp
   kernel/xhci_controller_tests.cpp
   mm/kmem_tests.cpp

@@ -11,6 +11,7 @@
 
 #if defined(OS1_HOST_TEST)
 void (*host_tlb_retirement_wait)(cpu*) = nullptr;
+void (*host_ipi_destination_written)() = nullptr;
 #endif
 namespace
 {
@@ -37,8 +38,15 @@ void wait_for_icr_delivery()
 
 void lapic_icr_write(uint32_t high, uint32_t low)
 {
+    // The destination and command are one per-CPU transaction. A nested timer
+    // wakeup must not replace ICRHI before this caller publishes ICRLO.
+    IrqGuard irq;
     wait_for_icr_delivery();
     lapic[ICRHI] = high;
+#if defined(OS1_HOST_TEST)
+    if(host_ipi_destination_written)
+        host_ipi_destination_written();
+#endif
     lapic[ICRLO] = low;
     (void)lapic[ID];
     wait_for_icr_delivery();
@@ -132,7 +140,8 @@ bool ipi_send_reschedule(const cpu* target)
 #if defined(OS1_HOST_TEST)
     // Hardware-boundary seam: host tests may model an AP consuming publication.
     extern void host_reschedule_delivered(const cpu*);
-    if(sent) host_reschedule_delivered(target);
+    if(sent)
+        host_reschedule_delivered(target);
 #endif
     if(!sent)
     {
