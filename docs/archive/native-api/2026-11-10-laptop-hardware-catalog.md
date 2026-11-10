@@ -91,3 +91,5 @@ The table preserves their identities without publishing unrelated network config
 | Linux | `lspci.txt` | 1908 | `6fe5df39c315244318539f63fe952a207ba7ce31e7f33072ad123f9efd50f47b` |
 | Linux | `lsusb-t.txt` | 878 | `c00bea1f5d773711785878aea00a508d9faf2ff3d761f59ace95625e1f5bab0b` |
 | Linux | `lsusb.txt` | 710 | `cff9bff92fbfcf1be2b5e0c8377e530c96392af8e3553c5e91b50a39d1b75edb` |
+
+The subsequent [laptop retest](2026-11-10-laptop-hardware-catalog-retest.md) records the updated presentation and additional observations.

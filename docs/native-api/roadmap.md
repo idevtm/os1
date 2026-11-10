@@ -417,7 +417,8 @@ It joins USB descriptors, driver bindings, block geometry, observed partitions, 
 `lshw`, `lspci`, `lsusb`, and `lsblk` consume the same records as context and Tab navigation.
 
 The [laptop comparison](../archive/native-api/2026-11-10-laptop-hardware-catalog.md) confirms PCI coverage and USB storage relationships.
-Unsupported-speed presence records and utility presentation improve inspection without adding transfer support.
+The [laptop retest](../archive/native-api/2026-11-10-laptop-hardware-catalog-retest.md) confirms CPU descriptions, boot memory totals, firmware links, and unsupported USB presence.
+These observations improve inspection without adding transfer support.
 Cached CPU identity, boot memory totals, and verified PCI/ACPI associations enrich the same passive view.
 Low/full-speed EHCI transfers and class drivers remain separate work.
 The first profile remains a boot snapshot. Runtime device removal does not update reflected state.

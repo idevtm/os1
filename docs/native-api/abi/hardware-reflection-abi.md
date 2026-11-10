@@ -128,7 +128,7 @@ A failed user-buffer copy returns an error; no kernel address enters the respons
 ## Runtime integration and limits
 
 The fixed runtime registry retains its 256-node limit.
-External hardware IDs do not consume fixed registry entries beyond five root aliases and an optional `os.system` container.
+External hardware IDs consume six fixed registry entries for aliases and one optional `os.system` container.
 The runtime retains one 1512-byte page cache rather than a complete hardware tree.
 Completion retains at most 2048 matching IDs and displays eight choices at a time.
 It rejects a larger result rather than writing beyond the match array.

@@ -163,4 +163,5 @@ All six catalog smokes passed across virtio, xHCI, EHCI, BIOS, and UEFI.
 Independent source review found no remaining defects; a separate pass verified the corrected name assertions.
 The [follow-up evidence](../archive/native-api/2026-11-10-hardware-presentation.md) records timings, resource differences, and preserved failures.
 Twelve comparative boots measured utility, startup, memory, and image costs.
-New physical descriptions and anonymous unsupported-device capture still require hardware retesting.
+The [laptop retest](../archive/native-api/2026-11-10-laptop-hardware-catalog-retest.md) confirms summary descriptions, firmware links, and anonymous unsupported-device capture.
+Desktop acceptance, interactive Tab navigation, and complete verbose platform fields remain pending.

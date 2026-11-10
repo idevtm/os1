@@ -121,7 +121,7 @@ The report retains these variations; it does not claim a leak-free lifecycle fro
 The 256-record catalog remains 151616 bytes. Three fixed platform records and firmware references add 2776 bytes of static data.
 The kernel window change accommodates these records and additional code while preserving the 16 KiB post-image reserve.
 No fixed performance threshold applies to this slice; correctness, bounds, and passive discovery requirements passed.
-Physical timing and new descriptions remain unmeasured until hardware retesting.
+Physical timing remains unmeasured. The later laptop retest validates summary descriptions without timing claims.
 
 Raw samples and hashes are in `build/hardware-presentation/measurements/measurements.json`.
 Individual serial logs and timing profiles are beside that file.
@@ -174,8 +174,8 @@ Changed Python syntax, local document targets, whitespace, and secret checks pas
 The captured hardware data contains identifiers and evidence hashes, not credentials.
 
 The laptop captures describe the earlier catalog implementation.
-The new presentation and unsupported-device records remain unmeasured on physical hardware.
-Retest both machines with updated kernel and ext2 programs.
+The later [laptop retest](2026-11-10-laptop-hardware-catalog-retest.md) confirms presentation and unsupported-device records on physical hardware.
+Desktop acceptance and complete verbose platform-field coverage remain pending.
 On the laptop, inspect anonymous 12 Mbit/s and 1.5 Mbit/s records where those devices remain connected.
 Do not infer vendor or product identity from an anonymous record alone.
 The complete ASD-STE100 standard and dictionary were unavailable; full compliance remains unverified.
@@ -200,7 +200,7 @@ This includes CPU leaf bounds, memory-map rejection, address matching, and ACPIC
 
 CPU decoding follows the Intel architectural [CPUID definition](https://www.intel.com/content/www/us/en/support/articles/000006831/processors/intel-processor.html).
 The complete CPUID leaf definitions are in the Intel Software Developer's Manual.
-Physical acceptance of these new descriptions remains pending.
+The laptop retest confirms summary descriptions; verbose-field and desktop acceptance remain pending.
 
 The expanded full run exposed stale context-completion assertions for the old `PCI function` label.
 The actual QEMU host-bridge name is now `Intel Bridge`, as required by the readable-name change.
