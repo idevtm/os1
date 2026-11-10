@@ -406,7 +406,8 @@ long roundtrip(int fd)
 struct Input
 {
     uint64_t id{}, interface{}, events{}, movement{}, button_changes{}, shift_changes{};
-    unsigned buttons{}, shift{};
+    unsigned buttons{}, shift{}, kind{}, catalog_id{};
+    tr::InputFailures failures{};
     int subscription{-1};
 };
 Input inputs[OS1_INPUT_DEVICE_LIMIT]{};
@@ -490,11 +491,31 @@ long input_checks()
         auto& retained = inputs[input_count++];
         retained.id = info.device;
         retained.interface = iface;
+        retained.kind = info.kind;
+        retained.catalog_id = info.catalog_id;
         retained.buttons = state.buttons;
         retained.shift = state.keys[28] & 2;
         retained.subscription = b.take();
     }
     return io_failed ? OS1_ERR_IO : 0;
+}
+void failure_sample(const char* label, const tr::InputFailureSample& sample)
+{
+    text(journal, label);
+    text(journal, "\n");
+    field(journal, "observed_ns", sample.observed_ns);
+    field(journal, "sequence", sample.sequence);
+    field(journal, "event_ns", sample.event_ns);
+    field(journal, "event_device", sample.device);
+    field(journal, "lost", sample.lost);
+    text(journal, "status=");
+    if(sample.status < 0)
+        text(journal, "-");
+    number(journal, sample.status < 0 ? uint64_t(0) - uint64_t(sample.status) : sample.status);
+    text(journal, "\n");
+    field(journal, "payload_bytes", sample.bytes);
+    field(journal, "flags", sample.flags);
+    field(journal, "kind", sample.kind);
 }
 void observe_input(bool stimulus)
 {
@@ -514,7 +535,10 @@ void observe_input(bool stimulus)
     }
     f::Handle timer_client(timer.client), timer_provider(timer.provider);
     uint64_t duration = stimulus ? UINT64_C(20000000000) : UINT64_C(1000000000);
-    while(uint64_t(u::ipc_clock()) - uint64_t(start) < duration)
+    long timer_error = 0;
+    long now = start;
+    const uint64_t end = uint64_t(start) + duration;
+    while(uint64_t(now) < end)
     {
         for(unsigned i = 0; i < input_count; ++i)
         {
@@ -532,18 +556,17 @@ void observe_input(bool stimulus)
                                         r);
                 if(s == OS1_ERR_WOULD_BLOCK)
                     break;
-                if(s < 0 || r.payload_bytes != sizeof(os1_input_event))
+                os1_input_event e{};
+                if(!s && r.payload_bytes == sizeof(e))
+                    __builtin_memcpy(&e, r.payload, sizeof(e));
+                bool usable = d.failures.accept(s, r.payload_bytes, e, d.id, d.kind, now);
+                if(s != 0 || r.payload_bytes != sizeof(e))
                 {
-                    result("input stream closed or invalid", s < 0 ? s : OS1_ERR_INVALID);
                     u::close(d.subscription);
                     d.subscription = -1;
                     break;
                 }
-                os1_input_event e{};
-                __builtin_memcpy(&e, r.payload, sizeof(e));
-                if(!tr::usable_input_event(e, r.payload_bytes, d.id))
-                    result("input removed, lost, or invalid", OS1_ERR_IO);
-                else
+                if(usable)
                 {
                     ++d.events;
                     d.movement += e.dx != 0 || e.dy != 0;
@@ -554,25 +577,71 @@ void observe_input(bool stimulus)
                 }
             }
         }
-        long now = u::ipc_clock();
-        long waited = now < 0 ? now : u::ipc_wait_until(timer.client, uint64_t(now) + 20000000);
+        now = u::ipc_clock();
+        if(now < 0)
+        {
+            timer_error = now;
+            break;
+        }
+        if(uint64_t(now) >= end)
+            break;
+        uint64_t deadline = uint64_t(now) + 20000000;
+        if(deadline > end)
+            deadline = end;
+        long waited = u::ipc_wait_until(timer.client, deadline);
         if(waited != OS1_ERR_TIMED_OUT)
         {
-            result("input timer wait", waited < 0 ? waited : OS1_ERR_INVALID);
+            timer_error = waited < 0 ? waited : OS1_ERR_INVALID;
+            break;
+        }
+        now = u::ipc_clock();
+        if(now < 0)
+        {
+            timer_error = now;
             break;
         }
     }
+    // Close every subscription before report writes or filesystem synchronization.
+    for(unsigned i = 0; i < input_count; ++i)
+    {
+        if(inputs[i].subscription >= 0)
+            u::close(inputs[i].subscription);
+        inputs[i].subscription = -1;
+    }
+    if(timer_error)
+        result("input timer wait", timer_error);
     for(unsigned i = 0; i < input_count; ++i)
     {
         field(journal, "observed_device", inputs[i].id);
+        field(journal, "catalog_id", inputs[i].catalog_id);
+        auto& failures = inputs[i].failures;
+        field(journal, "failure_occurrences", failures.total);
+        field(journal, "lost_events", failures.lost_events);
+        field(journal, "lost_global_records", failures.lost_records);
+        field(journal, "removed_events", failures.removed);
+        field(journal, "invalid_replies", failures.invalid);
+        field(journal, "closed_replies", failures.closed);
+        field(journal, "error_replies", failures.errors);
+        if(failures.total)
+        {
+            failure_sample("first_failure", failures.first);
+            failure_sample("last_failure", failures.last);
+        }
+        if(failures.lost_events)
+            result("input event loss", OS1_ERR_IO);
+        if(failures.removed)
+            result("input device removed", OS1_ERR_CLOSED);
+        if(failures.invalid)
+            result("input invalid reply", OS1_ERR_INVALID);
+        if(failures.closed)
+            result("input stream closed", OS1_ERR_CLOSED);
+        if(failures.errors)
+            result("input call error", OS1_ERR_IO);
         field(journal, "observed_events", inputs[i].events);
         field(journal, "movement_events", inputs[i].movement);
         field(journal, "button_changes", inputs[i].button_changes);
         field(journal, "left_shift_changes", inputs[i].shift_changes);
         result("physical stimulus observed", 0, !stimulus || !inputs[i].events);
-        if(inputs[i].subscription >= 0)
-            u::close(inputs[i].subscription);
-        inputs[i].subscription = -1;
     }
 }
 }  // namespace
@@ -622,8 +691,8 @@ int main(int argc, char** argv)
         return 1;
     }
     field(manifest.fd, "format_version", 1);
-    field(manifest.fd, "runner_version", 2);
-    field(manifest.fd, "test_suite_version", 2);
+    field(manifest.fd, "runner_version", 3);
+    field(manifest.fd, "test_suite_version", 3);
     field(manifest.fd, "machine_fingerprint", fingerprint.value);
     text(manifest.fd, "machine_label=");
     text(manifest.fd, label ? label : "auto");
@@ -671,12 +740,16 @@ int main(int argc, char** argv)
         result("disk write/sync/read", roundtrip(disk.fd));
     }
     stage("native input");
+    result("USB input failures before",
+           snapshot("usb-input-before.bin", OS1_OBSERVE_USB_INPUT_FAILURES));
     long input_status = input_checks();
     result("input acquisition/state/subscriptions", input_status, !input_status && !input_count);
     field(journal, "input_devices", input_count);
     field(journal, "usb_pointers", usb_pointers);
     result("expected USB mouse", usb_pointers ? 0 : OS1_ERR_NOT_FOUND, !expect_mouse);
     observe_input(stimulus);
+    result("USB input failures after",
+           snapshot("usb-input-after.bin", OS1_OBSERVE_USB_INPUT_FAILURES));
     result("USB after input", inventory("lsusb-after.txt", 2));
     stage("log capture");
     long exported = export_tmp(log.fd);

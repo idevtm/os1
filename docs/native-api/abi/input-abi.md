@@ -171,7 +171,7 @@ PS/2 auxiliary initialization selects relative compatibility packets for mouse a
 Pause-key event decoding remains unsupported; ordinary keys and extended navigation keys use the common bitmap.
 The user verified keyboard Left Shift state and laptop touchpad movement and buttons on 2026-11-10.
 The [returned hardware tests](../../hardware/input-hardware-fixes-plan.md) exposed EHCI mouse and xHCI receiver failures.
-Physical acceptance of their corrections remains pending.
+The [physical retest](../../hardware/input-failure-diagnostics-plan.md#hardware-retest-november-10-2026) confirms movement delivery but retains unresolved input failures.
 QEMU results do not establish that acceptance.
 
 ## Shell example
@@ -203,3 +203,61 @@ The [device test runner](../../hardware/device-test-runner-plan.md) records inpu
 Its optional observation records event counts, movement, button changes, and Left Shift changes.
 Input attachment and removal also produce bounded memory-log events with input and catalog identities.
 These diagnostics preserve the existing rights, record layouts, and subscription semantics.
+
+
+## Retained input failure evidence
+
+The runner separates event loss, removal, invalid replies, closed streams, and other call errors.
+It retains counters and first/last failure metadata in bounded memory during observation.
+It closes subscriptions before writing reports or synchronizing filesystems.
+Diagnostic boot can still trace API calls; this policy does not disable kernel tracing.
+
+```text
+EHCI failure -> first-cause store -> observe snapshot -> captures.tar
+input reply -> per-device counters -> progress.txt after observation
+```
+
+Runner version 3 adds `usb-input-before.bin` and `usb-input-after.bin` to the archive.
+The offline comparison tool decodes both members under `usb_input_failures`.
+Retained records include earlier boot failures; their presence alone does not prove failure during the current observation.
+Compare the before/after snapshots and input identities.
+
+`OS1_OBSERVE_USB_INPUT_FAILURES` has observe kind 14 and ABI version 1.
+It returns the existing 16-byte `Os1ObserveHeader`, followed by zero to 64 packed 72-byte records.
+Each record describes the first EHCI retirement cause for one native input identity.
+Duplicate publication cannot replace that cause, and general log traffic cannot evict it.
+The store resets on reboot and remains separate from the sealed USB boot snapshot.
+Reads copy an immutable prefix without probing hardware or consuming evidence.
+User-buffer validation follows the existing observe contract.
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | u64 | Publication sequence, starting at 1 |
+| 8 | u64 | Measurement timestamp in nanoseconds |
+| 16 | u64 | Native input identity |
+| 24 | u32 | Hardware catalog identity |
+| 28 | u32 | Retirement reason |
+| 32 | u32 | PCI inventory index |
+| 36 | u32 | Root port |
+| 40 | u32 | Parent hub address, or zero |
+| 44 | u32 | Downstream port |
+| 48 | u32 | USB address |
+| 52 | u32 | HID endpoint address |
+| 56 | u32 | Transfer token, when available |
+| 60 | u32 | Requested transfer bytes, when available |
+| 64 | u32 | Source-specific status, when available |
+| 68 | u32 | Flags; bit 0 means the measurement clock was unavailable |
+
+Reason 1 means transfer failure; reason 2 means controller retirement.
+Reasons 3 and 4 mean root-port and hub-port changes.
+Reason 5 means another input-stop path; reason 6 means a transfer observed disconnection.
+For periodic transfers, status contains USBSTS; root and hub changes retain their port status.
+Other paths can leave status and transfer details zero.
+A hub change can describe the ancestor port that caused a descendant's retirement.
+This profile does not retain xHCI controller failures; runner event diagnostics cover both controller types.
+
+A loss counter measures overwritten global input records, including records from other devices.
+It does not count lost mouse movements alone.
+Runner result totals count failing categories per device; separate occurrence counters retain repetition counts.
+A successful later event does not erase earlier failures.
+Failure metadata excludes key bitmaps and input payload contents.

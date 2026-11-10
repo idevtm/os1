@@ -18,6 +18,7 @@
 #include "mm/dma.hpp"
 #include "platform/hardware_catalog.hpp"
 #include "platform/pci_config.hpp"
+#include "platform/platform.hpp"
 #include "platform/state.hpp"
 #include "storage/block_device.hpp"
 #include "sync/smp.hpp"
@@ -77,6 +78,30 @@ struct Controller
 alignas(Controller) uint8_t pool[max_controllers][sizeof(Controller)]{};
 Controller* controllers[max_controllers]{};
 
+void input_failure(
+    Device& d, unsigned reason, unsigned token = 0, unsigned expected = 0, unsigned status = 0)
+{
+    if(!d.input_identity)
+        return;
+    Os1ObserveUsbInputFailure record{};
+    uint64_t ns = 0, resolution = 0;
+    if(!platform_measurement_sample(ns, resolution))
+        record.flags = OS1_USB_INPUT_CLOCK_UNAVAILABLE;
+    record.time_ns = ns;
+    record.input_device = d.input_identity;
+    record.catalog_id = d.catalog_id;
+    record.reason = reason;
+    record.pci_index = d.controller->owner.index;
+    record.root_port = d.root;
+    record.parent_address = d.parent ? d.parent->address : 0;
+    record.port = d.port;
+    record.address = d.address;
+    record.endpoint = d.hid.endpoint;
+    record.token = token;
+    record.expected_bytes = expected;
+    record.status = status;
+    usb::diagnostics::input_failure(record);
+}
 void delay_us(unsigned us)
 {
     // Keep individual waits short so remote page-table retirement can progress.
@@ -110,6 +135,7 @@ void retire(Controller& c)
     {
         d.failed = true;
         d.storage.invalidate();
+        input_failure(d, OS1_USB_INPUT_CONTROLLER);
         native_input::remove(d.input_identity);
         hardware_catalog::unavailable(d.catalog_id);
     }
@@ -239,6 +265,7 @@ Transfer transfer(Device& d,
         {
             d.failed = true;
             d.storage.invalidate();
+            input_failure(d, OS1_USB_INPUT_DISCONNECTED);
             native_input::remove(d.input_identity);
             hardware_catalog::unavailable(d.catalog_id);
             return {Status::Failed, 0};
@@ -252,6 +279,7 @@ Transfer transfer(Device& d,
             return {Status::Stall, 0};
         d.failed = true;
         d.storage.invalidate();
+        input_failure(d, OS1_USB_INPUT_TRANSFER, td[last].token | fault, bytes);
         native_input::remove(d.input_identity);
         hardware_catalog::unavailable(d.catalog_id);
         return {Status::Failed, 0};
@@ -396,6 +424,7 @@ bool submit(BlockDevice& block, BlockRequest& request)
     {
         d.failed = true;
         d.storage.invalidate();
+        input_failure(d, OS1_USB_INPUT_STOP);
         native_input::remove(d.input_identity);
         hardware_catalog::unavailable(d.catalog_id);
     }
@@ -502,6 +531,7 @@ bool start_input(Device& d)
 }
 void stop_input(Device& d)
 {
+    input_failure(d, OS1_USB_INPUT_STOP);
     native_input::remove(d.input_identity);
     if(!d.input_armed || d.controller->failed)
         return;
@@ -517,7 +547,8 @@ void stop_input(Device& d)
 }
 void retire_root(Controller& c, unsigned root)
 {
-    ehci::retire_root_devices(c.devices, root, [](Device& d) {
+    ehci::retire_root_devices(c.devices, root, [&](Device& d) {
+        input_failure(d, OS1_USB_INPUT_ROOT_CHANGE, 0, 0, c.op[17 + root - 1]);
         stop_input(d);
         d.failed = true;
         d.storage.invalidate();
@@ -541,9 +572,7 @@ void poll_input(Controller& c)
         unsigned bytes = d.hid.packet;
         if((td->token & ehci::errors) || ehci::remaining(td->token) > bytes)
         {
-            debug("ehci: HID failed input=")(d.input_identity)(" root=")(d.root)(" port=")(d.port)(
-                " address=")(d.address)(" endpoint=")(d.hid.endpoint)(" token=0x")(
-                td->token, 16)(" expected=")(bytes)();
+            input_failure(d, OS1_USB_INPUT_TRANSFER, td->token, bytes, c.op[1]);
             d.failed = true;
             stop_input(d);
             hardware_catalog::unavailable(d.catalog_id);
@@ -1001,6 +1030,7 @@ void ehci_poll_devices(PageFrameContainer&, bool topology)
                     for(auto& child : c->devices)
                         if(child.parent == &d && child.port == port && !child.failed)
                         {
+                            input_failure(child, OS1_USB_INPUT_HUB_CHANGE, 0, 0, status);
                             stop_input(child);
                             child.failed = true;
                             child.storage.invalidate();
@@ -1009,6 +1039,8 @@ void ehci_poll_devices(PageFrameContainer&, bool topology)
                                 for(auto* p = descendant.parent; p; p = p->parent)
                                     if(p == &child)
                                     {
+                                        input_failure(
+                                            descendant, OS1_USB_INPUT_HUB_CHANGE, 0, 0, status);
                                         stop_input(descendant);
                                         descendant.failed = true;
                                         descendant.storage.invalidate();

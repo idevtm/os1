@@ -31,3 +31,9 @@ USB mass storage and ext2 persistence pass QEMU checks. The USB menu now creates
 Qualification of additional firmware paths, controllers, and physical failure cases remains pending.
 
 [Asus G74SX hardware validation](../archive/filesystems/2026-11-06-usb-hardware-validation.md) records EHCI hub traversal and USB ext2 reboot persistence.
+
+
+## Returned input retest
+
+The [input failure diagnostics plan](input-failure-diagnostics-plan.md) records the November 10 physical retest and retained diagnostic contracts.
+The [evidence summary](2026-11-10-input-retest-evidence.json) contains build identities, archive hashes, and per-device observations.

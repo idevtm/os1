@@ -1,5 +1,6 @@
 #pragma once
 #include <os1/input.h>
+#include <os1/resource.h>
 #include <stdint.h>
 
 namespace os1::hardware::test_run
@@ -11,6 +12,65 @@ inline bool usable_input_event(const os1_input_event& event, unsigned bytes, uin
            (event.kind == OS1_INPUT_KEYBOARD || event.kind == OS1_INPUT_POINTER) &&
            !(event.flags & (OS1_INPUT_LOST | OS1_INPUT_REMOVED));
 }
+// No I/O or key payload retention. The caller reports these counters after polling.
+struct InputFailureSample
+{
+    uint64_t observed_ns{}, sequence{}, event_ns{}, device{}, lost{};
+    int64_t status{};
+    uint32_t bytes{}, flags{}, kind{};
+};
+struct InputFailures
+{
+    uint64_t total{}, lost_events{}, lost_records{}, removed{}, invalid{}, closed{}, errors{};
+    InputFailureSample first{}, last{};
+    bool accept(long status,
+                unsigned bytes,
+                const os1_input_event& event,
+                uint64_t device,
+                unsigned kind,
+                uint64_t now)
+    {
+        if(status == OS1_ERR_WOULD_BLOCK)
+            return false;
+        bool valid = status == 0 && bytes == sizeof(event);
+        InputFailureSample sample{};
+        sample.observed_ns = now;
+        sample.status = status;
+        sample.bytes = bytes;
+        if(valid)
+        {
+            sample.sequence = event.sequence;
+            sample.event_ns = event.time_ns;
+            sample.device = event.device;
+            sample.lost = event.lost;
+            sample.flags = event.flags;
+            sample.kind = event.kind;
+        }
+        if(status == OS1_ERR_CLOSED)
+            ++closed;
+        else if(status != 0)
+            ++errors;
+        else if(!valid || event.device != device || event.kind != kind ||
+                (event.flags & ~(OS1_INPUT_CHANGED | OS1_INPUT_REMOVED | OS1_INPUT_LOST |
+                                 OS1_INPUT_COARSE_CLOCK)))
+            ++invalid;
+        else if(event.flags & (OS1_INPUT_LOST | OS1_INPUT_REMOVED))
+        {
+            if(event.flags & OS1_INPUT_LOST)
+            {
+                ++lost_events;
+                lost_records += event.lost;
+            }
+            removed += bool(event.flags & OS1_INPUT_REMOVED);
+        }
+        else
+            return true;
+        if(!total++)
+            first = sample;
+        last = sample;
+        return false;
+    }
+};
 inline bool label_valid(const char* s)
 {
     unsigned n = 0;

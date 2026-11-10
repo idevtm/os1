@@ -129,6 +129,10 @@ The hardware catalog serializes USB updates and queries with a generation counte
 Changed generations cancel stale pagination cursors.
 Platform and firmware records remain boot observations.
 The legacy `usb` diagnostic command retains its sealed boot snapshot.
+A separate bounded store retains the first EHCI input retirement reason for each input identity.
+Passive snapshots preserve this evidence independently of the kernel log ring.
+The runner accumulates input failures in memory and reports them after observation.
+The [failure diagnostics plan](hardware/input-failure-diagnostics-plan.md) records the physical evidence and validation.
 Removed attachments keep unavailable identities; new attachments receive new identities.
 Existing storage mounts do not automatically switch to replacement media.
 

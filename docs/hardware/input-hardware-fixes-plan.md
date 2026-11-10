@@ -1,7 +1,8 @@
 # Returned hardware results and input corrections
 
 This work records the returned laptop and desktop tests and corrects three capture or USB defects.
-Physical confirmation of the corrections requires another test on each machine.
+The [subsequent retest](input-failure-diagnostics-plan.md#hardware-retest-november-10-2026) confirms report capture and pointer movement.
+Input reliability still requires investigation and another physical test.
 
 ```text
 returned ext2 image -> preserved logs and reference comparison

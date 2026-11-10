@@ -1,0 +1,163 @@
+{
+  "baseline": {
+    "revision": "b350facc04303aeff646024384d0a72279a82cff",
+    "artifacts": [
+      {
+        "path": "build/artifacts/kernel.elf",
+        "bytes": 616328,
+        "sha256": "26a0f6f94fc8634234fc2b67b2ed303020765857b616edeb79242b82972cf848"
+      },
+      {
+        "path": "build/artifacts/initrd.cpio",
+        "bytes": 10240,
+        "sha256": "745d48337869f60bbff0aa3e12c656a4b56ccd3cf92583cfbf013ba85e5530f0"
+      },
+      {
+        "path": "build/artifacts/os1.raw",
+        "bytes": 1474560,
+        "sha256": "ad6664404a3da838eeee7cac1ba9da0d095c7e6270753a3da29f6dbeaa7c951c"
+      },
+      {
+        "path": "build/artifacts/os1.iso",
+        "bytes": 4352000,
+        "sha256": "fbb5bdf3f8d9bb6c81bf62492333b935869aa920c62c30cf4944d62558ee0f57"
+      },
+      {
+        "path": "build/artifacts/user/run-tests.elf",
+        "bytes": 30768,
+        "sha256": "55bdbbfa67bd23b0d04bcf695196d375685bf25900ae7d684ed841ad154e2e75"
+      }
+    ],
+    "embedded_revision": "65fae14cbdbbd6002018a29dd5ca18d03fa97a5d",
+    "embedded_build_hash": "94a4d9ebd04b8f5a4e42c0608b49a798ffb96be3cf0e853c2a77a45c2bfa3baa",
+    "committed_source_profile_hash": "8db2ac76df8edc18a6765080c31b899bd5f50228851842c51333c8e0b530ae05",
+    "committed_source_with_local_hash_inputs": "94a4d9ebd04b8f5a4e42c0608b49a798ffb96be3cf0e853c2a77a45c2bfa3baa",
+    "local_non_source_hash_inputs": [
+      "src/.DS_Store",
+      "cmake/.DS_Store"
+    ]
+  },
+  "candidate": "b350fac plus this task diff; executable and test diff hash in environment",
+  "environment": {
+    "host": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "revision": "b350facc04303aeff646024384d0a72279a82cff",
+    "working_diff_sha256": "3e0142cdbe851bb954460eb3d29e281b7c2336e00f676b42b5121ce225425415",
+    "qemu": "QEMU emulator version 11.1.3",
+    "compiler": "x86_64-elf-g++ (GCC) 11.2.0",
+    "workload": "os1_smoke_device_runner BIOS and UEFI; q35 TCG, 4 CPUs, 128 MiB; parallel 2",
+    "repeats": 1,
+    "profile": "Debug:GNU:11.2.0::ON:ON:OFF:OFF; KMEM_DEBUG and QEMU_DEBUGCON ON; normal images",
+    "firmware": [
+      {
+        "path": "/opt/homebrew/share/qemu/edk2-x86_64-code.fd",
+        "bytes": 3653632,
+        "sha256": "33090cc07675baa5190d9f1e84bf5176b33bcbfa9bacac522961150cdb6dbb2a"
+      },
+      {
+        "path": "/opt/homebrew/share/qemu/edk2-i386-vars.fd",
+        "bytes": 540672,
+        "sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+      }
+    ],
+    "source_diff_sha256": "c0c2d98a684c1f17fcd9bc2fc8c00598e3f9104e1daed8b6176f29874f6c212f",
+    "candidate_build_identity": "#pragma once\n#define OS1_LOG_REVISION \"b350facc04303aeff646024384d0a72279a82cff\"\n#define OS1_LOG_IMAGE \"c8175364febe1081bbc71ed768adfdc51956b0052b382d28d7abb0d06eb699aa\"\n"
+  },
+  "workload": "Two default run-tests commands per firmware; one isolated pair of BIOS and UEFI runner checks on each tree. Full tests also cover input and persistence.",
+  "timings": [
+    {
+      "firmware": "bios",
+      "baseline_samples_seconds": [
+        1.7912777913734317,
+        1.773533457890153
+      ],
+      "candidate_samples_seconds": [
+        1.8076948327943683,
+        1.766417040489614
+      ],
+      "baseline_median_seconds": 1.7824056246317923,
+      "candidate_median_seconds": 1.7870559366419911,
+      "difference_seconds": 0.0046503120101988316,
+      "difference_percent": 0.2609008828256749,
+      "candidate_evidence": "build/artifacts/test-runs/os1_smoke_device_runner_bios-aji3crq2"
+    },
+    {
+      "firmware": "uefi",
+      "baseline_samples_seconds": [
+        1.638011165894568,
+        1.616741749458015
+      ],
+      "candidate_samples_seconds": [
+        1.5356510002166033,
+        1.647239750251174
+      ],
+      "baseline_median_seconds": 1.6273764576762915,
+      "candidate_median_seconds": 1.5914453752338886,
+      "difference_seconds": -0.03593108244240284,
+      "difference_percent": -2.207914602237047,
+      "candidate_evidence": "build/artifacts/test-runs/os1_smoke_device_runner_uefi-k0qmn0kf"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "build/artifacts/kernel.elf",
+      "baseline_bytes": 616328,
+      "candidate_bytes": 617408,
+      "difference_bytes": 1080,
+      "difference_percent": 0.17523137030931582,
+      "baseline_sha256": "26a0f6f94fc8634234fc2b67b2ed303020765857b616edeb79242b82972cf848",
+      "candidate_sha256": "625d0b12f6f994ac968625313a8b03c438eeef216617e0d95c89b3d821839fca"
+    },
+    {
+      "path": "build/artifacts/initrd.cpio",
+      "baseline_bytes": 10240,
+      "candidate_bytes": 10240,
+      "difference_bytes": 0,
+      "difference_percent": 0.0,
+      "baseline_sha256": "745d48337869f60bbff0aa3e12c656a4b56ccd3cf92583cfbf013ba85e5530f0",
+      "candidate_sha256": "745d48337869f60bbff0aa3e12c656a4b56ccd3cf92583cfbf013ba85e5530f0"
+    },
+    {
+      "path": "build/artifacts/os1.raw",
+      "baseline_bytes": 1474560,
+      "candidate_bytes": 1474560,
+      "difference_bytes": 0,
+      "difference_percent": 0.0,
+      "baseline_sha256": "ad6664404a3da838eeee7cac1ba9da0d095c7e6270753a3da29f6dbeaa7c951c",
+      "candidate_sha256": "cb053046f07d2def82092360a8b11fc7232ff4624312e8677ba2c5bf30ce74eb"
+    },
+    {
+      "path": "build/artifacts/os1.iso",
+      "baseline_bytes": 4352000,
+      "candidate_bytes": 4354048,
+      "difference_bytes": 2048,
+      "difference_percent": 0.047058823529411764,
+      "baseline_sha256": "fbb5bdf3f8d9bb6c81bf62492333b935869aa920c62c30cf4944d62558ee0f57",
+      "candidate_sha256": "672e3b0620365b0ef2818cd6fa79184a23e50107b97ab877ee5573d1af36b4fc"
+    },
+    {
+      "path": "build/artifacts/user/run-tests.elf",
+      "baseline_bytes": 30768,
+      "candidate_bytes": 44672,
+      "difference_bytes": 13904,
+      "difference_percent": 45.189807592303694,
+      "baseline_sha256": "55bdbbfa67bd23b0d04bcf695196d375685bf25900ae7d684ed841ad154e2e75",
+      "candidate_sha256": "f2c9471b8f50fb34a4063b46aca1deb1e3e6d9cd6ee5c079a4deb006dbccafb8"
+    }
+  ],
+  "static_storage": {
+    "runner_input_array_baseline_bytes": 4096,
+    "runner_input_array_candidate_bytes": 16384,
+    "runner_difference_bytes": 12288,
+    "runner_difference_percent": 300,
+    "kernel_failure_records_bytes": 4608,
+    "kernel_failure_bookkeeping": "Spinlock and used count; no dynamic allocation.",
+    "kernel_failure_records_baseline_bytes": 0,
+    "kernel_failure_records_difference_percent": null
+  },
+  "limitations": [
+    "One test invocation per tree and firmware does not establish a performance trend.",
+    "Peak process memory and physical input latency remain unmeasured.",
+    "The baseline embeds 65fae14, but its source/profile hash matches committed b350fac with the retained local hash inputs.",
+    "The build hash includes ignored .DS_Store files; firmware hashes and executable hashes are recorded separately."
+  ]
+}

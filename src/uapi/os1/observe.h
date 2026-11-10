@@ -18,6 +18,14 @@ enum
     OS1_OBSERVE_ACPI = 11,
     OS1_OBSERVE_USB = 12,
     OS1_OBSERVE_HARDWARE = 13,
+    OS1_OBSERVE_USB_INPUT_FAILURES = 14,
+    OS1_USB_INPUT_TRANSFER = 1,
+    OS1_USB_INPUT_CONTROLLER = 2,
+    OS1_USB_INPUT_ROOT_CHANGE = 3,
+    OS1_USB_INPUT_HUB_CHANGE = 4,
+    OS1_USB_INPUT_STOP = 5,
+    OS1_USB_INPUT_DISCONNECTED = 6,
+    OS1_USB_INPUT_CLOCK_UNAVAILABLE = 1u << 0,
     OS1_OBSERVE_USB_CONTROLLER = 1,
     OS1_OBSERVE_USB_ROOT_PORT = 2,
     OS1_OBSERVE_USB_DEVICE = 3,
@@ -81,6 +89,14 @@ struct Os1ObserveUsbRecord
     uint32_t kind, pci_index, root_port, port, address, parent_address, status, detail;
     uint64_t sectors;
     char stage[24];
+};
+
+// First retirement cause per native input identity; EHCI only in this profile.
+struct Os1ObserveUsbInputFailure
+{
+    uint64_t sequence, time_ns, input_device;
+    uint32_t catalog_id, reason, pci_index, root_port, parent_address, port;
+    uint32_t address, endpoint, token, expected_bytes, status, flags;
 };
 
 struct Os1ObserveHeader

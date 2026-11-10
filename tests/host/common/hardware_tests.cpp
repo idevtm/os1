@@ -873,3 +873,97 @@ TEST(HardwareArchive, EnforcesMemberLimitAndReportsIoFailures)
     unseekable.fail_seek = true;
     EXPECT_FALSE(seek_failure.finish());
 }
+
+TEST(DeviceTestInput, SeparatesLossRemovalAndClosureWithoutDiscardingEvidence)
+{
+    hardware::test_run::InputFailures failures{};
+    os1_input_event event{};
+    event.device = 7;
+    event.kind = OS1_INPUT_POINTER;
+    event.sequence = 300;
+    event.time_ns = 200;
+    event.flags = OS1_INPUT_LOST;
+    event.lost = 44;
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 7, OS1_INPUT_POINTER, 210));
+    event.flags = OS1_INPUT_REMOVED;
+    event.lost = 0;
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 7, OS1_INPUT_POINTER, 220));
+    EXPECT_FALSE(failures.accept(OS1_ERR_CLOSED, 0, event, 7, OS1_INPUT_POINTER, 230));
+    EXPECT_EQ(3u, failures.total);
+    EXPECT_EQ(1u, failures.lost_events);
+    EXPECT_EQ(44u, failures.lost_records);
+    EXPECT_EQ(1u, failures.removed);
+    EXPECT_EQ(1u, failures.closed);
+    EXPECT_EQ(210u, failures.first.observed_ns);
+    EXPECT_EQ(300u, failures.first.sequence);
+    EXPECT_EQ(44u, failures.first.lost);
+    EXPECT_EQ(OS1_INPUT_LOST, failures.first.flags);
+    EXPECT_EQ(OS1_ERR_CLOSED, failures.last.status);
+    EXPECT_EQ(230u, failures.last.observed_ns);
+    EXPECT_EQ(0u, failures.last.device);  // No stale payload from a failed call.
+    event.flags = OS1_INPUT_CHANGED;
+    EXPECT_TRUE(failures.accept(0, sizeof(event), event, 7, OS1_INPUT_POINTER, 240));
+    EXPECT_EQ(3u, failures.total);  // Later success cannot clear earlier failures.
+}
+
+TEST(DeviceTestInput, RejectsMalformedIdentityKindFlagsAndStatus)
+{
+    hardware::test_run::InputFailures failures{};
+    os1_input_event event{};
+    event.device = 2;
+    event.kind = OS1_INPUT_POINTER;
+    EXPECT_FALSE(failures.accept(OS1_ERR_WOULD_BLOCK, 0, event, 2, OS1_INPUT_POINTER, 1));
+    EXPECT_EQ(0u, failures.total);
+    EXPECT_FALSE(failures.accept(0, sizeof(event) - 1, event, 2, OS1_INPUT_POINTER, 2));
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 3, OS1_INPUT_POINTER, 3));
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 2, OS1_INPUT_KEYBOARD, 4));
+    event.flags = 0x80000000u;
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 2, OS1_INPUT_POINTER, 5));
+    EXPECT_FALSE(failures.accept(OS1_ERR_INVALID, 0, event, 2, OS1_INPUT_POINTER, 6));
+    EXPECT_FALSE(failures.accept(1, sizeof(event), event, 2, OS1_INPUT_POINTER, 7));
+    EXPECT_EQ(4u, failures.invalid);
+    EXPECT_EQ(2u, failures.errors);
+    EXPECT_EQ(6u, failures.total);
+    EXPECT_EQ(sizeof(event) - 1, failures.first.bytes);
+    EXPECT_EQ(0u, failures.first.flags);
+    EXPECT_EQ(1, failures.last.status);
+}
+
+TEST(UsbInputDiagnostics, RetainsFirstCauseAcrossCleanupAndBootSnapshotFreeze)
+{
+    usb::diagnostics::reset_for_test();
+    usb::diagnostics::freeze();
+    Os1ObserveUsbInputFailure record{};
+    record.input_device = 1;
+    record.reason = OS1_USB_INPUT_TRANSFER;
+    record.token = 0x30d52;
+    record.expected_bytes = 4;
+    record.catalog_id = 1376640;
+    usb::diagnostics::input_failure(record);
+    record.reason = OS1_USB_INPUT_STOP;
+    record.token = 0;
+    usb::diagnostics::input_failure(record);
+    Os1ObserveUsbInputFailure out{};
+    ASSERT_TRUE(usb::diagnostics::input_failure_at(0, out));
+    EXPECT_EQ(1u, out.sequence);
+    EXPECT_EQ(OS1_USB_INPUT_TRANSFER, out.reason);
+    EXPECT_EQ(0x30d52u, out.token);
+    EXPECT_EQ(4u, out.expected_bytes);
+    EXPECT_EQ(1376640u, out.catalog_id);
+    EXPECT_EQ(1u, usb::diagnostics::input_failure_count());
+    for(unsigned id = 2; id <= OS1_INPUT_DEVICE_LIMIT; ++id)
+    {
+        record.input_device = id;
+        usb::diagnostics::input_failure(record);
+    }
+    record.input_device = OS1_INPUT_DEVICE_LIMIT + 1;
+    usb::diagnostics::input_failure(record);
+    record.input_device = 0;
+    usb::diagnostics::input_failure(record);
+    EXPECT_EQ(OS1_INPUT_DEVICE_LIMIT, usb::diagnostics::input_failure_count());
+    EXPECT_FALSE(usb::diagnostics::input_failure_at(OS1_INPUT_DEVICE_LIMIT, out));
+    ASSERT_TRUE(usb::diagnostics::input_failure_at(0, out));
+    EXPECT_EQ(OS1_USB_INPUT_TRANSFER, out.reason);
+    EXPECT_EQ(0u, usb::diagnostics::count());
+    usb::diagnostics::reset_for_test();
+}

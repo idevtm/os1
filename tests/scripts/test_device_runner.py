@@ -8,6 +8,7 @@ import threading
 import time
 import re
 import shutil
+import struct
 import subprocess
 from pathlib import Path
 import sys
@@ -79,11 +80,19 @@ def main():
         assert re.search(rb'kernel_revision=[a-f0-9]{40}\n', manifest), manifest
         assert re.search(rb'kernel_build=[a-f0-9]{64}\n', manifest), manifest
         assert b'machine_label=qemu\n' in manifest
+        assert b'runner_version=3\n' in manifest
+        assert b'failure_occurrences=0\n' in before[key + '/progress.txt']
         assert b'state=complete\n' in summary and b'io_failed=0\n' in summary, summary
         assert (b'failed=0' in summary.splitlines()) == (index < 2), summary
         assert len(before[key + '/storage-probe.bin']) == 4096
         with tarfile.open(fileobj=io.BytesIO(before[key + '/captures.tar'])) as archive:
-            assert len(archive.getnames()) == 12, archive.getnames()
+            assert len(archive.getnames()) == 14, archive.getnames()
+            for member in ('usb-input-before.bin', 'usb-input-after.bin'):
+                data = archive.extractfile(member).read()
+                version, kind, size, count = struct.unpack_from('<4I', data)
+                assert (version, kind, size) == (1, 14, 72), data
+                assert count <= 64 and len(data) == 16 + size * count
+                assert count == 0, data  # No EHCI retirement in this xHCI workload.
             records = catalog(archive.extractfile('catalog.bin').read())
             assert any(r['source'] == 1 for r in records), records
             assert b'PS/2 keyboard' in archive.extractfile('input.txt').read()

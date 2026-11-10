@@ -175,6 +175,33 @@ def input_devices(data):
     return devices
 
 
+USB_FAILURE = struct.Struct('<3Q12I')
+USB_FAILURE_REASONS = {1: 'transfer', 2: 'controller', 3: 'root_change',
+                       4: 'hub_change', 5: 'stop', 6: 'disconnected'}
+
+
+def usb_input_failures(data):
+    if len(data) < 16:
+        raise ValueError('short USB input failure snapshot')
+    version, kind, size, count = struct.unpack_from('<4I', data)
+    if (version, kind, size) != (1, 14, USB_FAILURE.size) or count > 64 or len(data) != 16 + count * size:
+        raise ValueError('invalid USB input failure snapshot')
+    names = ('sequence', 'time_ns', 'input_device', 'catalog_id', 'reason', 'pci_index',
+             'root_port', 'parent_address', 'port', 'address', 'endpoint', 'token',
+             'expected_bytes', 'status', 'flags')
+    records, seen = [], set()
+    for index in range(count):
+        record = dict(zip(names, USB_FAILURE.unpack_from(data, 16 + index * size)))
+        identity = record['input_device']
+        if (record['sequence'] != index + 1 or not 1 <= identity <= 64 or identity in seen
+                or record['reason'] not in USB_FAILURE_REASONS or record['flags'] & ~1):
+            raise ValueError('invalid USB input failure record')
+        record['reason_name'] = USB_FAILURE_REASONS[record['reason']]
+        seen.add(identity)
+        records.append(record)
+    return records
+
+
 def compare(run, profiles, machine=None):
     manifest = key_values(bounded(run / 'manifest.txt', 16384))
     summary = key_values(bounded(run / 'summary.txt', 16384))
@@ -193,6 +220,10 @@ def compare(run, profiles, machine=None):
                                       set(p['anchors']) <= identities)]
     report = dict(comparison_version=VERSION, run=str(run), manifest=manifest, summary=summary,
                   capture_sha256=digest(bounded(run / 'captures.tar')), findings=[])
+    if manifest.get('runner_version') == '3':
+        report['usb_input_failures'] = {
+            phase: usb_input_failures(members['usb-input-' + phase + '.bin'])
+            for phase in ('before', 'after')}
     issues = report['findings']
     def add(status, check, **detail):
         issues.append(dict(status=status, check=check, **detail))

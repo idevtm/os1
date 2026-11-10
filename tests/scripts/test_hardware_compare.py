@@ -56,6 +56,32 @@ class Compare(unittest.TestCase):
     def compare(self, profiles=None):
         return c.compare(self.root, profiles or [self.profile])
 
+    def test_usb_retirement_capture_decodes_first_cause(self):
+        record = c.USB_FAILURE.pack(1, 123, 7, 1376640, 1, 9, 1, 1, 2, 3, 0x81,
+                                   0x30d52, 4, 0x2005, 0)
+        data = struct.pack('<4I', 1, 14, 72, 1) + record
+        row, = c.usb_input_failures(data)
+        self.assertEqual('transfer', row['reason_name'])
+        self.assertEqual(7, row['input_device'])
+        self.assertEqual(0x30d52, row['token'])
+        with (self.root / 'manifest.txt').open('a') as output:
+            output.write('runner_version=3\n')
+        self.save({'usb-input-before.bin': struct.pack('<4I', 1, 14, 72, 0),
+                   'usb-input-after.bin': data})
+        report = self.compare()
+        self.assertEqual([row], report['usb_input_failures']['after'])
+        self.assertEqual([], report['usb_input_failures']['before'])
+
+    def test_usb_retirement_capture_rejects_truncation_and_duplicates(self):
+        record = c.USB_FAILURE.pack(1, 123, 7, 1376640, 1, 9, 1, 1, 2, 3, 0x81,
+                                   0x30d52, 4, 0x2005, 0)
+        for data in (b'', struct.pack('<4I', 1, 14, 72, 1),
+                     struct.pack('<4I', 1, 14, 72, 65),
+                     struct.pack('<4I', 1, 14, 72, 2) + record + record,
+                     struct.pack('<4I', 1, 14, 71, 1) + record):
+            with self.assertRaises(ValueError):
+                c.usb_input_failures(data)
+
     def test_matching_numeric_hardware_and_input_api(self):
         self.assertEqual('PASS', self.compare()['status'])
 
