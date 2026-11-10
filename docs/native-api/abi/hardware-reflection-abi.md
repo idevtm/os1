@@ -26,6 +26,7 @@ Scoped hardware-inspection capabilities remain future work.
 No query performs hardware transactions, firmware evaluation, driver activation, allocation, or filesystem access.
 
 The catalog describes boot-discovered records, not hotplug state.
+Version 1 retains the original diagnostic-backed USB view. Version 2 adds the normalized catalog below.
 Driver names and states are captured before the first user process starts.
 The snapshot stores up to 16 distinct driver names, matching the existing PCI driver registry limit.
 It copies each name once and retains a small name index and state for each PCI function.
@@ -104,7 +105,7 @@ Node type 0 describes an object; type 1 describes an integer; type 2 describes a
 The node `parent` describes canonical discovery placement, not physical attachment.
 Use `parent_id` for physical attachment.
 
-Set `version` to 1.
+Set `version` to 1 for the original profile or 2 for the normalized profile.
 Set `operation` to `DESCRIBE` or `CHILDREN`.
 Set `id` to the requested node ID.
 For the first child page, set `start` to zero.
@@ -125,7 +126,7 @@ A failed user-buffer copy returns an error; no kernel address enters the respons
 ## Runtime integration and limits
 
 The fixed runtime registry retains its 256-node limit.
-External hardware IDs do not consume fixed registry entries beyond three root aliases and an optional `os.system` container.
+External hardware IDs do not consume fixed registry entries beyond five root aliases and an optional `os.system` container.
 The runtime retains one 1512-byte page cache rather than a complete hardware tree.
 Completion retains at most 2048 matching IDs and displays eight choices at a time.
 It rejects a larger result rather than writing beyond the match array.
@@ -157,3 +158,114 @@ Use Up or Down to select a child.
 Press Tab to descend or accept a field.
 Press Enter on the completed field expression to display its value.
 Serial terminals keep sequential output. Framebuffer consoles reuse the existing completion area.
+
+## Version 2 normalized profile
+
+Version 2 retains the 1512-byte query and 184-byte node layouts.
+Existing PCI, ACPI, and processor record IDs retain their meaning.
+Version 1 queries retain their original collections, fields, USB records, and `HardwareNode` descriptions.
+
+```text
+os.devices.inventory.usb -> ports and devices
+os.devices.inventory.usb_interfaces -> interfaces
+os.storage.devices -> partitions -> filesystems -> os.fs.mounts
+                         shared identities and backing relationships
+```
+
+| Collection | Record names and content |
+| --- | --- |
+| `os.devices.inventory.usb` | `port_N` and `usb_N`; normalized ports and devices |
+| `os.devices.inventory.usb_interfaces` | `interface_N`; descriptors from the observed configuration |
+| `os.storage.devices` | `block_N`; driver-published block devices |
+| `os.storage.partitions` | `partition_N`; observed nonempty primary MBR entries |
+| `os.storage.filesystems` | `filesystem_N`; successfully mounted ext2 filesystems |
+| `os.fs.mounts` | `mount_N`; successful ext2 mount at `/disk` |
+| `os.devices.catalog_records_dropped` | Capture failures and records omitted at capacity |
+
+This profile does not enumerate every possible filesystem or every VFS mount.
+It records partitions only when the existing ext2 startup path reads a device's MBR.
+Startup stops searching after a successful mount. Later candidate disks can have no partition records.
+GPT, extended partition traversal, and filesystem signature scans remain outside this profile.
+No query performs additional storage reads.
+
+Record source codes 5 through 11 identify USB devices, interfaces, blocks, partitions, filesystems, mounts, and USB ports.
+Version 1 USB source code 2 remains separate. Numeric IDs are not interchangeable between these USB profiles.
+Each source uses `0x100000 + (source << 16) + (index << 6)`.
+IDs remain boot-local and grant no authority.
+
+| Field offset within a record ID | Meaning |
+| --- | --- |
+| 32: `attachment` | Collection containing the known physical parent |
+| 33: `backing` | Collection containing the backing object |
+| 34: `consumers` | Collection containing objects backed by this object |
+| 35: `identifier` | Filesystem UUID text when available; empty otherwise |
+| 36: `observation` | `boot_snapshot` |
+| 37: `backing_id` | Backing object ID, or zero |
+
+Forward and reverse collections return canonical object records, not copies with different identities.
+`children` and `parent_id` retain physical attachment semantics.
+USB interfaces use `backing` to reference their USB device.
+Storage follows interface, block, partition, filesystem, and mount relationships.
+PCI-backed virtio block devices reference the PCI function directly.
+
+USB device fields include vendor/product IDs, version, class, protocol, speed, address, route, and selected configuration when known.
+`speed_mbps_x10` stores ten times the rate in megabits per second; 15 means 1.5 Mbit/s.
+The xHCI profile does not retain the assigned USB address.
+USB interfaces expose number, alternate setting, class, subclass, protocol, endpoint count, and configuration value.
+Unbound interfaces remain visible. Driver names describe the bound interface, not every function on its physical device.
+
+Block fields expose sector count, sector size, byte size, request limit, and queue depth.
+Overflow makes byte size unknown. Partition fields expose MBR index, type code, start sector, sector count, and byte size.
+Partition `observed` state does not certify filesystem validity or prove that partition ranges do not overlap.
+Filesystem fields expose block size, block count, byte size, and UUID.
+Mount `name` contains the mount path.
+
+Unknown numeric fields return `NOT_FOUND` and do not appear in child enumeration.
+`state` describes the captured record outcome; it does not promise current physical presence or usable service authority.
+The catalog has no functional device endpoints in this slice.
+
+Capture allocates one bounded catalog during boot. Its capacity is 256 normalized records across all new sources.
+Allocation failure or capacity exhaustion increments the loss counter and does not fail device startup.
+Partial captures can contain unknown backing relationships. Utilities return failure when the loss counter is nonzero.
+The boot thread freezes publication before the first user process runs.
+Queries do not allocate, acquire device sessions, or mutate the catalog.
+
+## Hotplug state
+
+Device removal does not update these snapshots. A displayed mount can become unavailable after boot.
+Programs must not use snapshot state as proof that I/O will succeed.
+The [hotplug follow-up](../hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) defines generation updates and removal handling.
+
+## Inspection utilities
+
+The disk deployment includes `lshw`, `lspci`, `lsusb`, and `lsblk`.
+Each program consumes the same version 2 catalog as context and Tab completion.
+These programs provide native summaries, not full Linux command-line compatibility.
+
+| Command | Default view |
+| --- | --- |
+| `lshw` | Physical topology, logical consumers, processors, ACPI records, and block devices |
+| `lspci` | PCI functions and their captured fields |
+| `lsusb` | USB ports and devices |
+| `lsblk` | Block devices and their partition, filesystem, and mount relationships |
+
+Use `-v` to include all scalar fields. Use `-t` to follow physical children and logical consumers.
+`lshw` and `lsblk` enable relationship traversal by default.
+Repeated IDs print a reference marker. Traversal stops at 16 levels or 4096 distinct records.
+All programs support `--help`, standard output redirection, and nonzero error status.
+Unknown options return status 2. Observation, output, traversal, or capture failure returns status 1.
+Empty collections are valid and return status 0.
+
+```text
+lspci -v
+lsusb -t
+lsblk -v
+lshw > /tmp/hardware
+context os.storage.devices
+context os.fs.mounts.mount_0.backing
+os.storage.devices.block_0.sector_size
+```
+
+Type `os.storage.` to explore storage collections with Tab.
+Follow `backing` toward a provider or `consumers` toward a logical resource.
+Completion resolves canonical paths when a relationship points to an existing record.

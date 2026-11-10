@@ -409,3 +409,13 @@ passive reflection -> Keyboard / Pointer -> basic display -> GUI provider
 
 Native device-control interfaces remain future work. They require explicit authority, removal behavior, and event-loss recovery.
 Automated physical-device diagnostic bundles remain planned and can use these hardware descriptions.
+
+## Hardware catalog and hotplug sequence
+
+The [normalized catalog plan](hardware-catalog-plan.md) precedes functional device endpoints.
+It joins USB descriptors, driver bindings, block geometry, observed partitions, filesystems, and mounts.
+`lshw`, `lspci`, `lsusb`, and `lsblk` consume the same records as context and Tab navigation.
+
+The first profile remains a boot snapshot. Runtime device removal does not update reflected state.
+The [hotplug follow-up](hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) requires detection, deferred publication, generations, notifications, and safe teardown.
+SMBIOS, detailed endpoints, broader partition formats, and vendor naming databases remain separate extensions.

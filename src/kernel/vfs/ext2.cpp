@@ -3,6 +3,7 @@
 #include "core/wall_clock.hpp"
 #include "fs/ext2.hpp"
 #include "mm/kmem.hpp"
+#include "platform/hardware_catalog.hpp"
 #include "storage/block_device.hpp"
 #include "sync/atomic.hpp"
 #include "util/memory.h"
@@ -645,6 +646,7 @@ long ext2_mount(NativeObject* root, BlockDevice& device)
         return OS1_ERR_IO;
     if(mbr[510] != 0x55 || mbr[511] != 0xaa)
         return OS1_ERR_NOT_FOUND;
+    hardware_catalog::partitions(device, mbr);
     const uint8_t* partition = nullptr;
     for(unsigned i = 0; i < 4; ++i)
     {
@@ -722,6 +724,8 @@ long ext2_mount(NativeObject* root, BlockDevice& device)
     mount->next = static_cast<VfsNode*>(root)->children;
     static_cast<VfsNode*>(root)->children = mount;
     mounted_disk = fs;
+    hardware_catalog::mounted(
+        device, unsigned((partition - (mbr + 446)) / 16 + 1), fs->volume.super);
     return 0;
 }
 

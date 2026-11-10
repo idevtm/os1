@@ -36,8 +36,10 @@ inline bool member(const os1::discovery::View& view, unsigned id, os1::discovery
         return false;
     out = {};
     out.parent = node.parent;
-    if(id == OS1_HARDWARE_DEVICES || id == OS1_HARDWARE_FIRMWARE)
+    if(id == OS1_HARDWARE_DEVICES || id == OS1_HARDWARE_FIRMWARE || id == OS1_HARDWARE_STORAGE_ROOT)
         out.parent = view.resolve("os");
+    if(id == OS1_HARDWARE_MOUNTS)
+        out.parent = view.resolve("os.fs");
     if(id == OS1_HARDWARE_PROCESSORS)
         out.parent = view.resolve("os.system");
     out.kind = node.type == OS1_HARDWARE_OBJECT ? os1::discovery::Kind::Object
@@ -91,11 +93,14 @@ inline bool attach(os1::discovery::View& view)
     int system = view.resolve("os.system");
     if(system < 0)
         system = view.add(os, "system");
-    const unsigned parents[] = {os, os, unsigned(system)};
-    const unsigned targets[] = {
-        OS1_HARDWARE_DEVICES, OS1_HARDWARE_FIRMWARE, OS1_HARDWARE_PROCESSORS};
-    const char* names[] = {"devices", "firmware", "processors"};
-    for(unsigned i = 0; i < 3; ++i)
+    const unsigned parents[] = {os, os, unsigned(system), os, unsigned(view.resolve("os.fs"))};
+    const unsigned targets[] = {OS1_HARDWARE_DEVICES,
+                                OS1_HARDWARE_FIRMWARE,
+                                OS1_HARDWARE_PROCESSORS,
+                                OS1_HARDWARE_STORAGE_ROOT,
+                                OS1_HARDWARE_MOUNTS};
+    const char* names[] = {"devices", "firmware", "processors", "storage", "mounts"};
+    for(unsigned i = 0; i < 5; ++i)
     {
         unsigned id = view.add(parents[i], names[i]);
         if(view.failed)

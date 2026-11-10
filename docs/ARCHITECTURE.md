@@ -544,8 +544,8 @@ The BIOS raw image keeps a fixed LBA layout generated at configure time and emit
 
 - LBA `0`: MBR boot sector
 - LBA `1-64`: `kernel16.bin`
-- LBA `65-912`: `kernel_bios.elf`
-- LBA `913-1200`: `initrd.cpio`
+- LBA `65-1072`: `kernel_bios.elf`
+- LBA `1073-1200`: `initrd.cpio`
 - LBA `1280`: real-hardware boot log journal
 - LBA `1288-2855`: four boot log slots of 392 sectors (see [2026-11-02-real-hardware-bootlog.md](hardware/boot-log.md))
 
@@ -556,9 +556,9 @@ Final `.text`, `.rodata`, and `.data` alignment occupies zero-filled `PT_LOAD` m
 Both loaders zero the segment memory before copying initialized bytes.
 Page-aligned boundary symbols, segment addresses, permissions, and reserved memory remain unchanged.
 The [BIOS size correction](archive/boot/2026-11-09-bios-image-size.md) records the regression and validation.
-The BIOS loader stages the stripped kernel in `[0xE000,0x78000)` (424 KiB).
-It stages the plain initrd in `[0x78000,0x9C000)` (144 KiB).
-The latest CI correction moves 16 KiB of staging capacity from initrd to the kernel.
+The BIOS loader stages the stripped kernel in `[0xE000,0x8C000)` (504 KiB).
+It stages the plain initrd in `[0x8C000,0x9C000)` (64 KiB).
+The normalized catalog extension moves 80 KiB of staging capacity from initrd to the kernel.
 Compact non-reflective executables keep the initrd within its new bound.
 The 2880-sector raw image, firmware ceiling, and boot-log placement remain unchanged.
 Kernel C++ and bundled userspace use `-Os`; userspace discards unreferenced sections while retaining metadata.
@@ -621,7 +621,7 @@ Key addresses:
 | `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
 | `0x09000` | BIOS disk scratch, then temporary page tables after firmware disk I/O completes |
 | `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
-| `0x78000` | BIOS initrd load buffer (144 KiB slot, ending at `0x9C000`) |
+| `0x8C000` | BIOS initrd load buffer (64 KiB slot, ending at `0x9C000`) |
 | `0x100000` | shared kernel physical load base |
 | `0x1A0000-0x21FFFF` | page-frame bitmap |
 
@@ -1659,6 +1659,13 @@ xHCI retains normal-boot port outcomes in the existing bounded USB diagnostic ar
 The user runtime caches one page and keeps external nodes outside its fixed registry.
 The context inspector prints cached hardware field values and identifies empty collections without invoking members.
 Hardware nodes do not grant device control. Functional input, display, and block interfaces remain planned.
+
+Version 2 adds a bounded normalized USB and storage catalog.
+Driver enumeration publishes descriptors and bindings without additional device transfers.
+Existing storage reads publish partition facts; successful ext2 mounts publish backing relationships.
+The runtime adds `os.storage` and `os.fs.mounts` as passive views.
+The four hardware utilities use the same observation profile as context and Tab.
+The [catalog plan](native-api/hardware-catalog-plan.md) records scope, validation, and planned hotplug updates.
 
 ## Live context exploration
 

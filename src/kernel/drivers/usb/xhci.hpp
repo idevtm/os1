@@ -12,3 +12,6 @@ void xhci_poll_input();
 
 // Boot-thread summary; uses the existing diagnostic screen/log sinks.
 void xhci_diagnostic_summary();
+
+// Boot-thread reconciliation before the hardware catalog freezes. No I/O.
+void xhci_capture_catalog_state();

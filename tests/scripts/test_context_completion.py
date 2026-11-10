@@ -119,7 +119,7 @@ def main():
         assert b'32902\n' in expect()
         if args.keyboard == 'usb':
             usb = run('context os.devices.classes.input')
-            assert b'usb_' in usb, usb
+            assert b'interface_' in usb and b'UsbInterface' in usb, usb
         run('process.environment.config = {enabled:true, label:"sample"}')
         fields = run('context process.environment.config')
         assert b'enabled [field] Boolean' in fields and b'label [field] String' in fields, fields

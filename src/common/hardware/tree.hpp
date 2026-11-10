@@ -10,7 +10,14 @@ enum Source : unsigned
     Pci = 1,
     Usb,
     Acpi,
-    Processor
+    Processor,
+    UsbDevice,
+    UsbInterface,
+    Block,
+    Partition,
+    Filesystem,
+    Mount,
+    UsbPort
 };
 constexpr unsigned record_base = 0x100000, source_limit = 1024;
 constexpr unsigned object_id(unsigned source, unsigned index)
@@ -19,15 +26,18 @@ constexpr unsigned object_id(unsigned source, unsigned index)
 }
 struct Record
 {
-    uint32_t parent = 0, category = OS1_HARDWARE_OTHER;
+    uint32_t parent = 0, category = 0;
     char name[96]{}, state[96]{}, driver[96]{}, identifier[96]{};
     uint64_t values[22]{};
+    uint64_t known = 0;
+    uint32_t backing = 0;
 };
 struct SourceView
 {
     unsigned (*count)(unsigned);
     bool (*read)(unsigned, unsigned, Record&);
     unsigned (*lost)() = nullptr;
+    unsigned (*catalog_lost)() = nullptr;
 };
 inline void copy(char* out, unsigned capacity, const char* in)
 {
@@ -60,7 +70,26 @@ inline unsigned group(unsigned source)
 {
     const unsigned groups[] = {
         0, OS1_HARDWARE_PCI, OS1_HARDWARE_USB, OS1_HARDWARE_ACPI, OS1_HARDWARE_PROCESSORS};
-    return source <= Processor ? groups[source] : 0;
+    if(source <= Processor)
+        return groups[source];
+    switch(source)
+    {
+        case UsbDevice:
+        case UsbPort:
+            return OS1_HARDWARE_USB;
+        case UsbInterface:
+            return OS1_HARDWARE_USB_INTERFACES;
+        case Block:
+            return OS1_HARDWARE_BLOCKS;
+        case Partition:
+            return OS1_HARDWARE_PARTITIONS;
+        case Filesystem:
+            return OS1_HARDWARE_FILESYSTEMS;
+        case Mount:
+            return OS1_HARDWARE_MOUNTS;
+        default:
+            return 0;
+    }
 }
 inline const char* detail_name(unsigned source, unsigned index)
 {
@@ -92,12 +121,74 @@ inline const char* detail_name(unsigned source, unsigned index)
         return acpi[index];
     if(source == Processor && index < 3)
         return cpu[index];
+    static constexpr const char* device[] = {"vendor_id",
+                                             "product_id",
+                                             "usb_version",
+                                             "device_class",
+                                             "device_subclass",
+                                             "device_protocol",
+                                             "speed_mbps_x10",
+                                             "address",
+                                             "root_port",
+                                             "port",
+                                             "configuration"};
+    static constexpr const char* interface[] = {"number",
+                                                "alternate_setting",
+                                                "class_code",
+                                                "subclass",
+                                                "protocol",
+                                                "endpoint_count",
+                                                "configuration"};
+    static constexpr const char* block[] = {
+        "sector_count", "sector_size", "size_bytes", "max_sectors_per_request", "queue_depth"};
+    static constexpr const char* partition[] = {
+        "number", "type_code", "start_sector", "sector_count", "size_bytes"};
+    static constexpr const char* filesystem[] = {"block_size", "block_count", "size_bytes"};
+    static constexpr const char* port[] = {"port", "connected"};
+    if(source == UsbDevice && index < 11)
+        return device[index];
+    if(source == UsbInterface && index < 7)
+        return interface[index];
+    if(source == Block && index < 5)
+        return block[index];
+    if(source == Partition && index < 5)
+        return partition[index];
+    if(source == Filesystem && index < 3)
+        return filesystem[index];
+    if(source == UsbPort && index < 2)
+        return port[index];
     return nullptr;
 }
-inline bool describe(const SourceView& source, unsigned id, Os1HardwareNode& node)
+inline bool describe(const SourceView& source,
+                     unsigned id,
+                     Os1HardwareNode& node,
+                     bool normalized = true)
 {
     node = {};
     node.id = id;
+    if(normalized && id >= OS1_HARDWARE_STORAGE_ROOT && id <= OS1_HARDWARE_USB_INTERFACES)
+    {
+        const char* names[] = {"storage",
+                               "devices",
+                               "partitions",
+                               "filesystems",
+                               "mounts",
+                               "catalog_records_dropped",
+                               "usb_interfaces"};
+        copy(node.name, sizeof(node.name), names[id - OS1_HARDWARE_STORAGE_ROOT]);
+        copy(node.text, sizeof(node.text), "HardwareCollection");
+        if(id >= OS1_HARDWARE_BLOCKS && id <= OS1_HARDWARE_FILESYSTEMS)
+            node.parent = OS1_HARDWARE_STORAGE_ROOT;
+        if(id == OS1_HARDWARE_USB_INTERFACES)
+            node.parent = OS1_HARDWARE_INVENTORY;
+        if(id == OS1_HARDWARE_CATALOG_DROPPED)
+        {
+            node.parent = OS1_HARDWARE_DEVICES;
+            node.type = OS1_HARDWARE_INTEGER;
+            node.integer = source.catalog_lost ? source.catalog_lost() : 0;
+        }
+        return true;
+    }
     if(id == OS1_HARDWARE_COVERAGE || id == OS1_HARDWARE_USB_DROPPED)
     {
         node.parent = OS1_HARDWARE_DEVICES;
@@ -107,7 +198,10 @@ inline bool describe(const SourceView& source, unsigned id, Os1HardwareNode& nod
              id == OS1_HARDWARE_COVERAGE ? "coverage" : "usb_records_dropped");
         copy(node.text,
              sizeof(node.text),
-             "boot snapshot; cached PCI/USB/ACPI/CPU records; no hotplug or control interfaces");
+             normalized ? "boot snapshot; normalized hardware and observed storage; no hotplug or "
+                          "control interfaces"
+                        : "boot snapshot; cached PCI/USB/ACPI/CPU records; no hotplug or control "
+                          "interfaces");
         node.integer = source.lost ? source.lost() : 0;
         return true;
     }
@@ -142,7 +236,7 @@ inline bool describe(const SourceView& source, unsigned id, Os1HardwareNode& nod
             node.parent = OS1_HARDWARE_DEVICES;
         return true;
     }
-    if(id < record_base || id >= object_id(Processor + 1, 0))
+    if(id < record_base || id >= object_id((normalized ? UsbPort : Processor) + 1, 0))
         return false;
     unsigned kind = (id - record_base) >> 16, index = (id & 0xffff) >> 6, field = id & 63;
     if(!kind || index >= source.count(kind) || index >= source_limit)
@@ -154,9 +248,32 @@ inline bool describe(const SourceView& source, unsigned id, Os1HardwareNode& nod
     node.parent = field ? object : group(kind);
     if(!field)
     {
-        const char* prefixes[] = {"", "pci_", "usb_", "acpi_", "cpu_"};
+        const char* prefixes[] = {"",
+                                  "pci_",
+                                  "usb_",
+                                  "acpi_",
+                                  "cpu_",
+                                  "usb_",
+                                  "interface_",
+                                  "block_",
+                                  "partition_",
+                                  "filesystem_",
+                                  "mount_",
+                                  "port_"};
         indexed(node.name, sizeof(node.name), prefixes[kind], index);
-        copy(node.text, sizeof(node.text), "HardwareNode");
+        const char* types[] = {"",
+                               "PciFunction",
+                               "HardwareNode",
+                               "AcpiDevice",
+                               "Processor",
+                               "UsbDevice",
+                               "UsbInterface",
+                               "BlockDeviceInfo",
+                               "PartitionInfo",
+                               "FilesystemInfo",
+                               "MountInfo",
+                               "UsbPort"};
+        copy(node.text, sizeof(node.text), normalized ? types[kind] : "HardwareNode");
         return true;
     }
     static constexpr const char* fields[] = {
@@ -168,6 +285,31 @@ inline bool describe(const SourceView& source, unsigned id, Os1HardwareNode& nod
         copy(node.text, sizeof(node.text), record.identifier);
         return true;
     }
+    if(normalized && field >= 32 && field <= 37)
+    {
+        const char* names[] = {
+            "attachment", "backing", "consumers", "identifier", "observation", "backing_id"};
+        copy(node.name, sizeof(node.name), names[field - 32]);
+        if(field <= 34)
+        {
+            node.type = OS1_HARDWARE_OBJECT;
+            copy(node.text, sizeof(node.text), "HardwareCollection");
+        }
+        else if(field == 37)
+        {
+            node.type = OS1_HARDWARE_INTEGER;
+            node.integer = record.backing;
+        }
+        else
+        {
+            node.type = OS1_HARDWARE_STRING;
+            copy(node.text, sizeof(node.text), field == 35 ? record.identifier : "boot_snapshot");
+        }
+        return true;
+    }
+    if(kind >= UsbDevice && field >= 8 && field < 30 &&
+       !(record.known & (uint64_t(1) << (field - 8))))
+        return false;
     const char* name = field < 8 ? fields[field] : detail_name(kind, field - 8);
     if(!name)
         return false;
@@ -199,8 +341,8 @@ inline bool describe(const SourceView& source, unsigned id, Os1HardwareNode& nod
 }
 inline long query(const SourceView& source, Os1HardwareQuery& q)
 {
-    if(q.version != OS1_HARDWARE_VERSION || q.reserved || q.next || q.count || q.end ||
-       (q.operation != OS1_HARDWARE_DESCRIBE && q.operation != OS1_HARDWARE_CHILDREN))
+    if((q.version != 1 && q.version != OS1_HARDWARE_VERSION) || q.reserved || q.next || q.count ||
+       q.end || (q.operation != OS1_HARDWARE_DESCRIBE && q.operation != OS1_HARDWARE_CHILDREN))
         return OS1_ERR_INVALID;
     if(q.generation && q.generation != 1)
         return OS1_ERR_CANCELLED;
@@ -211,8 +353,9 @@ inline long query(const SourceView& source, Os1HardwareQuery& q)
             if(bytes[i])
                 return OS1_ERR_INVALID;
     }
+    bool normalized = q.version == 2;
     Os1HardwareNode parent{};
-    if(!describe(source, q.id, parent))
+    if(!describe(source, q.id, parent, normalized))
         return OS1_ERR_NOT_FOUND;
     q.generation = 1;
     if(q.operation == OS1_HARDWARE_DESCRIBE)
@@ -228,26 +371,30 @@ inline long query(const SourceView& source, Os1HardwareQuery& q)
     unsigned matched = 0;
     auto emit = [&](unsigned id) {
         Os1HardwareNode node{};
-        if(!describe(source, id, node))
+        if(!describe(source, id, node, normalized))
             return;
         if(matched++ >= q.start && q.count < OS1_HARDWARE_PAGE)
             q.nodes[q.count++] = node;
     };
     if(q.id >= record_base && (q.id & 63) == 0)
     {
-        for(unsigned f = 1; f < 32; ++f)
+        for(unsigned f = 1; f < (normalized ? 38u : 32u); ++f)
             emit(q.id + f);
     }
     else
     {
-        for(unsigned g = OS1_HARDWARE_DEVICES; g <= OS1_HARDWARE_USB_DROPPED; ++g)
+        for(unsigned g = OS1_HARDWARE_DEVICES;
+            g <= (normalized ? OS1_HARDWARE_USB_INTERFACES : OS1_HARDWARE_USB_DROPPED);
+            ++g)
         {
             Os1HardwareNode node{};
-            if(describe(source, g, node) && node.parent == q.id)
+            if(describe(source, g, node, normalized) && node.parent == q.id)
                 emit(g);
         }
-        for(unsigned s = Pci; s <= Processor; ++s)
+        for(unsigned s = Pci; s <= (normalized ? UsbPort : Processor); ++s)
         {
+            if(normalized && s == Usb)
+                continue;
             unsigned count = source.count(s);
             if(count > source_limit)
                 return OS1_ERR_LIMIT;
@@ -263,13 +410,26 @@ inline long query(const SourceView& source, Os1HardwareQuery& q)
                     if(!source.read(s, i, record))
                         continue;
                     if(q.id == OS1_HARDWARE_TOPOLOGY)
-                        include = (s == Pci || s == Usb) && !record.parent;
+                        include = (s == Pci || s == Usb || s == UsbDevice || s == UsbPort) &&
+                                  !record.parent;
                     else if(q.id == OS1_HARDWARE_DRIVERS)
-                        include = s == Pci && record.driver[0];
+                        include = record.driver[0];
                     else if(q.id >= record_base)
-                        include = record.parent == (q.id & ~63u);
+                    {
+                        const unsigned owner = q.id & ~63u, field = q.id & 63;
+                        Record selected{};
+                        unsigned owner_kind = (owner - record_base) >> 16;
+                        unsigned owner_index = (owner & 0xffff) >> 6;
+                        if(!source.read(owner_kind, owner_index, selected))
+                            return OS1_ERR_NOT_FOUND;
+                        include = field == 6    ? record.parent == owner
+                                  : field == 32 ? id == selected.parent
+                                  : field == 33 ? id == selected.backing
+                                  : field == 34 ? record.backing == owner
+                                                : false;
+                    }
                     else
-                        include = (s == Pci || s == Usb) && record.category == q.id;
+                        include = record.category == q.id && s != Acpi && s != Processor;
                 }
                 if(include)
                     emit(id);

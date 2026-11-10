@@ -1,13 +1,19 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstring>
 
 #include "discovery/completion.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "drivers/usb/diagnostics.hpp"
+#include "handoff/memory_layout.h"
 #include "hardware/tree.hpp"
+#include "mm/kmem.hpp"
 #include "platform/hardware.hpp"
+#include "platform/hardware_catalog.hpp"
 #include "platform/state.hpp"
+#include "storage/block_device.hpp"
+#include "support/physical_memory.hpp"
 using namespace os1;
 namespace
 {
@@ -275,3 +281,190 @@ TEST(Hardware, BindingNamesAreCopiedDeduplicatedAndBounded)
     EXPECT_EQ(0u, q.count);
 }
 }  // namespace
+
+namespace
+{
+struct NormalizedHardware : testing::Test
+{
+    os1::host_test::PhysicalMemoryArena arena{32 * 1024 * 1024};
+    PageFrameContainer frames;
+    void SetUp() override
+    {
+        hardware_reset_bindings();
+        std::array<BootMemoryRegion, 1> regions{{{0, 32 * 1024 * 1024, BootMemoryType::Usable, 0}}};
+        ASSERT_TRUE(
+            frames.initialize(regions, kPageFrameBitmapBaseAddress, kPageFrameBitmapQwordLimit));
+        kmem_init(frames);
+    }
+    void TearDown() override
+    {
+        hardware_reset_bindings();
+    }
+    Os1HardwareQuery inspect(unsigned id, unsigned op = OS1_HARDWARE_CHILDREN)
+    {
+        auto q = request(id, op);
+        q.version = 2;
+        EXPECT_EQ(0, hardware_query(q));
+        return q;
+    }
+};
+TEST_F(NormalizedHardware, UsbDescriptorsInterfacesAndUnknownValues)
+{
+    unsigned port = hardware_catalog::usb_port(0, 4, true);
+    unsigned device = hardware_catalog::usb_device(port, 4, 4, 15);
+    auto q = request(device + 8, OS1_HARDWARE_DESCRIBE);
+    q.version = 2;
+    EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(q));  // No fabricated vendor ID.
+    uint8_t descriptor[18] = {18, 1, 0, 2, 0, 0, 0, 8, 0xef, 0x17, 0x90, 0x61, 0, 1, 0, 0, 0, 1};
+    hardware_catalog::usb_descriptor(device, descriptor, sizeof(descriptor));
+    q = inspect(device + 8, OS1_HARDWARE_DESCRIBE);
+    EXPECT_EQ(0x17efu, q.nodes[0].integer);
+    uint8_t config[] = {9, 2, 34, 0,    2, 1, 0, 0x80, 50, 9, 4, 0, 0, 1, 3, 1, 1,
+                        0, 7, 5,  0x81, 3, 8, 0, 10,   9,  4, 1, 0, 0, 3, 0, 0, 0};
+    hardware_catalog::usb_configuration(device, config, sizeof(config));
+    auto interfaces = inspect(OS1_HARDWARE_USB_INTERFACES);
+    ASSERT_EQ(2u, interfaces.count);
+    unsigned keyboard = hardware_catalog::usb_bind(device, 1, 0, "usb-hid", true);
+    EXPECT_EQ(interfaces.nodes[0].id, keyboard);
+    q = inspect(keyboard + 33);
+    ASSERT_EQ(1u, q.count);
+    EXPECT_EQ(device, q.nodes[0].id);
+    q = inspect(device + 34);
+    ASSERT_EQ(2u, q.count);
+    EXPECT_EQ(keyboard, q.nodes[0].id);
+    q = inspect(keyboard + 4, OS1_HARDWARE_DESCRIBE);
+    EXPECT_STREQ("usb-hid", q.nodes[0].text);
+    q = inspect(interfaces.nodes[1].id + 3, OS1_HARDWARE_DESCRIBE);
+    EXPECT_STREQ("unbound", q.nodes[0].text);
+    q = inspect(device + 32);
+    ASSERT_EQ(1u, q.count);
+    EXPECT_EQ(port, q.nodes[0].id);
+    q = request(OS1_HARDWARE_BLOCKS);
+    EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(q));  // Version 1 is unchanged.
+}
+TEST_F(NormalizedHardware, StorageForwardAndReverseIdentityAndFreeze)
+{
+    unsigned device = hardware_catalog::usb_device(0, 1, 1, 4800);
+    BlockDevice block{};
+    block.name = "test-block";
+    block.sector_size = 512;
+    block.sector_count = 8192;
+    hardware_catalog::block(block, device);
+    uint8_t mbr[512]{};
+    mbr[510] = 0x55;
+    mbr[511] = 0xaa;
+    mbr[450] = 0x83;
+    mbr[455] = 8;
+    mbr[459] = 8;  // start=2048, sectors=2048
+    hardware_catalog::partitions(block, mbr);
+    uint8_t super[1024]{};
+    super[5] = 1;
+    super[104] = 0xab;
+    hardware_catalog::mounted(block, 1, super);
+    auto mounts = inspect(OS1_HARDWARE_MOUNTS);
+    ASSERT_EQ(1u, mounts.count);
+    unsigned current = mounts.nodes[0].id;
+    auto name = inspect(current + 2, OS1_HARDWARE_DESCRIBE);
+    EXPECT_STREQ("/disk", name.nodes[0].text);
+    for(unsigned i = 0; i < 4; ++i)
+    {
+        auto backing = inspect(current + 33);
+        ASSERT_EQ(1u, backing.count);
+        auto consumers = inspect(backing.nodes[0].id + 34);
+        ASSERT_EQ(1u, consumers.count);
+        EXPECT_EQ(current, consumers.nodes[0].id);
+        current = backing.nodes[0].id;
+    }
+    EXPECT_EQ(device, current);
+    hardware_freeze_bindings();
+    EXPECT_EQ(nullptr, hardware_catalog::edit(device));
+    EXPECT_EQ(0u, hardware_catalog::usb_device(0, 2, 2, 0));
+    EXPECT_EQ(1u, inspect(OS1_HARDWARE_BLOCKS).count);
+}
+TEST_F(NormalizedHardware, MalformedConfigurationDoesNotPublishPartialInterfaces)
+{
+    unsigned device = hardware_catalog::usb_device(0, 1, 1, 0);
+    uint8_t malformed[] = {9, 2, 20, 0, 1, 1, 0, 0, 0, 9, 4, 0, 0, 0, 3, 1, 1, 0, 0, 5};
+    hardware_catalog::usb_configuration(device, malformed, sizeof(malformed));
+    EXPECT_EQ(0u, inspect(OS1_HARDWARE_USB_INTERFACES).count);
+    EXPECT_EQ(1u, inspect(OS1_HARDWARE_CATALOG_DROPPED, OS1_HARDWARE_DESCRIBE).nodes[0].integer);
+    EXPECT_STREQ("descriptor_invalid", inspect(device + 3, OS1_HARDWARE_DESCRIBE).nodes[0].text);
+    malformed[2] = 40;
+    hardware_catalog::usb_configuration(device, malformed, sizeof(malformed));
+    EXPECT_EQ(0u, inspect(OS1_HARDWARE_USB_INTERFACES).count);
+}
+TEST_F(NormalizedHardware, CaptureLimitsAndStorageOverflowAreExplicit)
+{
+    BlockDevice block{};
+    block.name = "overflow";
+    block.sector_count = ~uint64_t(0);
+    block.sector_size = 4096;
+    hardware_catalog::block(block, 0);
+    auto q = request(block.catalog_id + 10, OS1_HARDWARE_DESCRIBE);
+    q.version = 2;
+    EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(q));
+    for(unsigned i = 1; i < hardware::Catalog::capacity; ++i)
+        ASSERT_NE(0u, hardware_catalog::usb_device(0, i, i, 0));
+    EXPECT_EQ(0u, hardware_catalog::usb_device(0, 1, 1, 0));
+    EXPECT_EQ(1u, inspect(OS1_HARDWARE_CATALOG_DROPPED, OS1_HARDWARE_DESCRIBE).nodes[0].integer);
+}
+}  // namespace
+
+TEST_F(NormalizedHardware, AllocationFailureDoesNotBreakPassiveQueries)
+{
+    ASSERT_TRUE(frames.reserve_range(0, 32 * 1024 * 1024));
+    EXPECT_EQ(0u, hardware_catalog::usb_device(0, 1, 1, 0));
+    EXPECT_EQ(1u, inspect(OS1_HARDWARE_CATALOG_DROPPED, OS1_HARDWARE_DESCRIBE).nodes[0].integer);
+    EXPECT_EQ(0u, inspect(OS1_HARDWARE_USB).count);
+}
+
+TEST_F(NormalizedHardware, FailedConfigurationAndBootRetirementRemainVisible)
+{
+    unsigned device = hardware_catalog::usb_device(0, 1, 1, 4800);
+    uint8_t config[] = {9, 2, 18, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0, 0, 8, 6, 0x50, 0};
+    hardware_catalog::usb_configuration(device, config, sizeof(config));
+    unsigned interface = hardware_catalog::usb_bind(device, 1, 0, "usb-bot", false);
+    auto q = request(device + 18, OS1_HARDWARE_DESCRIBE);
+    q.version = 2;
+    EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(q));
+    hardware_catalog::usb_bind(device, 1, 0, "usb-bot", true);
+    EXPECT_EQ(1u, inspect(device + 18, OS1_HARDWARE_DESCRIBE).nodes[0].integer);
+    BlockDevice block{};
+    block.name = "test";
+    hardware_catalog::block(block, interface);
+    hardware_catalog::unavailable(device);
+    for(unsigned id : {device, interface, block.catalog_id})
+        EXPECT_STREQ("unavailable", inspect(id + 3, OS1_HARDWARE_DESCRIBE).nodes[0].text);
+    hardware_freeze_bindings();
+    hardware_catalog::usb_configuration(device, nullptr, 0);
+    EXPECT_EQ(0u, inspect(OS1_HARDWARE_CATALOG_DROPPED, OS1_HARDWARE_DESCRIBE).nodes[0].integer);
+}
+
+TEST(Hardware, CompleteNameClosesAutomaticMenuDespiteLongerPrefixMatch)
+{
+    discovery::View view;
+    context::Data data{};
+    context::defaults(data);
+    ASSERT_TRUE(view.build({}, data, 1));
+    unsigned inventory = view.add(view.resolve("os"), "inventory");
+    view.add(inventory, "usb");
+    view.add(inventory, "usb_interfaces");
+    discovery::Completion edit;
+    discovery::copy(edit.line, sizeof(edit.line), "os.inventory.usb");
+    edit.size = edit.cursor = std::strlen(edit.line);
+    edit.refine(view, false);
+    EXPECT_FALSE(edit.open);
+    ASSERT_TRUE(edit.begin(view));
+    EXPECT_EQ(2u, edit.matches);
+    EXPECT_TRUE(edit.open);
+}
+
+TEST_F(NormalizedHardware, UpstreamDescriptorRejectionIsRecordedBeforeFreeze)
+{
+    unsigned device = hardware_catalog::usb_device(0, 1, 1, 4800);
+    uint8_t config[] = {9, 2, 18, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0, 0, 8, 6, 0x50, 0};
+    hardware_catalog::usb_configuration(device, config, sizeof(config), false);
+    EXPECT_EQ(0u, inspect(OS1_HARDWARE_USB_INTERFACES).count);
+    EXPECT_EQ(1u, inspect(OS1_HARDWARE_CATALOG_DROPPED, OS1_HARDWARE_DESCRIBE).nodes[0].integer);
+    EXPECT_STREQ("descriptor_invalid", inspect(device + 3, OS1_HARDWARE_DESCRIBE).nodes[0].text);
+}

@@ -44,6 +44,6 @@ with tempfile.TemporaryDirectory() as temporary:
         assert installed[path][1] == hashlib.sha256(Path(entry['source']).read_bytes()).hexdigest(), path
 assert not any('/disk/bin/' + name in [e['destination'] for e in programs] for name in ('init', 'rescue'))
 assert {'/disk/bin/sh', '/disk/bin/ls', '/disk/bin/cat', '/disk/bin/textprocessor', '/disk/bin/counter', '/disk/bin/activation', '/disk/bin/intf',
-        '/disk/bin/paramdemo', '/disk/bin/buffercheck'} <= {e['destination'] for e in programs}
+        '/disk/bin/paramdemo', '/disk/bin/buffercheck', '/disk/bin/lshw', '/disk/bin/lspci', '/disk/bin/lsusb', '/disk/bin/lsblk'} <= {e['destination'] for e in programs}
 assert {e['destination'] for e in resources} == {'/disk/etc/motd'}
 print(f'Two recovery executables; {len(programs)} complete disk ELFs; {len(resources)} resource defaults')
