@@ -83,7 +83,9 @@ TEST_F(Presentation, RepeatedSelectionAndDescentPreserveHistoryAndScreenPosition
     ASSERT_TRUE(display.paint(view, state, screen));
     EXPECT_EQ("os.", std::string(state.line));
     EXPECT_EQ(0, screen.line(16).find("> fs [object]"));
-    for(unsigned r = 18; r < 24; ++r)
+    EXPECT_NE(std::string::npos, screen.line(17).find("input [object]"));
+    EXPECT_NE(std::string::npos, screen.line(18).find("system [object]"));
+    for(unsigned r = 19; r < 24; ++r)
         EXPECT_EQ(std::string(80, ' '), screen.line(r));
     EXPECT_EQ(scrolls, screen.scrolls);
 }

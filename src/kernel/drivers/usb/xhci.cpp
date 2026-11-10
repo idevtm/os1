@@ -9,6 +9,7 @@
 #include "debug/event_ring.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/resource.hpp"
+#include "drivers/input/service.hpp"
 #include "drivers/timer/tsc_clock.hpp"
 #include "drivers/usb/hid_keyboard.hpp"
 #include "drivers/usb/mass_storage.hpp"
@@ -47,7 +48,7 @@ constexpr PciMatch kXhciMatches[]{
     },
 };
 constexpr size_t kXhciMaxControllers = 4u;
-constexpr size_t kXhciMaxDevices = 4u;
+constexpr size_t kXhciMaxDevices = 16u;
 constexpr size_t kXhciCommandRingBytes = kPageSize;
 constexpr size_t kXhciEventRingBytes = kPageSize;
 constexpr size_t kXhciTransferRingBytes = kPageSize;
@@ -171,6 +172,7 @@ struct HidInterfaceSelection
 struct XhciControllerState;
 struct XhciDeviceState
 {
+    uint64_t input_identity = 0;
     bool present = false;
     bool configured = false;
     bool failed = false;
@@ -225,6 +227,8 @@ struct XhciControllerState
     bool failed = false;
     bool dma_published = false;
     uint8_t storage_busy = 0;
+    bool port_changed[256]{};
+    unsigned catalog_ports[256]{};
     DeviceId owner{DeviceBus::Platform, 0};
     uint16_t pci_index = 0;
     uint16_t configured_slots = 0;
@@ -265,6 +269,7 @@ bool initialize_storage(PageFrameContainer&,
                         const usb::storage::Interface&);
 void fail_device(XhciDeviceState& device)
 {
+    native_input::remove(device.input_identity);
     __atomic_store_n(&device.failed, true, __ATOMIC_RELEASE);
     device.storage.invalidate();
 }
@@ -442,7 +447,10 @@ void release_controller(PageFrameContainer& frames, XhciControllerState& control
         // Keep MMIO claims, rings and block-object addresses stable after publication.
         __atomic_store_n(&controller.failed, true, __ATOMIC_RELEASE);
         for(auto& device : controller.devices)
+        {
             fail_device(device);
+            hardware_catalog::unavailable(device.catalog_id);
+        }
         (void)xhci::controller_stop(controller.controller, kXhciInitTimeoutSpins);
         if(controller.pci_index < kPlatformMaxPciDevices)
         {
@@ -668,6 +676,10 @@ bool allocate_device_resources(PageFrameContainer& frames,
 
 void handle_keyboard_report(XhciDeviceState& device)
 {
+    native_input::boot_keyboard(
+        device.input_identity,
+        static_cast<const uint8_t*>(device.report_buffer_dma.virtual_address),
+        8);
     char output[6]{};
     size_t output_count = 0;
     if(!usb::hid::boot_keyboard_apply_report(
@@ -696,6 +708,10 @@ void handle_keyboard_report(XhciDeviceState& device)
 
 void handle_mouse_report(XhciDeviceState& device)
 {
+    native_input::boot_pointer(
+        device.input_identity,
+        static_cast<const uint8_t*>(device.report_buffer_dma.virtual_address),
+        3);
     ++device.report_count;
 }
 
@@ -789,11 +805,15 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
             dma_sync_for_cpu(device.report_buffer_dma);
             if(transfer_completion_ok(event.completion_code))
             {
-                if(HidBootProtocol::Keyboard == device.protocol)
+                if(HidBootProtocol::Keyboard == device.protocol &&
+                   event.transfer_length <= device.report_buffer_dma.size_bytes &&
+                   device.report_buffer_dma.size_bytes - event.transfer_length == 8)
                 {
                     handle_keyboard_report(device);
                 }
-                else if(HidBootProtocol::Mouse == device.protocol)
+                else if(HidBootProtocol::Mouse == device.protocol &&
+                        event.transfer_length <= device.report_buffer_dma.size_bytes &&
+                        device.report_buffer_dma.size_bytes - event.transfer_length >= 3)
                 {
                     handle_mouse_report(device);
                 }
@@ -842,10 +862,14 @@ void service_events_locked(XhciControllerState& controller)
             case xhci::EventType::PortStatusChange: {
                 xhci::PortStatus status{};
                 if(xhci::read_port_status(controller.controller, event.port_id, status))
+                {
+                    if(!status.connected || (status.raw & xhci::kPortScConnectStatusChange))
+                        controller.port_changed[event.port_id] = true;
                     for(auto& device : controller.devices)
                         if(device.present && device.port_id == event.port_id &&
                            (!status.connected || (status.raw & xhci::kPortScConnectStatusChange)))
                             fail_device(device);
+                }
                 (void)xhci::clear_port_change_bits(controller.controller, event.port_id);
                 break;
             }
@@ -930,7 +954,10 @@ bool submit_command(XhciControllerState& controller,
         xhci::disable_interrupts(controller.controller);
         __atomic_store_n(&controller.failed, true, __ATOMIC_RELEASE);
         for(auto& device : controller.devices)
+        {
             fail_device(device);
+            hardware_catalog::unavailable(device.catalog_id);
+        }
         return false;
     }
 
@@ -1549,6 +1576,8 @@ bool initialize_port(PageFrameContainer& frames,
     if(nullptr == device)
     {
         debug("xhci: HID device table full")();
+        if(!disable_slot(controller, slot_id))
+            release_controller(frames, controller);
         return false;
     }
 
@@ -1707,6 +1736,17 @@ bool initialize_port(PageFrameContainer& frames,
         return false;
     }
 
+    device->input_identity = native_input::attach(
+        device->protocol == HidBootProtocol::Keyboard ? OS1_INPUT_KEYBOARD : OS1_INPUT_POINTER,
+        device->protocol == HidBootProtocol::Keyboard ? "USB keyboard" : "USB pointer",
+        catalog_device);
+    if(!device->input_identity)
+    {
+        observation.stage = "input-capacity";
+        release_device(frames, controller, *device);
+        return false;
+    }
+    hardware_catalog::usb_input(catalog_device, device->input_identity);
     device->configured = true;
     bool armed = false;
     {
@@ -1747,6 +1787,7 @@ void enumerate_ports(PageFrameContainer& frames, XhciControllerState& controller
         usb::diagnostics::append(port_record);
         unsigned catalog_port =
             hardware_catalog::usb_port(controller.pci_index, port_id, status.connected);
+        controller.catalog_ports[port_id] = catalog_port;
         if(status.connected)
         {
             if(bootlog_diagnostics_enabled())
@@ -1756,6 +1797,10 @@ void enumerate_ports(PageFrameContainer& frames, XhciControllerState& controller
             if(bootlog_diagnostics_enabled())
                 debug("usbdiag: enumeration pci=")(controller.pci_index)(" port=")(port_id)(" ok=")(
                     initialized)();
+        }
+        {
+            IrqSpinGuard guard(g_event_lock);
+            controller.port_changed[port_id] = false;
         }
     }
 }
@@ -2075,4 +2120,64 @@ void xhci_diagnostic_summary()
         }
     }
     debug("usbdiag: configured keyboards=")(ready)();
+}
+
+void xhci_poll_devices(PageFrameContainer& frames)
+{
+    for(auto* c : g_xhci_controllers)
+    {
+        if(!c || __atomic_load_n(&c->failed, __ATOMIC_ACQUIRE) ||
+           __atomic_exchange_n(&c->storage_busy, 1, __ATOMIC_ACQUIRE))
+            continue;
+        for(unsigned port = 1; port <= c->controller.capability.max_ports; ++port)
+        {
+            bool changed = false;
+            {
+                IrqSpinGuard guard(g_event_lock);
+                changed = c->port_changed[port];
+                c->port_changed[port] = false;
+            }
+            if(!changed)
+                continue;
+            bool safe = true;
+            for(auto& d : c->devices)
+            {
+                uint8_t slot = 0;
+                {
+                    IrqSpinGuard guard(g_event_lock);
+                    if(d.present && d.port_id == port)
+                    {
+                        fail_device(d);
+                        slot = d.slot_id;
+                    }
+                }
+                if(!slot)
+                    continue;
+                hardware_catalog::unavailable(d.catalog_id);
+                if(!disable_slot(*c, slot))
+                {
+                    safe = false;
+                    break;
+                }
+                {
+                    IrqSpinGuard guard(g_event_lock);
+                    d.slot_id = 0;  // A later slot reuse cannot match this retired attachment.
+                }
+                // Keep every published DMA buffer and block address stable until reboot.
+            }
+            if(!safe)
+            {
+                release_controller(frames, *c);
+                break;
+            }
+            tsc_clock_delay_us(100000);
+            xhci::PortStatus status{};
+            if(!xhci::read_port_status(c->controller, port, status))
+                continue;
+            hardware_catalog::port_state(c->catalog_ports[port], status.connected);
+            if(status.connected)
+                (void)initialize_port(frames, *c, uint8_t(port), c->catalog_ports[port]);
+        }
+        __atomic_store_n(&c->storage_busy, 0, __ATOMIC_RELEASE);
+    }
 }

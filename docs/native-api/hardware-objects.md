@@ -38,7 +38,7 @@ Inspection grants no register, DMA, interrupt, or device-control authority.
 Session acquisition remains explicit. Interface versions define compatibility independently of driver names.
 Removal makes retained references unavailable. Replacement hardware receives a different identity.
 Bulk operations will use explicit Buffer ownership with driver-specific alignment and DMA constraints.
-These functional interfaces remain accepted designs, not implemented ABI profiles.
+Keyboard and Pointer have an implemented [input profile](abi/input-abi.md). Other functional interfaces remain accepted designs.
 
 ## First reflection slice
 
@@ -47,9 +47,10 @@ The slice exposes cached PCI, USB, ACPI, and processor records through bounded d
 It must not probe hardware, execute firmware methods, construct objects, or activate drivers during exploration.
 Tab navigation and explicit field evaluation use the same descriptions.
 
-The first inventory describes boot-discovered hardware. It does not claim hotplug support or complete physical-machine coverage.
+Platform records describe boot-discovered hardware. USB attachment records now support bounded runtime updates.
+The [input ABI](abi/input-abi.md) defines the implemented transport scope and hardware acceptance limits.
 Missing firmware associations and unsupported device details remain unknown.
-Physical RAM-module discovery, general provider publication, and usable input and display interfaces remain later work.
+Physical RAM-module discovery, general provider publication, and display interfaces remain later work.
 
 ## Normalized catalog and storage relationships
 
@@ -83,14 +84,16 @@ The normalized profile describes the first USB configuration read by existing en
 It includes interface descriptors and endpoint counts. Detailed endpoint records remain future work.
 SMBIOS, physical memory modules, additional CPU details, and vendor databases remain future work.
 
-## Hotplug limitation and follow-up
+## Hotplug scope and follow-up
 
-The implemented catalog describes boot observations, including binding and mount outcomes.
-It does not track later disconnection, reconnection, driver failure, or mount availability.
-Context coverage and utility output identify this limitation.
+Platform descriptions retain boot observations. Supported USB paths update attachment and retirement records at runtime.
+Removed devices and dependent storage records become unavailable. Replacement devices receive new identities.
+Context coverage and utility output distinguish these scopes.
+Inspection does not perform device I/O. Applications must handle removal after inspection.
 
 The [hotplug plan](hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) requires deferred enumeration, generation changes, and lifetime-specific identities.
-It also requires bounded notifications, missed-event recovery, and safe driver teardown.
+Broader catalog notifications, automatic storage remount, and xHCI hub support remain deferred.
+Input subscriptions already provide bounded events and state recovery. Published DMA remains retained until reboot.
 Inspection will continue to read published data without initiating hardware operations.
 
 ## Sequence

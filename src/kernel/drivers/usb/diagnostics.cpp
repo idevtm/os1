@@ -6,15 +6,23 @@ namespace
 Os1ObserveUsbRecord records[capacity]{};
 size_t used{};
 unsigned lost{};
+bool sealed{};
 }  // namespace
 #ifdef OS1_HOST_TEST
 void reset_for_test()
 {
     used = lost = 0;
+    sealed = false;
 }
 #endif
+void freeze()
+{
+    sealed = true;
+}
 void append(const Os1ObserveUsbRecord& record)
 {
+    if(sealed)
+        return;
     if(used < capacity)
         records[used++] = record;
     else

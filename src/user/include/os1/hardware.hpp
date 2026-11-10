@@ -65,7 +65,7 @@ inline long page(const os1::discovery::View&,
     cache.operation = OS1_HARDWARE_CHILDREN;
     cache.id = parent;
     cache.start = cursor.next;
-    cache.generation = 1;
+    cache.generation = cursor.external_generation;
     long result = observe(OS1_OBSERVE_HARDWARE, &cache, sizeof(cache));
     if(result < 0)
     {
@@ -82,10 +82,12 @@ inline long page(const os1::discovery::View&,
     for(unsigned i = 0; i < out.count; ++i)
         out.ids[i] = cache.nodes[i].id;
     cursor.next = cache.next;
+    cursor.external_generation = cache.generation;
     return 0;
 }
 inline bool attach(os1::discovery::View& view)
 {
+    cache = {};  // A rebuilt context must not reuse values from an earlier prompt.
     // Hardware observation has the same global read-only policy as observe(PCI).
     view.external_member = member;
     view.external_page = page;

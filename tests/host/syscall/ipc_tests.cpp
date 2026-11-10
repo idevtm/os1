@@ -244,6 +244,8 @@ TEST_F(Ipc, PairFaultRollsBackAndDescriptorExhaustionNeverPublishes)
 }
 TEST_F(Ipc, WaitRegistrationSurvivesCloseAndDefersWakeUntilOffCpu)
 {
+    // Prior timer-only waits must not suppress a later object readiness wakeup.
+    thread->wait.ipc.timer_only = true;
     ASSERT_EQ(kIpcBlocked, sys_ipc(frames, thread, OS1_IPC_WAIT, pair.client, 0));
     EXPECT_EQ(ThreadWaitReason::Ipc, thread->wait.reason);
     ASSERT_EQ(0, ready());
@@ -2778,4 +2780,16 @@ TEST_F(KernelConsole, CursorPositionChecksAuthorityAndColumnBounds)
     EXPECT_EQ(OS1_ERR_ACCESS, complete(op).application_status);
     descriptor_close(table(), op);
     descriptor_close(table(), client);
+}
+
+TEST_F(Ipc, KernelTimerWaitDoesNotWakeOnUnrelatedObjectReadiness)
+{
+    kernel_sleep_for(thread, 5'000'000);
+    EXPECT_TRUE(thread->wait.ipc.timer_only);
+    set_current_thread(nullptr);
+    ipc_timer_tick(4'000'000);
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    ipc_timer_tick(1'000'000);
+    EXPECT_EQ(ThreadState::Ready, thread->state);
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
 }

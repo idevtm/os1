@@ -30,3 +30,6 @@ bool ipc_run_kernel_request();
 
 // Atomic check/registration for the single kernel worker; empty IPC selection.
 bool ipc_wait_kernel_work(Thread*);
+
+// Kernel-thread timed sleep; shares acknowledged scheduler-frame retirement.
+void kernel_sleep_for(Thread*, uint64_t delay_ns);

@@ -617,6 +617,32 @@ context os.storage.devices
 context os.fs.mounts.mount_0.backing
 ```
 
-These views describe boot observations. They do not update after device removal or reconnection.
+Platform views describe boot observations. Supported USB attachment and dependent storage records update after removal or reconnection.
+Retired identities remain unavailable; replacement devices receive new identities.
 The [hardware profile](docs/native-api/abi/hardware-reflection-abi.md#version-2-normalized-profile) defines coverage, commands, and limits.
-The [hotplug plan](docs/native-api/hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) records the next lifecycle extension.
+The [input plan](docs/hardware/input-services-plan.md) records transport coverage, validation, and pending hardware acceptance.
+
+## Native input
+
+Keyboard and Pointer objects provide independent volatile subscriptions and state recovery.
+They preserve Console typing. Explicit input authority permits raw events.
+
+```text
+os.input.list -> os.input.open -> get_state / subscribe -> try_read / unsubscribe
+```
+
+```text
+context os.input
+os.input.list
+keyboard = os.input.open device:1
+keys = keyboard.subscribe
+keys.try_read
+keyboard.get_state
+keys.unsubscribe
+process.shell.bindings.remove "keys"
+process.shell.bindings.remove "keyboard"
+```
+
+Select the device identity returned by `list`; the example uses identity 1.
+Press Tab after `keyboard.` or `keys.` to explore callable methods.
+See the [input ABI](docs/native-api/abi/input-abi.md) for loss recovery, transport limits, and authority.

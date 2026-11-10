@@ -2,6 +2,8 @@
 
 This plan extends passive hardware discovery and adds four inspection programs.
 The accepted model uses shared identities and typed relationships.
+This document retains the original implementation scope and measurements.
+The [input milestone](../hardware/input-services-plan.md) now implements bounded runtime USB updates; broader notifications and recovery remain deferred.
 
 ```text
 bus enumeration -> bounded boot catalog -> context / Tab / utility programs

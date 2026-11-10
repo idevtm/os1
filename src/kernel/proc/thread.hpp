@@ -46,6 +46,7 @@ struct IpcWaitState
 {
     OpenInstance* instances[OS1_IPC_WAIT_LIMIT]{};
     uint32_t count = 0;
+    bool timer_only = false;
     uint64_t deadline_ns = UINT64_MAX;
     long result = 0;
 };

@@ -106,6 +106,16 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
     }
     if(interface == OS1_CONSOLE_INPUT_INTERFACE_ID)
         return d;
+    if(interface == OS1_INPUT_INTERFACE_ID)
+    {
+        d.add(member == OS1_INPUT_LIST ? "after" : "device",
+              T::Integer,
+              member == OS1_INPUT_LIST ? "0" : "<?>");
+        return d;
+    }
+    if(interface == OS1_KEYBOARD_INTERFACE_ID || interface == OS1_POINTER_INTERFACE_ID ||
+       interface == OS1_INPUT_SUBSCRIPTION_INTERFACE_ID)
+        return d;
     if(interface == OS1_SYSTEM_INTERFACE_ID)
         return d;
     if(interface == OS1_LOG_INTERFACE_ID)

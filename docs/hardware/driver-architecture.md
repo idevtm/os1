@@ -50,7 +50,8 @@ Failed retirement requires bounded DMA quarantine and admission limits; the cont
 
 Module code remains resident until reboot in the first implementation.
 Per-device removal still requires safe resource retirement.
-Future USB hotplug uses controller and hub notifications with bounded debounce and deferred processing.
+The [input profile](../native-api/abi/input-abi.md) implements bounded USB root and EHCI hub change processing.
+The worker uses controller notifications and bounded polling with deferred debounce and enumeration.
 Each attachment lifetime receives a new identity; reconnect does not revive old handles.
 Catalog generations invalidate stale cursors; bounded notifications require reconciliation after loss.
 Storage removal marks mounts unavailable without promising durability for interrupted writes.

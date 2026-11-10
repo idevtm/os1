@@ -41,6 +41,7 @@ set(KERNEL_DRIVER_SOURCES
   drivers/bus/pci_bus.cpp
   drivers/bus/resource.cpp
   drivers/display/text_display.cpp
+  drivers/input/service.cpp
   drivers/input/ps2_keyboard.cpp
   drivers/module/loader.cpp
   drivers/module/virtio_host.cpp
@@ -54,6 +55,7 @@ set(KERNEL_DRIVER_SOURCES
   drivers/usb/storage_devices.cpp
   drivers/usb/mass_storage.cpp
   drivers/usb/hid_keyboard.cpp
+  drivers/usb/worker.cpp
   drivers/usb/xhci.cpp
   drivers/usb/xhci_controller.cpp
   drivers/virtio/pci_transport.cpp

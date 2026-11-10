@@ -1,0 +1,886 @@
+{
+  "date": "2026-11-10",
+  "baseline_revision": "80d754dce62a0cc9ee17277132b0a23a242da99e",
+  "candidate": {
+    "base": "80d754dce62a0cc9ee17277132b0a23a242da99e",
+    "branch": "codex/input-services-hotplug",
+    "code_tree_sha256": "4a2386a29232b59e932cc280a948c143411c4612881acefb3cbd12cdc3a6e3b3"
+  },
+  "host": {
+    "os": "macOS 26.6.2",
+    "cpu": "Apple M4 Max",
+    "logical_cpus": 16,
+    "ram_bytes": 68719476736
+  },
+  "toolchain": {
+    "gcc": "11.2.0",
+    "cmake": "4.4.5",
+    "qemu": "11.1.3"
+  },
+  "build": {
+    "type": "Debug",
+    "OS1_KMEM_DEBUG": true,
+    "OS1_QEMU_DEBUGCON": true,
+    "OS1_BOOT_DIAGNOSTICS": false
+  },
+  "profiles": {
+    "virtio": {
+      "machine": "q35",
+      "cpus": 4,
+      "ram_mib": 128,
+      "repeat_count": 3,
+      "workload": "context",
+      "transport": "virtio",
+      "driver_network": false,
+      "samples": [
+        {
+          "revision": "baseline",
+          "firmware": "bios",
+          "repeat": 0,
+          "boot_seconds": 0.461559,
+          "workload_seconds": 3.743913,
+          "qemu_cpu_seconds": 4.601092,
+          "pages_before": [
+            31593,
+            32732
+          ],
+          "pages_after": [
+            31592,
+            32732
+          ],
+          "kmem_before": [
+            13,
+            172,
+            471,
+            2346,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            471,
+            2349,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "bios",
+          "repeat": 0,
+          "boot_seconds": 0.458826,
+          "workload_seconds": 3.670103,
+          "qemu_cpu_seconds": 4.579445000000001,
+          "pages_before": [
+            31580,
+            32732
+          ],
+          "pages_after": [
+            31579,
+            32732
+          ],
+          "kmem_before": [
+            13,
+            172,
+            469,
+            2348,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            469,
+            2351,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "bios",
+          "repeat": 1,
+          "boot_seconds": 0.456672,
+          "workload_seconds": 3.733971,
+          "qemu_cpu_seconds": 4.516914000000001,
+          "pages_before": [
+            31593,
+            32732
+          ],
+          "pages_after": [
+            31592,
+            32732
+          ],
+          "kmem_before": [
+            13,
+            172,
+            471,
+            2346,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            471,
+            2349,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "bios",
+          "repeat": 1,
+          "boot_seconds": 0.461302,
+          "workload_seconds": 3.665442,
+          "qemu_cpu_seconds": 4.4846980000000025,
+          "pages_before": [
+            31580,
+            32732
+          ],
+          "pages_after": [
+            31579,
+            32732
+          ],
+          "kmem_before": [
+            13,
+            172,
+            469,
+            2348,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            469,
+            2351,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "bios",
+          "repeat": 2,
+          "boot_seconds": 0.462493,
+          "workload_seconds": 3.720348,
+          "qemu_cpu_seconds": 4.566072,
+          "pages_before": [
+            31593,
+            32732
+          ],
+          "pages_after": [
+            31592,
+            32732
+          ],
+          "kmem_before": [
+            13,
+            172,
+            471,
+            2346,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            471,
+            2349,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "bios",
+          "repeat": 2,
+          "boot_seconds": 0.463358,
+          "workload_seconds": 3.690924,
+          "qemu_cpu_seconds": 4.586513000000002,
+          "pages_before": [
+            31580,
+            32732
+          ],
+          "pages_after": [
+            31579,
+            32732
+          ],
+          "kmem_before": [
+            13,
+            172,
+            469,
+            2348,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            469,
+            2351,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "uefi",
+          "repeat": 0,
+          "boot_seconds": 1.962288,
+          "workload_seconds": 1.873734,
+          "qemu_cpu_seconds": 4.115119,
+          "pages_before": [
+            19166,
+            24676
+          ],
+          "pages_after": [
+            19165,
+            24676
+          ],
+          "kmem_before": [
+            13,
+            172,
+            471,
+            2346,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            472,
+            2348,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "uefi",
+          "repeat": 0,
+          "boot_seconds": 1.976002,
+          "workload_seconds": 1.900393,
+          "qemu_cpu_seconds": 4.2358729999999944,
+          "pages_before": [
+            19149,
+            24676
+          ],
+          "pages_after": [
+            19148,
+            24676
+          ],
+          "kmem_before": [
+            13,
+            172,
+            469,
+            2348,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            470,
+            2350,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "uefi",
+          "repeat": 1,
+          "boot_seconds": 1.967101,
+          "workload_seconds": 1.883407,
+          "qemu_cpu_seconds": 4.134320999999997,
+          "pages_before": [
+            19166,
+            24676
+          ],
+          "pages_after": [
+            19165,
+            24676
+          ],
+          "kmem_before": [
+            13,
+            172,
+            471,
+            2346,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            472,
+            2348,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "uefi",
+          "repeat": 1,
+          "boot_seconds": 1.976424,
+          "workload_seconds": 1.952927,
+          "qemu_cpu_seconds": 4.317702000000002,
+          "pages_before": [
+            19149,
+            24676
+          ],
+          "pages_after": [
+            19148,
+            24676
+          ],
+          "kmem_before": [
+            13,
+            172,
+            469,
+            2348,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            470,
+            2350,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "uefi",
+          "repeat": 2,
+          "boot_seconds": 1.999079,
+          "workload_seconds": 1.906004,
+          "qemu_cpu_seconds": 4.184933999999997,
+          "pages_before": [
+            19166,
+            24676
+          ],
+          "pages_after": [
+            19165,
+            24676
+          ],
+          "kmem_before": [
+            13,
+            172,
+            471,
+            2346,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            472,
+            2348,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "uefi",
+          "repeat": 2,
+          "boot_seconds": 2.002913,
+          "workload_seconds": 2.011782,
+          "qemu_cpu_seconds": 4.3271780000000035,
+          "pages_before": [
+            19149,
+            24676
+          ],
+          "pages_after": [
+            19148,
+            24676
+          ],
+          "kmem_before": [
+            13,
+            172,
+            469,
+            2348,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            470,
+            2350,
+            0
+          ],
+          "utility_output_bytes": {}
+        }
+      ],
+      "artifacts": {
+        "baseline": {
+          "kernel.elf": {
+            "bytes": 595816,
+            "sha256": "c4d40aae2c449c11d56c9b4195e5172c5e9cbfeb70fc4e89df92bd6705910102"
+          },
+          "initrd.cpio": {
+            "bytes": 7680,
+            "sha256": "96eca6b3e4aa49c17eb9c757bef478c80a5e1be02bc453e40d2daea22e0dec78"
+          },
+          "os1.raw": {
+            "bytes": 1474560,
+            "sha256": "f9b49a4b39811da62e531436720ff0344e889829628bd5097f716ea4d6f2d643"
+          },
+          "os1.iso": {
+            "bytes": 4329472,
+            "sha256": "56771ed76e757c7ef12d29ace2774a6afb648dfa4dd3b2ef363d12ffcc268209"
+          },
+          "program-test-disk.raw": {
+            "bytes": 34603008,
+            "sha256": "1355f73dcad94087cf9af5f40a3f01b31b9ce1f9a0a434b55ba0b2122ff0627f"
+          }
+        },
+        "candidate": {
+          "kernel.elf": {
+            "bytes": 612056,
+            "sha256": "fbc30f8170a94c2f86a11b03a37c040daca0d94e7b957d2caa3151a374c62883"
+          },
+          "initrd.cpio": {
+            "bytes": 7680,
+            "sha256": "f17dc80805c7498456efe80ab840e30cb0b9d9857a33709452bf0f718810ccaf"
+          },
+          "os1.raw": {
+            "bytes": 1474560,
+            "sha256": "e57f650fe12a9ae1f6aa79a562e201847e064086301fe8794bc4a90dba08b233"
+          },
+          "os1.iso": {
+            "bytes": 4345856,
+            "sha256": "7e33e1ed40771db2179736d7266a9be36f341055503707bd6388c0d528ea043a"
+          },
+          "program-test-disk.raw": {
+            "bytes": 34603008,
+            "sha256": "7ffbdb0a61a65f30f4a7ec3c03097dd73784379e89388e1c8f762e74e6eb28d6"
+          }
+        }
+      }
+    },
+    "usb": {
+      "machine": "q35",
+      "cpus": 4,
+      "ram_mib": 128,
+      "repeat_count": 3,
+      "workload": "context",
+      "transport": "usb",
+      "driver_network": false,
+      "samples": [
+        {
+          "revision": "baseline",
+          "firmware": "bios",
+          "repeat": 0,
+          "boot_seconds": 0.564277,
+          "workload_seconds": 3.845982,
+          "qemu_cpu_seconds": 4.816556,
+          "pages_before": [
+            31583,
+            32734
+          ],
+          "pages_after": [
+            31582,
+            32734
+          ],
+          "kmem_before": [
+            13,
+            173,
+            459,
+            2361,
+            0
+          ],
+          "kmem_after": [
+            13,
+            174,
+            459,
+            2364,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "bios",
+          "repeat": 0,
+          "boot_seconds": 0.561287,
+          "workload_seconds": 3.883608,
+          "qemu_cpu_seconds": 4.974691999999999,
+          "pages_before": [
+            31570,
+            32734
+          ],
+          "pages_after": [
+            31569,
+            32734
+          ],
+          "kmem_before": [
+            13,
+            173,
+            457,
+            2363,
+            0
+          ],
+          "kmem_after": [
+            13,
+            174,
+            457,
+            2366,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "bios",
+          "repeat": 1,
+          "boot_seconds": 0.571148,
+          "workload_seconds": 3.910478,
+          "qemu_cpu_seconds": 4.972392000000001,
+          "pages_before": [
+            31583,
+            32734
+          ],
+          "pages_after": [
+            31582,
+            32734
+          ],
+          "kmem_before": [
+            13,
+            173,
+            459,
+            2361,
+            0
+          ],
+          "kmem_after": [
+            13,
+            174,
+            459,
+            2364,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "bios",
+          "repeat": 1,
+          "boot_seconds": 0.553685,
+          "workload_seconds": 3.843587,
+          "qemu_cpu_seconds": 4.820842999999998,
+          "pages_before": [
+            31570,
+            32734
+          ],
+          "pages_after": [
+            31569,
+            32734
+          ],
+          "kmem_before": [
+            13,
+            173,
+            457,
+            2363,
+            0
+          ],
+          "kmem_after": [
+            13,
+            174,
+            457,
+            2366,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "bios",
+          "repeat": 2,
+          "boot_seconds": 0.556793,
+          "workload_seconds": 3.744641,
+          "qemu_cpu_seconds": 4.593356999999999,
+          "pages_before": [
+            31583,
+            32734
+          ],
+          "pages_after": [
+            31582,
+            32734
+          ],
+          "kmem_before": [
+            13,
+            173,
+            459,
+            2361,
+            0
+          ],
+          "kmem_after": [
+            13,
+            174,
+            459,
+            2364,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "bios",
+          "repeat": 2,
+          "boot_seconds": 0.554489,
+          "workload_seconds": 3.731684,
+          "qemu_cpu_seconds": 4.650965000000003,
+          "pages_before": [
+            31570,
+            32734
+          ],
+          "pages_after": [
+            31569,
+            32734
+          ],
+          "kmem_before": [
+            13,
+            173,
+            457,
+            2363,
+            0
+          ],
+          "kmem_after": [
+            13,
+            174,
+            457,
+            2366,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "uefi",
+          "repeat": 0,
+          "boot_seconds": 2.399147,
+          "workload_seconds": 1.977845,
+          "qemu_cpu_seconds": 4.668476999999997,
+          "pages_before": [
+            19111,
+            24629
+          ],
+          "pages_after": [
+            19111,
+            24629
+          ],
+          "kmem_before": [
+            13,
+            173,
+            459,
+            2361,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            457,
+            2363,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "uefi",
+          "repeat": 0,
+          "boot_seconds": 2.426213,
+          "workload_seconds": 1.922111,
+          "qemu_cpu_seconds": 4.6897920000000015,
+          "pages_before": [
+            19094,
+            24629
+          ],
+          "pages_after": [
+            19094,
+            24629
+          ],
+          "kmem_before": [
+            13,
+            173,
+            457,
+            2363,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            455,
+            2365,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "uefi",
+          "repeat": 1,
+          "boot_seconds": 2.363978,
+          "workload_seconds": 1.906075,
+          "qemu_cpu_seconds": 4.535579,
+          "pages_before": [
+            19111,
+            24629
+          ],
+          "pages_after": [
+            19111,
+            24629
+          ],
+          "kmem_before": [
+            13,
+            173,
+            459,
+            2361,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            457,
+            2363,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "uefi",
+          "repeat": 1,
+          "boot_seconds": 2.393755,
+          "workload_seconds": 1.938606,
+          "qemu_cpu_seconds": 4.704503000000004,
+          "pages_before": [
+            19094,
+            24629
+          ],
+          "pages_after": [
+            19094,
+            24629
+          ],
+          "kmem_before": [
+            13,
+            173,
+            457,
+            2363,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            455,
+            2365,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "baseline",
+          "firmware": "uefi",
+          "repeat": 2,
+          "boot_seconds": 2.364606,
+          "workload_seconds": 1.900759,
+          "qemu_cpu_seconds": 4.531954,
+          "pages_before": [
+            19111,
+            24629
+          ],
+          "pages_after": [
+            19111,
+            24629
+          ],
+          "kmem_before": [
+            13,
+            173,
+            459,
+            2361,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            457,
+            2363,
+            0
+          ],
+          "utility_output_bytes": {}
+        },
+        {
+          "revision": "candidate",
+          "firmware": "uefi",
+          "repeat": 2,
+          "boot_seconds": 2.380564,
+          "workload_seconds": 1.916976,
+          "qemu_cpu_seconds": 4.652423999999998,
+          "pages_before": [
+            19094,
+            24629
+          ],
+          "pages_after": [
+            19094,
+            24629
+          ],
+          "kmem_before": [
+            13,
+            173,
+            457,
+            2363,
+            0
+          ],
+          "kmem_after": [
+            13,
+            173,
+            455,
+            2365,
+            0
+          ],
+          "utility_output_bytes": {}
+        }
+      ],
+      "artifacts": {
+        "baseline": {
+          "kernel.elf": {
+            "bytes": 595816,
+            "sha256": "c4d40aae2c449c11d56c9b4195e5172c5e9cbfeb70fc4e89df92bd6705910102"
+          },
+          "initrd.cpio": {
+            "bytes": 7680,
+            "sha256": "96eca6b3e4aa49c17eb9c757bef478c80a5e1be02bc453e40d2daea22e0dec78"
+          },
+          "os1.raw": {
+            "bytes": 1474560,
+            "sha256": "f9b49a4b39811da62e531436720ff0344e889829628bd5097f716ea4d6f2d643"
+          },
+          "os1.iso": {
+            "bytes": 4329472,
+            "sha256": "56771ed76e757c7ef12d29ace2774a6afb648dfa4dd3b2ef363d12ffcc268209"
+          },
+          "program-test-disk.raw": {
+            "bytes": 34603008,
+            "sha256": "1355f73dcad94087cf9af5f40a3f01b31b9ce1f9a0a434b55ba0b2122ff0627f"
+          }
+        },
+        "candidate": {
+          "kernel.elf": {
+            "bytes": 612056,
+            "sha256": "fbc30f8170a94c2f86a11b03a37c040daca0d94e7b957d2caa3151a374c62883"
+          },
+          "initrd.cpio": {
+            "bytes": 7680,
+            "sha256": "f17dc80805c7498456efe80ab840e30cb0b9d9857a33709452bf0f718810ccaf"
+          },
+          "os1.raw": {
+            "bytes": 1474560,
+            "sha256": "e57f650fe12a9ae1f6aa79a562e201847e064086301fe8794bc4a90dba08b233"
+          },
+          "os1.iso": {
+            "bytes": 4345856,
+            "sha256": "7e33e1ed40771db2179736d7266a9be36f341055503707bd6388c0d528ea043a"
+          },
+          "program-test-disk.raw": {
+            "bytes": 34603008,
+            "sha256": "7ffbdb0a61a65f30f4a7ec3c03097dd73784379e89388e1c8f762e74e6eb28d6"
+          }
+        }
+      }
+    }
+  }
+}

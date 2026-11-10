@@ -141,7 +141,8 @@ long inherit_process_namespace(Process* parent, Process* child)
         auto* root = initrd_namespace_root();
         if(!root)
             return OS1_ERR_BAD_IMAGE;
-        root->allowed_rights |= OS1_RIGHT_SYSTEM_CONTROL | OS1_RIGHT_LOG_READ;
+        root->allowed_rights |=
+            OS1_RIGHT_SYSTEM_CONTROL | OS1_RIGHT_LOG_READ | OS1_RIGHT_INPUT_READ;
         const int roles[] = {OS1_BOOT_ROOT_FD, OS1_BOOT_CWD_FD};
         for(int fd : roles)
         {
@@ -152,7 +153,9 @@ long inherit_process_namespace(Process* parent, Process* child)
                 child->descriptors,
                 instance.get(),
                 kDirectoryRights |
-                    (fd == OS1_BOOT_ROOT_FD ? OS1_RIGHT_SYSTEM_CONTROL | OS1_RIGHT_LOG_READ : 0),
+                    (fd == OS1_BOOT_ROOT_FD
+                         ? OS1_RIGHT_SYSTEM_CONTROL | OS1_RIGHT_LOG_READ | OS1_RIGHT_INPUT_READ
+                         : 0),
                 0,
                 fd,
                 kNamespaceCeiling);

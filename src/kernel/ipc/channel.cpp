@@ -148,6 +148,8 @@ long ready_selection_locked(const IpcWaitState& wait)
 {
     // Only the kernel worker registers an empty selection; user WAIT_MANY
     // validates count >= 1. It shares IPC's post-context-save wakeup discipline.
+    if(wait.timer_only)
+        return OS1_ERR_WOULD_BLOCK;
     if(!wait.count)
         return kernel_ready_locked() ? 0 : OS1_ERR_WOULD_BLOCK;
     for(unsigned i = 0; i < wait.count; ++i)
@@ -1282,6 +1284,7 @@ long sys_ipc(
             return OS1_ERR_TIMED_OUT;
         thread->wait = {};
         thread->wait.reason = ThreadWaitReason::Ipc;
+        thread->wait.ipc = {};
         thread->wait.ipc.instances[0] = pin.take();
         thread->wait.ipc.count = 1;
         thread->wait.ipc.deadline_ns = deadline;
@@ -1610,6 +1613,32 @@ bool ipc_wait_kernel_work(Thread* thread)
     thread->process->state = ProcessState::Ready;
     wait_queue_enqueue_locked(waiters, thread);
     return true;
+}
+void kernel_sleep_for(Thread* thread, uint64_t delay_ns)
+{
+    {
+        IrqSpinGuard process_guard(g_process_table_lock);
+        IrqSpinGuard guard(waiters.lock);
+        thread->wait = {};
+        thread->wait.reason = ThreadWaitReason::Ipc;
+        thread->wait.ipc = {};
+        thread->wait.ipc.timer_only = true;
+        thread->wait.ipc.deadline_ns =
+            delay_ns > uint64_t(INT64_MAX) - monotonic_ns ? INT64_MAX : monotonic_ns + delay_ns;
+        thread->state = ThreadState::Blocked;
+        thread->process->state = ProcessState::Ready;
+        wait_queue_enqueue_locked(waiters, thread);
+    }
+#ifndef OS1_HOST_TEST
+    while(thread->wait.reason == ThreadWaitReason::Ipc)
+    {
+        IrqGuard irq;
+        if(ipi_send_reschedule(cpu_cur()))
+            asm volatile("sti; hlt" ::: "memory");
+        else
+            asm volatile("pause" ::: "memory");
+    }
+#endif
 }
 namespace
 {

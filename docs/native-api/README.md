@@ -69,6 +69,10 @@ The current encoding remains `fd`; general typed owning/borrowed C++ wrappers re
 
 ## Latest implementation
 
+The [native input profile](abi/input-abi.md) defines Keyboard, Pointer, and volatile input subscriptions.
+The [input implementation plan](../hardware/input-services-plan.md) records transport scope and validation.
+
+
 The [driver module profile](../hardware/driver-module-abi.md) defines the first disk-loaded kernel driver.
 This internal boundary does not change native application interfaces.
 

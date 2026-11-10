@@ -48,7 +48,7 @@ struct Os1HardwareNode
 };
 
 // Input: version, operation, id, start, generation; all other fields zero.
-// Output: generation=1 for this immutable boot catalog, next, count, end, nodes.
+// Output: catalog generation, next, count, end, nodes. A changed generation cancels stale cursors.
 struct Os1HardwareQuery
 {
     uint32_t version, operation, id, start;

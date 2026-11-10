@@ -85,6 +85,7 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/buffer/buffer.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/kernel_provider.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/drivers/input/service.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/system_control.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/system_power.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/acpica_ec.cpp"
@@ -214,6 +215,7 @@ add_executable(os1_host_tests
   kernel/ehci_tests.cpp
   kernel/usb_storage_tests.cpp
   kernel/hid_keyboard_tests.cpp
+  kernel/input_service_tests.cpp
   kernel/ipi_tests.cpp
   kernel/ext2_tests.cpp
   kernel/xhci_controller_tests.cpp

@@ -1,5 +1,6 @@
 #pragma once
 #include <os1/console.h>
+#include <os1/input.h>
 #include <os1/log.h>
 #include <os1/system.h>
 #include <os1/vfs.h>
@@ -43,6 +44,7 @@ struct Grants
 struct Cursor
 {
     uint64_t generation = 0;
+    uint64_t external_generation = 0;
     uint32_t parent = 0, next = 0;
 };
 struct Page
@@ -402,6 +404,27 @@ struct View
             add(text, "count", Kind::Method, "source:PathOrStream=input", 0, 0, 0, Local | Shell);
             unsigned pager = add(0, "pager", Kind::Object, "Pager");
             add(pager, "show", Kind::Method, "path:String", 0, 0, 0, Local | Shell);
+        }
+        if(g.root.rights & OS1_RIGHT_INPUT_READ)
+        {
+            unsigned input = add(
+                os, "input", Kind::Object, "Input", OS1_RIGHT_INPUT_READ, OS1_INPUT_INTERFACE_ID);
+            add(input,
+                "list",
+                Kind::Method,
+                "after:Integer=0 -> InputDevice",
+                OS1_RIGHT_INPUT_READ,
+                OS1_INPUT_INTERFACE_ID,
+                OS1_INPUT_LIST,
+                Native);
+            add(input,
+                "open",
+                Kind::Method,
+                "device:Integer -> KeyboardOrPointer",
+                OS1_RIGHT_INPUT_READ,
+                OS1_INPUT_INTERFACE_ID,
+                OS1_INPUT_OPEN,
+                Native);
         }
         unsigned system = 0;
         if(g.root.rights & (OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL))

@@ -15,3 +15,5 @@ void xhci_diagnostic_summary();
 
 // Boot-thread reconciliation before the hardware catalog freezes. No I/O.
 void xhci_capture_catalog_state();
+
+void xhci_poll_devices(PageFrameContainer&);

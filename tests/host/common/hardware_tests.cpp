@@ -344,7 +344,7 @@ TEST_F(NormalizedHardware, UsbDescriptorsInterfacesAndUnknownValues)
     q = request(OS1_HARDWARE_BLOCKS);
     EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(q));  // Version 1 is unchanged.
 }
-TEST_F(NormalizedHardware, StorageForwardAndReverseIdentityAndFreeze)
+TEST_F(NormalizedHardware, StorageForwardAndReverseIdentityAndLiveGeneration)
 {
     unsigned device = hardware_catalog::usb_device(0, 1, 1, 4800);
     BlockDevice block{};
@@ -379,8 +379,17 @@ TEST_F(NormalizedHardware, StorageForwardAndReverseIdentityAndFreeze)
     }
     EXPECT_EQ(device, current);
     hardware_freeze_bindings();
-    EXPECT_EQ(nullptr, hardware_catalog::edit(device));
-    EXPECT_EQ(0u, hardware_catalog::usb_device(0, 2, 2, 0));
+    auto old = inspect(OS1_HARDWARE_USB);
+    unsigned replacement = hardware_catalog::usb_device(0, 2, 2, 0);
+    EXPECT_NE(0u, replacement);
+    EXPECT_NE(device, replacement);
+    auto stale = request(OS1_HARDWARE_USB);
+    stale.version = OS1_HARDWARE_VERSION;
+    stale.generation = old.generation;
+    EXPECT_EQ(OS1_ERR_CANCELLED, hardware_query(stale));
+    hardware_catalog::unavailable(device);
+    auto removed = inspect(device + 3, OS1_HARDWARE_DESCRIBE);
+    EXPECT_STREQ("unavailable", removed.nodes[0].text);
     EXPECT_EQ(1u, inspect(OS1_HARDWARE_BLOCKS).count);
 }
 TEST_F(NormalizedHardware, MalformedConfigurationDoesNotPublishPartialInterfaces)
@@ -394,6 +403,23 @@ TEST_F(NormalizedHardware, MalformedConfigurationDoesNotPublishPartialInterfaces
     malformed[2] = 40;
     hardware_catalog::usb_configuration(device, malformed, sizeof(malformed));
     EXPECT_EQ(0u, inspect(OS1_HARDWARE_USB_INTERFACES).count);
+}
+TEST_F(NormalizedHardware, InputAdmissionAndRetiredHubChildrenRemainConsistent)
+{
+    unsigned hub = hardware_catalog::usb_device(0, 1, 1, 4800);
+    unsigned child = hardware_catalog::usb_device(hub, 1, 2, 15);
+    hardware_catalog::usb_input(child, 0);
+    auto query = request(child + 19, OS1_HARDWARE_DESCRIBE);
+    query.version = OS1_HARDWARE_VERSION;
+    EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(query));
+    hardware_catalog::usb_input(child, 7);
+    EXPECT_EQ(7u, inspect(child + 19, OS1_HARDWARE_DESCRIBE).nodes[0].integer);
+    EXPECT_STREQ("runtime_catalog", inspect(child + 36, OS1_HARDWARE_DESCRIBE).nodes[0].text);
+    // A transfer can retire the hub before the topology worker observes removal.
+    hardware_catalog::unavailable(hub);
+    hardware_catalog::unavailable(hub);
+    for(unsigned id : {hub, child})
+        EXPECT_STREQ("unavailable", inspect(id + 3, OS1_HARDWARE_DESCRIBE).nodes[0].text);
 }
 TEST_F(NormalizedHardware, CaptureLimitsAndStorageOverflowAreExplicit)
 {
@@ -493,7 +519,9 @@ TEST_F(NormalizedHardware, UnsupportedPresenceDoesNotInventIdentityOrRootSpeed)
     q.version = 2;
     EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(q));
     hardware_freeze_bindings();
-    EXPECT_EQ(0u, hardware_catalog::usb_unenumerated(hub, 1, 4, 120));
+    auto later = hardware_catalog::usb_unenumerated(hub, 1, 4, 120);
+    EXPECT_NE(0u, later);
+    EXPECT_STREQ("unsupported_speed", inspect(later + 3, OS1_HARDWARE_DESCRIBE).nodes[0].text);
 }
 TEST(HardwarePresentation, UnitsIdentifiersAndBcdRemainUnambiguous)
 {
@@ -690,3 +718,19 @@ TEST(HardwarePlatform, NamesRetainUsefulFallbacks)
     EXPECT_STREQ("PCI USB controller", name);
 }
 static_assert(sizeof(hardware::Record) == 584);
+
+TEST(Hardware, RuntimeUsbDiscoveryCannotMutateBootDiagnostics)
+{
+    usb::diagnostics::reset_for_test();
+    Os1ObserveUsbRecord first{};
+    first.port = 1;
+    usb::diagnostics::append(first);
+    usb::diagnostics::freeze();
+    Os1ObserveUsbRecord later{};
+    later.port = 2;
+    usb::diagnostics::append(later);
+    ASSERT_EQ(1u, usb::diagnostics::count());
+    EXPECT_EQ(1u, usb::diagnostics::at(0)->port);
+    EXPECT_EQ(0u, usb::diagnostics::dropped());
+    usb::diagnostics::reset_for_test();
+}

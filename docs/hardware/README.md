@@ -7,6 +7,7 @@ Keep physical observations separate from emulator validation.
 | --- | --- |
 | [Driver module profile](driver-module-abi.md) | Implemented internal ELF boundary and lifetime limits |
 | [Driver lifecycle plan](driver-lifecycle-plan.md) | Scope, impact assessment, validation, and resource comparison |
+| [Input services plan](input-services-plan.md) | Native input, transport, and attachment lifecycle implementation |
 | [Driver architecture](driver-architecture.md) | Accepted disk-module, lifecycle, hotplug, and functional-object direction |
 | [USB mass storage](usb-storage.md) | Current transport, QEMU checks, failure behavior, and physical limitations |
 | [USB image workflow](usb-image-workflow.md) | Build and write fresh or preserved-layout images through `os1.sh` |

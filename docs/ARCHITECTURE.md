@@ -26,8 +26,8 @@ The [service roadmap](native-api/roadmap.md) defines the next integration milest
 - shared virtio PCI transport and virtqueue helpers
 - an interrupt-driven modern `virtio-blk` path with reads and writes
 - a disk-loaded `virtio-net` path with ARP-level smoke coverage
-- an xHCI USB path with HID boot-keyboard input
-- an EHCI storage path with bounded high-speed hub discovery
+- an xHCI USB path with native boot-keyboard and mouse input, plus bounded root-port reconnect
+- an EHCI storage path with bounded high-speed hub discovery and split periodic HID input
 - a freestanding `C++20` kernel core with narrow assembly boundaries
 - per-CPU run queues, reschedule / TLB-shootdown IPIs, and load-balanced SMP scheduling
 - `WaitQueue` / `Completion` primitives wired through block-I/O, child-exit, and console-read waits
@@ -94,6 +94,27 @@ The selected [reflective hierarchy](native-api/object-hierarchy.md) organizes fu
 It separates local values, resource references, and service providers.
 The [shell command proposal](shell/object-commands.md) defines user-facing bindings separately.
 These proposals change no current ABI or runtime behavior.
+
+## Input services and attachment changes
+
+```text
+IRQ reports -> locked input state / ring -> native provider -> client subscriptions
+USB worker -> deferred topology changes -> locked catalog -> context and Tab
+EHCI characters -> bounded queue -> BSP console input
+```
+
+The [input ABI](native-api/abi/input-abi.md) adds dedicated raw-input authority and bounded broadcast subscriptions.
+A separate USB worker processes periodic completions and attachment changes.
+It uses timed scheduler waits; enumeration cannot block the native provider worker.
+Local APIC destination and command writes use one IRQ-masked transaction. Nested timer wakeups cannot redirect an interrupted sender.
+PS/2 and xHCI Console behavior remains available alongside native input.
+
+The hardware catalog serializes USB updates and queries with a generation counter.
+Changed generations cancel stale pagination cursors.
+Platform and firmware records remain boot observations.
+The legacy `usb` diagnostic command retains its sealed boot snapshot.
+Removed attachments keep unavailable identities; new attachments receive new identities.
+Existing storage mounts do not automatically switch to replacement media.
 
 ## Glossary
 
