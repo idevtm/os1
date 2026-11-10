@@ -29,7 +29,13 @@ def main():
             qmp = Qmp(args.qmp)
             try:
                 assert b'keyboard1 [object]' in run('context os.input')
-                qmp.execute('device_add', {'driver': 'usb-mouse', 'id': 'pointer', 'bus': 'xhci.0'})
+                def attach(name):
+                    qmp.execute('device_add', {'driver': 'usb-mouse', 'id': name, 'bus': 'xhci.0'})
+                    # Drain the driver's ready line before parsing structured shell output.
+                    expect(b'xhci: HID mouse ready', timeout=15)
+                    expect(b'\n', timeout=15)
+
+                attach('pointer')
 
                 def devices():
                     out = run('context os.input')
@@ -57,6 +63,13 @@ def main():
                 for _ in range(12):
                     assert devices() == stable, 'discovery changed without hotplug'
                 assert b'USB pointer' in run(f'os.input.{name}.name')
+                collection = run('context os.input.pointers')
+                assert b'count [field]' in collection, collection
+                ordinal = int(name.removeprefix('mouse')) - 1
+                assert b'USB pointer' in run(f'os.input.pointers[{ordinal}].name')
+                run(f'indexed = os.input.pointers[{ordinal}].op\t')
+                assert b'get_state' in run('context indexed')
+                run('drop indexed')
                 # Tab accepts the discovered leaf. Enter invokes its zero-argument method.
                 run(f'p = os.input.{name}.op\t')
                 assert b'get_state' in run('context p')
@@ -90,9 +103,10 @@ def main():
                     assert time.monotonic() < end, state
                 assert b'input closed' in run('p.subscribe', allow_errors=True)
                 assert name.encode() + b' [object]' not in run('context os.input')
-                qmp.execute('device_add', {'driver': 'usb-mouse', 'id': 'replacement', 'bus': 'xhci.0'})
+                attach('replacement')
                 replacement, next_name = await_pointer(identity)
-                assert replacement > identity and next_name != name
+                assert replacement > identity and next_name == name
+                assert re.search(rb'connected[:= ]+0', run('p.get_state'))
                 run(f'q = os.input.{next_name}.open')
                 run('c = q.subscribe')
                 run('c.unsubscribe')

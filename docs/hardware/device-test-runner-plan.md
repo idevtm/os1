@@ -96,11 +96,16 @@ The tar archive contains these members:
 
 | Members | Evidence |
 | --- | --- |
+| `catalog.bin` | Versioned, generation-consistent hardware records for offline comparison |
 | `system.bin`, `pci.bin`, `usb-boot.bin` | Existing observation headers and records |
 | `lshw.txt`, `lspci.txt`, `lsblk.txt` | Platform, PCI, and storage presentation |
 | `lsusb-before.txt`, `lsusb-after.txt` | USB catalog observations before and after input testing |
 | `input.txt` | Connected input identities, names, kinds, catalog associations, and state |
 | `kernel-before.bin`, `kernel.bin` | Framed kernel snapshots before and after the checks |
+
+Runner and test-suite version 2 add `catalog.bin` and automatic diagnostic startup.
+The [acceptance workflow](input-collections-test-workflow-plan.md) defines compact collections, profile comparison, and startup behavior.
+Earlier measurements below describe version 1.
 
 Extract `captures.tar` with a standard tar reader after copying the data partition.
 Decode the kernel members with `tools/log_dump.py`.

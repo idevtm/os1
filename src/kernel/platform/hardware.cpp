@@ -288,9 +288,7 @@ void hardware_freeze_bindings()
 }
 long hardware_query(Os1HardwareQuery& request)
 {
-    if(request.id >= OS1_HARDWARE_INPUT_ROOT &&
-       request.id <
-           OS1_HARDWARE_INPUT_ROOT + (OS1_INPUT_DEVICE_LIMIT + 1) * OS1_HARDWARE_INPUT_STRIDE)
+    if(request.id >= OS1_HARDWARE_INPUT_ROOT && request.id < OS1_HARDWARE_INPUT_END)
         return native_input::query(request);
     IrqSpinGuard guard(catalog_lock);
     if(driver_names_overflow)

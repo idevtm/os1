@@ -9,6 +9,9 @@ context / Tab -> passive descriptions -> explicit open -> retained input object
 removal -> child disappears; existing objects retain disconnected state
 ```
 
+The [compact collection contract](input-collections-test-workflow-plan.md) supersedes the original non-reused alias policy below.
+The measurements and hardware observations in this document remain historical evidence.
+
 ## Requirements and impact
 
 | Area | Requirement and effect |

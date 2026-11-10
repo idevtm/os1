@@ -109,6 +109,10 @@ def main():
         expect(b'shell prompt ready')
         # Do not inject a report while the shell is still writing its first prompt.
         expect(b'os1> ')
+        assert transcript.count(b'shell: diagnostic tests starting') == (not args.normal), transcript[-4000:]
+        if not args.normal:
+            assert b'run-tests: PASS; saved results' in transcript, transcript[-4000:]
+            assert b'shell: diagnostic tests completed' in transcript, transcript[-4000:]
         elapsed = time.monotonic() - started
         connection.connect(str(monitor))
         connection.recv(4096)

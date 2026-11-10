@@ -1,0 +1,366 @@
+{
+  "anchors": [
+    "8086:0104",
+    "8086:1c2d",
+    "8086:1c26"
+  ],
+  "machine": "laptop",
+  "pci": [
+    {
+      "class_code": 6,
+      "device": 260,
+      "location": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "name": "Host bridge",
+      "subclass": 0,
+      "vendor": 32902
+    },
+    {
+      "class_code": 6,
+      "device": 257,
+      "location": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "name": "PCI bridge",
+      "subclass": 4,
+      "vendor": 32902
+    },
+    {
+      "class_code": 7,
+      "device": 7226,
+      "location": [
+        0,
+        0,
+        22,
+        0
+      ],
+      "name": "Communication controller",
+      "subclass": 128,
+      "vendor": 32902
+    },
+    {
+      "class_code": 12,
+      "device": 7213,
+      "location": [
+        0,
+        0,
+        26,
+        0
+      ],
+      "name": "USB controller",
+      "subclass": 3,
+      "vendor": 32902
+    },
+    {
+      "class_code": 4,
+      "device": 7200,
+      "location": [
+        0,
+        0,
+        27,
+        0
+      ],
+      "name": "Audio device",
+      "subclass": 3,
+      "vendor": 32902
+    },
+    {
+      "class_code": 6,
+      "device": 7184,
+      "location": [
+        0,
+        0,
+        28,
+        0
+      ],
+      "name": "PCI bridge",
+      "subclass": 4,
+      "vendor": 32902
+    },
+    {
+      "class_code": 6,
+      "device": 7186,
+      "location": [
+        0,
+        0,
+        28,
+        1
+      ],
+      "name": "PCI bridge",
+      "subclass": 4,
+      "vendor": 32902
+    },
+    {
+      "class_code": 6,
+      "device": 7190,
+      "location": [
+        0,
+        0,
+        28,
+        3
+      ],
+      "name": "PCI bridge",
+      "subclass": 4,
+      "vendor": 32902
+    },
+    {
+      "class_code": 6,
+      "device": 7194,
+      "location": [
+        0,
+        0,
+        28,
+        5
+      ],
+      "name": "PCI bridge",
+      "subclass": 4,
+      "vendor": 32902
+    },
+    {
+      "class_code": 12,
+      "device": 7206,
+      "location": [
+        0,
+        0,
+        29,
+        0
+      ],
+      "name": "USB controller",
+      "subclass": 3,
+      "vendor": 32902
+    },
+    {
+      "class_code": 6,
+      "device": 7241,
+      "location": [
+        0,
+        0,
+        31,
+        0
+      ],
+      "name": "ISA bridge",
+      "subclass": 1,
+      "vendor": 32902
+    },
+    {
+      "class_code": 1,
+      "device": 7171,
+      "location": [
+        0,
+        0,
+        31,
+        2
+      ],
+      "name": "SATA controller",
+      "subclass": 6,
+      "vendor": 32902
+    },
+    {
+      "class_code": 12,
+      "device": 7202,
+      "location": [
+        0,
+        0,
+        31,
+        3
+      ],
+      "name": "SMBus",
+      "subclass": 5,
+      "vendor": 32902
+    },
+    {
+      "class_code": 3,
+      "device": 4689,
+      "location": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "name": "VGA compatible controller",
+      "subclass": 0,
+      "vendor": 4318
+    },
+    {
+      "class_code": 4,
+      "device": 3054,
+      "location": [
+        0,
+        1,
+        0,
+        1
+      ],
+      "name": "Audio device",
+      "subclass": 3,
+      "vendor": 4318
+    },
+    {
+      "class_code": 2,
+      "device": 43,
+      "location": [
+        0,
+        3,
+        0,
+        0
+      ],
+      "name": "Network controller",
+      "subclass": 128,
+      "vendor": 5772
+    },
+    {
+      "class_code": 12,
+      "device": 4096,
+      "location": [
+        0,
+        4,
+        0,
+        0
+      ],
+      "name": "USB controller",
+      "subclass": 3,
+      "vendor": 7027
+    },
+    {
+      "class_code": 2,
+      "device": 33128,
+      "location": [
+        0,
+        5,
+        0,
+        0
+      ],
+      "name": "Ethernet controller",
+      "subclass": 0,
+      "vendor": 4332
+    }
+  ],
+  "required_functions": [
+    {
+      "kind": 1,
+      "transport": "ps2"
+    },
+    {
+      "kind": 2,
+      "transport": "ps2"
+    }
+  ],
+  "source_hashes": {
+    "laptop/linux/os1-hardware/input.txt": "633b1b0dafcbdb888426c646ea9819a5caed4a2c85a67e6cffa4b1ec2aa5c013",
+    "laptop/linux/os1-hardware/pci.txt": "87967ba33c7a990734e01950f7c81dda6a650f3241ec34178992a4e6b80a5fad",
+    "laptop/linux/os1-hardware/storage.txt": "9ec01e14ad346e4cf4a042d6dfc17b306b08b7f23ad39c7de62c190294d04ad3",
+    "laptop/linux/os1-hardware/usb-descriptors.txt": "52cbf317050dbd4297a6473f70c6a7b0bec38649f07f4d1d35cd8a08365a76ed"
+  },
+  "storage": [
+    {
+      "expectation": "unsupported",
+      "model": "SPCC Solid State Disk",
+      "size_label": "476.9G",
+      "transport": "sata"
+    },
+    {
+      "expectation": "unsupported",
+      "model": "WDC WD7500BPKT-80PK4T0",
+      "size_label": "698.6G",
+      "transport": "sata"
+    },
+    {
+      "expectation": "unsupported",
+      "model": "SlimtypeDVD A DS8A5SH",
+      "size_label": "1024M",
+      "transport": "sata"
+    }
+  ],
+  "usb": [
+    {
+      "interfaces": [
+        [
+          9,
+          0,
+          0
+        ]
+      ],
+      "name": "Intel Corp. Integrated Rate Matching Hub",
+      "product": 36,
+      "required": true,
+      "vendor": 32903
+    },
+    {
+      "interfaces": [
+        [
+          3,
+          1,
+          2
+        ]
+      ],
+      "name": "SiGma Micro XM102K Optical Wheel Mouse",
+      "product": 52,
+      "required": false,
+      "vendor": 7247
+    },
+    {
+      "interfaces": [
+        [
+          9,
+          0,
+          0
+        ]
+      ],
+      "name": "Intel Corp. Integrated Rate Matching Hub",
+      "product": 36,
+      "required": true,
+      "vendor": 32903
+    },
+    {
+      "interfaces": [
+        [
+          14,
+          1,
+          0
+        ],
+        [
+          14,
+          2,
+          0
+        ]
+      ],
+      "name": "IMC Networks Integrated Webcam",
+      "product": 20788,
+      "required": true,
+      "vendor": 5075
+    },
+    {
+      "interfaces": [
+        [
+          255,
+          6,
+          80
+        ]
+      ],
+      "name": "Realtek Semiconductor Corp. RTS5139 Card Reader Controller",
+      "product": 313,
+      "required": true,
+      "vendor": 3034
+    },
+    {
+      "interfaces": [
+        [
+          224,
+          1,
+          1
+        ]
+      ],
+      "name": "Qualcomm Atheros Communications AR3011 Bluetooth",
+      "product": 12293,
+      "required": true,
+      "vendor": 3315
+    }
+  ],
+  "version": 1
+}

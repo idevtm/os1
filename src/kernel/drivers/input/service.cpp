@@ -373,23 +373,54 @@ long query(Os1HardwareQuery& q)
             freestanding::copy_string(out.text, sizeof(out.text), "InputDevices");
             return true;
         }
-        if(id < OS1_HARDWARE_INPUT_ROOT + OS1_HARDWARE_INPUT_STRIDE)
+        const unsigned collections[] = {OS1_HARDWARE_KEYBOARDS, OS1_HARDWARE_POINTERS};
+        for(unsigned collection : collections)
+        {
+            if(id != collection && id != collection + 1)
+                continue;
+            bool keys = collection == OS1_HARDWARE_KEYBOARDS;
+            out.parent = id == collection ? OS1_HARDWARE_INPUT_ROOT : collection;
+            freestanding::copy_string(
+                out.name,
+                sizeof(out.name),
+                id == collection ? (keys ? "keyboards" : "pointers") : "count");
+            if(id == collection)
+                freestanding::copy_string(
+                    out.text, sizeof(out.text), keys ? "KeyboardCollection" : "PointerCollection");
+            else
+            {
+                out.type = OS1_HARDWARE_INTEGER;
+                for(unsigned i = 0; store && i < store->count; ++i)
+                    out.integer += store->devices[i].info.connected &&
+                                   store->devices[i].info.kind ==
+                                       (keys ? OS1_INPUT_KEYBOARD : OS1_INPUT_POINTER);
+            }
+            return true;
+        }
+        bool item = id >= OS1_HARDWARE_INPUT_ITEMS;
+        unsigned base = item ? OS1_HARDWARE_INPUT_ITEMS : OS1_HARDWARE_INPUT_ROOT;
+        if(id < base + OS1_HARDWARE_INPUT_STRIDE)
             return false;
-        unsigned index = (id - OS1_HARDWARE_INPUT_ROOT) / OS1_HARDWARE_INPUT_STRIDE;
-        unsigned field = (id - OS1_HARDWARE_INPUT_ROOT) % OS1_HARDWARE_INPUT_STRIDE;
+        unsigned index = (id - base) / OS1_HARDWARE_INPUT_STRIDE;
+        unsigned field = (id - base) % OS1_HARDWARE_INPUT_STRIDE;
         auto* d = find(index);
         if(!d || !d->info.connected || field > 6)
             return false;
-        out.parent = field ? id - field : OS1_HARDWARE_INPUT_ROOT;
         bool keyboard = d->info.kind == OS1_INPUT_KEYBOARD;
+        out.parent = field  ? id - field
+                     : item ? (keyboard ? OS1_HARDWARE_KEYBOARDS : OS1_HARDWARE_POINTERS)
+                            : OS1_HARDWARE_INPUT_ROOT;
         if(!field)
         {
             unsigned ordinal = 0;
             for(unsigned i = 0; i < index; ++i)
-                ordinal += store->devices[i].info.kind == d->info.kind;
-            const char* prefix = keyboard ? "keyboard" : "mouse";
+                ordinal +=
+                    store->devices[i].info.connected && store->devices[i].info.kind == d->info.kind;
+            if(item)
+                --ordinal;
+            const char* prefix = item ? "" : keyboard ? "keyboard" : "mouse";
             freestanding::copy_string(out.name, sizeof(out.name), prefix);
-            unsigned at = keyboard ? 8 : 5;
+            unsigned at = item ? 0 : keyboard ? 8 : 5;
             if(ordinal >= 10)
                 out.name[at++] = '0' + ordinal / 10;
             out.name[at] = '0' + ordinal % 10;
@@ -444,8 +475,18 @@ long query(Os1HardwareQuery& q)
     };
     if(q.id == OS1_HARDWARE_INPUT_ROOT)
     {
+        emit(OS1_HARDWARE_KEYBOARDS);
+        emit(OS1_HARDWARE_POINTERS);
         for(unsigned i = 1; store && i <= store->count; ++i)
             emit(OS1_HARDWARE_INPUT_ROOT + i * OS1_HARDWARE_INPUT_STRIDE);
+    }
+    else if(q.id == OS1_HARDWARE_KEYBOARDS || q.id == OS1_HARDWARE_POINTERS)
+    {
+        emit(q.id + 1);
+        unsigned kind = q.id == OS1_HARDWARE_KEYBOARDS ? OS1_INPUT_KEYBOARD : OS1_INPUT_POINTER;
+        for(unsigned i = 1; store && i <= store->count; ++i)
+            if(store->devices[i - 1].info.kind == kind)
+                emit(OS1_HARDWARE_INPUT_ITEMS + i * OS1_HARDWARE_INPUT_STRIDE);
     }
     else
         for(unsigned field = 1; field <= 6; ++field)

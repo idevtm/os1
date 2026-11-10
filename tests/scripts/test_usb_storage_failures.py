@@ -157,6 +157,9 @@ def main():
                                             'file': {'driver': 'file', 'filename': str(disk)}})
                 qmp.execute('device_add', {'driver': 'usb-storage', 'id': 'replacement',
                                           'drive': 'reconnected', 'bus': 'ehci.0' if args.transport == 'ehci' else 'xhci.0'})
+                # Finish asynchronous driver output before parsing shell prompts or fields.
+                expect(b'ehci: storage ready' if args.transport == 'ehci' else b'usb-storage: ready', timeout=15)
+                expect(b'\n', timeout=15)
                 output = run('cat /disk/readme', allow_errors=True)
                 assert b'failed' in output or b'error' in output, output
                 deadline = time.monotonic()+15

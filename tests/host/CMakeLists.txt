@@ -251,3 +251,7 @@ target_compile_definitions(os1_host_tests PRIVATE OS1_LOG_EXT2_FIXTURE="${OS1_LO
 include(GoogleTest)
 gtest_add_tests(TARGET os1_host_tests TEST_LIST os1_host_tests_TESTS)
 set_tests_properties(${os1_host_tests_TESTS} PROPERTIES LABELS "host;unit")
+
+add_test(NAME HardwareReferenceComparison
+  COMMAND "${Python3_EXECUTABLE}" -B "${OS1_REPO_ROOT}/tests/scripts/test_hardware_compare.py")
+set_tests_properties(HardwareReferenceComparison PROPERTIES LABELS "host;unit")

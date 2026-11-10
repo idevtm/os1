@@ -18,11 +18,13 @@ Children inherit the parent's grant; attenuation cannot restore removed rights.
 Ordinary file-read rights do not authorize raw input.
 This initial policy gives trusted interactive applications system-wide input access; it does not implement desktop focus or credentials.
 
-`os.input` exposes connected devices as children through context discovery and Tab navigation.
-Names use `keyboardN` and `mouseN`, with separate per-kind ordinals.
-The relative touchpad interface also uses a `mouseN` name.
-Ordinals remain stable and are not reused during the boot.
-Removal hides the child; a replacement receives a new ordinal and identity.
+`os.input.keyboards` and `os.input.pointers` expose connected devices through context discovery and Tab navigation.
+Each collection has a read-only `count` and zero-based children, such as `os.input.pointers[0]`.
+The shell accepts literal decimal indexes; computed indexes are not implemented.
+The short aliases `keyboardN` and `mouseN` use one-based positions in the same collections.
+A relative touchpad belongs to the pointer collection.
+Removal compacts positions and aliases; reconnect creates a new attachment identity.
+An open descriptor retains its attachment identity, even when its former collection position changes.
 
 Each child exposes `device`, `name`, `kind`, `connected`, and `catalog_id` fields.
 Its zero-argument `open` method returns an owned Keyboard or Pointer descriptor.
@@ -44,7 +46,11 @@ No inspection operation instantiates a hardware device or loads a driver.
 
 Input descriptions use `OS1_OBSERVE_HARDWARE` with query version 2.
 The root identity is `OS1_HARDWARE_INPUT_ROOT`, separate from the hardware catalog identity range.
-Device node identities use `root + device * 8`.
+Alias node identities use `root + device * 8`.
+Collection identities are `root + 0x800` for keyboards and `root + 0x810` for pointers.
+Each collection places its `count` field at offset 1.
+Canonical device nodes use `root + 0x1000 + device * 8`.
+Their displayed decimal names describe current positions; their node identities retain attachment identity.
 Offsets 1 through 6 describe `device`, `name`, `kind`, `connected`, `catalog_id`, and `open`.
 The `open` node has type `OS1_HARDWARE_METHOD`; its integer stores the acquisition identity.
 Its text describes the zero-argument result type.

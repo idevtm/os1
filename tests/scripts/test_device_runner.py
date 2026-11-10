@@ -10,6 +10,9 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+from compare_hardware import catalog
 from test_ext2_persistence import boot
 from test_usb_storage_failures import Qmp
 
@@ -67,6 +70,7 @@ def main():
                 for p in target.rglob('*') if p.is_file()}
 
     boot(args, disk, 'first', exercise=first)
+    assert b'shell: diagnostic tests starting' not in Path(args.log).with_suffix('.first.log').read_bytes()
     before = extract('first')
     for index, path in enumerate(paths):
         key = path.removeprefix('/disk/')
@@ -79,7 +83,9 @@ def main():
         assert (b'failed=0' in summary.splitlines()) == (index < 2), summary
         assert len(before[key + '/storage-probe.bin']) == 4096
         with tarfile.open(fileobj=io.BytesIO(before[key + '/captures.tar'])) as archive:
-            assert len(archive.getnames()) == 11, archive.getnames()
+            assert len(archive.getnames()) == 12, archive.getnames()
+            records = catalog(archive.extractfile('catalog.bin').read())
+            assert any(r['source'] == 1 for r in records), records
             assert b'PS/2 keyboard' in archive.extractfile('input.txt').read()
             assert len(archive.extractfile('kernel.bin').read()) >= 256
 
@@ -89,6 +95,8 @@ def main():
         errors = []
         try:
             qmp.execute('device_add', {'driver': 'usb-mouse', 'id': 'pointer', 'bus': 'xhci.0'})
+            expect(b'xhci: HID mouse ready', timeout=15)
+            expect(b'\n', timeout=15)
             deadline = time.monotonic() + 15
             while True:
                 listing = run('context os.input')
@@ -130,6 +138,14 @@ def main():
     key = paths[-1].removeprefix('/disk/')
     assert re.search(rb'movement_events=[1-9][0-9]*\n', after[key + '/progress.txt'])
     assert b'failed=0' in after[key + '/summary.txt'].splitlines()
+    with tarfile.open(fileobj=io.BytesIO(after[key + '/captures.tar'])) as archive:
+        records = catalog(archive.extractfile('catalog.bin').read())
+        devices = {r['id'] for r in records if r['source'] == 5}
+        interfaces = [r for r in records if r['source'] == 6]
+        assert interfaces and all(r['backing'] in devices for r in interfaces), interfaces
+        classes = {tuple(r['values'][2:5]) for r in interfaces}
+        assert {(3, 1, 1), (3, 1, 2), (8, 6, 80)} <= classes, classes
+
     print('traceable device results, explicit failure, and reboot preservation passed')
     print('first_run_bytes=' + str(sum(len(v) for k, v in before.items()
                                       if k.startswith(paths[0].removeprefix('/disk/')))))

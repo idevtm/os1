@@ -47,8 +47,7 @@ inline bool member(const os1::discovery::View& view, unsigned id, os1::discovery
                                                 : os1::discovery::Kind::Field;
     if(node.type == OS1_HARDWARE_METHOD)
     {
-        if(id < OS1_HARDWARE_INPUT_ROOT ||
-           id >= OS1_HARDWARE_INPUT_ROOT + (OS1_INPUT_DEVICE_LIMIT + 1) * OS1_HARDWARE_INPUT_STRIDE)
+        if(id < OS1_HARDWARE_INPUT_ROOT || id >= OS1_HARDWARE_INPUT_END)
             return false;
         out.kind = os1::discovery::Kind::Method;
         out.target = node.integer;

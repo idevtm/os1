@@ -59,17 +59,24 @@ inline bool member_path(const View& view, unsigned id, char* out, unsigned capac
     {
         const auto member = view.member(stack[--count]);
         const char* name = member.name;
+        bool indexed = used && index_name(name);
         if(used)
         {
             if(used + 1 >= capacity)
                 return false;
-            out[used++] = '.';
+            out[used++] = indexed ? '[' : '.';
         }
         while(*name)
         {
             if(used + 1 >= capacity)
                 return false;
             out[used++] = *name++;
+        }
+        if(indexed)
+        {
+            if(used + 1 >= capacity)
+                return false;
+            out[used++] = ']';
         }
     }
     out[used] = 0;

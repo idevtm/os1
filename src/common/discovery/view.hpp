@@ -62,6 +62,15 @@ inline bool copy(char* out, unsigned capacity, const char* in)
     out[i] = 0;
     return !in[i];
 }
+inline bool index_name(const char* name)
+{
+    if(!*name)
+        return false;
+    for(; *name; ++name)
+        if(*name < '0' || *name > '9')
+            return false;
+    return true;
+}
 inline const char* kind_name(Kind k)
 {
     switch(k)
@@ -203,6 +212,36 @@ struct View
     {
         if(!path)
             return -1;
+        char normalized[path_limit]{};
+        unsigned used = 0;
+        for(unsigned i = 0;; ++i)
+        {
+            if(i >= path_limit || used + 1 >= path_limit)
+                return -1;
+            if(!path[i])
+                break;
+            if(path[i] == ']')
+                return -1;
+            if(path[i] != '[')
+            {
+                normalized[used++] = path[i];
+                continue;
+            }
+            if(!used || normalized[used - 1] == '.')
+                return -1;
+            normalized[used++] = '.';
+            unsigned begin = ++i;
+            while(i < path_limit && path[i] >= '0' && path[i] <= '9')
+            {
+                if(used + 1 >= path_limit)
+                    return -1;
+                normalized[used++] = path[i++];
+            }
+            if(i == begin || i + 1 >= path_limit || path[i] != ']' ||
+               (path[i + 1] && path[i + 1] != '.' && path[i + 1] != '['))
+                return -1;
+        }
+        path = normalized;
         unsigned current = 0, start = 0, depth = 0;
         for(unsigned i = 0; i < path_limit; ++i)
         {

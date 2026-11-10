@@ -211,14 +211,14 @@ Os1HardwareQuery input_query(unsigned id = OS1_HARDWARE_INPUT_ROOT,
     q.id = id;
     return q;
 }
-TEST_F(InputService, DiscoveryIsPassiveAndNamesRemainStable)
+TEST_F(InputService, DiscoveryIsPassiveAndAliasesCompactWithoutReusingIdentity)
 {
     auto pointer = native_input::attach(OS1_INPUT_POINTER, "touchpad", 123);
     auto q = input_query();
     ASSERT_EQ(0, native_input::query(q));
-    ASSERT_EQ(2u, q.count);
-    EXPECT_STREQ("keyboard1", q.nodes[0].name);
-    EXPECT_STREQ("mouse1", q.nodes[1].name);
+    ASSERT_EQ(4u, q.count);
+    EXPECT_STREQ("keyboard1", q.nodes[2].name);
+    EXPECT_STREQ("mouse1", q.nodes[3].name);
     const auto original = q;
     for(unsigned i = 0; i < 100; ++i)
     {
@@ -226,7 +226,7 @@ TEST_F(InputService, DiscoveryIsPassiveAndNamesRemainStable)
         ASSERT_EQ(0, native_input::query(q));
         EXPECT_EQ(0, std::memcmp(&original, &q, sizeof(q)));
     }
-    auto fields = input_query(q.nodes[1].id);
+    auto fields = input_query(q.nodes[3].id);
     ASSERT_EQ(0, native_input::query(fields));
     ASSERT_EQ(6u, fields.count);
     EXPECT_EQ(pointer, fields.nodes[0].integer);
@@ -239,16 +239,16 @@ TEST_F(InputService, DiscoveryIsPassiveAndNamesRemainStable)
     auto stale = input_query();
     stale.generation = original.generation;
     EXPECT_EQ(OS1_ERR_CANCELLED, native_input::query(stale));
-    auto missing = input_query(original.nodes[1].id, OS1_HARDWARE_DESCRIBE);
+    auto missing = input_query(original.nodes[3].id, OS1_HARDWARE_DESCRIBE);
     EXPECT_EQ(OS1_ERR_NOT_FOUND, native_input::query(missing));
     auto next = native_input::attach(OS1_INPUT_POINTER, "USB mouse");
     EXPECT_EQ(pointer + 1, next);  // Observation created no identities.
     q = input_query();
     ASSERT_EQ(0, native_input::query(q));
-    ASSERT_EQ(2u, q.count);
-    EXPECT_STREQ("keyboard1", q.nodes[0].name);
-    EXPECT_STREQ("mouse2", q.nodes[1].name);
-    EXPECT_NE(original.nodes[1].id, q.nodes[1].id);
+    ASSERT_EQ(4u, q.count);
+    EXPECT_STREQ("keyboard1", q.nodes[2].name);
+    EXPECT_STREQ("mouse1", q.nodes[3].name);
+    EXPECT_NE(original.nodes[3].id, q.nodes[3].id);
 }
 TEST_F(InputService, DiscoveryPagesAndMalformedRequests)
 {
@@ -268,14 +268,14 @@ TEST_F(InputService, DiscoveryPagesAndMalformedRequests)
         generation = q.generation;
         if(q.end)
         {
-            EXPECT_STREQ("mouse63", q.nodes[q.count - 1].name);
+            EXPECT_STREQ("mouse62", q.nodes[q.count - 1].name);
             break;
         }
         ASSERT_EQ(OS1_HARDWARE_PAGE, q.count);
     }
-    EXPECT_EQ(63u, count);
+    EXPECT_EQ(65u, count);
     auto invalid = input_query();
-    invalid.start = 64;
+    invalid.start = 66;
     EXPECT_EQ(OS1_ERR_INVALID, native_input::query(invalid));
     invalid = input_query();
     invalid.nodes[7].text[95] = 1;
@@ -365,4 +365,30 @@ TEST(HidBoot, BoundsAndCompositeInterfaceSelection)
         EXPECT_FALSE(os1::input::hid_boot(config, n, h));
     config[27] = 0;
     EXPECT_FALSE(os1::input::hid_boot(config, sizeof(config), h));
+}
+TEST_F(InputService, TypedCollectionsCompactUnderOneGeneration)
+{
+    auto first = native_input::attach(OS1_INPUT_POINTER, "touchpad");
+    auto second = native_input::attach(OS1_INPUT_POINTER, "mouse");
+    auto q = input_query(OS1_HARDWARE_POINTERS);
+    ASSERT_EQ(0, native_input::query(q));
+    ASSERT_EQ(3u, q.count);
+    EXPECT_STREQ("count", q.nodes[0].name);
+    EXPECT_EQ(2u, q.nodes[0].integer);
+    EXPECT_STREQ("0", q.nodes[1].name);
+    EXPECT_STREQ("1", q.nodes[2].name);
+    auto identity = q.nodes[2].id;
+    native_input::remove(first);
+    auto stale = input_query(OS1_HARDWARE_POINTERS);
+    stale.generation = q.generation;
+    EXPECT_EQ(OS1_ERR_CANCELLED, native_input::query(stale));
+    q = input_query(OS1_HARDWARE_POINTERS);
+    ASSERT_EQ(0, native_input::query(q));
+    ASSERT_EQ(2u, q.count);
+    EXPECT_EQ(1u, q.nodes[0].integer);
+    EXPECT_STREQ("0", q.nodes[1].name);
+    EXPECT_EQ(identity, q.nodes[1].id);
+    auto fields = input_query(identity);
+    ASSERT_EQ(0, native_input::query(fields));
+    EXPECT_EQ(second, fields.nodes[5].integer);
 }

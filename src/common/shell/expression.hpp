@@ -145,7 +145,20 @@ struct Tree
             while(position < bytes && text[position] != ' ' && text[position] != '\t' &&
                   text[position] != ',' && text[position] != ')' && text[position] != '}' &&
                   text[position] != ']' && text[position] != '(')
+            {
+                if(text[position] == '[')
+                {
+                    unsigned begin = ++position;
+                    while(position < bytes && text[position] >= '0' && text[position] <= '9')
+                        ++position;
+                    if(position == begin || position == bytes || text[position] != ']')
+                    {
+                        fail("index requires a literal nonnegative integer");
+                        return 0;
+                    }
+                }
                 ++position;
+            }
             if(position == start)
             {
                 fail("missing expression");

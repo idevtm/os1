@@ -4,6 +4,7 @@
 #include <os1/system.hpp>
 
 #include "freestanding/string.hpp"
+#include "hardware/capture.hpp"
 #include "hardware/test_run.hpp"
 #include "log/frame.hpp"
 
@@ -303,6 +304,68 @@ long copy_log(const char* source, const char* name)
             return OS1_ERR_IO;
     }
 }
+long catalog_capture()
+{
+    Artifact out("catalog.bin");
+    os1::hardware::capture::Header header{};
+    if(out.fd < 0 || !f::put(out.fd, reinterpret_cast<const char*>(&header), sizeof(header)))
+        return OS1_ERR_IO;
+    printer = {};
+    const unsigned groups[] = {OS1_HARDWARE_PLATFORM,
+                               OS1_HARDWARE_PCI,
+                               OS1_HARDWARE_USB,
+                               OS1_HARDWARE_USB_INTERFACES,
+                               OS1_HARDWARE_BLOCKS,
+                               OS1_HARDWARE_PARTITIONS,
+                               OS1_HARDWARE_FILESYSTEMS,
+                               OS1_HARDWARE_MOUNTS};
+    for(unsigned group : groups)
+    {
+        unsigned start = 0;
+        for(;;)
+        {
+            Os1HardwareQuery page{};
+            long status = printer.query(page, group, OS1_HARDWARE_CHILDREN, start);
+            if(status < 0)
+                return status;
+            for(unsigned i = 0; i < page.count; ++i)
+            {
+                const auto& node = page.nodes[i];
+                if(node.id < os1::hardware::record_base || (node.id & 63) ||
+                   node.type != OS1_HARDWARE_OBJECT)
+                    continue;
+                if(header.count == os1::hardware::capture::record_limit)
+                    return OS1_ERR_LIMIT;
+                u::hardware_tools::Printer::Fields fields{};
+                if(!printer.fields(node.id, fields))
+                    return OS1_ERR_IO;
+                os1::hardware::capture::Record record{};
+                record.id = node.id;
+                record.parent = fields.values[5];
+                record.backing = fields.values[37];
+                record.source = (node.id - os1::hardware::record_base) >> 16;
+                record.known = fields.known;
+                for(unsigned v = 0; v < 22; ++v)
+                    record.values[v] = fields.values[v + 8];
+                freestanding::copy_string(record.name, sizeof(record.name), fields.name);
+                freestanding::copy_string(record.state, sizeof(record.state), fields.state);
+                freestanding::copy_string(record.driver, sizeof(record.driver), fields.driver);
+                if(!f::put(out.fd, reinterpret_cast<const char*>(&record), sizeof(record)))
+                    return OS1_ERR_IO;
+                ++header.count;
+            }
+            if(page.end)
+                break;
+            start = page.next;
+        }
+    }
+    header.generation = printer.generation;
+    header.complete = 1;
+    return u::seek(out.fd, 0) >= 0 &&
+                   f::put(out.fd, reinterpret_cast<const char*>(&header), sizeof(header))
+               ? 0
+               : OS1_ERR_IO;
+}
 long roundtrip(int fd)
 {
     if(fd < 0)
@@ -543,7 +606,8 @@ int main(int argc, char** argv)
         return 1;
     }
     field(manifest.fd, "format_version", 1);
-    field(manifest.fd, "runner_version", 1);
+    field(manifest.fd, "runner_version", 2);
+    field(manifest.fd, "test_suite_version", 2);
     field(manifest.fd, "machine_fingerprint", fingerprint.value);
     text(manifest.fd, "machine_label=");
     text(manifest.fd, label ? label : "auto");
@@ -576,6 +640,7 @@ int main(int argc, char** argv)
     }
     result("initial kernel log copy", copy_log("/tmp/log/kernel.bin", "kernel-before.bin"));
     stage("hardware snapshots");
+    result("structured catalog", catalog_capture());
     result("system snapshot", snapshot("system.bin", OS1_OBSERVE_SYSTEM));
     result("PCI snapshot", snapshot("pci.bin", OS1_OBSERVE_PCI));
     result("USB boot snapshot", snapshot("usb-boot.bin", OS1_OBSERVE_USB));

@@ -1499,6 +1499,28 @@ int main(int argc_main, char** argv_main)
     };
     if(os1::user::logs::context(OS1_LOG_CONTEXT_OPEN) < 0)
         os1::user::files::message("shell: history capture unavailable\n");
+    if(argc_main == 2 && os1::discovery::same(argv_main[1], "--boot"))
+    {
+        argc_main = 1;
+        os1::user::files::Handle log(os1::user::logs::bind());
+        os1_log_info info{};
+        if(log.fd >= 0 &&
+           os1::user::logs::call(log.fd, OS1_LOG_INFO, nullptr, 0, &info, sizeof(info)) ==
+               sizeof(info) &&
+           info.diagnostic)
+        {
+            os1::user::files::message("shell: diagnostic tests starting\n");
+            CommandRecord record("run-tests", false);
+            record.executed = true;
+            long child = os1::user::spawn("/disk/bin/run-tests");
+            int status = 0;
+            command_failed = child < 0 || os1::user::waitpid(child, &status) != child || status;
+            os1::user::files::message(
+                command_failed
+                    ? "shell: diagnostic tests failed or unavailable; inspect /disk/tests\n"
+                    : "shell: diagnostic tests completed; results in /disk/tests\n");
+        }
+    }
     char line[kShellLineBytes];
     os1::user::files::Reader reader;
     os1::user::files::Handle script;
