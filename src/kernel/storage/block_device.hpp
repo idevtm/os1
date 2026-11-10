@@ -58,6 +58,10 @@ inline bool block_request_succeeded(const BlockRequest& request)
     return completion_done(request.completion) && (BlockRequestStatus::Success == request.status);
 }
 
+struct Thread;
+// Busy has no completion producer. Only interrupt-enabled kernel workers can park.
+void block_retry_wait(Thread*, bool interrupts_enabled);
+
 void block_request_complete(BlockRequest& request,
                             BlockRequestStatus status,
                             uint32_t bytes_transferred = 0);

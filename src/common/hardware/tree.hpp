@@ -41,6 +41,7 @@ struct SourceView
     bool (*read)(unsigned, unsigned, Record&);
     unsigned (*lost)() = nullptr;
     unsigned (*catalog_lost)() = nullptr;
+    uint64_t generation = 1;
 };
 inline void copy(char* out, unsigned capacity, const char* in)
 {
@@ -138,7 +139,8 @@ inline const char* detail_name(unsigned source, unsigned index)
                                              "address",
                                              "root_port",
                                              "port",
-                                             "configuration"};
+                                             "configuration",
+                                             "input_identity"};
     static constexpr const char* interface[] = {"number",
                                                 "alternate_setting",
                                                 "class_code",
@@ -152,7 +154,7 @@ inline const char* detail_name(unsigned source, unsigned index)
         "number", "type_code", "start_sector", "sector_count", "size_bytes"};
     static constexpr const char* filesystem[] = {"block_size", "block_count", "size_bytes"};
     static constexpr const char* port[] = {"port", "connected"};
-    if(source == UsbDevice && index < 11)
+    if(source == UsbDevice && index < 12)
         return device[index];
     if(source == UsbInterface && index < 7)
         return interface[index];
@@ -230,10 +232,10 @@ inline bool describe(const SourceView& source,
              id == OS1_HARDWARE_COVERAGE ? "coverage" : "usb_records_dropped");
         copy(node.text,
              sizeof(node.text),
-             normalized ? "boot snapshot; normalized hardware and observed storage; no hotplug or "
-                          "control interfaces"
-                        : "boot snapshot; cached PCI/USB/ACPI/CPU records; no hotplug or control "
-                          "interfaces");
+             normalized
+                 ? "platform boot snapshot; USB attachments updated at runtime; inspection only"
+                 : "boot snapshot; cached PCI/USB/ACPI/CPU records; no hotplug or control "
+                   "interfaces");
         node.integer = source.lost ? source.lost() : 0;
         return true;
     }
@@ -362,7 +364,12 @@ inline bool describe(const SourceView& source,
         else
         {
             node.type = OS1_HARDWARE_STRING;
-            copy(node.text, sizeof(node.text), field == 35 ? record.identifier : "boot_snapshot");
+            const bool live = kind >= UsbDevice && kind <= UsbPort;
+            copy(node.text,
+                 sizeof(node.text),
+                 field == 35 ? record.identifier
+                 : live      ? "runtime_catalog"
+                             : "boot_snapshot");
         }
         return true;
     }
@@ -403,7 +410,7 @@ inline long query(const SourceView& source, Os1HardwareQuery& q)
     if((q.version != 1 && q.version != OS1_HARDWARE_VERSION) || q.reserved || q.next || q.count ||
        q.end || (q.operation != OS1_HARDWARE_DESCRIBE && q.operation != OS1_HARDWARE_CHILDREN))
         return OS1_ERR_INVALID;
-    if(q.generation && q.generation != 1)
+    if(q.generation && q.generation != source.generation)
         return OS1_ERR_CANCELLED;
     for(const auto& node : q.nodes)
     {
@@ -416,7 +423,7 @@ inline long query(const SourceView& source, Os1HardwareQuery& q)
     Os1HardwareNode parent{};
     if(!describe(source, q.id, parent, normalized))
         return OS1_ERR_NOT_FOUND;
-    q.generation = 1;
+    q.generation = source.generation;
     if(q.operation == OS1_HARDWARE_DESCRIBE)
     {
         if(q.start)

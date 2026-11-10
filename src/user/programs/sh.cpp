@@ -1499,6 +1499,50 @@ int main(int argc_main, char** argv_main)
     };
     if(os1::user::logs::context(OS1_LOG_CONTEXT_OPEN) < 0)
         os1::user::files::message("shell: history capture unavailable\n");
+    if(argc_main == 2 && os1::discovery::same(argv_main[1], "--boot"))
+    {
+        argc_main = 1;
+        os1::user::files::Handle log(os1::user::logs::bind());
+        os1_log_info info{};
+        if(log.fd >= 0 &&
+           os1::user::logs::call(log.fd, OS1_LOG_INFO, nullptr, 0, &info, sizeof(info)) ==
+               sizeof(info) &&
+           info.diagnostic)
+        {
+            os1::user::files::message("shell: diagnostic tests starting\n");
+            // Only automatic boot tests use this explicit deployment setting.
+            os1::user::files::Handle mode(
+                os1::user::open("/disk/etc/run-tests-mode", OS1_RIGHT_READ));
+            char setting[12]{};
+            const bool unattended = mode.fd >= 0 &&
+                                    os1::user::read(mode.fd, setting, sizeof(setting)) == 11 &&
+                                    os1::discovery::same(setting, "unattended\n");
+            const char* command =
+                unattended ? "run-tests --no-input --no-expect-usb-mouse" : "run-tests";
+            if(unattended)
+                os1::user::files::message("shell: diagnostic tests use unattended mode\n");
+            CommandRecord record(command, false);
+            record.executed = true;
+            const char* arguments[] = {"run-tests", "--no-input", "--no-expect-usb-mouse"};
+            const os1_constructor_args constructor{};
+            long child = os1::user::run_program("/disk/bin/run-tests",
+                                                unattended ? 3 : 1,
+                                                arguments,
+                                                false,
+                                                0,
+                                                nullptr,
+                                                nullptr,
+                                                nullptr,
+                                                -1,
+                                                &constructor);
+            int status = 0;
+            command_failed = child < 0 || os1::user::waitpid(child, &status) != child || status;
+            os1::user::files::message(
+                command_failed
+                    ? "shell: diagnostic tests failed or unavailable; inspect /disk/tests\n"
+                    : "shell: diagnostic tests completed; results in /disk/tests\n");
+        }
+    }
     char line[kShellLineBytes];
     os1::user::files::Reader reader;
     os1::user::files::Handle script;

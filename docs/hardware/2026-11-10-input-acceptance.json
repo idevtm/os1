@@ -1,0 +1,76 @@
+{
+  "image_sha256": "df51f85b8461e68b09c703d05d66325578f4f58c16e981ad66f4ed064c0cd09d",
+  "runs": [
+    {
+      "path": "build/hardware-input-retest-0993324/extracted/tests/m-laptop-da00c1febcd0571d/k-38d355c972ec01e2/b0000000000000001-r0000000000000001",
+      "manifest": {
+        "format_version": "1",
+        "runner_version": "3",
+        "test_suite_version": "3",
+        "machine_fingerprint": "15708768800101914397",
+        "machine_label": "laptop",
+        "kernel_revision": "099332486570ba47f5226348e8ae96ae966e38aa",
+        "kernel_build": "38d355c972ec01e2e37af516a17bb9951335b456fae2621b6e9626c65f24e029",
+        "boot_id": "1",
+        "boot_mode": "2",
+        "diagnostic": "0",
+        "wall_ns": "1794339726768000000",
+        "start_ns": "12109000000",
+        "pid": "4",
+        "input_observation": "1",
+        "expect_usb_mouse": "1",
+        "deployed_runner_fnv64": "15239236505143827827"
+      },
+      "summary": {
+        "passed": "21",
+        "failed": "0",
+        "skipped": "0",
+        "io_failed": "0",
+        "end_ns": "41474000000",
+        "state": "complete"
+      },
+      "archive_sha256": "c45cf34200a0587841b19df911e1d911de9543dadad4c222031acc8f56f26893",
+      "lshw_bytes": 65944,
+      "usb_before_after_equal": true,
+      "archive_log_frames_valid": 4,
+      "storage_probe_valid": true
+    },
+    {
+      "path": "build/hardware-input-retest-0993324/extracted/tests/m-desktop-a15c974cde8bf3c2/k-38d355c972ec01e2/b0000000000000002-r0000000000000001",
+      "manifest": {
+        "format_version": "1",
+        "runner_version": "3",
+        "test_suite_version": "3",
+        "machine_fingerprint": "11627334694370800578",
+        "machine_label": "desktop",
+        "kernel_revision": "099332486570ba47f5226348e8ae96ae966e38aa",
+        "kernel_build": "38d355c972ec01e2e37af516a17bb9951335b456fae2621b6e9626c65f24e029",
+        "boot_id": "2",
+        "boot_mode": "2",
+        "diagnostic": "0",
+        "wall_ns": "1794339883820000000",
+        "start_ns": "13095000000",
+        "pid": "4",
+        "input_observation": "1",
+        "expect_usb_mouse": "1",
+        "deployed_runner_fnv64": "15239236505143827827"
+      },
+      "summary": {
+        "passed": "19",
+        "failed": "0",
+        "skipped": "3",
+        "io_failed": "0",
+        "end_ns": "38590000000",
+        "state": "complete"
+      },
+      "archive_sha256": "f02242b5cf4f6cfa1e7ad743abfdbcd5873f0d788f956c63db7079d702cc5151",
+      "lshw_bytes": 72218,
+      "usb_before_after_equal": true,
+      "archive_log_frames_valid": 4,
+      "storage_probe_valid": true
+    }
+  ],
+  "persistent_frames_valid": 25,
+  "max_overwritten": 0,
+  "max_dropped": 0
+}

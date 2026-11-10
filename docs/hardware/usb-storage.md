@@ -125,12 +125,11 @@ Unsupported or failed children are disabled before enumeration proceeds to anoth
 Runtime requests check the root connection and each parent hub port.
 Connection, reset, enable, or other port changes reject the old storage identity.
 
-Low/full-speed transfers and split transactions are not implemented.
-UHCI/OHCI companion controllers and EHCI interrupt endpoints remain separate work.
-Thus this EHCI storage driver does not provide USB keyboard or mouse support.
-The hardware catalog retains anonymous `unsupported_speed` records for stable low/full-speed hub children.
+The [input profile](../native-api/abi/input-abi.md) adds low/full-speed control and periodic HID transfers through high-speed transaction-translator hubs.
+UHCI/OHCI companion controllers remain unsupported. Low/full-speed root devices and full-speed downstream hubs remain outside this profile.
 Connected unusable root ports retain `not_enumerated` records with unknown speed.
-These records do not enable transfers or replace runtime hotplug detection.
+The deferred worker updates supported attachment paths and retires removed storage identities.
+Reconnection creates new records; it does not revive or replace an existing mounted filesystem.
 
 `devices` reports a started EHCI controller when probing succeeds.
 Boot diagnostics report hub addresses, root and downstream ports, storage capacity, and failures.

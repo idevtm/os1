@@ -773,6 +773,35 @@ long sys_observe_usb(const ObserveContext& context,
     return result;
 }
 
+long sys_observe_usb_input_failures(const ObserveContext& context,
+                                    Thread* thread,
+                                    uint64_t user_buffer,
+                                    size_t length)
+{
+    const uint32_t count = usb::diagnostics::input_failure_count();
+    size_t offset = 0;
+    long result = -1;
+    if(!begin_observe_transfer(context,
+                               thread,
+                               user_buffer,
+                               length,
+                               OS1_OBSERVE_USB_INPUT_FAILURES,
+                               sizeof(Os1ObserveUsbInputFailure),
+                               count,
+                               offset,
+                               result))
+        return -1;
+    // The captured prefix is immutable. Never hold the diagnostic lock during user copies.
+    for(uint32_t i = 0; i < count; ++i)
+    {
+        Os1ObserveUsbInputFailure record{};
+        if(!usb::diagnostics::input_failure_at(i, record) ||
+           !write_observe_record(context, thread, user_buffer, offset, &record, sizeof(record)))
+            return -1;
+    }
+    return result;
+}
+
 long sys_observe_kmem(const ObserveContext& context,
                       Thread* thread,
                       uint64_t user_buffer,
@@ -935,6 +964,8 @@ long sys_observe(const ObserveContext& context, uint64_t kind, uint64_t user_buf
             return sys_observe_kmem(context, thread, user_buffer, length);
         case OS1_OBSERVE_USB:
             return sys_observe_usb(context, thread, user_buffer, length);
+        case OS1_OBSERVE_USB_INPUT_FAILURES:
+            return sys_observe_usb_input_failures(context, thread, user_buffer, length);
         case OS1_OBSERVE_ACPI:
             return sys_observe_acpi(context, thread, user_buffer, length);
         default:

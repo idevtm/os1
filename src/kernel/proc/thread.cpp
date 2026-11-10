@@ -2,19 +2,18 @@
 // Kmem-backed thread-registry implementation. This file owns thread IDs,
 // kernel stacks, saved TrapFrame initialization, wait-state transitions, and
 // CPU-local current-thread publication.
-#include "proc/thread.hpp"
-#include "syscall/vfs.hpp"
-#include "ipc/channel.hpp"
-#include "syscall/console_read.hpp"
-
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "console/console_input.hpp"
 #include "debug/debug.hpp"
 #include "handoff/memory_layout.h"
+#include "ipc/channel.hpp"
 #include "mm/kmem.hpp"
-#include "sync/wait_queue.hpp"
+#include "proc/thread.hpp"
 #include "sync/smp.hpp"
+#include "sync/wait_queue.hpp"
+#include "syscall/console_read.hpp"
+#include "syscall/vfs.hpp"
 #include "util/memory.h"
 
 namespace
@@ -297,7 +296,8 @@ void unlink_thread(Thread* thread)
     }
 
     Thread* previous = nullptr;
-    for(Thread* candidate = g_thread_head; nullptr != candidate; candidate = candidate->registry_next)
+    for(Thread* candidate = g_thread_head; nullptr != candidate;
+        candidate = candidate->registry_next)
     {
         if(candidate != thread)
         {
@@ -760,7 +760,8 @@ void mark_current_thread_dying(int exit_status)
     cancel_vfs_wait(thread);
     cancel_ipc_wait(thread);
     clear_thread_wait(thread);
-    if(thread->process) descriptor_close_all(thread->process->descriptors);
+    if(thread->process)
+        descriptor_close_all(thread->process->descriptors);
     if(thread->process)
     {
         IrqSpinGuard guard(g_process_table_lock);
@@ -769,4 +770,33 @@ void mark_current_thread_dying(int exit_status)
             thread->process->parent ? ProcessState::Zombie : ProcessState::Dying;
     }
     thread->state = ThreadState::Dying;
+}
+
+SchedulingGuard::SchedulingGuard()
+{
+    IrqGuard irq;
+    thread_ = current_thread();
+    if(thread_)
+        ++thread_->scheduling_depth;
+}
+SchedulingGuard::~SchedulingGuard()
+{
+    IrqGuard irq;
+    if(thread_ && !--thread_->scheduling_depth && cpu_cur()->reschedule_pending &&
+       cpu_run_queue_length(cpu_cur()))
+    {
+        // Coalesce requests while a syscall still has interrupts disabled.
+        cpu_cur()->reschedule_pending = 0;
+        if(!ipi_send_reschedule(cpu_cur()))
+            cpu_cur()->reschedule_pending = 1;
+    }
+}
+bool defer_irq_work(bool reschedule)
+{
+    Thread* thread = current_thread();
+    if(!thread || !thread->scheduling_depth)
+        return false;
+    if(reschedule)
+        cpu_cur()->reschedule_pending = 1;
+    return true;
 }

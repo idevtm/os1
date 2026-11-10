@@ -1,3 +1,4 @@
+#include <os1/input.hpp>
 #pragma once
 #include <stddef.h>
 #if __STDC_HOSTED__
@@ -183,7 +184,31 @@ inline bool extend(os1::discovery::View& v)
             os1_resource_info info{};
             if(query(value.fd, &info) < 0)
                 continue;
-            if(value.exclusive)
+            if(info.kind == OS1_OBJECT_INPUT_DEVICE || info.kind == OS1_OBJECT_POINTER ||
+               info.kind == OS1_OBJECT_INPUT_SUBSCRIPTION)
+            {
+                bool subscription = info.kind == OS1_OBJECT_INPUT_SUBSCRIPTION;
+                uint64_t interface = subscription ? OS1_INPUT_SUBSCRIPTION_INTERFACE_ID
+                                     : info.kind == OS1_OBJECT_POINTER ? OS1_POINTER_INTERFACE_ID
+                                                                       : OS1_KEYBOARD_INTERFACE_ID;
+                v.add(at,
+                      subscription ? "try_read" : "get_state",
+                      os1::discovery::Kind::Method,
+                      subscription ? "() -> InputEvent" : "() -> InputState",
+                      OS1_RIGHT_INPUT_READ,
+                      interface,
+                      1,
+                      os1::discovery::Native);
+                v.add(at,
+                      subscription ? "unsubscribe" : "subscribe",
+                      os1::discovery::Kind::Method,
+                      subscription ? "()" : "() -> InputSubscription",
+                      OS1_RIGHT_INPUT_READ,
+                      interface,
+                      2,
+                      os1::discovery::Native);
+            }
+            else if(value.exclusive)
             {
                 v.add(at,
                       "try_read_key",
@@ -390,6 +415,107 @@ inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false);
 [[gnu::noinline]] inline bool native(
     const char* path, const os1::discovery::Member& m, Frame& f, Value& out, bool scoped)
 {
+    if(m.interface_id == OS1_INPUT_INTERFACE_ID || m.interface_id == OS1_KEYBOARD_INTERFACE_ID ||
+       m.interface_id == OS1_POINTER_INTERFACE_ID ||
+       m.interface_id == OS1_INPUT_SUBSCRIPTION_INTERFACE_ID)
+    {
+        bool service = m.interface_id == OS1_INPUT_INTERFACE_ID;
+        files::Handle client(input::bind(service ? root() : source(path), m.interface_id));
+        if(client.fd < 0)
+            return fail("input binding failed", client.fd);
+        os1_input_selector selector{m.target};
+        bool owned = m.member == 2 && m.interface_id != OS1_INPUT_SUBSCRIPTION_INTERFACE_ID;
+        os1_ipc_result r{};
+        long status = input::call(client.fd,
+                                  m.interface_id,
+                                  m.member,
+                                  service ? &selector : nullptr,
+                                  service ? sizeof(selector) : 0,
+                                  r,
+                                  owned);
+        if(status < 0)
+            return fail(status == OS1_ERR_WOULD_BLOCK ? "no input event"
+                        : status == OS1_ERR_CLOSED    ? "input closed"
+                                                      : "input method failed",
+                        status);
+        if(owned)
+        {
+            out.clear();
+            out.fd = status;
+            return true;
+        }
+        out.clear();
+        if(!r.payload_bytes)
+            return true;
+        int record = os1::context::add(out.data, 0, "value", 5, OS1_VALUE_RECORD);
+        auto number = [&](const char* name, uint64_t value) {
+            os1::context::add(out.data,
+                              record,
+                              name,
+                              files::length(name),
+                              OS1_VALUE_INTEGER,
+                              nullptr,
+                              0,
+                              int64_t(value));
+        };
+        if(service && r.payload_bytes == sizeof(os1_input_device))
+        {
+            os1_input_device d{};
+            __builtin_memcpy(&d, r.payload, sizeof(d));
+            number("device", d.device);
+            number("kind", d.kind);
+            number("connected", d.connected);
+            number("catalog_id", d.catalog_id);
+            os1::context::add(
+                out.data, record, "name", 4, OS1_VALUE_STRING, d.name, files::length(d.name));
+        }
+        else if(r.payload_bytes == sizeof(os1_input_state))
+        {
+            os1_input_state d{};
+            __builtin_memcpy(&d, r.payload, sizeof(d));
+            number("device", d.device);
+            number("sequence", d.sequence);
+            number("time_ns", d.time_ns);
+            number("connected", d.connected);
+            number("buttons", d.buttons);
+            number("x", d.x);
+            number("y", d.y);
+            number("wheel", d.wheel);
+            for(unsigned i = 0; i < 4; ++i)
+            {
+                uint64_t word = 0;
+                __builtin_memcpy(&word, d.keys + 8 * i, 8);
+                char key[] = "keys_0";
+                key[5] += i;
+                number(key, word);
+            }
+        }
+        else if(r.payload_bytes == sizeof(os1_input_event))
+        {
+            os1_input_event d{};
+            __builtin_memcpy(&d, r.payload, sizeof(d));
+            number("device", d.device);
+            number("sequence", d.sequence);
+            number("time_ns", d.time_ns);
+            number("lost", d.lost);
+            number("flags", d.flags);
+            number("buttons", d.buttons);
+            number("dx", int64_t(d.dx));
+            number("dy", int64_t(d.dy));
+            number("wheel", int64_t(d.wheel));
+            for(unsigned i = 0; i < 4; ++i)
+            {
+                uint64_t word = 0;
+                __builtin_memcpy(&word, d.keys + 8 * i, 8);
+                char key[] = "keys_0";
+                key[5] += i;
+                number(key, word);
+            }
+        }
+        else
+            return fail("invalid input result");
+        return true;
+    }
     if(m.interface_id == OS1_SYSTEM_INTERFACE_ID)
     {
         long r = system_control(m.member);

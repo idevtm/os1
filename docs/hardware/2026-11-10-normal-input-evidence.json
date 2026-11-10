@@ -1,0 +1,323 @@
+{
+  "source_image": "build/hardware-input-normal-2026-11-10/data.ext2",
+  "image_sha256": "0b68147c3ce9f61cc621e0e4305a71ce0fffd35be293cb4b1166972cf7b289a7",
+  "filesystem_check": "e2fsck -fn: all five passes, no errors",
+  "user_context": "Normal os1 boot; manual --input --expect-usb-mouse on both machines; mice remained connected; laptop touchpad also exercised.",
+  "runs": [
+    {
+      "machine": "desktop",
+      "run": "build/hardware-input-normal-2026-11-10/extracted/tests/m-desktop-a15c974cde8bf3c2/k-0c88f3040d131f34/b0000000000000002-r0000000000000001",
+      "manifest": {
+        "boot_id": "2",
+        "boot_mode": "2",
+        "deployed_runner_fnv64": "10706558150810868742",
+        "diagnostic": "0",
+        "expect_usb_mouse": "1",
+        "format_version": "1",
+        "input_observation": "1",
+        "kernel_build": "0c88f3040d131f34f84f54427f9fefc69a90774f6fd314a43ceba9c5aa4eb1d8",
+        "kernel_revision": "c4cc470e1a14ceb10beb054deb034cae05f3d355",
+        "machine_fingerprint": "11627334694370800578",
+        "machine_label": "desktop",
+        "pid": "4",
+        "runner_version": "3",
+        "start_ns": "19274000000",
+        "test_suite_version": "3",
+        "wall_ns": "1794333880031000000"
+      },
+      "summary": {
+        "end_ns": "49474000000",
+        "failed": "4",
+        "io_failed": "0",
+        "passed": "19",
+        "skipped": "3",
+        "state": "complete"
+      },
+      "archive_sha256": "eaa01fc38b37a2898fba8487c3234373be63e6c77740600da74af65c0707a3ee",
+      "lshw_bytes": 72218,
+      "storage_probe_valid": true,
+      "devices": [
+        {
+          "device": 1,
+          "kind": 1,
+          "catalog_id": 1376256,
+          "connected": 1,
+          "observation": {
+            "failure_occurrences": 11,
+            "lost_events": 11,
+            "lost_global_records": 6312,
+            "removed_events": 0,
+            "invalid_replies": 0,
+            "closed_replies": 0,
+            "error_replies": 0,
+            "observed_events": 0,
+            "movement_events": 0,
+            "button_changes": 0,
+            "left_shift_changes": 0
+          }
+        },
+        {
+          "device": 2,
+          "kind": 1,
+          "catalog_id": 1376384,
+          "connected": 1,
+          "observation": {
+            "failure_occurrences": 5,
+            "lost_events": 5,
+            "lost_global_records": 6507,
+            "removed_events": 0,
+            "invalid_replies": 0,
+            "closed_replies": 0,
+            "error_replies": 0,
+            "observed_events": 0,
+            "movement_events": 0,
+            "button_changes": 0,
+            "left_shift_changes": 0
+          }
+        },
+        {
+          "device": 3,
+          "kind": 2,
+          "catalog_id": 1376384,
+          "connected": 1,
+          "observation": {
+            "failure_occurrences": 5,
+            "lost_events": 5,
+            "lost_global_records": 6535,
+            "removed_events": 0,
+            "invalid_replies": 0,
+            "closed_replies": 0,
+            "error_replies": 0,
+            "observed_events": 1340,
+            "movement_events": 1331,
+            "button_changes": 14,
+            "left_shift_changes": 0
+          }
+        },
+        {
+          "device": 4,
+          "kind": 1,
+          "catalog_id": 0,
+          "connected": 1,
+          "observation": {
+            "failure_occurrences": 4,
+            "lost_events": 4,
+            "lost_global_records": 6508,
+            "removed_events": 0,
+            "invalid_replies": 0,
+            "closed_replies": 0,
+            "error_replies": 0,
+            "observed_events": 0,
+            "movement_events": 0,
+            "button_changes": 0,
+            "left_shift_changes": 0
+          }
+        }
+      ],
+      "usb_input_failures": {
+        "after": [],
+        "before": []
+      },
+      "retained_read_calls": 1315,
+      "read_call_max_duration_ns": 1433000000,
+      "read_calls_over_100ms": 9,
+      "read_would_block_warnings": 180,
+      "failure_findings": [
+        {
+          "check": "on_device_tests",
+          "failed": "4",
+          "status": "FAIL"
+        }
+      ]
+    },
+    {
+      "machine": "laptop",
+      "run": "build/hardware-input-normal-2026-11-10/extracted/tests/m-laptop-da00c1febcd0571d/k-0c88f3040d131f34/b0000000000000001-r0000000000000001",
+      "manifest": {
+        "boot_id": "1",
+        "boot_mode": "2",
+        "deployed_runner_fnv64": "10706558150810868742",
+        "diagnostic": "0",
+        "expect_usb_mouse": "1",
+        "format_version": "1",
+        "input_observation": "1",
+        "kernel_build": "0c88f3040d131f34f84f54427f9fefc69a90774f6fd314a43ceba9c5aa4eb1d8",
+        "kernel_revision": "c4cc470e1a14ceb10beb054deb034cae05f3d355",
+        "machine_fingerprint": "15708768800101914397",
+        "machine_label": "laptop",
+        "pid": "4",
+        "runner_version": "3",
+        "start_ns": "32759000000",
+        "test_suite_version": "3",
+        "wall_ns": "1794333750408000000"
+      },
+      "summary": {
+        "end_ns": "65551000000",
+        "failed": "2",
+        "io_failed": "0",
+        "passed": "20",
+        "skipped": "1",
+        "state": "complete"
+      },
+      "archive_sha256": "e000803fd81ce2cc3bdf5f3becf186223fc286dcdfd69a2cfd237607997b5b62",
+      "lshw_bytes": 65944,
+      "storage_probe_valid": true,
+      "devices": [
+        {
+          "device": 1,
+          "kind": 2,
+          "catalog_id": 1376640,
+          "connected": 1,
+          "observation": {
+            "failure_occurrences": 2,
+            "lost_events": 0,
+            "lost_global_records": 0,
+            "removed_events": 1,
+            "invalid_replies": 0,
+            "closed_replies": 1,
+            "error_replies": 0,
+            "observed_events": 208,
+            "movement_events": 208,
+            "button_changes": 15,
+            "left_shift_changes": 0
+          }
+        },
+        {
+          "device": 2,
+          "kind": 1,
+          "catalog_id": 0,
+          "connected": 1,
+          "observation": {
+            "failure_occurrences": 0,
+            "lost_events": 0,
+            "lost_global_records": 0,
+            "removed_events": 0,
+            "invalid_replies": 0,
+            "closed_replies": 0,
+            "error_replies": 0,
+            "observed_events": 0,
+            "movement_events": 0,
+            "button_changes": 0,
+            "left_shift_changes": 0
+          }
+        },
+        {
+          "device": 3,
+          "kind": 2,
+          "catalog_id": 0,
+          "connected": 1,
+          "observation": {
+            "failure_occurrences": 0,
+            "lost_events": 0,
+            "lost_global_records": 0,
+            "removed_events": 0,
+            "invalid_replies": 0,
+            "closed_replies": 0,
+            "error_replies": 0,
+            "observed_events": 134,
+            "movement_events": 130,
+            "button_changes": 4,
+            "left_shift_changes": 0
+          }
+        }
+      ],
+      "usb_input_failures": {
+        "after": [
+          {
+            "address": 3,
+            "catalog_id": 1376640,
+            "endpoint": 129,
+            "expected_bytes": 4,
+            "flags": 0,
+            "input_device": 1,
+            "parent_address": 1,
+            "pci_index": 9,
+            "port": 4,
+            "reason": 1,
+            "reason_name": "transfer",
+            "root_port": 1,
+            "sequence": 1,
+            "status": 8207,
+            "time_ns": 59190219812,
+            "token": 2147746113
+          },
+          {
+            "address": 4,
+            "catalog_id": 1376704,
+            "endpoint": 129,
+            "expected_bytes": 4,
+            "flags": 0,
+            "input_device": 4,
+            "parent_address": 1,
+            "pci_index": 9,
+            "port": 4,
+            "reason": 1,
+            "reason_name": "transfer",
+            "root_port": 1,
+            "sequence": 2,
+            "status": 8207,
+            "time_ns": 65615149195,
+            "token": 2147746113
+          }
+        ],
+        "before": []
+      },
+      "retained_read_calls": 800,
+      "read_call_max_duration_ns": 1805000000,
+      "read_calls_over_100ms": 12,
+      "read_would_block_warnings": 453,
+      "failure_findings": [
+        {
+          "check": "on_device_tests",
+          "failed": "2",
+          "status": "FAIL"
+        },
+        {
+          "check": "missing_usb",
+          "expected": {
+            "interfaces": [
+              [
+                224,
+                1,
+                1
+              ]
+            ],
+            "name": "Qualcomm Atheros Communications AR3011 Bluetooth",
+            "product": 12293,
+            "required": true,
+            "vendor": 3315
+          },
+          "status": "FAIL"
+        }
+      ]
+    }
+  ],
+  "conclusions": {
+    "desktop": "Confirmed shared event-ring overflow. No removal, closure, malformed reply, or transport-call error during observation. Logitech stays configured.",
+    "laptop": "Confirmed EHCI periodic split ERR with halted=1, CERR=0, remaining=4, token=0x80040141 on two input identities. Driver retires each identity; original observation reports removal then closure. Touchpad has no input failure.",
+    "shared_latency": "Normal native-input polling remains traced. Automatic persistence runs synchronously before request dispatch and holds global syscall admission. Logs show second-scale input-call delays. This is a strong contributor hypothesis, not a timed attribution of each delay to export.",
+    "limits": "Exact cause of EHCI downstream ERR remains unknown. Scheduling/rearm and TT behavior need investigation and bounded recovery. Do not combine coarse IPC times with measurement-clock EHCI timestamps. Lost counters count global records and overlap across subscriptions."
+  },
+  "analysis_scope": "Read-only hardware evidence and source analysis. No source changes, image writes, or kernel builds. Runtime test execution is not required for this analysis.",
+  "sources": {
+    "ehci_spec": "https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/ehci-specification-for-usb.pdf (Table3-16; section4.12.2.4.2)",
+    "normal_log_policy": "src/kernel/debug/log.cpp:355",
+    "export_worker": "src/kernel/ipc/channel.cpp:1646",
+    "syscall_admission": "src/kernel/core/trap_dispatch.cpp:24",
+    "input_loss": "src/kernel/drivers/input/service.cpp:194",
+    "ehci_retirement": "src/kernel/drivers/usb/ehci.cpp:573"
+  },
+  "review": {
+    "reviewer": "normal_input_capture_review",
+    "result": "No blocking findings",
+    "coverage": "Raw reports, summaries, device counters, build identities, source paths, numerical claims, and EHCI specification interpretation",
+    "limitations": [
+      "Read-only review; no tests or physical retest executed",
+      "Exporter attribution is a hypothesis supported by source and timing",
+      "IPC duration excludes earlier syscall admission waits",
+      "Coarse log and measurement clock timestamps are distinct",
+      "Full ASD-STE100 dictionary unavailable"
+    ]
+  },
+  "analyzed_source_revision": "c4cc470e1a14ceb10beb054deb034cae05f3d355"
+}

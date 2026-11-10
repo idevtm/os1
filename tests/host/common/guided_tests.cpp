@@ -124,6 +124,15 @@ TEST(Expression, NestedCallsRecordsAndSourceArgumentOrder)
     ASSERT_TRUE(tree.parse("service.info().field"));
     EXPECT_EQ(shell::expression::Kind::Access, tree.nodes[tree.root].kind);
 }
+TEST(Expression, LiteralCollectionIndexesRemainReferences)
+{
+    shell::expression::Tree tree;
+    ASSERT_TRUE(tree.parse("os.input.pointers[0].open"));
+    EXPECT_EQ(shell::expression::Kind::Reference, tree.nodes[tree.root].kind);
+    ASSERT_TRUE(tree.parse("service.use device:os.input.keyboards[12].open()"));
+    for(const char* text : {"os.input.pointers[]", "os.input.pointers[-1]", "os.input.pointers[x]"})
+        EXPECT_FALSE(tree.parse(text)) << text;
+}
 TEST(Expression, MalformedSyntaxAndBudgetsFailBeforeEvaluation)
 {
     for(const char* text :

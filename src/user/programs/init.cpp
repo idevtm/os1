@@ -2,9 +2,25 @@
 
 int main(int, char**)
 {
+    bool first = true;
     for(;;)
     {
-        long child = os1::user::spawn("/disk/bin/sh");
+        const char* arguments[] = {"sh", "--boot"};
+        // The bootstrap shell takes argv, not a typed class constructor.
+        // Avoid repeated ELF metadata reads before the first interactive prompt.
+        const os1_constructor_args constructor{};
+        long child = first ? os1::user::run_program("/disk/bin/sh",
+                                                    2,
+                                                    arguments,
+                                                    false,
+                                                    0,
+                                                    nullptr,
+                                                    nullptr,
+                                                    nullptr,
+                                                    -1,
+                                                    &constructor)
+                           : os1::user::spawn("/disk/bin/sh");
+        first = false;
         int status = 0;
         long result = child < 0 ? child : os1::user::waitpid(child, &status);
         if(child >= 0 && result == child)

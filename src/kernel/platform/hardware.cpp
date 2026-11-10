@@ -2,6 +2,7 @@
 
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/driver_registry.hpp"
+#include "drivers/input/service.hpp"
 #include "drivers/usb/diagnostics.hpp"
 #include "freestanding/string.hpp"
 #include "hardware/names.hpp"
@@ -18,6 +19,8 @@ namespace
 using namespace os1::hardware;
 os1::hardware::Catalog* catalog{};
 unsigned capture_lost{};
+Spinlock catalog_lock{"hardware-catalog"};
+uint64_t catalog_generation = 1;
 bool catalog_frozen{};
 Record platform_records[3]{};
 bool platform_captured{};
@@ -218,6 +221,7 @@ void hardware_reset_bindings()
     kfree(catalog);
     catalog = nullptr;
     capture_lost = 0;
+    catalog_generation = 1;
     catalog_frozen = false;
     platform_captured = false;
     for(auto& id : firmware_associations)
@@ -265,14 +269,13 @@ void hardware_capture_platform(const BootInfo& boot)
 }
 void hardware_freeze_bindings()
 {
+    catalog_frozen = true;
     hardware_facts::associate(platform_acpi_devices(),
                               platform_acpi_device_count(),
                               g_platform.devices,
                               g_platform.device_count,
                               firmware_associations);
-    catalog_frozen = true;
-    if(catalog)
-        catalog->frozen = true;
+
     for(unsigned i = 0; i < device_binding_count(); ++i)
     {
         const auto& b = device_bindings()[i];
@@ -285,17 +288,21 @@ void hardware_freeze_bindings()
 }
 long hardware_query(Os1HardwareQuery& request)
 {
+    if(request.id >= OS1_HARDWARE_INPUT_ROOT && request.id < OS1_HARDWARE_INPUT_END)
+        return native_input::query(request);
+    IrqSpinGuard guard(catalog_lock);
     if(driver_names_overflow)
         return OS1_ERR_LIMIT;
-    return os1::hardware::query({count, read, usb::diagnostics::dropped, catalog_lost}, request);
+    return os1::hardware::query(
+        {count, read, usb::diagnostics::dropped, catalog_lost, catalog_generation}, request);
 }
 
 namespace hardware_catalog
 {
-unsigned add(unsigned kind, const os1::hardware::Record& r)
+namespace
 {
-    if(catalog_frozen)
-        return 0;
+unsigned add_locked(unsigned kind, const os1::hardware::Record& r)
+{
     if(!catalog)
         catalog = static_cast<os1::hardware::Catalog*>(
             kmalloc(sizeof(os1::hardware::Catalog), KmallocFlags::Zero));
@@ -306,11 +313,11 @@ unsigned add(unsigned kind, const os1::hardware::Record& r)
     }
     return catalog->add(kind, r);
 }
-os1::hardware::Record* edit(unsigned id)
+os1::hardware::Record* edit_locked(unsigned id)
 {
     return catalog ? catalog->edit(id) : nullptr;
 }
-unsigned usb_port(unsigned pci, unsigned port, bool connected)
+unsigned usb_port_locked(unsigned pci, unsigned port, bool connected)
 {
     Record r{};
     r.parent = object_id(Pci, pci);
@@ -320,9 +327,9 @@ unsigned usb_port(unsigned pci, unsigned port, bool connected)
     copy(r.state, sizeof(r.state), connected ? "connected" : "disconnected");
     r.values[0] = port;
     r.values[1] = connected;
-    return add(UsbPort, r);
+    return add_locked(UsbPort, r);
 }
-unsigned usb_device(unsigned parent, unsigned root, unsigned port, unsigned speed)
+unsigned usb_device_locked(unsigned parent, unsigned root, unsigned port, unsigned speed)
 {
     Record r{};
     r.category = OS1_HARDWARE_OTHER;
@@ -337,18 +344,18 @@ unsigned usb_device(unsigned parent, unsigned root, unsigned port, unsigned spee
     }
     copy(r.name, sizeof(r.name), "USB device");
     copy(r.state, sizeof(r.state), "enumeration_failed");
-    return add(UsbDevice, r);
+    return add_locked(UsbDevice, r);
 }
-unsigned usb_unenumerated(unsigned parent, unsigned root, unsigned port, unsigned speed)
+unsigned usb_unenumerated_locked(unsigned parent, unsigned root, unsigned port, unsigned speed)
 {
-    unsigned id = usb_device(parent, root, port, speed);
-    if(auto* record = edit(id))
+    unsigned id = usb_device_locked(parent, root, port, speed);
+    if(auto* record = edit_locked(id))
         copy(record->state, sizeof(record->state), speed ? "unsupported_speed" : "not_enumerated");
     return id;
 }
-void usb_descriptor(unsigned id, const void* bytes, unsigned length)
+void usb_descriptor_locked(unsigned id, const void* bytes, unsigned length)
 {
-    auto* r = edit(id);
+    auto* r = edit_locked(id);
     auto* b = static_cast<const uint8_t*>(bytes);
     if(!r || !b || length < 18 || b[0] < 18 || b[1] != 1)
         return;
@@ -364,15 +371,25 @@ void usb_descriptor(unsigned id, const void* bytes, unsigned length)
         r->category = OS1_HARDWARE_CONTROLLERS;
     copy(r->state, sizeof(r->state), "described");
 }
-void usb_configuration(unsigned id, const void* bytes, unsigned length, bool descriptor_valid)
+void usb_configuration_locked(unsigned id,
+                              const void* bytes,
+                              unsigned length,
+                              bool descriptor_valid)
 {
+    auto* record = edit_locked(id);
+    if(record && freestanding::strings_equal(record->state, "unavailable"))
+        return;
     if(catalog && catalog->interfaces(id, descriptor_valid ? bytes : nullptr, length) < 0)
-        if(auto* r = edit(id))
+        if(auto* r = edit_locked(id))
             copy(r->state, sizeof(r->state), "descriptor_invalid");
 }
-unsigned usb_bind(unsigned id, unsigned config, unsigned number, const char* driver, bool ready)
+unsigned usb_bind_locked(
+    unsigned id, unsigned config, unsigned number, const char* driver, bool ready)
 {
-    if(auto* r = edit(id))
+    auto* existing = edit_locked(id);
+    if(existing && freestanding::strings_equal(existing->state, "unavailable"))
+        return 0;
+    if(auto* r = edit_locked(id))
     {
         if(ready)
         {
@@ -383,9 +400,9 @@ unsigned usb_bind(unsigned id, unsigned config, unsigned number, const char* dri
     }
     return catalog ? catalog->bind_interface(id, config, number, driver, ready) : 0;
 }
-void unavailable(unsigned id)
+void unavailable_locked(unsigned id)
 {
-    auto* record = edit(id);
+    auto* record = edit_locked(id);
     if(!record)
         return;
     copy(record->state, sizeof(record->state), "unavailable");
@@ -396,8 +413,10 @@ void unavailable(unsigned id)
         for(unsigned i = 0; i < catalog->used; ++i)
         {
             auto& r = catalog->entries[i].record;
-            auto* backing = edit(r.backing);
-            if(backing && freestanding::strings_equal(backing->state, "unavailable") &&
+            auto* backing = edit_locked(r.backing);
+            auto* parent = edit_locked(r.parent);
+            if(((backing && freestanding::strings_equal(backing->state, "unavailable")) ||
+                (parent && freestanding::strings_equal(parent->state, "unavailable"))) &&
                !freestanding::strings_equal(r.state, "unavailable"))
             {
                 copy(r.state, sizeof(r.state), "unavailable");
@@ -408,7 +427,7 @@ void unavailable(unsigned id)
             break;
     }
 }
-void block(BlockDevice& b, unsigned backing)
+void block_locked(BlockDevice& b, unsigned backing)
 {
     if(b.catalog_id)
         return;
@@ -428,9 +447,9 @@ void block(BlockDevice& b, unsigned backing)
     }
     r.values[3] = b.max_sectors_per_request;
     r.values[4] = b.queue_depth;
-    b.catalog_id = add(Block, r);
+    b.catalog_id = add_locked(Block, r);
 }
-void partitions(BlockDevice& b, const uint8_t* mbr)
+void partitions_locked(BlockDevice& b, const uint8_t* mbr)
 {
     if(!b.catalog_id || mbr[510] != 0x55 || mbr[511] != 0xaa)
         return;
@@ -456,10 +475,10 @@ void partitions(BlockDevice& b, const uint8_t* mbr)
                      r.values[3] <= b.sector_count - r.values[2];
         copy(r.name, sizeof(r.name), "MBR partition");
         copy(r.state, sizeof(r.state), valid ? "observed" : "invalid_bounds");
-        add(Partition, r);
+        add_locked(Partition, r);
     }
 }
-void mounted(BlockDevice& b, unsigned partition, const uint8_t* super)
+void mounted_locked(BlockDevice& b, unsigned partition, const uint8_t* super)
 {
     if(!catalog || !b.catalog_id)
         return;
@@ -496,7 +515,7 @@ void mounted(BlockDevice& b, unsigned partition, const uint8_t* super)
         r.identifier[n++] = hex[super[104 + i] >> 4];
         r.identifier[n++] = hex[super[104 + i] & 15];
     }
-    unsigned fs = add(Filesystem, r);
+    unsigned fs = add_locked(Filesystem, r);
     if(!fs)
         return;
     r = {};
@@ -505,6 +524,107 @@ void mounted(BlockDevice& b, unsigned partition, const uint8_t* super)
     r.known = 0;
     copy(r.name, sizeof(r.name), "/disk");
     copy(r.state, sizeof(r.state), "mounted");
-    add(Mount, r);
+    add_locked(Mount, r);
+}
+void usb_address_locked(unsigned id, unsigned address)
+{
+    if(auto* r = edit_locked(id))
+    {
+        r->values[7] = address;
+        r->known |= 1u << 7;
+    }
+}
+void port_state_locked(unsigned id, bool connected)
+{
+    if(auto* r = edit_locked(id))
+    {
+        r->values[1] = connected;
+        copy(r->state, sizeof(r->state), connected ? "connected" : "disconnected");
+    }
+}
+}  // namespace
+unsigned usb_port(unsigned pci, unsigned port, bool connected)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    return usb_port_locked(pci, port, connected);
+}
+unsigned usb_device(unsigned parent, unsigned root, unsigned port, unsigned speed)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    return usb_device_locked(parent, root, port, speed);
+}
+unsigned usb_unenumerated(unsigned parent, unsigned root, unsigned port, unsigned speed)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    return usb_unenumerated_locked(parent, root, port, speed);
+}
+void usb_descriptor(unsigned id, const void* bytes, unsigned length)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    usb_descriptor_locked(id, bytes, length);
+}
+void usb_configuration(unsigned id, const void* bytes, unsigned length, bool valid)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    usb_configuration_locked(id, bytes, length, valid);
+}
+unsigned usb_bind(unsigned id, unsigned config, unsigned number, const char* driver, bool ready)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    return usb_bind_locked(id, config, number, driver, ready);
+}
+void unavailable(unsigned id)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    unavailable_locked(id);
+}
+void block(BlockDevice& b, unsigned backing)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    block_locked(b, backing);
+}
+void partitions(BlockDevice& b, const uint8_t* mbr)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    partitions_locked(b, mbr);
+}
+void mounted(BlockDevice& b, unsigned partition, const uint8_t* super)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    mounted_locked(b, partition, super);
+}
+void usb_address(unsigned id, unsigned address)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    usb_address_locked(id, address);
+}
+void port_state(unsigned id, bool connected)
+{
+    IrqSpinGuard guard(catalog_lock);
+    ++catalog_generation;
+    port_state_locked(id, connected);
+}
+void usb_input(unsigned id, uint64_t identity)
+{
+    if(!identity)
+        return;
+    IrqSpinGuard guard(catalog_lock);
+    if(auto* r = edit_locked(id))
+    {
+        r->values[11] = identity;
+        r->known |= 1u << 11;
+        ++catalog_generation;
+    }
 }
 }  // namespace hardware_catalog

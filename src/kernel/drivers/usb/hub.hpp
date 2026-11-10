@@ -25,10 +25,12 @@ struct Transport
     bool (*child)(void*, uint8_t port);
     // Called only for a stable, connected low/full-speed child after reset.
     void (*unsupported)(void*, uint8_t port, unsigned speed_mbps_x10) = nullptr;
+    bool split_children = false;
 };
 bool port_status(const Transport&, uint8_t port, uint32_t&);
 bool stable_high_speed(uint32_t status);
 unsigned unsupported_speed(uint32_t status);
 // Enumerate only high-speed children. Unsupported speeds remain unconfigured.
 bool enumerate(const Transport&, const Descriptor&);
+bool enumerate_port(const Transport&, uint8_t port);
 }  // namespace usb::hub

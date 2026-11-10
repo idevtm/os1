@@ -55,6 +55,62 @@ unsigned unsupported_speed(uint32_t status)
         return 0;
     return status & 0x200u ? 15 : 120;
 }
+bool enumerate_port(const Transport& t, uint8_t port)
+{
+    uint32_t status = 0;
+    if(!port_status(t, port, status))
+        return false;
+    if(!(status & 1))
+        return true;
+    t.delay_ms(t.context, 100);  // Connection debounce.
+    if(!port_status(t, port, status))
+        return false;
+    if(!(status & 1) || (status & 8))
+        return true;
+    if(!t.control(t.context, 0x23, 3, 4, port, nullptr, 0))
+        return false;
+    bool ready = false;
+    for(unsigned attempt = 0; attempt < 50; ++attempt)
+    {
+        t.delay_ms(t.context, 10);
+        if(!port_status(t, port, status))
+            return false;
+        if(!(status & 1))
+            break;
+        if(!(status & 16) && (status & 2))
+        {
+            ready = true;
+            break;
+        }
+    }
+    // A late reset completion could expose another device at address zero.
+    // Abort the tree; the controller caller must isolate it before continuing.
+    if(!ready)
+        return false;
+    for(unsigned bit = 0; bit < 5; ++bit)
+        if((status & (1u << (16 + bit))) &&
+           !t.control(t.context, 0x23, 1, uint16_t(16 + bit), port, nullptr, 0))
+            return false;
+    t.delay_ms(t.context, 10);  // Reset recovery before address-zero traffic.
+    if(!port_status(t, port, status))
+        return false;
+    if(stable_high_speed(status) || (t.split_children && unsupported_speed(status)))
+    {
+        if(!t.child(t.context, port))
+            return false;
+    }
+    else
+    {
+        unsigned speed = unsupported_speed(status);
+        if(speed && t.unsupported)
+            t.unsupported(t.context, port, speed);
+        if((status & (0x1fu << 16)) || !t.control(t.context, 0x23, 1, 1, port, nullptr, 0) ||
+           !port_status(t, port, status) || (status & 0x12))
+            return false;
+    }
+
+    return true;
+}
 bool enumerate(const Transport& t, const Descriptor& hub)
 {
     if(!hub.ports || hub.ports > 15)
@@ -64,59 +120,8 @@ bool enumerate(const Transport& t, const Descriptor& hub)
             return false;
     t.delay_ms(t.context, hub.power_delay_ms);
     for(uint8_t port = 1; port <= hub.ports; ++port)
-    {
-        uint32_t status = 0;
-        if(!port_status(t, port, status))
+        if(!enumerate_port(t, port))
             return false;
-        if(!(status & 1))
-            continue;
-        t.delay_ms(t.context, 100);  // Connection debounce.
-        if(!port_status(t, port, status))
-            return false;
-        if(!(status & 1) || (status & 8))
-            continue;
-        if(!t.control(t.context, 0x23, 3, 4, port, nullptr, 0))
-            return false;
-        bool ready = false;
-        for(unsigned attempt = 0; attempt < 50; ++attempt)
-        {
-            t.delay_ms(t.context, 10);
-            if(!port_status(t, port, status))
-                return false;
-            if(!(status & 1))
-                break;
-            if(!(status & 16) && (status & 2))
-            {
-                ready = true;
-                break;
-            }
-        }
-        // A late reset completion could expose another device at address zero.
-        // Abort the tree; the controller caller must isolate it before continuing.
-        if(!ready)
-            return false;
-        for(unsigned bit = 0; bit < 5; ++bit)
-            if((status & (1u << (16 + bit))) &&
-               !t.control(t.context, 0x23, 1, uint16_t(16 + bit), port, nullptr, 0))
-                return false;
-        t.delay_ms(t.context, 10);  // Reset recovery before address-zero traffic.
-        if(!port_status(t, port, status))
-            return false;
-        if(stable_high_speed(status))
-        {
-            if(!t.child(t.context, port))
-                return false;
-        }
-        else
-        {
-            unsigned speed = unsupported_speed(status);
-            if(speed && t.unsupported)
-                t.unsupported(t.context, port, speed);
-            if((status & (0x1fu << 16)) || !t.control(t.context, 0x23, 1, 1, port, nullptr, 0) ||
-               !port_status(t, port, status) || (status & 0x12))
-                return false;
-        }
-    }
     return true;
 }
 }  // namespace usb::hub

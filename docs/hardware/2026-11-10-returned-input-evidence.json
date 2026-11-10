@@ -1,0 +1,103 @@
+{
+  "image_sha256": "74323877d3eb688c8e766b02292de79667a55d40399c321a7b87c4aa3bf6dca7",
+  "runs": [
+    {
+      "machine": "laptop",
+      "relative_run": "extracted/tests/m-da00c1febcd0571d/k-02eca581020d5708/b0000000000000001-r0000000000000001",
+      "manifest": {
+        "format_version": "1",
+        "runner_version": "2",
+        "test_suite_version": "2",
+        "machine_fingerprint": "15708768800101914397",
+        "machine_label": "auto",
+        "kernel_revision": "7fb69e73923a9450de6f8d8daae8cddaa067d19c",
+        "kernel_build": "02eca581020d5708e34ebf9802f94a07e8ac9071fb37d3dfe197c6bcc25b93de",
+        "boot_id": "1",
+        "boot_mode": "2",
+        "diagnostic": "0",
+        "wall_ns": "1794323624458000000",
+        "start_ns": "6389000000",
+        "pid": "4",
+        "input_observation": "0",
+        "expect_usb_mouse": "0",
+        "deployed_runner_fnv64": "4256184364609630110"
+      },
+      "summary": {
+        "passed": "14",
+        "failed": "1",
+        "skipped": "3",
+        "io_failed": "0",
+        "end_ns": "15025000000",
+        "state": "complete"
+      },
+      "catalog_record_count": 68,
+      "catalog_sources": {
+        "12": 1,
+        "13": 1,
+        "14": 1,
+        "1": 18,
+        "5": 7,
+        "11": 16,
+        "6": 18,
+        "7": 1,
+        "8": 3,
+        "9": 1,
+        "10": 1
+      },
+      "capture_sha256": "7328192aeb2f32ae6fc2dae49d97d073fa65671b5344c10b323cedc72d0a78a4",
+      "lshw_bytes": 65536
+    },
+    {
+      "machine": "desktop",
+      "relative_run": "extracted/tests/m-a15c974cde8bf3c2/k-02eca581020d5708/b0000000000000002-r0000000000000001",
+      "manifest": {
+        "format_version": "1",
+        "runner_version": "2",
+        "test_suite_version": "2",
+        "machine_fingerprint": "11627334694370800578",
+        "machine_label": "auto",
+        "kernel_revision": "7fb69e73923a9450de6f8d8daae8cddaa067d19c",
+        "kernel_build": "02eca581020d5708e34ebf9802f94a07e8ac9071fb37d3dfe197c6bcc25b93de",
+        "boot_id": "2",
+        "boot_mode": "2",
+        "diagnostic": "0",
+        "wall_ns": "1794323948137000000",
+        "start_ns": "18409000000",
+        "pid": "4",
+        "input_observation": "0",
+        "expect_usb_mouse": "0",
+        "deployed_runner_fnv64": "4256184364609630110"
+      },
+      "summary": {
+        "passed": "14",
+        "failed": "1",
+        "skipped": "3",
+        "io_failed": "0",
+        "end_ns": "25557000000",
+        "state": "complete"
+      },
+      "catalog_record_count": 57,
+      "catalog_sources": {
+        "12": 1,
+        "13": 1,
+        "14": 1,
+        "1": 17,
+        "5": 5,
+        "11": 21,
+        "6": 5,
+        "7": 1,
+        "8": 3,
+        "9": 1,
+        "10": 1
+      },
+      "capture_sha256": "644fce304bdf3f7b40666f311acff6068445c4f5ad6484a02416a463f0eefd7b",
+      "lshw_bytes": 65532
+    }
+  ],
+  "source_directory": "build/hardware-acceptance-2026-11-10",
+  "limitations": [
+    "Normal boot; input_observation=0 and expect_usb_mouse=0 in both runs.",
+    "Bluetooth comparison remains FAIL; firmware-dependent identity is an inference.",
+    "Physical mouse movement and diagnostic autorun are not qualified by these captures."
+  ]
+}

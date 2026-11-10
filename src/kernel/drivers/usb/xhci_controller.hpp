@@ -204,6 +204,15 @@ void publish_control_transfer(void* ring_base,
                               const ControlTransfer& transfer);
 // Caller matches slot and endpoint under the event lock. Returns true for a matched event.
 bool control_transfer_event(ControlTransfer& transfer, const EventInfo& event);
+// Validate the initial eight bytes before a full descriptor transfer.
+bool device_control_packet(uint8_t speed, const void* prefix, size_t actual, uint16_t& packet);
+bool prepare_control_packet_context(void* input,
+                                    size_t input_bytes,
+                                    const void* output,
+                                    size_t output_bytes,
+                                    unsigned context_bytes,
+                                    uint16_t packet);
+uint8_t interrupt_interval(uint8_t speed, uint8_t interval);
 bool valid_descriptor_header(const void* bytes, size_t actual, uint8_t type, uint8_t minimum);
 bool valid_configuration_descriptors(const void* bytes, size_t actual);
 

@@ -2,6 +2,7 @@
 """Exercise real USB removal, reconnect identity, readonly media, and HID coexistence."""
 import argparse
 import json
+import re
 import socket
 import sys
 import tempfile
@@ -145,6 +146,8 @@ def main():
                 else:
                     run('/disk/diskutil seed', b'diskutil seed ok')
                 run('/disk/diskutil verify', b'diskutil verify ok')
+                inventory_before = run('context os.devices.inventory.usb')
+                identities_before = set(re.findall(rb'usb_[0-9]+', inventory_before))
                 qmp.execute('device_del', {'id': 'usbdata'})
                 qmp.removed()
                 output = run('cat /disk/readme', allow_errors=True)
@@ -154,15 +157,43 @@ def main():
                                             'file': {'driver': 'file', 'filename': str(disk)}})
                 qmp.execute('device_add', {'driver': 'usb-storage', 'id': 'replacement',
                                           'drive': 'reconnected', 'bus': 'ehci.0' if args.transport == 'ehci' else 'xhci.0'})
+                # Finish asynchronous driver output before parsing shell prompts or fields.
+                expect(b'ehci: storage ready' if args.transport == 'ehci' else b'usb-storage: ready', timeout=15)
+                expect(b'\n', timeout=15)
                 output = run('cat /disk/readme', allow_errors=True)
                 assert b'failed' in output or b'error' in output, output
+                deadline = time.monotonic()+15
+                while True:
+                    current = run('context os.devices.inventory.usb')
+                    added = set(re.findall(rb'usb_[0-9]+',current)) - identities_before
+                    if added:
+                        break
+                    assert time.monotonic() < deadline, current
+                    time.sleep(.1)
+                assert len(added) == 1, current
+                path = 'os.devices.inventory.usb.'+next(iter(added)).decode()
+                deadline = time.monotonic()+15
+                while True:
+                    state = run('context '+path+'.state')
+                    if b'configured' in state:
+                        break
+                    assert time.monotonic() < deadline, state
+                    time.sleep(.1)
                 run('echo no-stale-reconnect', b'no-stale-reconnect\n')
             finally:
                 qmp.close()
         boot(args, disk, 'unplug', exercise=exercise)
     args.qmp = None
     args.high_speed = True
+    # Surprise removal can interrupt automatic log export. Preserve that fault
+    # image; the ext2 profile correctly refuses an unclean subsequent mount.
+    # High-speed reboot persistence is a separate, clean-shutdown workload.
+    disk = log.with_suffix('.clean.raw')
+    create(disk, args.utility, reset=True, manifest=args.programs_manifest)
+    args.poweroff = True
+    boot(args, disk, 'high-speed-seed', commands=[('/disk/diskutil seed', b'diskutil seed ok')])
     boot(args, disk, 'high-speed', commands=[('/disk/diskutil verify', b'diskutil verify ok')])
+    args.poweroff = False
     args.readonly = True
     before = disk.read_bytes()
     boot(args, disk, 'readonly', commands=[('help', b'usb; retry; sync; shutdown; reboot')])

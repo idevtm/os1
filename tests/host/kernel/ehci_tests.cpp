@@ -52,6 +52,29 @@ TEST(Ehci, RootAndHubChangesInvalidateOldIdentity)
     EXPECT_FALSE(usb::hub::stable_high_speed(0x703));
     EXPECT_FALSE(usb::hub::stable_high_speed(0x50b));
 }
+TEST(Ehci, PartialHubProbeRetiresEveryPublishedRootMember)
+{
+    struct Device
+    {
+        unsigned root;
+        bool failed, live_input, live_storage, visible;
+    };
+    Device devices[]{{1, true, false, false, true},
+                     {1, false, true, false, true},
+                     {1, false, false, true, true},
+                     {2, false, true, true, true}};
+    ehci::retire_root_devices(devices, 1, [](Device& device) {
+        device.failed = true;
+        device.live_input = device.live_storage = device.visible = false;
+    });
+    for(unsigned i = 0; i < 3; ++i)
+    {
+        EXPECT_TRUE(devices[i].failed);
+        EXPECT_FALSE(devices[i].live_input || devices[i].live_storage || devices[i].visible);
+    }
+    EXPECT_FALSE(devices[3].failed);
+    EXPECT_TRUE(devices[3].live_input && devices[3].live_storage && devices[3].visible);
+}
 TEST(UsbHub, DescriptorAndConfigurationBounds)
 {
     uint8_t descriptor[]{9, 0x29, 6, 0, 0, 10, 0, 0, 0xff};
@@ -300,4 +323,84 @@ TEST(UsbDiagnostics, BoundedCopiesDoNotExposeCallerMutation)
     EXPECT_EQ(usb::diagnostics::count(), usb::diagnostics::capacity);
     EXPECT_EQ(usb::diagnostics::at(usb::diagnostics::capacity), nullptr);
     EXPECT_EQ(usb::diagnostics::at(size_t(-1)), nullptr);
+}
+
+TEST(Ehci, SplitControlAndPeriodicUseExplicitTranslatorAndMasks)
+{
+    ehci::QueueHead q{};
+    ASSERT_TRUE(ehci::prepare_head(q, 0x1000, 0x1080, 4, 0, 8, 1, 2, 3));
+    EXPECT_EQ(1u, (q.endpoint >> 12) & 3);
+    EXPECT_NE(0u, q.endpoint & (1u << 27));
+    EXPECT_EQ(2u, (q.capabilities >> 16) & 127);
+    EXPECT_EQ(3u, (q.capabilities >> 23) & 127);
+    EXPECT_EQ(0u, q.capabilities & 65535);
+    ASSERT_TRUE(ehci::prepare_head(q, 0x1000, 0x1080, 4, 1, 8, 1, 2, 3, true));
+    EXPECT_EQ(0x1c01u, q.capabilities & 65535);
+    EXPECT_EQ(0u, q.endpoint & ((1u << 27) | (1u << 15)));
+    EXPECT_FALSE(ehci::prepare_head(q, 0x1000, 0x1080, 4, 0, 64, 1, 2, 3));
+    EXPECT_FALSE(ehci::prepare_head(q, 0x1000, 0x1080, 4, 0, 8, 1, 0, 3));
+    EXPECT_FALSE(ehci::prepare_head(q, 0x1000, 0x1080, 4, 0, 8, 0, 2, 0));
+}
+
+TEST(Ehci, FailedAddressZeroProbeDisablesPortAndWaitsForResetBeforeSibling)
+{
+    struct State
+    {
+        volatile uint32_t port = 0x1127;
+        unsigned calls = 0;
+    } state;
+    auto poll = [](void* p) {
+        auto& s = *static_cast<State*>(p);
+        EXPECT_EQ(0u, s.port & 4u);
+        if(++s.calls == 2)
+            s.port = s.port & ~(1u << 8);
+    };
+    EXPECT_TRUE(ehci::isolate_root(state.port, poll, &state, 3));
+    EXPECT_EQ(2u, state.calls);
+    EXPECT_EQ(0u, state.port & (4u | 0x2au));
+    EXPECT_NE(0u, state.port & (1u << 12));
+    state.port = 0x1105;
+    state.calls = 0;
+    EXPECT_FALSE(ehci::isolate_root(state.port, [](void*) {}, nullptr, 2));
+}
+
+TEST(Ehci, SplitInputRecoveryIsBoundedAndRejectsOtherFailures)
+{
+    constexpr uint32_t observed = 0x80040141;
+    ehci::InputRecovery recovery{};
+    uint64_t now = 1'000'000'000;
+    for(unsigned i = 0; i < 3; ++i)
+    {
+        ASSERT_TRUE(recovery.schedule(observed, 4, 1, now));
+        EXPECT_EQ(now + (20'000'000ull << i), recovery.due_ns);
+        EXPECT_TRUE(recovery.pending);
+        EXPECT_FALSE(recovery.schedule(observed, 4, 1, now));
+        recovery.pending = false;
+        now = recovery.due_ns;
+        ehci::Qtd td{};
+        ASSERT_TRUE(ehci::prepare_qtd(td, 0x1000, 4, 1, observed >> 31));
+        EXPECT_NE(0u, td.token & (1u << 31));
+        EXPECT_EQ(3u, (td.token >> 10) & 3);
+        EXPECT_EQ(ehci::active, td.token & 255);
+    }
+    EXPECT_FALSE(recovery.schedule(observed, 4, 1, now));
+    EXPECT_TRUE(recovery.retried);
+    EXPECT_TRUE(recovery.schedule(observed, 4, 1, 11'000'000'000));
+    EXPECT_EQ(1u, recovery.attempts);
+    for(uint32_t bad : {observed | ehci::active,
+                        observed | 0x20,
+                        observed | 0x10,
+                        observed | 8,
+                        observed | 4,
+                        observed & ~1u,
+                        observed | (1u << 10),
+                        observed ^ (1u << 8),
+                        observed - (1u << 16)})
+    {
+        ehci::InputRecovery rejected{};
+        EXPECT_FALSE(rejected.schedule(bad, 4, 1, now)) << std::hex << bad;
+        EXPECT_FALSE(rejected.retried);
+    }
+    ehci::InputRecovery high_speed{};
+    EXPECT_FALSE(high_speed.schedule(observed, 4, 2, now));
 }

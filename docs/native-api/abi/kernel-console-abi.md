@@ -205,16 +205,22 @@ The prompt also accepts serial `ESC [ Z` and NUL for these actions.
 
 ## Dispatch, bounds, and lifetime
 
-One kernel thread processes the global FIFO queue outside IRQ context and global IPC, descriptor, and scheduler locks.
+Two kernel threads dispatch retained requests outside IRQ context and global IPC, descriptor, and scheduler locks.
+The service lane handles Console, input, and memory-log queries.
+The I/O lane handles File, Directory, system control, and explicit log export.
+Automatic export also runs on the I/O worker.
 The console callbacks retain their existing subsystem locks.
-The worker sleeps when the queue is empty and uses the existing deferred IPC wake path.
+Each worker sleeps when its lane has no eligible request and uses the existing deferred IPC wake path.
 Wait registration rechecks the queue under the IPC lock.
 A reschedule IPI saves the blocked worker context, including on APs without a periodic timer.
 
 The system permits 16 live kernel bindings and four retained Operations per binding.
 Aliases, wait pins, pending dispatch, and retained results can keep these charges active.
 There are at most 64 accepted kernel Operations across the bindings.
-Admission order determines FIFO dispatch order across clients; scheduler wake order is not guaranteed.
+Admission order determines dispatch order among eligible requests within each lane.
+Deferred admission permits later eligible requests to proceed.
+There is no dispatch ordering between lanes; scheduler wake order is not guaranteed.
+Clients must await completion before submitting work that depends on a prior result.
 The current bounded callbacks must finish promptly; blocking device handlers need a separate completion design.
 
 SUBMIT copies bytes before queue publication.

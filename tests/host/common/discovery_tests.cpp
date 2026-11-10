@@ -29,6 +29,10 @@ struct Discovery : testing::Test
 };
 TEST_F(Discovery, LiveRightsExcludeUnavailableServicesAndStreamMethods)
 {
+    int input = view.resolve("os.input");
+    ASSERT_GE(input, 0);
+    EXPECT_EQ(OS1_HARDWARE_INPUT_ROOT, view.nodes[input].target);
+    EXPECT_EQ(discovery::Alias, view.nodes[input].flags);
     EXPECT_GE(view.resolve("os.system.log.print"), 0);
     EXPECT_GE(view.resolve("process.streams.output.write"), 0);
     EXPECT_LT(view.resolve("process.streams.output.try_read"), 0);
@@ -37,6 +41,7 @@ TEST_F(Discovery, LiveRightsExcludeUnavailableServicesAndStreamMethods)
     g.root.rights = OS1_RIGHT_LOOKUP;
     g.ceiling = OS1_RIGHT_READ;
     ASSERT_TRUE(view.build(g, data, 2));
+    EXPECT_LT(view.resolve("os.input"), 0);
     EXPECT_LT(view.resolve("os.system"), 0);
     EXPECT_LT(view.resolve("fs.create_file"), 0);
     EXPECT_GE(view.resolve("fs.copy"), 0);
@@ -154,3 +159,25 @@ TEST_F(Discovery, MaximumEnvironmentFitsWithoutTruncatingMembers)
     EXPECT_LT(view.count, discovery::node_limit);
 }
 }  // namespace
+TEST_F(Discovery, IndexedPathsAndCompletionUseCompactPositions)
+{
+    unsigned collection = view.add(view.resolve("os"), "pointers");
+    unsigned item = view.add(collection, "0");
+    unsigned field = view.add(item, "name", discovery::Kind::Field);
+    EXPECT_EQ(int(field), view.resolve("os.pointers[0].name"));
+    EXPECT_LT(view.resolve("os.pointers[-1]"), 0);
+    EXPECT_LT(view.resolve("os.pointers[]"), 0);
+    EXPECT_LT(view.resolve("os.pointers[0]name"), 0);
+    char path[256]{};
+    ASSERT_TRUE(discovery::member_path(view, field, path, sizeof(path)));
+    EXPECT_STREQ("os.pointers[0].name", path);
+    discovery::Completion c;
+    for(char ch : std::string("os.pointers."))
+        ASSERT_TRUE(c.insert(ch));
+    ASSERT_TRUE(c.begin(view));
+    ASSERT_TRUE(c.accept(view, true));
+    EXPECT_STREQ("os.pointers[0].", c.line);
+    ASSERT_TRUE(c.begin(view));
+    ASSERT_TRUE(c.accept(view, false));
+    EXPECT_STREQ("os.pointers[0].name", c.line);
+}

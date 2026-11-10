@@ -26,8 +26,8 @@ The [service roadmap](native-api/roadmap.md) defines the next integration milest
 - shared virtio PCI transport and virtqueue helpers
 - an interrupt-driven modern `virtio-blk` path with reads and writes
 - a disk-loaded `virtio-net` path with ARP-level smoke coverage
-- an xHCI USB path with HID boot-keyboard input
-- an EHCI storage path with bounded high-speed hub discovery
+- an xHCI USB path with native boot-keyboard and mouse input, plus bounded root-port reconnect
+- an EHCI storage path with bounded high-speed hub discovery and split periodic HID input
 - a freestanding `C++20` kernel core with narrow assembly boundaries
 - per-CPU run queues, reschedule / TLB-shootdown IPIs, and load-balanced SMP scheduling
 - `WaitQueue` / `Completion` primitives wired through block-I/O, child-exit, and console-read waits
@@ -78,7 +78,9 @@ An object handle selects a rights-bearing entry, which retains an open instance 
 The current handle encoding is `fd`; it is not global object identity.
 The [approved handle model](native-api/object-contract.md#object-handles-and-interoperability) defines ownership, transfer, typed-reference direction, and compatibility boundaries.
 The [Console ABI](native-api/abi/kernel-console-abi.md) binds a ready IPC client from an existing console grant.
-A single kernel worker invokes bounded callbacks outside IRQ context and global IPC locks.
+Two kernel workers invoke callbacks outside IRQ context and global IPC locks.
+One worker serves memory-only providers, including input.
+The other serves File, Directory, system control, and explicit log export, plus automatic persistence.
 Accepted Operations retain their source resource through completion and result delivery.
 The [roadmap](native-api/roadmap.md#shared-service-foundation) extends this boundary without moving hardware drivers into userspace.
 It records the bounded `/tmp` slice and the remaining input-service and persistent USB milestones.
@@ -94,6 +96,69 @@ The selected [reflective hierarchy](native-api/object-hierarchy.md) organizes fu
 It separates local values, resource references, and service providers.
 The [shell command proposal](shell/object-commands.md) defines user-facing bindings separately.
 These proposals change no current ABI or runtime behavior.
+
+## Storage retry scheduling
+
+Storage waits must preserve progress for the controller owner.
+
+```text
+Busy kernel worker -> registered timer -> retry
+controller ownership -> IRQ service without scheduling -> release -> pending reschedule
+```
+
+Unaccepted Busy block requests retry after a one-millisecond scheduler timer when the caller is an interrupt-enabled kernel worker.
+The shared IPC timer wait supplies an explicit reschedule and wakeup, including on BIOS APs without periodic ticks.
+Interrupt handlers, early boot, and user syscall frames poll instead of halting without a wake source.
+User syscall frames cannot park through the kernel-thread scheduling path.
+Read, write, and flush requests share this rule; accepted requests retain completion-based waiting.
+EHCI and xHCI defer scheduling while they own a controller busy flag.
+IRQ service continues, but scheduling and deferred filesystem work wait until ownership ends.
+The outermost guard requests a pending reschedule when local runnable work exists, including on APs without periodic ticks.
+These synchronous scopes cannot sleep or yield. They can delay other tasks on their CPU during controller timeouts.
+The [input recovery plan](hardware/input-recovery-plan.md#bios-startup-failure-found-during-validation) records the discovered deadlock and controlled regression evidence.
+
+## Input services and attachment changes
+
+```text
+IRQ reports -> locked input state / ring -> native provider -> client subscriptions
+USB worker -> deferred topology changes -> locked catalog -> context and Tab
+EHCI characters -> bounded queue -> BSP console input
+```
+
+The [input ABI](native-api/abi/input-abi.md) adds dedicated raw-input authority and bounded broadcast subscriptions.
+A separate USB worker processes periodic completions and attachment changes.
+It uses timed scheduler waits; enumeration cannot block the native provider worker.
+Local APIC destination and command writes use one IRQ-masked transaction. Nested timer wakeups cannot redirect an interrupted sender.
+PS/2 and xHCI Console behavior remains available alongside native input.
+
+The input registry exposes compact `os.input.keyboards` and `os.input.pointers` collections through passive observation.
+Each child supplies descriptive fields and an explicit `open` method.
+Its separate discovery generation changes on attachment or removal, but not on input reports.
+Collection indexes and short aliases compact after removal; retained handles keep their original attachment identity.
+
+The [device test runner](hardware/device-test-runner-plan.md) uses these native interfaces to collect physical test evidence.
+It writes separate machine, build, boot, and run directories under `/disk/tests`.
+A progress journal records completed stages; a tar archive contains bounded snapshots and kernel logs.
+Inventory reports stream through a 4096-byte buffer, with a 256 KiB limit per archive member.
+xHCI negotiates control packet sizes and supports two boot HID interfaces on each attachment.
+Each interface has its own input identity and endpoint buffers; removal retires both identities.
+Input lifetime records and EHCI failure details support returned-stick diagnosis without logging raw key contents.
+Eligible EHCI split errors receive bounded recovery before retirement.
+The [recovery plan](hardware/input-recovery-plan.md) records hardware evidence, retry limits, and validation.
+The first diagnostic shell starts the runner before its prompt; normal boot and shell restarts do not.
+A bounded binary catalog supports offline comparison against hashed Linux reference profiles.
+The [acceptance workflow](hardware/input-collections-test-workflow-plan.md) defines identity, comparison outcomes, and capture limits.
+
+The hardware catalog serializes USB updates and queries with a generation counter.
+Changed generations cancel stale pagination cursors.
+Platform and firmware records remain boot observations.
+The legacy `usb` diagnostic command retains its sealed boot snapshot.
+A separate bounded store retains the first EHCI input retirement reason for each input identity.
+Passive snapshots preserve this evidence independently of the kernel log ring.
+The runner accumulates input failures in memory and reports them after observation.
+The [failure diagnostics plan](hardware/input-failure-diagnostics-plan.md) records the physical evidence and validation.
+Removed attachments keep unavailable identities; new attachments receive new identities.
+Existing storage mounts do not automatically switch to replacement media.
 
 ## Glossary
 
@@ -1636,11 +1701,12 @@ kernel provider worker -> timed drain -> bounded rotation -> periodic synchroniz
 process reaping -> retained closing history -> export or counted loss -> release
 ```
 
-The existing kernel provider worker wakes at bounded intervals and performs export outside capture locks.
-Export reserves admission against syscall entry and deferred descriptor I/O.
+A separate I/O provider worker checks export deadlines at bounded intervals.
+Export reserves admission against filesystem-capable syscalls, file providers, and deferred descriptor I/O.
 Conflicting syscalls yield before side effects and retry `INT 0x80`; queued descriptor operations wait for a later interrupt.
 This avoids foreground failures from the current nonblocking ext2 guard.
-It adds bounded syscall latency during export; interrupt capture and device completion continue.
+Filesystem calls can wait during export; input IPC, clock calls, descriptor cleanup, and memory queries remain available.
+A locked snapshot publishes completed export status without exposing concurrent writer fields.
 Explicit export requires log-read and system-control authority; status requires log-read authority.
 Its retained Operation waits for admission, with one-millisecond dispatch backoff.
 Other ready requests can proceed while export waits.

@@ -13,7 +13,7 @@ The [dated review](docs/reviews/2026-11-06-review.md) records evidence, remainin
 | Milestone | Current status | Remaining goal |
 | --- | --- | --- |
 | A–C: boot, platform, protected shell | Implemented baseline with BIOS/UEFI and SMP checks | Broader hardware and lifetime qualification |
-| D: native services, storage, input, security | Console, File/Directory, `/tmp`, ext2, USB storage, and preserving deployment implemented | Input services, physical update acceptance, larger storage profiles, credentials |
+| D: native services, storage, input, security | Console, File/Directory, `/tmp`, ext2, USB storage, and preserving deployment implemented | Input hardware acceptance, physical update acceptance, larger storage profiles, credentials |
 | E: networking | Virtio-net and ARP probe implemented | IPv4, UDP/TCP, sockets, addressing, DNS |
 | F: remote administration | Prerequisites incomplete | PTYs, sessions, authentication, secure SSH access |
 | G: desktop | Framebuffer text output exists | Optional terminal compositor after input and session contracts |
@@ -573,7 +573,7 @@ The [service roadmap](docs/native-api/roadmap.md) gives the detailed sequence an
 | --- | --- | --- |
 | Kernel services | Console and File/Directory native copied dispatch | Scoped discovery, broader lifecycle, kernel Buffer borrowing |
 | Temporary storage | Bounded writable `/tmp` and interactive file tools | Bulk Buffer methods when needed; public mount semantics |
-| Input | xHCI boot-keyboard characters reach the console | Physical keyboard qualification and native key/mouse events with loss recovery |
+| Input | Native Keyboard/Pointer subscriptions, loss recovery, and bounded USB attachment updates | Physical input acceptance; xHCI hubs, wheel reports, gestures, and focus routing |
 | Persistent data | Virtio and USB ext2; disk execution and reboot persistence | Larger ext2 profile, broader device and failure qualification |
 | Updates | QEMU and managed USB preserving deployment tools | Physical sentinel-file acceptance through boot and program updates |
 | Local security | Capability rights and explicit launch grants | Credentials, ownership, permissions, and service access policy |

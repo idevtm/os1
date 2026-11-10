@@ -28,16 +28,26 @@ bool prepare_head(QueueHead& qh,
                   uint64_t first,
                   uint8_t address,
                   uint8_t endpoint,
-                  uint16_t packet)
+                  uint16_t packet,
+                  unsigned speed,
+                  unsigned hub,
+                  unsigned port,
+                  bool periodic)
 {
     qh = {};
     if(self > 0xffffffffu || first > 0xffffffffu || (self & 31) || (first & 31) || address > 127 ||
-       endpoint > 15 || (packet != 64 && packet != 512))
+       endpoint > 15 || speed > 2 || !packet || packet > (speed == 2 ? 512u : 64u) ||
+       (speed == 1 && packet > 8) || (speed != 2 && (!hub || hub > 127 || !port || port > 127)) ||
+       (speed == 2 && !periodic && packet != 64 && packet != 512))
         return false;
     qh.next = uint32_t(self) | 2;  // Circular asynchronous QH list.
-    qh.endpoint = address | (uint32_t(endpoint) << 8) | (2u << 12) | (1u << 14) | (1u << 15) |
-                  (uint32_t(packet) << 16) | (4u << 28);
-    qh.capabilities = 1u << 30;  // One transaction per microframe.
+    qh.endpoint = address | (uint32_t(endpoint) << 8) | (speed << 12) | (1u << 14) |
+                  (periodic ? 0 : 1u << 15) | (uint32_t(packet) << 16) | (4u << 28);
+    if(speed != 2 && !endpoint)
+        qh.endpoint |= 1u << 27;
+    qh.capabilities =
+        (1u << 30) | (hub << 16) | (port << 23) |
+        (periodic ? (speed == 2 ? 1u : 0x1c01u) : 0u);  // One transaction per microframe.
     qh.qtd_next = uint32_t(first);
     qh.alternate = terminate;
     return true;
@@ -75,5 +85,42 @@ bool set_async(volatile uint32_t& command,
         return false;
     command = enabled ? command | enable : command & ~enable;
     return wait(enabled);
+}
+}  // namespace ehci
+
+namespace ehci
+{
+bool isolate_root(volatile uint32_t& port, void (*poll)(void*), void* context, unsigned limit)
+{
+    port = port & ~(0x2au | 4u);
+    for(unsigned i = 0; i < limit; ++i)
+    {
+        if(!(port & (4u | (1u << 8))))
+            return true;
+        poll(context);
+    }
+    return !(port & (4u | (1u << 8)));
+}
+}  // namespace ehci
+
+namespace ehci
+{
+bool InputRecovery::schedule(uint32_t token, unsigned bytes, unsigned speed, uint64_t now)
+{
+    // Only an exhausted, untransferred interrupt IN split ERR is recoverable.
+    // STALL, babble, buffer errors, active work, and malformed lengths retire normally.
+    if(pending || speed > 1 || !bytes || bytes > 8 || (token & 0xff) != 0x41 ||
+       ((token >> 8) & 3) != 1 || (token & (3u << 10)) || remaining(token) != bytes)
+        return false;
+    if(!attempts || now - window_ns >= 10'000'000'000ull)
+    {
+        window_ns = now;
+        attempts = 0;
+    }
+    if(attempts == 3)
+        return false;
+    due_ns = now + (20'000'000ull << attempts++);
+    pending = retried = true;
+    return true;
 }
 }  // namespace ehci

@@ -65,9 +65,10 @@ The fixed status record has no unbounded error text.
 | Background synchronization | Normal / diagnostic, when dirty | 5 seconds / 1 second |
 | Background framed-data rate | Normal / diagnostic | 64 KiB/s / 256 KiB/s |
 
-The kernel worker checks export deadlines at most every 250 milliseconds.
-This worker already services kernel-provider requests; export does not create another thread.
-Export requires exclusive admission against syscall entry and deferred descriptor I/O.
+A dedicated I/O worker checks export deadlines at most every 250 milliseconds when idle.
+It also dispatches File, Directory, system-control, and explicit-export requests.
+A separate service worker handles input, console, and memory-log queries.
+Export requires exclusive admission against filesystem-capable syscall entry, file providers, and deferred descriptor I/O.
 A conflicting syscall yields before side effects and retries its existing two-byte `INT 0x80` instruction.
 Deferred descriptor operations remain queued until admission is available.
 An active foreground entry causes automatic export to defer without counting a storage failure.
@@ -82,9 +83,15 @@ A storage error, including `WOULD_BLOCK`, is final for that Operation and is not
 Direct internal export calls retain their nonblocking admission result.
 
 This admission rule prevents background export from causing foreground ext2 guard failures.
-It delays syscall execution during bounded export, including calls that do not access files.
+It delays filesystem access during export.
+Input IPC, IPC clocks, basic descriptor operations, observation, and memory-log calls bypass this admission gate.
+IPC pair creation is memory-only and bypasses admission.
+Launch, spawn, and exec retain admission because they can load executable files.
+Descriptor release frees retained references without entering a filesystem backend.
+The I/O worker serializes lifecycle control with export.
 Interrupt capture and storage completions continue while export owns admission.
-A future sleeping filesystem mutex can provide finer concurrency without this broad admission rule.
+A short lock protects the published status snapshot; readers see the latest completed export state.
+No status lock spans storage I/O.
 Stream admission rotates to prevent sustained traffic from starving another stream.
 Errors request an early drain and synchronization, coalesced to one request per second.
 Backend metadata writes are additional I/O; the byte ceiling applies to framed log data.

@@ -12,12 +12,21 @@ namespace os1::user::hardware_tools
 struct Printer
 {
     bool verbose{}, tree{}, failed{};
+    bool (*output)(void*, const char*, unsigned){};
+    void* output_context{};
     unsigned seen[4096]{}, used{};
+    uint64_t generation{};
     void text(const char* s)
     {
         size_t n = 0;
         while(s[n])
             ++n;
+        if(output)
+        {
+            if(!failed && !output(output_context, s, n))
+                failed = true;
+            return;
+        }
         while(n && !failed)
         {
             long written = os1::user::write(1, s, n);
@@ -46,9 +55,12 @@ struct Printer
         q.operation = operation;
         q.id = id;
         q.start = start;
+        q.generation = generation;
         long status = observe(OS1_OBSERVE_HARDWARE, &q, sizeof(q));
         if(status < 0)
             failed = true;
+        else
+            generation = q.generation;
         return status;
     }
     struct Fields
@@ -360,7 +372,7 @@ inline int run(int argc, char** argv, unsigned mode)
             return 2;
         }
     }
-    printer.text("boot snapshot; cached observations, not current hotplug state\n");
+    printer.text("platform boot snapshot; USB attachments updated at runtime\n");
     if(mode == 0)
     {
         printer.collection(OS1_HARDWARE_PLATFORM);

@@ -1,5 +1,9 @@
 #include "debug/log_export.hpp"
 
+#include <os1/ipc.h>
+#include <os1/resource.h>
+#include <os1/syscall_numbers.h>
+
 #include "core/kernel_state.hpp"
 #include "debug/log.hpp"
 #include "fs/initrd.hpp"
@@ -30,7 +34,13 @@ uint8_t* staging;
 bool initialized, suspended, dirty;
 volatile bool busy;
 volatile uint32_t admission;
-os1_log_export_info status{};
+os1_log_export_info status{}, published_status{};
+Spinlock status_lock{"log-export-status"};
+void publish_status()
+{
+    IrqSpinGuard guard(status_lock);
+    published_status = status;
+}
 uint64_t kernel_cursor, next_segment = 1, last_errors, window_start, window_bytes, last_error_drain;
 uint64_t mount_identity, last_poll;
 unsigned first_stream;
@@ -746,19 +756,39 @@ void outcome(long result)
     status.suspended = suspended;
 }
 }  // namespace
-ForegroundGuard::ForegroundGuard() : held(false)
+bool syscall_needs_filesystem(uint64_t number, uint64_t operation)
 {
+    switch(number)
+    {
+        case os1_sys_ipc:
+            return false;
+        case os1_sys_resource:
+            return operation < OS1_RESOURCE_CLOSE || operation > OS1_RESOURCE_SET_STATUS_FLAGS;
+        case os1_sys_yield:
+        case os1_sys_getpid:
+        case os1_sys_observe:
+        case os1_sys_waitpid:
+        case os1_sys_log:
+            return false;
+        default:
+            return true;
+    }
+}
+ForegroundGuard::ForegroundGuard(bool required) : held(!required), acquired(false)
+{
+    if(!required)
+        return;
     uint32_t value = atomic_load_acquire(&admission);
     while(value < UINT32_MAX - 1)
         if(atomic_compare_exchange_strong(&admission, &value, value + 1))
         {
-            held = true;
+            held = acquired = true;
             break;
         }
 }
 ForegroundGuard::~ForegroundGuard()
 {
-    if(held)
+    if(acquired)
         (void)__atomic_fetch_sub(&admission, 1u, __ATOMIC_RELEASE);
 }
 void initialize()
@@ -770,11 +800,13 @@ void initialize()
     status.size = sizeof(status);
     status.enabled = staging != nullptr;
     diagnostic_log::enable_export(staging != nullptr);
+    publish_status();
     atomic_store_release(&initialized, true);
 }
 os1_log_export_info info()
 {
-    return status;
+    IrqSpinGuard guard(status_lock);
+    return published_status;
 }
 bool try_run(unsigned target, long& result)
 {
@@ -819,6 +851,7 @@ bool try_run(unsigned target, long& result)
         r = disk(true, true);
         outcome(r);
     }
+    publish_status();
     atomic_store_release(&admission, 0u);
     atomic_store_release(&busy, false);
     result = r;
@@ -883,6 +916,7 @@ void poll()
     }
     else if(suspended)
         retire_closed(false);
+    publish_status();
     atomic_store_release(&admission, 0u);
     atomic_store_release(&busy, false);
 }
@@ -902,6 +936,7 @@ void test_reset()
     busy = false;
     admission = 0;
     status = {};
+    publish_status();
     kernel_cursor = last_errors = window_start = window_bytes = last_error_drain = mount_identity =
         last_poll = 0;
     next_segment = 1;

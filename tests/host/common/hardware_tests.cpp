@@ -3,12 +3,15 @@
 #include <array>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "discovery/completion.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "drivers/usb/diagnostics.hpp"
 #include "handoff/memory_layout.h"
+#include "hardware/archive_stream.hpp"
 #include "hardware/presentation.hpp"
+#include "hardware/test_run.hpp"
 #include "hardware/tree.hpp"
 #include "mm/kmem.hpp"
 #include "platform/hardware.hpp"
@@ -344,7 +347,7 @@ TEST_F(NormalizedHardware, UsbDescriptorsInterfacesAndUnknownValues)
     q = request(OS1_HARDWARE_BLOCKS);
     EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(q));  // Version 1 is unchanged.
 }
-TEST_F(NormalizedHardware, StorageForwardAndReverseIdentityAndFreeze)
+TEST_F(NormalizedHardware, StorageForwardAndReverseIdentityAndLiveGeneration)
 {
     unsigned device = hardware_catalog::usb_device(0, 1, 1, 4800);
     BlockDevice block{};
@@ -379,8 +382,17 @@ TEST_F(NormalizedHardware, StorageForwardAndReverseIdentityAndFreeze)
     }
     EXPECT_EQ(device, current);
     hardware_freeze_bindings();
-    EXPECT_EQ(nullptr, hardware_catalog::edit(device));
-    EXPECT_EQ(0u, hardware_catalog::usb_device(0, 2, 2, 0));
+    auto old = inspect(OS1_HARDWARE_USB);
+    unsigned replacement = hardware_catalog::usb_device(0, 2, 2, 0);
+    EXPECT_NE(0u, replacement);
+    EXPECT_NE(device, replacement);
+    auto stale = request(OS1_HARDWARE_USB);
+    stale.version = OS1_HARDWARE_VERSION;
+    stale.generation = old.generation;
+    EXPECT_EQ(OS1_ERR_CANCELLED, hardware_query(stale));
+    hardware_catalog::unavailable(device);
+    auto removed = inspect(device + 3, OS1_HARDWARE_DESCRIBE);
+    EXPECT_STREQ("unavailable", removed.nodes[0].text);
     EXPECT_EQ(1u, inspect(OS1_HARDWARE_BLOCKS).count);
 }
 TEST_F(NormalizedHardware, MalformedConfigurationDoesNotPublishPartialInterfaces)
@@ -394,6 +406,23 @@ TEST_F(NormalizedHardware, MalformedConfigurationDoesNotPublishPartialInterfaces
     malformed[2] = 40;
     hardware_catalog::usb_configuration(device, malformed, sizeof(malformed));
     EXPECT_EQ(0u, inspect(OS1_HARDWARE_USB_INTERFACES).count);
+}
+TEST_F(NormalizedHardware, InputAdmissionAndRetiredHubChildrenRemainConsistent)
+{
+    unsigned hub = hardware_catalog::usb_device(0, 1, 1, 4800);
+    unsigned child = hardware_catalog::usb_device(hub, 1, 2, 15);
+    hardware_catalog::usb_input(child, 0);
+    auto query = request(child + 19, OS1_HARDWARE_DESCRIBE);
+    query.version = OS1_HARDWARE_VERSION;
+    EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(query));
+    hardware_catalog::usb_input(child, 7);
+    EXPECT_EQ(7u, inspect(child + 19, OS1_HARDWARE_DESCRIBE).nodes[0].integer);
+    EXPECT_STREQ("runtime_catalog", inspect(child + 36, OS1_HARDWARE_DESCRIBE).nodes[0].text);
+    // A transfer can retire the hub before the topology worker observes removal.
+    hardware_catalog::unavailable(hub);
+    hardware_catalog::unavailable(hub);
+    for(unsigned id : {hub, child})
+        EXPECT_STREQ("unavailable", inspect(id + 3, OS1_HARDWARE_DESCRIBE).nodes[0].text);
 }
 TEST_F(NormalizedHardware, CaptureLimitsAndStorageOverflowAreExplicit)
 {
@@ -493,7 +522,9 @@ TEST_F(NormalizedHardware, UnsupportedPresenceDoesNotInventIdentityOrRootSpeed)
     q.version = 2;
     EXPECT_EQ(OS1_ERR_NOT_FOUND, hardware_query(q));
     hardware_freeze_bindings();
-    EXPECT_EQ(0u, hardware_catalog::usb_unenumerated(hub, 1, 4, 120));
+    auto later = hardware_catalog::usb_unenumerated(hub, 1, 4, 120);
+    EXPECT_NE(0u, later);
+    EXPECT_STREQ("unsupported_speed", inspect(later + 3, OS1_HARDWARE_DESCRIBE).nodes[0].text);
 }
 TEST(HardwarePresentation, UnitsIdentifiersAndBcdRemainUnambiguous)
 {
@@ -690,3 +721,249 @@ TEST(HardwarePlatform, NamesRetainUsefulFallbacks)
     EXPECT_STREQ("PCI USB controller", name);
 }
 static_assert(sizeof(hardware::Record) == 584);
+
+TEST(Hardware, RuntimeUsbDiscoveryCannotMutateBootDiagnostics)
+{
+    usb::diagnostics::reset_for_test();
+    Os1ObserveUsbRecord first{};
+    first.port = 1;
+    usb::diagnostics::append(first);
+    usb::diagnostics::freeze();
+    Os1ObserveUsbRecord later{};
+    later.port = 2;
+    usb::diagnostics::append(later);
+    ASSERT_EQ(1u, usb::diagnostics::count());
+    EXPECT_EQ(1u, usb::diagnostics::at(0)->port);
+    EXPECT_EQ(0u, usb::diagnostics::dropped());
+    usb::diagnostics::reset_for_test();
+}
+
+TEST(DeviceTestIdentity, LabelsRejectPathsAndBoundLength)
+{
+    using os1::hardware::test_run::label_valid;
+    EXPECT_TRUE(label_valid("asus-laptop_1"));
+    EXPECT_FALSE(label_valid(""));
+    EXPECT_FALSE(label_valid("../laptop"));
+    EXPECT_FALSE(label_valid("two words"));
+    EXPECT_FALSE(label_valid("0123456789012345678901234"));
+}
+TEST(DeviceTestIdentity, NamesSeparateBootsAndRuns)
+{
+    char a[40]{}, b[40]{}, c[40]{};
+    os1::hardware::test_run::run_name(1, 1, a);
+    os1::hardware::test_run::run_name(1, 2, b);
+    os1::hardware::test_run::run_name(2, 1, c);
+    EXPECT_STRNE(a, b);
+    EXPECT_STRNE(a, c);
+    EXPECT_STREQ("b0000000000000001-r0000000000000001", a);
+}
+
+TEST(DeviceTestIdentity, ArchiveRejectsOversizeAndPathMembers)
+{
+    char header[512]{};
+    using os1::hardware::test_run::tar_header;
+    EXPECT_FALSE(tar_header("", 0, header));
+    EXPECT_FALSE(tar_header("../kernel.bin", 1, header));
+    EXPECT_FALSE(tar_header("kernel.bin", 262145, header));
+    ASSERT_TRUE(tar_header("kernel.bin", 262144, header));
+    EXPECT_STREQ("00001000000", header + 124);
+    EXPECT_STREQ("ustar", header + 257);
+    unsigned sum = 0, stored = 0;
+    for(unsigned i = 0; i < sizeof(header); ++i)
+        sum += i >= 148 && i < 156 ? ' ' : static_cast<unsigned char>(header[i]);
+    for(unsigned i = 148; i < 154; ++i)
+        stored = stored * 8 + header[i] - '0';
+    EXPECT_EQ(sum, stored);
+}
+
+TEST(DeviceTestIdentity, FirstSubscriptionProbeCannotDiscardLossOrMalformedEvents)
+{
+    os1_input_event event{};
+    event.device = 7;
+    event.kind = OS1_INPUT_POINTER;
+    using os1::hardware::test_run::usable_input_event;
+    EXPECT_TRUE(usable_input_event(event, sizeof(event), 7));
+    EXPECT_FALSE(usable_input_event(event, sizeof(event) - 1, 7));
+    EXPECT_FALSE(usable_input_event(event, sizeof(event), 8));
+    event.flags = OS1_INPUT_LOST;
+    EXPECT_FALSE(usable_input_event(event, sizeof(event), 7));
+    event.flags = OS1_INPUT_REMOVED;
+    EXPECT_FALSE(usable_input_event(event, sizeof(event), 7));
+}
+
+#include <vector>
+
+#include "hardware/archive_stream.hpp"
+namespace
+{
+struct ArchiveMemory
+{
+    std::vector<char> data;
+    long cursor{};
+    bool fail_write{}, fail_seek{};
+    long position()
+    {
+        return cursor;
+    }
+    bool seek(long offset)
+    {
+        if(fail_seek || offset < 0 || size_t(offset) > data.size())
+            return false;
+        cursor = offset;
+        return true;
+    }
+    bool write(const char* bytes, unsigned size)
+    {
+        if(fail_write)
+            return false;
+        if(cursor + size > data.size())
+            data.resize(cursor + size);
+        std::memcpy(data.data() + cursor, bytes, size);
+        cursor += size;
+        return true;
+    }
+};
+}  // namespace
+TEST(HardwareArchive, StreamsLargeReportsWithoutTemporaryFileLimit)
+{
+    ArchiveMemory output;
+    const char prefix[] = "existing archive prefix";
+    ASSERT_TRUE(output.write(prefix, sizeof(prefix)));
+    std::string report(100003, 'x');
+    for(unsigned i = 0; i < report.size(); ++i)
+        report[i] = 'a' + i % 26;
+    hardware::test_run::ArchiveStream<ArchiveMemory> stream(output, "lshw.txt");
+    for(unsigned at = 0; at < report.size();)
+    {
+        unsigned chunk = std::min(37u, unsigned(report.size()) - at);
+        ASSERT_TRUE(stream.write(report.data() + at, chunk));
+        at += chunk;
+    }
+    ASSERT_TRUE(stream.finish());
+    EXPECT_EQ(0, std::memcmp(output.data.data(), prefix, sizeof(prefix)));
+    char expected[512];
+    ASSERT_TRUE(hardware::test_run::tar_header("lshw.txt", report.size(), expected));
+    EXPECT_EQ(0, std::memcmp(output.data.data() + sizeof(prefix), expected, 512));
+    EXPECT_EQ(0,
+              std::memcmp(output.data.data() + sizeof(prefix) + 512, report.data(), report.size()));
+    EXPECT_EQ(output.position(), sizeof(prefix) + 512 + ((report.size() + 511) & ~511u));
+    hardware::test_run::ArchiveStream<ArchiveMemory> next(output, "next.txt");
+    ASSERT_TRUE(next.write("next", 4));
+    ASSERT_TRUE(next.finish());
+    EXPECT_EQ(0, std::memcmp(output.data.data() + output.data.size() - 512, "next", 4));
+}
+TEST(HardwareArchive, EnforcesMemberLimitAndReportsIoFailures)
+{
+    std::string bytes(262144, 'z');
+    ArchiveMemory output;
+    hardware::test_run::ArchiveStream<ArchiveMemory> stream(output, "maximum.txt");
+    ASSERT_TRUE(stream.write(bytes.data(), bytes.size()));
+    ASSERT_TRUE(stream.finish());
+    hardware::test_run::ArchiveStream<ArchiveMemory> large(output, "too-large.txt");
+    EXPECT_FALSE(large.write(bytes.data(), bytes.size() + 1));
+    EXPECT_FALSE(large.finish());
+    ArchiveMemory broken;
+    hardware::test_run::ArchiveStream<ArchiveMemory> failure(broken, "failure.txt");
+    broken.fail_write = true;
+    EXPECT_FALSE(failure.write(bytes.data(), 4096));
+    EXPECT_FALSE(failure.finish());
+    ArchiveMemory unseekable;
+    hardware::test_run::ArchiveStream<ArchiveMemory> seek_failure(unseekable, "failure.txt");
+    ASSERT_TRUE(seek_failure.write("data", 4));
+    unseekable.fail_seek = true;
+    EXPECT_FALSE(seek_failure.finish());
+}
+
+TEST(DeviceTestInput, SeparatesLossRemovalAndClosureWithoutDiscardingEvidence)
+{
+    hardware::test_run::InputFailures failures{};
+    os1_input_event event{};
+    event.device = 7;
+    event.kind = OS1_INPUT_POINTER;
+    event.sequence = 300;
+    event.time_ns = 200;
+    event.flags = OS1_INPUT_LOST;
+    event.lost = 44;
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 7, OS1_INPUT_POINTER, 210));
+    event.flags = OS1_INPUT_REMOVED;
+    event.lost = 0;
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 7, OS1_INPUT_POINTER, 220));
+    EXPECT_FALSE(failures.accept(OS1_ERR_CLOSED, 0, event, 7, OS1_INPUT_POINTER, 230));
+    EXPECT_EQ(3u, failures.total);
+    EXPECT_EQ(1u, failures.lost_events);
+    EXPECT_EQ(44u, failures.lost_records);
+    EXPECT_EQ(1u, failures.removed);
+    EXPECT_EQ(1u, failures.closed);
+    EXPECT_EQ(210u, failures.first.observed_ns);
+    EXPECT_EQ(300u, failures.first.sequence);
+    EXPECT_EQ(44u, failures.first.lost);
+    EXPECT_EQ(OS1_INPUT_LOST, failures.first.flags);
+    EXPECT_EQ(OS1_ERR_CLOSED, failures.last.status);
+    EXPECT_EQ(230u, failures.last.observed_ns);
+    EXPECT_EQ(0u, failures.last.device);  // No stale payload from a failed call.
+    event.flags = OS1_INPUT_CHANGED;
+    EXPECT_TRUE(failures.accept(0, sizeof(event), event, 7, OS1_INPUT_POINTER, 240));
+    EXPECT_EQ(3u, failures.total);  // Later success cannot clear earlier failures.
+}
+
+TEST(DeviceTestInput, RejectsMalformedIdentityKindFlagsAndStatus)
+{
+    hardware::test_run::InputFailures failures{};
+    os1_input_event event{};
+    event.device = 2;
+    event.kind = OS1_INPUT_POINTER;
+    EXPECT_FALSE(failures.accept(OS1_ERR_WOULD_BLOCK, 0, event, 2, OS1_INPUT_POINTER, 1));
+    EXPECT_EQ(0u, failures.total);
+    EXPECT_FALSE(failures.accept(0, sizeof(event) - 1, event, 2, OS1_INPUT_POINTER, 2));
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 3, OS1_INPUT_POINTER, 3));
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 2, OS1_INPUT_KEYBOARD, 4));
+    event.flags = 0x80000000u;
+    EXPECT_FALSE(failures.accept(0, sizeof(event), event, 2, OS1_INPUT_POINTER, 5));
+    EXPECT_FALSE(failures.accept(OS1_ERR_INVALID, 0, event, 2, OS1_INPUT_POINTER, 6));
+    EXPECT_FALSE(failures.accept(1, sizeof(event), event, 2, OS1_INPUT_POINTER, 7));
+    EXPECT_EQ(4u, failures.invalid);
+    EXPECT_EQ(2u, failures.errors);
+    EXPECT_EQ(6u, failures.total);
+    EXPECT_EQ(sizeof(event) - 1, failures.first.bytes);
+    EXPECT_EQ(0u, failures.first.flags);
+    EXPECT_EQ(1, failures.last.status);
+}
+
+TEST(UsbInputDiagnostics, RetainsFirstCauseAcrossCleanupAndBootSnapshotFreeze)
+{
+    usb::diagnostics::reset_for_test();
+    usb::diagnostics::freeze();
+    Os1ObserveUsbInputFailure record{};
+    record.input_device = 1;
+    record.reason = OS1_USB_INPUT_TRANSFER;
+    record.token = 0x30d52;
+    record.expected_bytes = 4;
+    record.catalog_id = 1376640;
+    usb::diagnostics::input_failure(record);
+    record.reason = OS1_USB_INPUT_STOP;
+    record.token = 0;
+    usb::diagnostics::input_failure(record);
+    Os1ObserveUsbInputFailure out{};
+    ASSERT_TRUE(usb::diagnostics::input_failure_at(0, out));
+    EXPECT_EQ(1u, out.sequence);
+    EXPECT_EQ(OS1_USB_INPUT_TRANSFER, out.reason);
+    EXPECT_EQ(0x30d52u, out.token);
+    EXPECT_EQ(4u, out.expected_bytes);
+    EXPECT_EQ(1376640u, out.catalog_id);
+    EXPECT_EQ(1u, usb::diagnostics::input_failure_count());
+    for(unsigned id = 2; id <= OS1_INPUT_DEVICE_LIMIT; ++id)
+    {
+        record.input_device = id;
+        usb::diagnostics::input_failure(record);
+    }
+    record.input_device = OS1_INPUT_DEVICE_LIMIT + 1;
+    usb::diagnostics::input_failure(record);
+    record.input_device = 0;
+    usb::diagnostics::input_failure(record);
+    EXPECT_EQ(OS1_INPUT_DEVICE_LIMIT, usb::diagnostics::input_failure_count());
+    EXPECT_FALSE(usb::diagnostics::input_failure_at(OS1_INPUT_DEVICE_LIMIT, out));
+    ASSERT_TRUE(usb::diagnostics::input_failure_at(0, out));
+    EXPECT_EQ(OS1_USB_INPUT_TRANSFER, out.reason);
+    EXPECT_EQ(0u, usb::diagnostics::count());
+    usb::diagnostics::reset_for_test();
+}

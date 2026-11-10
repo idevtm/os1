@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 from test_ext2_persistence import boot
+from device_test_mode import unattended
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +31,7 @@ def main():
     for entry in (None, 1, 2):
         for sample in range(args.repeat):
             shutil.copyfile(args.program_disk, disk)
+            unattended(disk, args.debugfs)
             args.boot_menu_entry = entry
             phase = f'entry-{entry}-sample-{sample}'
             profile = 1 if entry is None else entry
@@ -44,6 +46,12 @@ def main():
                 print(phase + ': ' + info.decode().strip())
                 print(run('kmem').decode().strip())
                 run('echo "boot menu profile"')
+                restarted = run('exit')
+                assert b'shell started' in restarted and b'diagnostic tests starting' not in restarted
+                # A nested scripted shell must not start an automatic test group.
+                run("echo 'echo \"nested shell\"' > \"/tmp/nested.sh\"")
+                nested = run('sh "/tmp/nested.sh"')
+                assert b'nested shell' in nested and b'diagnostic tests starting' not in nested
                 # Syscall-entry tracing is exclusive to the diagnostic profile.
                 trace = run('dmesg kind:2 limit:256')
                 assert (b'kind=2' in trace) == (profile == 2), trace
@@ -52,6 +60,11 @@ def main():
 
             started = time.monotonic()
             boot(args, disk, phase, exercise=exercise)
+            transcript = Path(args.log).with_suffix(f'.{phase}.log').read_bytes()
+            assert transcript.count(b'shell: diagnostic tests starting') == (profile == 2), transcript[-3000:]
+            assert (b'run-tests: PASS; saved results' in transcript) == (profile == 2), transcript[-3000:]
+            assert (b'diagnostic tests use unattended mode' in transcript) == (profile == 2)
+            assert b'20 seconds' not in transcript
             partition = disk.with_suffix('.ext2')
             partition.write_bytes(disk.read_bytes()[2048 * 512:])
             destination = disk.parent / (disk.stem + '-' + phase)
@@ -64,6 +77,30 @@ def main():
                       for f in reader.frames(io.BytesIO(path.read_bytes()))]
             assert frames and all(f['diagnostic'] == profile-1 for f in frames), frames
             print(f'{phase}: {len(frames)} frames match the selected profile')
+
+    # A blocked result directory makes the automatic runner fail, but leaves a usable shell.
+    shutil.copyfile(args.program_disk, disk)
+    partition = disk.with_suffix('.ext2')
+    image = disk.read_bytes()
+    partition.write_bytes(image[2048 * 512:])
+    blocker = disk.with_suffix('.blocker')
+    blocker.write_text('occupied')
+    subprocess.run([args.debugfs, '-w', '-R', f'write "{blocker}" /tests', str(partition)],
+                   check=True, capture_output=True)
+    disk.write_bytes(image[:2048 * 512] + partition.read_bytes())
+    args.boot_menu_entry = 2
+
+    def failed_run(run, expect):
+        run('echo "shell remains usable"', b'shell remains usable')
+        restarted = run('exit')
+        assert b'shell started' in restarted and b'diagnostic tests starting' not in restarted
+
+    boot(args, disk, 'failed-autorun', exercise=failed_run)
+    transcript = Path(args.log).with_suffix('.failed-autorun.log').read_bytes()
+    assert transcript.count(b'shell: diagnostic tests starting') == 1, transcript[-3000:]
+    assert b'cannot create a new /disk/tests run' in transcript, transcript[-3000:]
+    assert b'shell: diagnostic tests failed or unavailable' in transcript, transcript[-3000:]
+    assert b'run-tests: PASS; saved results' not in transcript
 
 
 if __name__ == '__main__':

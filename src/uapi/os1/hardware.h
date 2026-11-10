@@ -10,6 +10,14 @@ enum
     OS1_HARDWARE_OBJECT = 0,
     OS1_HARDWARE_INTEGER = 1,
     OS1_HARDWARE_STRING = 2,
+    OS1_HARDWARE_METHOD = 3,
+    // Live input descriptions use a separate identity and generation domain.
+    OS1_HARDWARE_INPUT_ROOT = 0x40000000,
+    OS1_HARDWARE_INPUT_STRIDE = 8,
+    OS1_HARDWARE_KEYBOARDS = OS1_HARDWARE_INPUT_ROOT + 0x800,
+    OS1_HARDWARE_POINTERS = OS1_HARDWARE_INPUT_ROOT + 0x810,
+    OS1_HARDWARE_INPUT_ITEMS = OS1_HARDWARE_INPUT_ROOT + 0x1000,
+    OS1_HARDWARE_INPUT_END = OS1_HARDWARE_INPUT_ROOT + 0x2000,
     OS1_HARDWARE_DEVICES = 65536,
     OS1_HARDWARE_INVENTORY,
     OS1_HARDWARE_PCI,
@@ -48,7 +56,7 @@ struct Os1HardwareNode
 };
 
 // Input: version, operation, id, start, generation; all other fields zero.
-// Output: generation=1 for this immutable boot catalog, next, count, end, nodes.
+// Output: catalog generation, next, count, end, nodes. A changed generation cancels stale cursors.
 struct Os1HardwareQuery
 {
     uint32_t version, operation, id, start;

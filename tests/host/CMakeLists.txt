@@ -85,6 +85,7 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/buffer/buffer.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/kernel_provider.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/drivers/input/service.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/system_control.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/system_power.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/acpica_ec.cpp"
@@ -214,6 +215,8 @@ add_executable(os1_host_tests
   kernel/ehci_tests.cpp
   kernel/usb_storage_tests.cpp
   kernel/hid_keyboard_tests.cpp
+  kernel/input_service_tests.cpp
+  kernel/ipi_tests.cpp
   kernel/ext2_tests.cpp
   kernel/xhci_controller_tests.cpp
   mm/kmem_tests.cpp
@@ -248,3 +251,7 @@ target_compile_definitions(os1_host_tests PRIVATE OS1_LOG_EXT2_FIXTURE="${OS1_LO
 include(GoogleTest)
 gtest_add_tests(TARGET os1_host_tests TEST_LIST os1_host_tests_TESTS)
 set_tests_properties(${os1_host_tests_TESTS} PROPERTIES LABELS "host;unit")
+
+add_test(NAME HardwareReferenceComparison
+  COMMAND "${Python3_EXECUTABLE}" -B "${OS1_REPO_ROOT}/tests/scripts/test_hardware_compare.py")
+set_tests_properties(HardwareReferenceComparison PROPERTIES LABELS "host;unit")

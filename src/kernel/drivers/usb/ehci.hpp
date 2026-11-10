@@ -3,3 +3,5 @@
 struct BlockDevice;
 const PciDriver& ehci_pci_driver();
 BlockDevice* ehci_storage_block_device(size_t index);
+
+void ehci_poll_devices(PageFrameContainer&, bool topology);

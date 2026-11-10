@@ -1,19 +1,25 @@
+#include "proc/thread.hpp"
 // Bounded, polling EHCI storage transport. Schedules are stopped before reuse.
-#include "drivers/usb/ehci.hpp"
-
 #include "debug/debug.hpp"
+#include "debug/log.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/resource.hpp"
+#include "drivers/input/service.hpp"
 #include "drivers/timer/tsc_clock.hpp"
 #include "drivers/usb/diagnostics.hpp"
+#include "drivers/usb/ehci.hpp"
 #include "drivers/usb/ehci_controller.hpp"
+#include "drivers/usb/hid_keyboard.hpp"
 #include "drivers/usb/hub.hpp"
 #include "drivers/usb/mass_storage.hpp"
+#include "drivers/usb/worker.hpp"
 #include "handoff/memory_layout.h"
+#include "input/hid_boot.hpp"
 #include "mm/boot_mapping.hpp"
 #include "mm/dma.hpp"
 #include "platform/hardware_catalog.hpp"
 #include "platform/pci_config.hpp"
+#include "platform/platform.hpp"
 #include "platform/state.hpp"
 #include "storage/block_device.hpp"
 #include "sync/smp.hpp"
@@ -35,6 +41,17 @@ struct Device
     Controller* controller{};
     Device* parent{};
     uint8_t root{}, port{}, address{}, depth{};
+    uint8_t speed = 2, control_packet = 64;
+    uint8_t tt_address{}, tt_port{};
+    uint64_t input_identity{};
+    os1::input::HidBoot hid{};
+    usb::hid::BootKeyboardState keyboard{};
+    usb::hub::Descriptor hub_descriptor{};
+    DmaBuffer input_dma{};
+    unsigned phase{}, period{};
+    bool input_armed{};
+    ehci::InputRecovery recovery{};
+
     bool hub{}, failed{}, published{}, in_toggle{}, out_toggle{};
     usb::storage::Interface interface{};
     usb::storage::Device storage{};
@@ -49,7 +66,8 @@ struct Controller
     const PciDevice* pci{};
     PciBarResource bar{};
     volatile uint32_t* op{};
-    DmaBuffer schedule{}, data{};
+    DmaBuffer schedule{}, data{}, periodic{};
+    PageFrameContainer* frames{};
     bool failed{}, exposed{};
     uint8_t busy{}, ports{}, count{};
     Device devices[max_devices]{};
@@ -62,6 +80,32 @@ struct Controller
 alignas(Controller) uint8_t pool[max_controllers][sizeof(Controller)]{};
 Controller* controllers[max_controllers]{};
 
+void input_failure(
+    Device& d, unsigned reason, unsigned token = 0, unsigned expected = 0, unsigned status = 0)
+{
+    if(!d.input_identity)
+        return;
+    Os1ObserveUsbInputFailure record{};
+    uint64_t ns = 0, resolution = 0;
+    if(!platform_measurement_sample(ns, resolution))
+        record.flags = OS1_USB_INPUT_CLOCK_UNAVAILABLE;
+    if(d.recovery.retried)
+        record.flags |= OS1_USB_INPUT_RETRIED;
+    record.time_ns = ns;
+    record.input_device = d.input_identity;
+    record.catalog_id = d.catalog_id;
+    record.reason = reason;
+    record.pci_index = d.controller->owner.index;
+    record.root_port = d.root;
+    record.parent_address = d.parent ? d.parent->address : 0;
+    record.port = d.port;
+    record.address = d.address;
+    record.endpoint = d.hid.endpoint;
+    record.token = token;
+    record.expected_bytes = expected;
+    record.status = status;
+    usb::diagnostics::input_failure(record);
+}
 void delay_us(unsigned us)
 {
     // Keep individual waits short so remote page-table retirement can progress.
@@ -95,6 +139,8 @@ void retire(Controller& c)
     {
         d.failed = true;
         d.storage.invalidate();
+        input_failure(d, OS1_USB_INPUT_CONTROLLER);
+        native_input::remove(d.input_identity);
         hardware_catalog::unavailable(d.catalog_id);
     }
     if(c.pci)
@@ -179,8 +225,15 @@ Transfer transfer(Device& d,
     }
     else
         ehci::prepare_qtd(td[0], c.data.physical_address, bytes, in ? 1 : 0, toggle);
-    ehci::prepare_head(
-        *qh, c.schedule.physical_address, td_address(c, 0), d.address, endpoint, packet);
+    ehci::prepare_head(*qh,
+                       c.schedule.physical_address,
+                       td_address(c, 0),
+                       d.address,
+                       endpoint,
+                       packet,
+                       d.speed,
+                       d.tt_address,
+                       d.tt_port);
     dma_sync_for_device(c.data);
     dma_sync_for_device(c.schedule);
     c.op[6] = uint32_t(c.schedule.physical_address);
@@ -212,6 +265,15 @@ Transfer transfer(Device& d,
     dma_sync_for_cpu(c.schedule);
     if(!completed)
     {
+        if(!root_connected(d))
+        {
+            d.failed = true;
+            d.storage.invalidate();
+            input_failure(d, OS1_USB_INPUT_DISCONNECTED);
+            native_input::remove(d.input_identity);
+            hardware_catalog::unavailable(d.catalog_id);
+            return {Status::Failed, 0};
+        }
         retire(c);
         return {Status::Failed, 0};
     }
@@ -221,6 +283,8 @@ Transfer transfer(Device& d,
             return {Status::Stall, 0};
         d.failed = true;
         d.storage.invalidate();
+        input_failure(d, OS1_USB_INPUT_TRANSFER, td[last].token | fault, bytes);
+        native_input::remove(d.input_identity);
         hardware_catalog::unavailable(d.catalog_id);
         return {Status::Failed, 0};
     }
@@ -260,7 +324,7 @@ bool control(Device& d,
     if(d.controller->probing)
         d.last_detail = uint32_t(type) << 24 | uint32_t(request) << 16 | value;
     bool toggle = false;
-    auto result = transfer(d, 0, 64, type & 0x80, data, bytes, toggle, setup);
+    auto result = transfer(d, 0, d.control_packet, type & 0x80, data, bytes, toggle, setup);
     if(actual)
         *actual = result.bytes;
     return result.status == Status::Ok && (actual || result.bytes == bytes);
@@ -293,7 +357,7 @@ void hub_unsupported(void* p, uint8_t port, unsigned speed)
 }
 usb::hub::Transport hub_transport(Device& d)
 {
-    return {&d, hub_control, delay_ms, hub_child, hub_unsupported};
+    return {&d, hub_control, delay_ms, hub_child, hub_unsupported, true};
 }
 bool path_connected(Device& d)
 {
@@ -303,7 +367,7 @@ bool path_connected(Device& d)
     {
         uint32_t status = 0;
         if(!usb::hub::port_status(hub_transport(*child->parent), child->port, status) ||
-           !usb::hub::stable_high_speed(status))
+           (!usb::hub::stable_high_speed(status) && !usb::hub::unsupported_speed(status)))
             return false;
     }
     return true;
@@ -348,6 +412,7 @@ bool submit(BlockDevice& block, BlockRequest& request)
         block_request_complete(request, BlockRequestStatus::Invalid);
         return false;
     }
+    SchedulingGuard scheduling;
     if(__atomic_exchange_n(&c.busy, 1, __ATOMIC_ACQUIRE))
     {
         request.status = BlockRequestStatus::Busy;
@@ -364,6 +429,8 @@ bool submit(BlockDevice& block, BlockRequest& request)
     {
         d.failed = true;
         d.storage.invalidate();
+        input_failure(d, OS1_USB_INPUT_STOP);
+        native_input::remove(d.input_identity);
         hardware_catalog::unavailable(d.catalog_id);
     }
     __atomic_store_n(&c.busy, 0, __ATOMIC_RELEASE);
@@ -371,6 +438,205 @@ bool submit(BlockDevice& block, BlockRequest& request)
                            ok ? BlockRequestStatus::Success : BlockRequestStatus::DeviceError,
                            ok && !flush ? request.sector_count * 512 : 0);
     return ok;
+}
+bool periodic_schedule(Controller& c, bool enabled)
+{
+    constexpr uint32_t command_bit = 1u << 4, status_bit = 1u << 14;
+    if(!wait_register(c.op[1], status_bit, (c.op[0] & command_bit) ? status_bit : 0))
+    {
+        retire(c);
+        return false;
+    }
+    c.op[0] = enabled ? c.op[0] | command_bit : c.op[0] & ~command_bit;
+    if(!wait_register(c.op[1], status_bit, enabled ? status_bit : 0))
+    {
+        retire(c);
+        return false;
+    }
+    return true;
+}
+bool arm_input(Device& d)
+{
+    auto& c = *d.controller;
+    auto* qh = static_cast<ehci::QueueHead*>(d.input_dma.virtual_address);
+    auto* td =
+        reinterpret_cast<ehci::Qtd*>(static_cast<uint8_t*>(d.input_dma.virtual_address) + 128);
+    bool toggle = d.input_armed ? (qh->token >> 31) != 0 : false;
+    if(!ehci::prepare_head(*qh,
+                           d.input_dma.physical_address,
+                           d.input_dma.physical_address + 128,
+                           d.address,
+                           d.hid.endpoint & 15,
+                           d.hid.packet,
+                           d.speed,
+                           d.tt_address,
+                           d.tt_port,
+                           true) ||
+       !ehci::prepare_qtd(*td, d.input_dma.physical_address + 256, d.hid.packet, 1, toggle))
+        return false;
+    qh->next = ehci::terminate;
+    dma_sync_for_device(d.input_dma);
+    auto* list = static_cast<uint32_t*>(c.periodic.virtual_address);
+    for(unsigned i = d.phase; i < 1024; i += d.period)
+        list[i] = uint32_t(d.input_dma.physical_address) | 2;
+    dma_sync_for_device(c.periodic);
+    d.input_armed = true;
+    return true;
+}
+bool start_input(Device& d)
+{
+    auto& c = *d.controller;
+    if(d.speed == 2)
+        return false;  // This periodic profile admits low/full-speed boot HID only.
+    if(!c.periodic.active)
+    {
+        if(!dma_allocate_buffer(
+               *c.frames, c.owner, 4096, DmaDirection::Bidirectional, c.periodic) ||
+           c.periodic.physical_address > 0xfffff000u)
+            return false;
+        auto* list = static_cast<uint32_t*>(c.periodic.virtual_address);
+        for(unsigned i = 0; i < 1024; ++i)
+            list[i] = ehci::terminate;
+    }
+    unsigned period = 1;
+    while(period < 128 && period * 2 <= d.hid.interval)
+        period *= 2;
+    auto* list = static_cast<uint32_t*>(c.periodic.virtual_address);
+    unsigned phase = 0;
+    for(; phase < period; ++phase)
+    {
+        bool available = true;
+        for(unsigned i = phase; i < 1024; i += period)
+            available &= list[i] == ehci::terminate;
+        if(available)
+            break;
+    }
+    if(phase == period)
+        return false;  // One TT transaction per frame; no split-budget overcommit.
+    if(!dma_allocate_buffer(*c.frames, c.owner, 4096, DmaDirection::Bidirectional, d.input_dma) ||
+       d.input_dma.physical_address > 0xfffff000u)
+        return false;
+    d.period = period;
+    d.phase = phase;
+    if(!periodic_schedule(c, false))
+        return false;
+    d.input_identity =
+        native_input::attach(d.hid.protocol == 1 ? OS1_INPUT_KEYBOARD : OS1_INPUT_POINTER,
+                             d.hid.protocol == 1 ? "USB keyboard" : "USB pointer",
+                             d.catalog_id);
+    if(!d.input_identity || !arm_input(d))
+    {
+        retire(c);
+        return false;
+    }
+    hardware_catalog::usb_input(d.catalog_id, d.input_identity);
+    c.op[5] = uint32_t(c.periodic.physical_address);
+    c.exposed = true;
+    return periodic_schedule(c, true);
+}
+void stop_input(Device& d)
+{
+    input_failure(d, OS1_USB_INPUT_STOP);
+    native_input::remove(d.input_identity);
+    if(!d.input_armed || d.controller->failed)
+        return;
+    auto& c = *d.controller;
+    if(!periodic_schedule(c, false))
+        return;
+    auto* list = static_cast<uint32_t*>(c.periodic.virtual_address);
+    for(unsigned i = d.phase; i < 1024; i += d.period)
+        list[i] = ehci::terminate;
+    dma_sync_for_device(c.periodic);
+    d.input_armed = false;
+    periodic_schedule(c, true);
+}
+void retire_root(Controller& c, unsigned root)
+{
+    ehci::retire_root_devices(c.devices, root, [&](Device& d) {
+        input_failure(d, OS1_USB_INPUT_ROOT_CHANGE, 0, 0, c.op[17 + root - 1]);
+        stop_input(d);
+        d.failed = true;
+        d.storage.invalidate();
+        hardware_catalog::unavailable(d.catalog_id);
+    });
+}
+void poll_input(Controller& c)
+{
+    for(auto& d : c.devices)
+    {
+        if(!d.input_armed || d.failed)
+            continue;
+        if(d.recovery.pending)
+        {
+            if(diagnostic_log::monotonic() < d.recovery.due_ns)
+                continue;
+            if(!path_connected(d))
+            {
+                input_failure(d, OS1_USB_INPUT_DISCONNECTED);
+                d.failed = true;
+                stop_input(d);
+                hardware_catalog::unavailable(d.catalog_id);
+                continue;
+            }
+            if(!periodic_schedule(c, false))
+                return;
+            d.recovery.pending = false;
+            if(!arm_input(d))
+            {
+                retire(c);
+                return;
+            }
+            if(!periodic_schedule(c, true))
+                return;
+            continue;
+        }
+        dma_sync_for_cpu(d.input_dma);
+        auto* td =
+            reinterpret_cast<ehci::Qtd*>(static_cast<uint8_t*>(d.input_dma.virtual_address) + 128);
+        if(td->token & ehci::active)
+            continue;
+        if(!periodic_schedule(c, false))
+            return;
+        dma_sync_for_cpu(d.input_dma);
+        unsigned bytes = d.hid.packet;
+        if((td->token & ehci::errors) || ehci::remaining(td->token) > bytes)
+        {
+            if(d.recovery.schedule(td->token, bytes, d.speed, diagnostic_log::monotonic()))
+            {
+                // The halted QH keeps its frame slots reserved during backoff.
+                // Other endpoints continue; descriptor reuse waits for PSS to clear.
+                if(!periodic_schedule(c, true))
+                    return;
+                continue;
+            }
+            input_failure(d, OS1_USB_INPUT_TRANSFER, td->token, bytes, c.op[1]);
+            d.failed = true;
+            stop_input(d);
+            hardware_catalog::unavailable(d.catalog_id);
+            continue;
+        }
+        auto* report = static_cast<uint8_t*>(d.input_dma.virtual_address) + 256;
+        unsigned actual = bytes - ehci::remaining(td->token);
+        if(d.hid.protocol == 1)
+        {
+            native_input::boot_keyboard(d.input_identity, report, actual);
+            char chars[6]{};
+            size_t count = 0;
+            if(usb::hid::boot_keyboard_apply_report(
+                   d.keyboard, report, actual, chars, sizeof(chars), count))
+                for(size_t i = 0; i < count; ++i)
+                    usb_queue_console_char(chars[i]);
+        }
+        else
+            native_input::boot_pointer(d.input_identity, report, actual);
+        if(!arm_input(d))
+        {
+            retire(c);
+            return;
+        }
+        if(!periodic_schedule(c, true))
+            return;
+    }
 }
 bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
 {
@@ -382,23 +648,39 @@ bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
     d.port = port;
     d.parent = parent;
     d.depth = parent ? parent->depth + 1 : 0;
+    unsigned speed_mbps = 4800;
+    if(parent)
+    {
+        uint32_t status = 0;
+        if(!usb::hub::port_status(hub_transport(*parent), port, status))
+            return false;
+        unsigned slow = usb::hub::unsupported_speed(status);
+        if(slow)
+        {
+            speed_mbps = slow;
+            d.speed = slow == 15 ? 1 : 0;
+            d.control_packet = 8;
+            d.tt_address = parent->address;
+            d.tt_port = port;
+        }
+    }
     d.catalog_id = hardware_catalog::usb_device(
-        parent ? parent->catalog_id : c.catalog_ports[root - 1], root, port, 4800);
+        parent ? parent->catalog_id : c.catalog_ports[root - 1], root, port, speed_mbps);
     d.stage = "device-descriptor";
     uint8_t descriptor[18]{};
-    if(!control(d, 0x80, 6, 0x100, 0, descriptor, sizeof(descriptor)) || descriptor[0] != 18 ||
-       descriptor[1] != 1 || descriptor[7] != 64 || !descriptor[17])
+    if(!control(d, 0x80, 6, 0x100, 0, descriptor, 8) || descriptor[0] != 18 || descriptor[1] != 1 ||
+       (descriptor[7] != 8 && descriptor[7] != 16 && descriptor[7] != 32 && descriptor[7] != 64) ||
+       (d.speed == 1 && descriptor[7] != 8) || (d.speed == 2 && descriptor[7] != 64))
+        return false;
+    d.control_packet = descriptor[7];
+    if(!control(d, 0x80, 6, 0x100, 0, descriptor, sizeof(descriptor)) || !descriptor[17])
         return false;
     hardware_catalog::usb_descriptor(d.catalog_id, descriptor, sizeof(descriptor));
     d.stage = "set-address";
     if(!control(d, 0, 5, c.count, 0, nullptr, 0))
         return false;
     d.address = c.count;
-    if(auto* record = hardware_catalog::edit(d.catalog_id))
-    {
-        record->values[7] = d.address;
-        record->known |= 1u << 7;
-    }
+    hardware_catalog::usb_address(d.catalog_id, d.address);
     delay_ms(nullptr, 2);
     d.stage = "config-header";
     auto* config = c.configuration;
@@ -422,6 +704,9 @@ bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
         if(!control(d, 0xa0, 6, 0x2900, 0, hub_descriptor, sizeof(hub_descriptor), &actual) ||
            !usb::hub::parse_descriptor(hub_descriptor, actual, hub))
             return false;
+        if(d.speed != 2)
+            return false;  // Full-speed hubs need a separate downstream TT profile.
+        d.hub_descriptor = hub;
         d.hub = true;
         // Hub interface number comes from its descriptor, not an assumed interface zero.
         for(unsigned at = 0; at + 2 <= length && config[at] >= 2 && config[at] <= length - at;
@@ -438,6 +723,16 @@ bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
             return false;
         }
         d.stage = "hub-ready";
+        return true;
+    }
+    if(os1::input::hid_boot(config, length, d.hid))
+    {
+        if(!control(d, 0, 9, d.hid.configuration, 0, nullptr, 0) ||
+           !control(d, 0x21, 11, 0, d.hid.interface, nullptr, 0) || !start_input(d))
+            return false;
+        hardware_catalog::usb_bind(
+            d.catalog_id, d.hid.configuration, d.hid.interface, "usb-hid", true);
+        d.stage = "hid-ready";
         return true;
     }
     d.stage = "storage-config";
@@ -609,7 +904,8 @@ bool probe(VirtualMemory& vm,
        !dma_allocate_buffer(frames, id, 4096, DmaDirection::Bidirectional, c.data) ||
        c.schedule.physical_address > 0xfffff000u || c.data.physical_address > 0xfffff000u)
         return fail();
-    c.op[2] = 0;  // Polling profile; no interrupt endpoint schedule.
+    c.frames = &frames;
+    c.op[2] = 0;  // Deferred polling services periodic completion.
     if(capability & 1)
         c.op[4] = 0;
     c.op[1] = 0x3f;
@@ -659,8 +955,8 @@ bool probe(VirtualMemory& vm,
             debug("ehci: enumeration failed root=")(port)();
             if(!c.failed)
             {
-                root_write(c, port, 0, 4);
-                if(!wait_register(c.op[17 + port - 1], 4u | (1u << 8), 0))
+                retire_root(c, port);
+                if(!ehci::isolate_root(c.op[17 + port - 1], schedule_poll, nullptr, 10000))
                     retire(c);
             }
         }
@@ -708,4 +1004,100 @@ BlockDevice* ehci_storage_block_device(size_t index)
                     --index;
                 }
     return nullptr;
+}
+
+void ehci_poll_devices(PageFrameContainer&, bool topology)
+{
+    for(auto* c : controllers)
+    {
+        SchedulingGuard scheduling;
+        if(!c || c->failed || __atomic_exchange_n(&c->busy, 1, __ATOMIC_ACQUIRE))
+            continue;
+        poll_input(*c);
+        if(topology && !c->failed)
+        {
+            for(unsigned port = 1; port <= c->ports && !c->failed; ++port)
+            {
+                uint32_t status = c->op[17 + port - 1];
+                if(!(status & 2))
+                    continue;
+                retire_root(*c, port);
+                root_write(*c, port, port_changes);
+                hardware_catalog::port_state(c->catalog_ports[port - 1], status & 1);
+                if(!(status & 1))
+                    continue;
+                delay_ms(nullptr, 100);
+                if(!(c->op[17 + port - 1] & 1))
+                    continue;
+                root_write(*c, port, 1u << 8, 4u | (1u << 13));
+                delay_ms(nullptr, 50);
+                root_write(*c, port, 0, 1u << 8);
+                if(!wait_register(c->op[17 + port - 1], 1u << 8, 0))
+                {
+                    retire(*c);
+                    break;
+                }
+                delay_ms(nullptr, 10);
+                root_write(*c, port, port_changes);
+                if(ehci::root_usable(c->op[17 + port - 1]) && !enumerate(*c, port, nullptr, port) &&
+                   !c->failed)
+                {
+                    // A failed address-zero child must not remain visible to a sibling reset.
+                    retire_root(*c, port);
+                    if(!ehci::isolate_root(c->op[17 + port - 1], schedule_poll, nullptr, 10000))
+                        retire(*c);
+                }
+            }
+            for(unsigned i = 0; i < c->count && !c->failed; ++i)
+            {
+                auto& d = c->devices[i];
+                if(d.failed || !d.hub)
+                    continue;
+                for(unsigned port = 1; port <= d.hub_descriptor.ports && !c->failed; ++port)
+                {
+                    uint32_t status = 0;
+                    if(!usb::hub::port_status(hub_transport(d), port, status))
+                    {
+                        if(!root_connected(d))
+                            break;
+                        retire(*c);
+                        break;
+                    }
+                    if(!(status & (1u << 16)))
+                        continue;
+                    for(auto& child : c->devices)
+                        if(child.parent == &d && child.port == port && !child.failed)
+                        {
+                            input_failure(child, OS1_USB_INPUT_HUB_CHANGE, 0, 0, status);
+                            stop_input(child);
+                            child.failed = true;
+                            child.storage.invalidate();
+                            hardware_catalog::unavailable(child.catalog_id);
+                            for(auto& descendant : c->devices)
+                                for(auto* p = descendant.parent; p; p = p->parent)
+                                    if(p == &child)
+                                    {
+                                        input_failure(
+                                            descendant, OS1_USB_INPUT_HUB_CHANGE, 0, 0, status);
+                                        stop_input(descendant);
+                                        descendant.failed = true;
+                                        descendant.storage.invalidate();
+                                        break;
+                                    }
+                        }
+                    if(!control(d, 0x23, 1, 16, port, nullptr, 0))
+                    {
+                        retire(*c);
+                        break;
+                    }
+                    if((status & 1) && !usb::hub::enumerate_port(hub_transport(d), port))
+                    {
+                        retire(*c);
+                        break;
+                    }
+                }
+            }
+        }
+        __atomic_store_n(&c->busy, 0, __ATOMIC_RELEASE);
+    }
 }

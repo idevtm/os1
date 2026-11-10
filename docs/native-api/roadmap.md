@@ -173,14 +173,14 @@ The affected desktop uses a Gigabyte H81M-S1 and Lenovo keyboard `17ef:6190`.
 PR 33 corrects firmware ownership, Intel port routing, and control-transfer construction.
 The [acceptance record](../archive/filesystems/2026-11-06-minimal-initrd.md#keyboard-hardware-acceptance) records the physical result and its limits.
 
-Current xHCI code decodes keyboard reports into console characters.
-Its mouse handler only counts reports; it does not deliver useful pointer input.
-See [xHCI](../../src/kernel/drivers/usb/xhci.cpp) and [keyboard decoding](../../src/kernel/drivers/usb/hid_keyboard.cpp).
+The [input ABI](abi/input-abi.md) implements native Keyboard, Pointer, and InputSubscription objects.
+PS/2 and supported USB paths publish shared state and events while preserving Console input.
+The [implementation record](../hardware/input-services-plan.md) separates automated evidence from pending physical acceptance.
 
-| Surface | Proposed first scope |
+| Surface | Implemented first scope |
 | --- | --- |
 | Properties | Device identity, availability, supported input classes, current key/button state |
-| Events | Key press/release, modifiers, pointer movement, buttons, and wheel where supported |
+| Events | Key state, modifiers, relative pointer movement, and three buttons; wheel support remains deferred |
 | Delivery | Volatile broadcast; every subscriber receives future events within its queue limits |
 | Recovery | Sequence/drop indication plus a state snapshot with a defined synchronization boundary |
 | Removal | Terminal device-state notification and a defined result for pending calls |
@@ -192,8 +192,8 @@ After event loss, clients must recover pressed-state consistency instead of reta
 Relative pointer movement can be lost; report that loss rather than inventing recovered movement.
 The state-snapshot protocol must cover events racing with snapshot delivery.
 
-The console consumes keyboard input through this service boundary.
-A small event-printing client can validate mouse input without a compositor.
+Console forwarding and native publication share decoded hardware reports. Console input does not consume native subscription events.
+Shell bindings can inspect state and read events without a compositor.
 Acceptance includes independent subscribers, unsubscribe, overflow recovery, device removal, and console typing.
 QEMU coverage complements physical tests; it does not close issue #27 by itself.
 Controller and hub expansion depend on the identified hardware, not assumptions about its age.
@@ -314,14 +314,15 @@ This document promotion does not imply ABI stability or approval of every illust
 
 ## Remaining priorities
 
-The selected storage and Console slices are implemented. Input services are the next functional implementation milestone.
+The selected storage, Console, and bounded native input slices are implemented.
+[Physical input retests](../hardware/2026-11-10-input-acceptance.md) pass on both reference machines; extended reliability qualification remains pending.
 This table records priority, acceptance, and dependencies without assigning new ABI numbers.
 
 | Order | Work | Acceptance | Dependency |
 | --- | --- | --- | --- |
 | 1 | Physical update preservation | An existing user file survives boot-only and program-only updates, synchronization, and reboot; updated code also runs | Existing managed USB tooling; record image hash, disk identity, commands, and results |
 | 2 | Minimal initrd and disk programs: implemented | Recovery and disk lookup checks passed; retain physical update acceptance | Typed context and configurable search are implemented; permissions and links remain deferred |
-| 3 | Native keyboard/mouse objects | Two clients receive future events; unsubscribe, overflow recovery, removal, and console typing work | Input protocol and kernel adapter event support; controller additions follow observed hardware needs |
+| 3 | Native keyboard/mouse physical acceptance | Two clients receive future events; unsubscribe, overflow recovery, removal, and console typing work | Input protocol and kernel adapter event support; controller additions follow observed hardware needs |
 | 4 | Service discovery and lifecycle | Startup grants a scoped service directory; lookup attenuates authority; shutdown/restart outcomes remain explicit | Existing capabilities and sessions; prove supported connection topology |
 | 5 | Kernel bulk I/O and BlockDevice | A real file/block client uses retained Buffer ranges; failure ends access before ownership returns | Internal kernel borrower lifetime; DMA pinning/quiescence only where device access requires it |
 | 6 | Storage growth | A larger validated filesystem preserves files and executables through updates and reboot | Multi-group ext2, directory growth, and deployment-validator changes before using full-stick capacity |
@@ -368,8 +369,8 @@ Keep full API tracing configurable until its overhead and retention costs are me
 ## Immediate implementation slice
 
 Complete physical update acceptance when hardware is available. Issue #27 now has user-confirmed keyboard recovery.
-In parallel, define native input records and the snapshot/event synchronization boundary described in [Milestone 2](#milestone-2-keyboard-and-mouse-services).
-Implement an event-monitor client before compositor work.
+Qualify the implemented [input profile](abi/input-abi.md) on the laptop and desktop before compositor work.
+Check keyboard events, relative touchpad motion, USB mouse buttons, removal, and replacement through native shell bindings.
 General reflection and generated C++ bindings do not gate this slice.
 Add kernel Buffer borrowing for a concrete bulk-data method after the input milestone, unless that method becomes an earlier requirement.
 
@@ -421,7 +422,7 @@ The [laptop retest](../archive/native-api/2026-11-10-laptop-hardware-catalog-ret
 These observations improve inspection without adding transfer support.
 Cached CPU identity, boot memory totals, and verified PCI/ACPI associations enrich the same passive view.
 Low/full-speed EHCI transfers and class drivers remain separate work.
-The first profile remains a boot snapshot. Runtime device removal does not update reflected state.
+Platform records remain boot observations. USB attachment changes now update the catalog generation and reflected state.
 The [hotplug follow-up](hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) requires detection, deferred publication, generations, notifications, and safe teardown.
 SMBIOS, detailed endpoints, broader partition formats, and vendor naming databases remain separate extensions.
 
@@ -430,5 +431,7 @@ SMBIOS, detailed endpoints, broader partition formats, and vendor naming databas
 The [driver architecture](../hardware/driver-architecture.md) consolidates detection, disk packages, hotplug, and functional objects.
 The [first slice](../hardware/driver-lifecycle-plan.md) adds shared PCI lifetime and a disk-loaded virtio-net driver.
 Boot-storage drivers remain built in; optional modules execute inside the kernel.
-USB hotplug and input services follow this foundation.
+The [input milestone](../hardware/input-services-plan.md) adds native subscriptions and bounded USB attachment changes.
+Physical input acceptance remains required before display-service work.
+SMBIOS remains deferred.
 Internal storage, fixed display output, power events, wired networking, and advanced devices follow the recorded priorities.

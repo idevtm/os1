@@ -11,6 +11,7 @@
 #include "core/timer_source.hpp"
 #include "core/wall_clock.hpp"
 #include "debug/event_ring.hpp"
+#include "drivers/usb/worker.hpp"
 #include "drivers/usb/xhci.hpp"
 #include "ipc/channel.hpp"
 #include "proc/thread.hpp"
@@ -95,6 +96,7 @@ Thread* handle_irq(TrapFrame* frame)
         if(cpu_on_boot())
         {
             xhci_poll_input();
+            usb_poll_console();
             console_input_poll_serial();
         }
     }
@@ -115,6 +117,9 @@ Thread* handle_irq(TrapFrame* frame)
     }
 
     acknowledge_irq_vector(vector);
+    // A preempted controller owner cannot release Busy for a syscall or IRQ reader.
+    if(defer_irq_work(scheduler_tick || reschedule_ipi))
+        return current_thread();
     if(cpu_on_boot())
     {
         wake_console_readers(page_frames);

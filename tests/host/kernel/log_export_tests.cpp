@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <os1/input.h>
+#include <os1/syscall_numbers.h>
 
 #include <algorithm>
 #include <array>
@@ -987,3 +989,79 @@ TEST(LogExportAuthority, RequiresControlForExportButNotStatus)
     EXPECT_EQ(sizeof(os1_log_export_info), result.payload_bytes);
 }
 }  // namespace
+
+TEST_F(LogExport, ServiceLaneRemainsAvailableInsideExport)
+{
+    shell();
+    int client = log_client();
+    ASSERT_GE(client, 0);
+    int operation = export_operation(client);
+    ASSERT_GE(operation, 0);
+    EXPECT_FALSE(ipc_run_kernel_request(KernelDispatch::Service));
+    log_export::after_history_snapshot = [] {
+        // Export owns admission. Clock, IPC, and descriptor cleanup must proceed.
+        for(auto pair : {std::pair{os1_sys_ipc, int(OS1_IPC_SUBMIT)},
+                         std::pair{os1_sys_ipc, int(OS1_IPC_RESULT)},
+                         std::pair{os1_sys_ipc, int(OS1_IPC_WAIT_MANY)},
+                         std::pair{os1_sys_ipc, int(OS1_IPC_CREATE)},
+                         std::pair{os1_sys_resource, int(OS1_RESOURCE_CLOSE)}})
+        {
+            log_export::ForegroundGuard allowed(
+                log_export::syscall_needs_filesystem(pair.first, pair.second));
+            EXPECT_TRUE(allowed.held);
+        }
+        for(auto pair : {std::pair{os1_sys_spawn, 0},
+                         std::pair{os1_sys_write, 0},
+                         std::pair{os1_sys_launch, 0},
+                         std::pair{os1_sys_resource, int(OS1_RESOURCE_OPEN_AT)}})
+        {
+            log_export::ForegroundGuard blocked(
+                log_export::syscall_needs_filesystem(pair.first, pair.second));
+            EXPECT_FALSE(blocked.held);
+        }
+        // A published snapshot stays readable while the writer owns its buffer.
+        EXPECT_EQ(1u, log_export::info().version);
+        auto& self = static_cast<LogExport_ServiceLaneRemainsAvailableInsideExport_Test&>(*active);
+        int client = self.log_client();
+        os1_ipc_message request{};
+        request.version = request.interface_version = 1;
+        request.size = sizeof(request);
+        request.interface_id = OS1_LOG_INTERFACE_ID;
+        request.member = OS1_LOG_INFO;
+        int op = self.ipc(OS1_IPC_SUBMIT, client, request);
+        ASSERT_GE(op, 0);
+        EXPECT_FALSE(ipc_run_kernel_request(KernelDispatch::Export));
+        EXPECT_TRUE(ipc_run_kernel_request(KernelDispatch::Service));
+        os1_ipc_result result{};
+        EXPECT_EQ(0, self.ipc(OS1_IPC_RESULT, op, result));
+        EXPECT_EQ(0, result.application_status);
+        descriptor_close(self.thread->process->descriptors, op);
+        descriptor_close(self.thread->process->descriptors, client);
+        auto& table = self.thread->process->descriptors;
+        initrd_namespace_root()->allowed_rights |= OS1_RIGHT_INPUT_READ;
+        InstanceRef root(open_instance(initrd_namespace_root()));
+        int fd = descriptor_install(table, root.get(), OS1_RIGHT_INPUT_READ, 0);
+        os1_ipc_kernel_binding binding{
+            1, sizeof(binding), OS1_INPUT_INTERFACE_ID, 1, OS1_RIGHT_INPUT_READ};
+        client = self.ipc(OS1_IPC_BIND_KERNEL, fd, binding);
+        ASSERT_GE(client, 0);
+        request.interface_id = OS1_INPUT_INTERFACE_ID;
+        request.member = OS1_INPUT_LIST;
+        request.payload_bytes = sizeof(os1_input_list);
+        op = self.ipc(OS1_IPC_SUBMIT, client, request);
+        ASSERT_GE(op, 0);
+        EXPECT_TRUE(ipc_run_kernel_request(KernelDispatch::Service));
+        EXPECT_EQ(0, self.ipc(OS1_IPC_RESULT, op, result));
+        EXPECT_EQ(0, result.application_status);
+        descriptor_close(table, op);
+        descriptor_close(table, client);
+        descriptor_close(table, fd);
+    };
+    ASSERT_TRUE(ipc_run_kernel_request(KernelDispatch::Export));
+    os1_ipc_result result{};
+    EXPECT_EQ(0, ipc(OS1_IPC_RESULT, operation, result));
+    EXPECT_EQ(0, result.application_status);
+    descriptor_close_all(thread->process->descriptors);
+    log_export::ForegroundGuard released;
+    EXPECT_TRUE(released.held);
+}

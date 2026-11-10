@@ -100,7 +100,7 @@ struct Completion
     static bool token(char c)
     {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-               c == '_' || c == '.';
+               c == '_' || c == '.' || c == '[' || c == ']';
     }
     unsigned value_end(unsigned at) const
     {
@@ -557,9 +557,19 @@ struct Completion
                 replacement[length++] = *s++;
             return !*s;
         };
-        if(!append(view.member(id).name))
-            return false;
         unsigned first = prefix;
+        const auto selected_member = view.member(id);
+        bool indexed = index_name(selected_member.name);
+        if(indexed)
+        {
+            if(first > start && line[first - 1] == '.')
+                --first;
+            append("[");
+        }
+        if(!append(selected_member.name))
+            return false;
+        if(indexed)
+            append("]");
         if(descend && object)
             append(".");
         bool method = view.member(id).kind == Kind::Method;

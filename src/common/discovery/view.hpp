@@ -1,5 +1,7 @@
 #pragma once
 #include <os1/console.h>
+#include <os1/hardware.h>
+#include <os1/input.h>
 #include <os1/log.h>
 #include <os1/system.h>
 #include <os1/vfs.h>
@@ -43,6 +45,7 @@ struct Grants
 struct Cursor
 {
     uint64_t generation = 0;
+    uint64_t external_generation = 0;
     uint32_t parent = 0, next = 0;
 };
 struct Page
@@ -58,6 +61,15 @@ inline bool copy(char* out, unsigned capacity, const char* in)
         out[i] = in[i];
     out[i] = 0;
     return !in[i];
+}
+inline bool index_name(const char* name)
+{
+    if(!*name)
+        return false;
+    for(; *name; ++name)
+        if(*name < '0' || *name > '9')
+            return false;
+    return true;
 }
 inline const char* kind_name(Kind k)
 {
@@ -200,6 +212,36 @@ struct View
     {
         if(!path)
             return -1;
+        char normalized[path_limit]{};
+        unsigned used = 0;
+        for(unsigned i = 0;; ++i)
+        {
+            if(i >= path_limit || used + 1 >= path_limit)
+                return -1;
+            if(!path[i])
+                break;
+            if(path[i] == ']')
+                return -1;
+            if(path[i] != '[')
+            {
+                normalized[used++] = path[i];
+                continue;
+            }
+            if(!used || normalized[used - 1] == '.')
+                return -1;
+            normalized[used++] = '.';
+            unsigned begin = ++i;
+            while(i < path_limit && path[i] >= '0' && path[i] <= '9')
+            {
+                if(used + 1 >= path_limit)
+                    return -1;
+                normalized[used++] = path[i++];
+            }
+            if(i == begin || i + 1 >= path_limit || path[i] != ']' ||
+               (path[i + 1] && path[i + 1] != '.' && path[i + 1] != '['))
+                return -1;
+        }
+        path = normalized;
         unsigned current = 0, start = 0, depth = 0;
         for(unsigned i = 0; i < path_limit; ++i)
         {
@@ -402,6 +444,12 @@ struct View
             add(text, "count", Kind::Method, "source:PathOrStream=input", 0, 0, 0, Local | Shell);
             unsigned pager = add(0, "pager", Kind::Object, "Pager");
             add(pager, "show", Kind::Method, "path:String", 0, 0, 0, Local | Shell);
+        }
+        if(g.root.rights & OS1_RIGHT_INPUT_READ)
+        {
+            unsigned input = add(os, "input", Kind::Object, "InputDevices", OS1_RIGHT_INPUT_READ);
+            nodes[input].flags = Alias;
+            nodes[input].target = OS1_HARDWARE_INPUT_ROOT;
         }
         unsigned system = 0;
         if(g.root.rights & (OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL))

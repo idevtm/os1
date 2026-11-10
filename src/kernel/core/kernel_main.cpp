@@ -1,6 +1,6 @@
-#include "platform/hardware.hpp"
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
+#include "platform/hardware.hpp"
 // Shared kernel entry and bring-up sequencing. Boot-frontends normalize their
 // native firmware/bootloader state into BootInfo, then both paths arrive here.
 #include <stdbool.h>
@@ -30,6 +30,8 @@
 #include "drivers/display/text_display.hpp"
 #include "drivers/module/loader.hpp"
 #include "drivers/timer/pit.hpp"
+#include "drivers/usb/diagnostics.hpp"
+#include "drivers/usb/worker.hpp"
 #include "drivers/usb/xhci.hpp"
 #include "drivers/watchdog/intel_tco.hpp"
 #include "fs/initrd.hpp"
@@ -54,12 +56,12 @@
 
 extern "C"
 {
-extern uint8_t __kernel_text_start[];
-extern uint8_t __kernel_text_end[];
-extern uint8_t __kernel_rodata_start[];
-extern uint8_t __kernel_rodata_end[];
-extern uint8_t __kernel_data_start[];
-extern uint8_t __kernel_bss_end[];
+    extern uint8_t __kernel_text_start[];
+    extern uint8_t __kernel_text_end[];
+    extern uint8_t __kernel_rodata_start[];
+    extern uint8_t __kernel_rodata_end[];
+    extern uint8_t __kernel_data_start[];
+    extern uint8_t __kernel_bss_end[];
 }
 
 namespace
@@ -72,6 +74,7 @@ constexpr uint32_t kLapicCalibrationInitialCount = 0xFFFFFFFFu;
 constexpr uint8_t kPitSchedulerVector = static_cast<uint8_t>(T_IRQ0 + IRQ_TIMER);
 constexpr DeviceId kPitTimerOwner{DeviceBus::Platform, 0};
 constexpr DeviceId kKeyboardOwner{DeviceBus::Platform, 1};
+constexpr DeviceId kPointerOwner{DeviceBus::Platform, 3};
 constexpr DeviceId kLapicTimerOwner{DeviceBus::Platform, 2};
 // Real-hardware bring-up watchdog: the platform resets after two stages without
 // a kick. After /bin/init starts, a longer stage leaves time at the shell and
@@ -121,7 +124,8 @@ void attach_uefi_bootlog(VirtualMemory& kvm)
         }
         if(!bootlog_attach_window(candidate, kBootLogUefiWindowBytes, shim_log))
         {
-            debug("bootlog: candidate 0x")(candidate, 16)(" memmap type ")(type)(" has no valid header")();
+            debug("bootlog: candidate 0x")(candidate,
+                                           16)(" memmap type ")(type)(" has no valid header")();
             continue;
         }
         if(boot_memory_region_is_usable(*region))
@@ -195,7 +199,8 @@ bool create_idle_threads_for_discovered_cpus(Process* kernel_process)
 {
     for(cpu* c = g_cpu_boot; nullptr != c; c = c->next)
     {
-        if(nullptr == create_idle_thread_for_cpu(kernel_process, c, kernel_idle_thread, page_frames))
+        if(nullptr ==
+           create_idle_thread_for_cpu(kernel_process, c, kernel_idle_thread, page_frames))
         {
             debug("cpu: idle thread creation failed for cpu ")(c->id)();
             return false;
@@ -222,17 +227,20 @@ bool spawn_kernel_smp_ping_threads(Process* kernel_process)
 
     for(size_t index = 0; index < booted_ap_count; ++index)
     {
-        if(nullptr == create_kernel_thread(kernel_process, [] {
-               cpu* local_cpu = cpu_cur();
-               const uint64_t ping_count = ++local_cpu->kernel_thread_ping_count;
-               kernel_event::record(OS1_KERNEL_EVENT_KERNEL_THREAD_PING,
-                                    OS1_KERNEL_EVENT_FLAG_SUCCESS,
-                                    local_cpu->id,
-                                    ping_count,
-                                    reinterpret_cast<uint64_t>(local_cpu),
-                                    0);
-               finish_kernel_thread(0);
-           }, page_frames))
+        if(nullptr == create_kernel_thread(
+                          kernel_process,
+                          [] {
+                              cpu* local_cpu = cpu_cur();
+                              const uint64_t ping_count = ++local_cpu->kernel_thread_ping_count;
+                              kernel_event::record(OS1_KERNEL_EVENT_KERNEL_THREAD_PING,
+                                                   OS1_KERNEL_EVENT_FLAG_SUCCESS,
+                                                   local_cpu->id,
+                                                   ping_count,
+                                                   reinterpret_cast<uint64_t>(local_cpu),
+                                                   0);
+                              finish_kernel_thread(0);
+                          },
+                          page_frames))
         {
             return false;
         }
@@ -337,10 +345,7 @@ bool calibrate_lapic_timer_from_hpet(uint32_t target_hz, uint32_t& initial_count
     }
 
     uint64_t calibrated_count = 0;
-    if(!divide_product_rounded(elapsed_lapic_counts,
-                               kFsPerSecond,
-                               denominator,
-                               calibrated_count) ||
+    if(!divide_product_rounded(elapsed_lapic_counts, kFsPerSecond, denominator, calibrated_count) ||
        (0u == calibrated_count) || (calibrated_count > 0xFFFFFFFFu))
     {
         return false;
@@ -374,8 +379,8 @@ bool prepare_scheduler_timer()
                                  lapic_vector,
                                  lapic_initial_count,
                                  kSchedulerTimerFrequencyHz);
-            debug("timer: LAPIC source vector=0x")(lapic_vector, 16, 2)(" count=")(
-                lapic_initial_count)();
+            debug("timer: LAPIC source vector=0x")(
+                lapic_vector, 16, 2)(" count=")(lapic_initial_count)();
             return true;
         }
 
@@ -388,13 +393,13 @@ bool prepare_scheduler_timer()
     }
 
     timer_source_set_ap_timer_enabled(false);
-    kernel_event::record(OS1_KERNEL_EVENT_TIMER_SOURCE,
-                         OS1_KERNEL_EVENT_FLAG_SUCCESS |
-                             OS1_KERNEL_EVENT_TIMER_SOURCE_AP_TICKS_DISABLED,
-                         OS1_KERNEL_EVENT_TIMER_SOURCE_PIT,
-                         kPitSchedulerVector,
-                         kSchedulerTimerFrequencyHz,
-                         0);
+    kernel_event::record(
+        OS1_KERNEL_EVENT_TIMER_SOURCE,
+        OS1_KERNEL_EVENT_FLAG_SUCCESS | OS1_KERNEL_EVENT_TIMER_SOURCE_AP_TICKS_DISABLED,
+        OS1_KERNEL_EVENT_TIMER_SOURCE_PIT,
+        kPitSchedulerVector,
+        kSchedulerTimerFrequencyHz,
+        0);
     debug("timer: PIT fallback configured (AP ticks disabled)")();
     return true;
 }
@@ -412,7 +417,7 @@ bool prepare_scheduler_timer()
     }
 
     if(!spawn_kernel_smp_ping_threads((nullptr != current_thread()) ? current_thread()->process
-                                                                  : nullptr))
+                                                                    : nullptr))
     {
         finish_boot_sequence_thread(1);
     }
@@ -451,6 +456,9 @@ bool prepare_scheduler_timer()
     xhci_capture_catalog_state();
     hardware_capture_platform(*g_boot_info);
     hardware_freeze_bindings();
+    usb::diagnostics::freeze();
+    if(!usb_start_worker(current_thread()->process, page_frames))
+        write_console_line("USB worker unavailable");
     write_console_line("starting first user process");
     mark_thread_ready(init_thread);
     finish_boot_sequence_thread(0);
@@ -563,9 +571,8 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     // before activating the kernel page tables.
     for(uint32_t i = 0; i < g_boot_info->module_count; ++i)
     {
-        if(!map_direct_range(kvm,
-                             g_boot_info->modules[i].physical_start,
-                             g_boot_info->modules[i].length))
+        if(!map_direct_range(
+               kvm, g_boot_info->modules[i].physical_start, g_boot_info->modules[i].length))
         {
             return;
         }
@@ -671,7 +678,8 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
             return;
         }
 
-        terminal[i].set_buffer(kernel_physical_pointer<uint16_t>(page), terminal_columns, terminal_rows);
+        terminal[i].set_buffer(
+            kernel_physical_pointer<uint16_t>(page), terminal_columns, terminal_rows);
         terminal[i].clear();
         terminal[i].write("Terminal ");
         terminal[i].write_int_line(i + 1);
@@ -752,7 +760,8 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     console_input_initialize();
     if(ismp)
     {
-        if(!platform_route_isa_irq(kKeyboardOwner, IRQ_KBD, T_IRQ0 + IRQ_KBD))
+        if(!platform_route_isa_irq(kKeyboardOwner, IRQ_KBD, T_IRQ0 + IRQ_KBD) ||
+           !platform_route_isa_irq(kPointerOwner, 12, T_IRQ0 + 12))
         {
             return;
         }

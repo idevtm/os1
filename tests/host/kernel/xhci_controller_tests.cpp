@@ -769,3 +769,59 @@ TEST(XhciControl, ConfigurationMustContainCompleteBoundedDescriptors)
     bytes[18] = 8;
     EXPECT_FALSE(xhci::valid_configuration_descriptors(bytes.data(), bytes.size()));
 }
+
+TEST(XhciController, NegotiatesFullSpeedReceiverControlPacketBeforeLongDescriptor)
+{
+    uint8_t descriptor[8] = {18, 1, 0, 2, 0, 0, 0, 32};  // Logitech 046d:c539 prefix.
+    uint16_t packet = 0;
+    ASSERT_TRUE(xhci::device_control_packet(1, descriptor, sizeof(descriptor), packet));
+    EXPECT_EQ(packet, 32);
+    for(unsigned value : {8, 16, 32, 64})
+    {
+        descriptor[7] = value;
+        EXPECT_TRUE(xhci::device_control_packet(1, descriptor, 8, packet));
+        EXPECT_EQ(packet, value);
+    }
+    descriptor[7] = 32;
+    EXPECT_FALSE(xhci::device_control_packet(2, descriptor, 8, packet));
+    EXPECT_FALSE(xhci::device_control_packet(3, descriptor, 8, packet));
+    EXPECT_FALSE(xhci::device_control_packet(1, descriptor, 7, packet));
+    descriptor[7] = 9;
+    EXPECT_TRUE(xhci::device_control_packet(4, descriptor, 8, packet));
+    EXPECT_EQ(packet, 512);
+    EXPECT_FALSE(xhci::device_control_packet(1, descriptor, 8, packet));
+    descriptor[1] = 2;
+    EXPECT_FALSE(xhci::device_control_packet(4, descriptor, 8, packet));
+}
+
+TEST(XhciController, EvaluateContextChangesOnlyPacketSizeAndPreservesEp0Dequeue)
+{
+    for(unsigned width : {32, 64})
+    {
+        std::array<uint8_t, 192> input{};
+        std::array<uint8_t, 128> output{};
+        for(unsigned i = 0; i < width; ++i)
+            output[width + i] = i + 1;
+        input.fill(0xff);
+        ASSERT_TRUE(xhci::prepare_control_packet_context(
+            input.data(), input.size(), output.data(), output.size(), width, 32));
+        EXPECT_EQ(read32(input, 0), 0);
+        EXPECT_EQ(read32(input, 4), 2);
+        for(unsigned i = 0; i < width; ++i)
+        {
+            unsigned expected = i == 6 ? 32 : i == 7 ? 0 : i + 1;
+            EXPECT_EQ(input[width * 2 + i], expected);
+            EXPECT_EQ(input[width + i], 0);
+        }
+        EXPECT_FALSE(xhci::prepare_control_packet_context(
+            input.data(), width * 2, output.data(), output.size(), width, 32));
+    }
+}
+
+TEST(XhciController, ConvertsUsbInterruptIntervalsToMicroframeExponents)
+{
+    EXPECT_EQ(xhci::interrupt_interval(1, 1), 3);   // Full speed, 1 ms.
+    EXPECT_EQ(xhci::interrupt_interval(2, 10), 6);  // Low speed, 8 ms <= 10 ms.
+    EXPECT_EQ(xhci::interrupt_interval(1, 255), 10);
+    EXPECT_EQ(xhci::interrupt_interval(3, 4), 3);  // High speed already logarithmic.
+}

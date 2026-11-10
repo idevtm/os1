@@ -24,7 +24,8 @@ extern "C" Thread* trap_dispatch(TrapFrame* frame)
     {
         // The x86-64 UAPI enters through the two-byte INT 0x80 instruction.
         // Retry before any side effect when background export owns filesystem admission.
-        log_export::ForegroundGuard foreground;
+        log_export::ForegroundGuard foreground(log_export::syscall_needs_filesystem(
+            frame->rax, frame->rax == os1_sys_ipc ? frame->rdi : frame->rsi));
         if(!foreground.held)
         {
             frame->rip -= 2;

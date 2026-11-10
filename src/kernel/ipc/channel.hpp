@@ -26,7 +26,16 @@ extern int host_ipc_kernel_allocation_budget;
 // Start once before publishing user processes. Dispatch runs in thread context.
 bool ipc_start_kernel_worker(Process*, PageFrameContainer&);
 // One nonblocking dispatch step; also used by host contract tests.
-bool ipc_run_kernel_request();
+enum class KernelDispatch : uint8_t
+{
+    Any,
+    Service,
+    Export
+};
+bool ipc_run_kernel_request(KernelDispatch lane = KernelDispatch::Any);
 
-// Atomic check/registration for the single kernel worker; empty IPC selection.
-bool ipc_wait_kernel_work(Thread*);
+// Atomic check/registration for a kernel dispatch lane; empty IPC selection.
+bool ipc_wait_kernel_work(Thread*, KernelDispatch lane = KernelDispatch::Any);
+
+// Kernel-thread timed sleep; shares acknowledged scheduler-frame retirement.
+void kernel_sleep_for(Thread*, uint64_t delay_ns);

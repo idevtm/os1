@@ -4,7 +4,7 @@ This profile exposes cached hardware descriptions without device control.
 The shell uses the same bounded descriptions for context inspection, field values, and completion.
 
 ```text
-PCI / USB / ACPI / CPU boot records
+Platform boot records + USB runtime attachment records
                  |
       observe(HARDWARE, query)
                  |
@@ -25,13 +25,13 @@ It grants no device-control, register, DMA, interrupt, or service authority.
 Scoped hardware-inspection capabilities remain future work.
 No query performs hardware transactions, firmware evaluation, driver activation, allocation, or filesystem access.
 
-The catalog describes boot-discovered records, not hotplug state.
+Platform records describe boot discovery. Version 2 USB records also track bounded runtime attachment changes.
 Version 1 retains the original diagnostic-backed USB view. Version 2 adds the normalized catalog below.
 Driver names and states are captured before the first user process starts.
 The snapshot stores up to 16 distinct driver names, matching the existing PCI driver registry limit.
 It copies each name once and retains a small name index and state for each PCI function.
 Logical processor records describe firmware discovery, not current scheduler activity.
-USB records describe captured port and enumeration outcomes.
+Version 1 USB records retain boot port and enumeration outcomes. Version 2 records also expose removal and replacement.
 Normal and diagnostic boots retain xHCI outcomes.
 
 ## Discovery paths
@@ -43,7 +43,7 @@ Normal and diagnostic boots retain xHCI outcomes.
 | `os.devices.topology` | PCI and USB records without a known physical parent |
 | `os.devices.classes` | Input, storage, network, display, controller, and other views |
 | `os.devices.drivers` | PCI records with a captured binding or failed probe |
-| `os.devices.coverage` | Text that identifies the boot-snapshot scope |
+| `os.devices.coverage` | Text that separates platform snapshots from runtime USB updates |
 | `os.devices.usb_records_dropped` | USB records lost because the capture array was full |
 | `os.firmware.acpi` | Cached ACPI device records, including inactive records |
 | `os.system.processors` | Firmware-discovered logical processor records |
@@ -104,6 +104,8 @@ The structures use natural eight-byte alignment.
 Each node has four 32-bit fields: `id`, `parent`, `type`, and `reserved`.
 An eight-byte integer follows them. The name and text buffers contain 64 and 96 bytes, including terminators.
 Node type 0 describes an object; type 1 describes an integer; type 2 describes a string.
+Type 3 describes a method in the separate [live input tree](input-abi.md#passive-discovery-transport).
+Hardware catalog nodes remain passive objects and fields; their existing layouts do not change.
 The node `parent` describes canonical discovery placement, not physical attachment.
 Use `parent_id` for physical attachment.
 
@@ -118,8 +120,8 @@ Pass exactly 1512 bytes to `observe`.
 `DESCRIBE` returns one node and requires `start=0`.
 `CHILDREN` returns up to eight nodes.
 Use `next` as the next `start` until `end` is nonzero.
-The immutable catalog uses generation 1 within the current boot.
-A different generation returns `CANCELLED`.
+The catalog starts at generation 1. Runtime publication increments its generation.
+A nonzero stale generation returns `CANCELLED`. Restart traversal from its first page after this result.
 Invalid versions, operations, reserved fields, payloads, or cursor positions return `INVALID`.
 Unknown IDs return `NOT_FOUND`. Source counts above 1024 return `LIMIT` during enumeration.
 A driver-name snapshot overflow makes hardware queries return `LIMIT` until the snapshot is reset.
@@ -133,7 +135,8 @@ The runtime retains one 1512-byte page cache rather than a complete hardware tre
 Completion retains at most 2048 matching IDs and displays eight choices at a time.
 It rejects a larger result rather than writing beyond the match array.
 Path length remains 256 bytes; resolution and alias traversal remain bounded to 16 steps.
-Runtime refresh invalidates discovery cursors even though the boot catalog remains unchanged.
+Runtime refresh invalidates discovery cursors and clears the page cache.
+Each traversal pins the catalog generation; concurrent attachment changes can cancel it.
 
 Hardware fields evaluate to typed data and can be copied into shell bindings.
 The `context` command also displays their cached values beside field types.
@@ -201,7 +204,7 @@ IDs remain boot-local and grant no authority.
 | 33: `backing` | Collection containing the backing object |
 | 34: `consumers` | Collection containing objects backed by this object |
 | 35: `identifier` | Filesystem UUID text when available; empty otherwise |
-| 36: `observation` | `boot_snapshot` |
+| 36: `observation` | `runtime_catalog` for normalized USB and storage records; `boot_snapshot` for platform records |
 | 37: `backing_id` | Backing object ID, or zero |
 
 Forward and reverse collections return canonical object records, not copies with different identities.
@@ -224,11 +227,13 @@ Mount `name` contains the mount path.
 
 Unknown numeric fields return `NOT_FOUND` and do not appear in child enumeration.
 `state` describes the captured record outcome; it does not promise current physical presence or usable service authority.
-The catalog has no functional device endpoints in this slice.
+The catalog grants no functional authority.
+USB input records expose an `input_identity` that matches the corresponding live `os.input` child.
+The child provides its own authorized `open` method.
 
-EHCI publishes an anonymous USB device for a stable connected low/full-speed hub child.
-Its `state` is `unsupported_speed`; its speed, parent, and port fields remain available.
-Vendor ID, product ID, class, version, configuration, and assigned address remain absent.
+EHCI enumerates low/full-speed children through high-speed hubs with transaction translators.
+It publishes descriptors and binds supported boot keyboards or pointers. Other interfaces remain unbound.
+Unsupported paths can retain anonymous presence records. Their unknown identity fields remain absent.
 A connected unusable EHCI root port publishes `not_enumerated`, with no assumed speed.
 These records describe observed presence, not successful enumeration or usable device authority.
 Capture uses existing status reads and does not add transfers or change port isolation.
@@ -238,14 +243,27 @@ Capture allocates one bounded catalog during boot. Its capacity is 256 normalize
 Three separate fixed records hold CPU identity, boot memory totals, and boot handoff facts.
 Allocation failure or capacity exhaustion increments the loss counter and does not fail device startup.
 Partial captures can contain unknown backing relationships. Utilities return failure when the loss counter is nonzero.
-The boot thread freezes publication before the first user process runs.
+The boot thread freezes platform bindings and legacy diagnostics before the first user process runs.
+The USB worker can subsequently update the normalized catalog under its lock.
 Queries do not allocate, acquire device sessions, or mutate the catalog.
 
 ## Hotplug state
 
-Device removal does not update these snapshots. A displayed mount can become unavailable after boot.
-Programs must not use snapshot state as proof that I/O will succeed.
-The [hotplug follow-up](../hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) defines generation updates and removal handling.
+```text
+port change -> deferred enumeration or removal -> locked catalog update -> new generation
+replacement -> new identity; old device and dependent resources -> unavailable
+```
+
+The USB worker polls xHCI root ports and supported EHCI roots and hubs.
+Removed device, interface, block, partition, filesystem, and mount records remain visible as unavailable.
+New attachments receive new identities. Reconnection does not revive an old storage mount.
+No automatic remount or filesystem recovery occurs in this slice.
+
+The catalog retains at most 256 normalized records until reboot. Driver attachment limits can be lower.
+Capacity exhaustion stops additional publication or admission; it does not reuse a retained identity.
+Observation does not guarantee successful I/O or immediate physical presence between polls.
+The [input ABI](input-abi.md) defines input access, transport limits, and retirement behavior.
+The [hotplug plan](../hardware-catalog-plan.md#follow-up-hotplug-state-and-reflection-updates) retains broader notification and recovery work.
 
 ## Inspection utilities
 
@@ -337,4 +355,4 @@ The search stops after 16 device levels; deeper associations can remain absent.
 USB, processor, and arbitrary AML associations are not inferred from names.
 
 Inspection never evaluates AML or executes CPUID.
-Capture runs before immutable publication and uses bounded memory.
+Platform capture runs before publication and uses bounded memory. Runtime USB publication remains separate.

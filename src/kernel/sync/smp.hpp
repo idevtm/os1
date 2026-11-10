@@ -14,6 +14,7 @@
 #define OS1_LOCKED_BY(name) [[maybe_unused]]
 
 #if defined(OS1_HOST_TEST)
+inline thread_local bool host_interrupts_enabled = true;
 #define KASSERT_ON_BSP() \
     do                   \
     {                    \
@@ -27,13 +28,13 @@
 [[noreturn]] void kassert_on_bsp_failed(const char* file, int line);
 
 #ifndef NDEBUG
-#define KASSERT_ON_BSP()                         \
-    do                                           \
-    {                                            \
-        if(!kernel_on_bsp())                     \
-        {                                        \
+#define KASSERT_ON_BSP()                               \
+    do                                                 \
+    {                                                  \
+        if(!kernel_on_bsp())                           \
+        {                                              \
             kassert_on_bsp_failed(__FILE__, __LINE__); \
-        }                                        \
+        }                                              \
     } while(false)
 #else
 #define KASSERT_ON_BSP() \
@@ -106,7 +107,8 @@ private:
 class IrqGuard
 {
 public:
-    IrqGuard() : saved_rflags_(read_rflags()), restore_interrupts_((saved_rflags_ & kInterruptFlag) != 0)
+    IrqGuard()
+        : saved_rflags_(read_rflags()), restore_interrupts_((saved_rflags_ & kInterruptFlag) != 0)
     {
         disable_interrupts();
     }
@@ -133,7 +135,7 @@ private:
     [[nodiscard]] static uint64_t read_rflags()
     {
 #if defined(OS1_HOST_TEST)
-        return kInterruptFlag;
+        return host_interrupts_enabled ? kInterruptFlag : 0;
 #else
         uint64_t value = 0;
         asm volatile("pushfq; popq %0" : "=r"(value) : : "memory");
@@ -143,14 +145,18 @@ private:
 
     static void disable_interrupts()
     {
-#if !defined(OS1_HOST_TEST)
+#if defined(OS1_HOST_TEST)
+        host_interrupts_enabled = false;
+#else
         asm volatile("cli" ::: "memory");
 #endif
     }
 
     static void enable_interrupts()
     {
-#if !defined(OS1_HOST_TEST)
+#if defined(OS1_HOST_TEST)
+        host_interrupts_enabled = true;
+#else
         asm volatile("sti" ::: "memory");
 #endif
     }
@@ -159,7 +165,7 @@ private:
     bool restore_interrupts_;
 };
 
-template <typename Lock = Spinlock>
+template<typename Lock = Spinlock>
 class IrqSpinGuard
 {
 public:

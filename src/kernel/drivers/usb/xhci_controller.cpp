@@ -389,6 +389,69 @@ bool control_transfer_event(ControlTransfer& transfer, const EventInfo& event)
     return true;
 }
 
+bool device_control_packet(uint8_t speed, const void* prefix, size_t actual, uint16_t& packet)
+{
+    packet = 0;
+    const auto* bytes = static_cast<const uint8_t*>(prefix);
+    if(!bytes || actual != 8 || bytes[0] != 18 || bytes[1] != 1)
+        return false;
+    unsigned value = bytes[7];
+    if(speed == 2 && value != 8)
+        return false;
+    if(speed == 3 && value != 64)
+        return false;
+    if(speed >= 4 && speed <= 5)
+    {
+        if(value != 9)
+            return false;
+        value = 512;
+    }
+    else if(speed != 1 && speed != 2 && speed != 3)
+        return false;
+    if(value != 8 && value != 16 && value != 32 && value != 64 && value != 512)
+        return false;
+    packet = value;
+    return true;
+}
+
+bool prepare_control_packet_context(void* input,
+                                    size_t input_bytes,
+                                    const void* output,
+                                    size_t output_bytes,
+                                    unsigned context_bytes,
+                                    uint16_t packet)
+{
+    if(!input || !output || (context_bytes != 32 && context_bytes != 64) ||
+       input_bytes < 3 * context_bytes || output_bytes < 2 * context_bytes ||
+       (packet != 8 && packet != 16 && packet != 32 && packet != 64 && packet != 512))
+        return false;
+    auto* in = static_cast<uint8_t*>(input);
+    const auto* out = static_cast<const uint8_t*>(output);
+    for(size_t i = 0; i < input_bytes; ++i)
+        in[i] = 0;
+    for(unsigned i = 0; i < context_bytes; ++i)
+        in[2 * context_bytes + i] = out[context_bytes + i];
+    // Add EP0 only; preserve the controller's dequeue position and lower fields.
+    in[4] = 2;
+    in[2 * context_bytes + 6] = packet & 255;
+    in[2 * context_bytes + 7] = packet >> 8;
+    return true;
+}
+
+uint8_t interrupt_interval(uint8_t speed, uint8_t interval)
+{
+    if(speed >= 3)
+        return interval ? (interval > 16 ? 15 : interval - 1) : 0;
+    // USB low/full-speed bInterval is milliseconds; xHCI uses powers of microframes.
+    uint8_t exponent = 3;
+    while(interval > 1)
+    {
+        interval >>= 1;
+        ++exponent;
+    }
+    return exponent;
+}
+
 bool valid_descriptor_header(const void* bytes, size_t actual, uint8_t type, uint8_t minimum)
 {
     const auto* header = static_cast<const uint8_t*>(bytes);

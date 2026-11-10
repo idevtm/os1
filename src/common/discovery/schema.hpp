@@ -59,17 +59,24 @@ inline bool member_path(const View& view, unsigned id, char* out, unsigned capac
     {
         const auto member = view.member(stack[--count]);
         const char* name = member.name;
+        bool indexed = used && index_name(name);
         if(used)
         {
             if(used + 1 >= capacity)
                 return false;
-            out[used++] = '.';
+            out[used++] = indexed ? '[' : '.';
         }
         while(*name)
         {
             if(used + 1 >= capacity)
                 return false;
             out[used++] = *name++;
+        }
+        if(indexed)
+        {
+            if(used + 1 >= capacity)
+                return false;
+            out[used++] = ']';
         }
     }
     out[used] = 0;
@@ -105,6 +112,11 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
         return d;
     }
     if(interface == OS1_CONSOLE_INPUT_INTERFACE_ID)
+        return d;
+    if(interface == OS1_INPUT_INTERFACE_ID)
+        return d;  // Device-local open carries its identity in the discovered member.
+    if(interface == OS1_KEYBOARD_INTERFACE_ID || interface == OS1_POINTER_INTERFACE_ID ||
+       interface == OS1_INPUT_SUBSCRIPTION_INTERFACE_ID)
         return d;
     if(interface == OS1_SYSTEM_INTERFACE_ID)
         return d;

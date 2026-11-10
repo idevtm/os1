@@ -1,6 +1,7 @@
 #include "debug/log.hpp"
 
 #include <os1/console.h>
+#include <os1/input.h>
 #include <os1/observe.h>
 #include <os1/resource.h>
 #include <os1/syscall_numbers.h>
@@ -339,7 +340,9 @@ void syscall_end(Thread* t, int64_t status)
     r.duration_ns = now() - r.time_ns;
     if(r.arg0 == os1_sys_ipc)
     {
-        if(status < 0 && status != OS1_ERR_WOULD_BLOCK)
+        const bool expected_timeout = status == OS1_ERR_TIMED_OUT &&
+                                      (r.arg1 == OS1_IPC_WAIT_UNTIL || r.arg1 == OS1_IPC_WAIT_MANY);
+        if(status < 0 && status != OS1_ERR_WOULD_BLOCK && (diagnostic || !expected_timeout))
         {
             r.level = OS1_LOG_WARNING;
             append(r);
@@ -348,16 +351,27 @@ void syscall_end(Thread* t, int64_t status)
     }
     if(status < 0)
         r.level = OS1_LOG_WARNING;
+    bool resource_effect =
+        r.arg0 == os1_sys_resource && r.arg1 != OS1_RESOURCE_CLOSE && r.arg1 != OS1_RESOURCE_QUERY;
     if(diagnostic || status < 0 || r.arg0 == os1_sys_launch || r.arg0 == os1_sys_spawn ||
-       r.arg0 == os1_sys_exec || r.arg0 == os1_sys_exit || r.arg0 == os1_sys_resource)
+       r.arg0 == os1_sys_exec || r.arg0 == os1_sys_exit || resource_effect)
         append(r);
+}
+bool input_poll(const os1_log_record& r)
+{
+    return (r.interface_id == OS1_INPUT_SUBSCRIPTION_INTERFACE_ID &&
+            r.arg0 == OS1_INPUT_TRY_READ) ||
+           ((r.interface_id == OS1_KEYBOARD_INTERFACE_ID ||
+             r.interface_id == OS1_POINTER_INTERFACE_ID) &&
+            r.arg0 == OS1_INPUT_GET_STATE) ||
+           (r.interface_id == OS1_INPUT_INTERFACE_ID && r.arg0 == OS1_INPUT_LIST);
 }
 bool trace_ipc(const os1_log_record& r)
 {
     if(diagnostic)
         return true;
     if(r.interface_id == OS1_CONSOLE_INTERFACE_ID ||
-       r.interface_id == OS1_CONSOLE_INPUT_INTERFACE_ID)
+       r.interface_id == OS1_CONSOLE_INPUT_INTERFACE_ID || input_poll(r))
         return false;
     if(r.interface_id == OS1_FILE_INTERFACE_ID)
         return r.arg0 == OS1_FILE_WRITE || r.arg0 == OS1_FILE_APPEND ||
@@ -387,7 +401,9 @@ void ipc_end(const os1_log_record& origin_record, int64_t status)
 {
     if(!origin_record.kind)
         return;
-    if(!diagnostic && origin_record.interface_id == OS1_CONSOLE_INPUT_INTERFACE_ID &&
+    if(!diagnostic &&
+       (origin_record.interface_id == OS1_CONSOLE_INPUT_INTERFACE_ID ||
+        input_poll(origin_record)) &&
        status == OS1_ERR_WOULD_BLOCK)
         return;  // An empty key queue is normal while an interactive shell waits.
     auto r = origin_record;

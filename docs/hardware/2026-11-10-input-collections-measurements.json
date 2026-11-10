@@ -1,0 +1,2211 @@
+{
+  "samples": [
+    {
+      "label": "baseline",
+      "firmware": "bios",
+      "repeat": 0,
+      "before": "sys\nsys boot=bios console=vga ticks=37 pages=31579/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3195 frees=3146 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=252 frees=224 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3741 frees=2087 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=29 frees=28 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.994382499717176,
+      "runner_seconds": 1.9653094997629523,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x38d000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-d9271e6cf2f68603/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=1636000000\nrun-tests: hardware snapshots\nPASS system snapshot status=0 time_ns=1650000000\nPASS PCI snapshot status=0 time_ns=1658000000\nPASS USB boot snapshot status=0 time_ns=1666000000\nPASS lshw status=0 time_ns=1718000000\nPASS lspci status=0 time_ns=1737000000\nPASS lsusb status=0 time_ns=1745000000\nPASS lsblk status=0 time_ns=1755000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=1766000000\nPASS disk write/sync/read status=0 time_ns=1775000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=1787000000\nSKIP expected USB mouse status=-12 time_ns=1794000000\nSKIP physical stimulus observed status=0 time_ns=2815000000\nSKIP physical stimulus observed status=0 time_ns=2830000000\nPASS USB after input status=0 time_ns=2841000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2853000000\nPASS kernel log copy status=0 time_ns=2887000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3210 frees=3161 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4839 frees=4811 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3875 frees=2221 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=151 frees=150 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=73 frees=13 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=bios console=vga ticks=3050 pages=31542/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> ",
+      "child_cpu_seconds": 4.509971,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.019903958775103092
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.026979041285812855
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.2328753750771284
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.14818183332681656
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09181062504649162
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09617308340966702
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09350037481635809
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09174779057502747
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0918277082964778
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09438775014132261
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09970074985176325
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09962829202413559
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0949823334813118
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09243258461356163
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09411358367651701
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.16781904082745314
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09076470881700516
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09127041604369879
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09115129243582487
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09056554082781076
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09084933251142502
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09189399983733892
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09155741613358259
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.9653073754161596
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.2310375003144145
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.026369291357696056
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.289648958481848,
+        "startup_seconds": 0.4651882080361247,
+        "prelude_seconds": 0.019909875467419624,
+        "workload_seconds": 4.804326124489307,
+        "cleanup_seconds": 0.00022475048899650574
+      }
+    },
+    {
+      "label": "candidate",
+      "firmware": "bios",
+      "repeat": 0,
+      "before": "sys\nsys boot=bios console=vga ticks=38 pages=31576/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3196 frees=3147 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=256 frees=228 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3742 frees=2088 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=30 frees=29 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 2.017602958716452,
+      "runner_seconds": 1.9657490830868483,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x38e000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-ffbeb80f2b64e0fe/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=1637000000\nrun-tests: hardware snapshots\nPASS structured catalog status=0 time_ns=1654000000\nPASS system snapshot status=0 time_ns=1663000000\nPASS PCI snapshot status=0 time_ns=1671000000\nPASS USB boot snapshot status=0 time_ns=1679000000\nPASS lshw status=0 time_ns=1717000000\nPASS lspci status=0 time_ns=1736000000\nPASS lsusb status=0 time_ns=1745000000\nPASS lsblk status=0 time_ns=1754000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=1765000000\nPASS disk write/sync/read status=0 time_ns=1773000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=1789000000\nSKIP expected USB mouse status=-12 time_ns=1798000000\nSKIP physical stimulus observed status=0 time_ns=2823000000\nSKIP physical stimulus observed status=0 time_ns=2835000000\nPASS USB after input status=0 time_ns=2846000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2858000000\nPASS kernel log copy status=0 time_ns=2890000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3212 frees=3163 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4850 frees=4822 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3878 frees=2224 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=154 frees=153 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=74 frees=14 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=bios console=vga ticks=3054 pages=31539/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> ",
+      "child_cpu_seconds": 4.507089000000001,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.018785541877150536
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.03053212445229292
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.23364458326250315
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.153759834356606
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0936517920345068
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0914186667650938
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.10241587460041046
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09344212524592876
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09300575032830238
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09596320800483227
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09703066665679216
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09605779219418764
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09276183322072029
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0930069163441658
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09097879193723202
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.16579108405858278
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09138791728764772
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09137854259461164
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09183508343994617
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09272008296102285
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09760074969381094
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09725720807909966
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09611574932932854
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.9657466663047671
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.2309808749705553
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.026194291189312935
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.302431249991059,
+        "startup_seconds": 0.4590557077899575,
+        "prelude_seconds": 0.01879416685551405,
+        "workload_seconds": 4.82444804161787,
+        "cleanup_seconds": 0.0001333337277173996
+      }
+    },
+    {
+      "label": "baseline",
+      "firmware": "bios",
+      "repeat": 1,
+      "before": "sys\nsys boot=bios console=vga ticks=36 pages=31579/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3195 frees=3146 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=252 frees=224 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3741 frees=2087 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=29 frees=28 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.9832889577373862,
+      "runner_seconds": 1.9523907089605927,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x38d000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-d9271e6cf2f68603/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=1629000000\nrun-tests: hardware snapshots\nPASS system snapshot status=0 time_ns=1642000000\nPASS PCI snapshot status=0 time_ns=1650000000\nPASS USB boot snapshot status=0 time_ns=1657000000\nPASS lshw status=0 time_ns=1709000000\nPASS lspci status=0 time_ns=1728000000\nPASS lsusb status=0 time_ns=1737000000\nPASS lsblk status=0 time_ns=1746000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=1758000000\nPASS disk write/sync/read status=0 time_ns=1767000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=1783000000\nSKIP expected USB mouse status=-12 time_ns=1791000000\nSKIP physical stimulus observed status=0 time_ns=2819000000\nSKIP physical stimulus observed status=0 time_ns=2831000000\nPASS USB after input status=0 time_ns=2841000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2853000000\nPASS kernel log copy status=0 time_ns=2890000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3210 frees=3161 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4839 frees=4811 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3875 frees=2221 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=151 frees=150 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=73 frees=13 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=bios console=vga ticks=3057 pages=31542/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> ",
+      "child_cpu_seconds": 4.403765999999999,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.019271083176136017
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.029238207265734673
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.23121491633355618
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.14876933302730322
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09190216567367315
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09153058286756277
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09157645888626575
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09147929213941097
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09065554197877645
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09144862461835146
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09234133269637823
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0931518329307437
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09159183409065008
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09254829213023186
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09440004080533981
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.161914249882102
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09237687475979328
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09307391755282879
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09270841628313065
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09942749980837107
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09514179266989231
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09208579082041979
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09514783415943384
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.952389125712216
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.23233354184776545
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.0846267081797123
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.273379207588732,
+        "startup_seconds": 0.45873758289963007,
+        "prelude_seconds": 0.019274584017693996,
+        "workload_seconds": 4.795212333090603,
+        "cleanup_seconds": 0.00015470758080482483
+      }
+    },
+    {
+      "label": "candidate",
+      "firmware": "bios",
+      "repeat": 1,
+      "before": "sys\nsys boot=bios console=vga ticks=38 pages=31576/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3196 frees=3147 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=255 frees=227 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3742 frees=2088 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=30 frees=29 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.9738302500918508,
+      "runner_seconds": 2.004263582639396,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x38e000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-ffbeb80f2b64e0fe/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=1606000000\nrun-tests: hardware snapshots\nPASS structured catalog status=0 time_ns=1626000000\nPASS system snapshot status=0 time_ns=1633000000\nPASS PCI snapshot status=0 time_ns=1640000000\nPASS USB boot snapshot status=0 time_ns=1648000000\nPASS lshw status=0 time_ns=1703000000\nPASS lspci status=0 time_ns=1717000000\nPASS lsusb status=0 time_ns=1727000000\nPASS lsblk status=0 time_ns=1736000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=1748000000\nPASS disk write/sync/read status=0 time_ns=1759000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=1774000000\nSKIP expected USB mouse status=-12 time_ns=1782000000\nSKIP physical stimulus observed status=0 time_ns=2822000000\nSKIP physical stimulus observed status=0 time_ns=2834000000\nPASS USB after input status=0 time_ns=2846000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2858000000\nPASS kernel log copy status=0 time_ns=2892000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3212 frees=3163 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4849 frees=4821 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3878 frees=2224 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=154 frees=153 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=74 frees=14 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=bios console=vga ticks=3051 pages=31539/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> ",
+      "child_cpu_seconds": 4.460851,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.019225957803428173
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.028631708584725857
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.23029658384621143
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.1484643742442131
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0931347506120801
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09102350007742643
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09186725039035082
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09374141693115234
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09416412468999624
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09242470748722553
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09115629084408283
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09148462489247322
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.08997225016355515
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0940802926197648
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09297612588852644
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.16311041545122862
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09231050033122301
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09505279082804918
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09136891644448042
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09169916622340679
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09294262435287237
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09145316667854786
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09138554148375988
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 2.00426216609776
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.22720250021666288
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.027352958917617798
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.303178500384092,
+        "startup_seconds": 0.4658874999731779,
+        "prelude_seconds": 0.01922950055450201,
+        "workload_seconds": 4.817876582965255,
+        "cleanup_seconds": 0.0001849168911576271
+      }
+    },
+    {
+      "label": "baseline",
+      "firmware": "bios",
+      "repeat": 2,
+      "before": "sys\nsys boot=bios console=vga ticks=37 pages=31579/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3195 frees=3146 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=252 frees=224 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3741 frees=2087 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=29 frees=28 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.9696835419163108,
+      "runner_seconds": 1.9810032499954104,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x38d000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-d9271e6cf2f68603/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=1612000000\nrun-tests: hardware snapshots\nPASS system snapshot status=0 time_ns=1625000000\nPASS PCI snapshot status=0 time_ns=1633000000\nPASS USB boot snapshot status=0 time_ns=1641000000\nPASS lshw status=0 time_ns=1692000000\nPASS lspci status=0 time_ns=1712000000\nPASS lsusb status=0 time_ns=1721000000\nPASS lsblk status=0 time_ns=1731000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=1741000000\nPASS disk write/sync/read status=0 time_ns=1750000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=1766000000\nSKIP expected USB mouse status=-12 time_ns=1774000000\nSKIP physical stimulus observed status=0 time_ns=2816000000\nSKIP physical stimulus observed status=0 time_ns=2833000000\nPASS USB after input status=0 time_ns=2847000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2858000000\nPASS kernel log copy status=0 time_ns=2866000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3210 frees=3161 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4837 frees=4809 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3875 frees=2221 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=151 frees=150 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=73 frees=13 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=bios console=vga ticks=3028 pages=31542/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> ",
+      "child_cpu_seconds": 4.430137000000002,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.019442709162831306
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.027476457878947258
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.23277366627007723
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.1502527091652155
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09186325035989285
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0915232915431261
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09234225004911423
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09239495731890202
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0910173337906599
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09177699964493513
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09158904198557138
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09230837505310774
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09361258428543806
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09201049990952015
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09290091693401337
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.16565637569874525
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09170941635966301
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0916015412658453
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09044116642326117
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09183166734874249
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09234366659075022
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0907805422320962
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09170900005847216
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.9810015419498086
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.22639499977231026
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.026378083974123
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.273226874880493,
+        "startup_seconds": 0.45806420780718327,
+        "prelude_seconds": 0.019445749931037426,
+        "workload_seconds": 4.795544625259936,
+        "cleanup_seconds": 0.00017229188233613968
+      }
+    },
+    {
+      "label": "candidate",
+      "firmware": "bios",
+      "repeat": 2,
+      "before": "sys\nsys boot=bios console=vga ticks=38 pages=31576/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3196 frees=3147 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=255 frees=227 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3742 frees=2088 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=30 frees=29 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.972657541744411,
+      "runner_seconds": 1.995063291862607,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x38e000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-ffbeb80f2b64e0fe/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=1621000000\nrun-tests: hardware snapshots\nPASS structured catalog status=0 time_ns=1639000000\nPASS system snapshot status=0 time_ns=1646000000\nPASS PCI snapshot status=0 time_ns=1655000000\nPASS USB boot snapshot status=0 time_ns=1662000000\nPASS lshw status=0 time_ns=1715000000\nPASS lspci status=0 time_ns=1731000000\nPASS lsusb status=0 time_ns=1740000000\nPASS lsblk status=0 time_ns=1749000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=1759000000\nPASS disk write/sync/read status=0 time_ns=1769000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=1785000000\nSKIP expected USB mouse status=-12 time_ns=1793000000\nSKIP physical stimulus observed status=0 time_ns=2836000000\nSKIP physical stimulus observed status=0 time_ns=2852000000\nPASS USB after input status=0 time_ns=2866000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2878000000\nPASS kernel log copy status=0 time_ns=2886000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3212 frees=3163 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4848 frees=4820 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3878 frees=2224 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=154 frees=153 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=74 frees=14 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=bios console=vga ticks=3108 pages=31538/32732 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=bios-loader\nos1> ",
+      "child_cpu_seconds": 4.519032999999998,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.019255749881267548
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.031258875504136086
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.22930820751935244
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.15018075052648783
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0913099991157651
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09379583410918713
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09146500006318092
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09101333376020193
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0941199166700244
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09196524973958731
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09026625007390976
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09093899931758642
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09547870885580778
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09340483229607344
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09204624965786934
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.1645747907459736
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09187945909798145
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09105945844203234
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09089783392846584
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09057779144495726
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09496991615742445
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.09152087569236755
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0911762909963727
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.9950620420277119
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.2898161243647337
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.026760583743453026
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.2921719597652555,
+        "startup_seconds": 0.4646062506362796,
+        "prelude_seconds": 0.019259249791502953,
+        "workload_seconds": 4.8081585839390755,
+        "cleanup_seconds": 0.00014787539839744568
+      }
+    },
+    {
+      "label": "baseline",
+      "firmware": "uefi",
+      "repeat": 0,
+      "before": "sys\nsys boot=limine console=framebuffer ticks=138 pages=19147/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3195 frees=3146 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=253 frees=225 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3741 frees=2087 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=29 frees=28 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.0593282924965024,
+      "runner_seconds": 1.9393369993194938,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x3aa000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-d9271e6cf2f68603/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=852000000\nrun-tests: hardware snapshots\nPASS system snapshot status=0 time_ns=860000000\nPASS PCI snapshot status=0 time_ns=865000000\nPASS USB boot snapshot status=0 time_ns=870000000\nPASS lshw status=0 time_ns=906000000\nPASS lspci status=0 time_ns=923000000\nPASS lsusb status=0 time_ns=930000000\nPASS lsblk status=0 time_ns=937000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=945000000\nPASS disk write/sync/read status=0 time_ns=951000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=962000000\nSKIP expected USB mouse status=-12 time_ns=966000000\nSKIP physical stimulus observed status=0 time_ns=2000000000\nSKIP physical stimulus observed status=0 time_ns=2012000000\nPASS USB after input status=0 time_ns=2022000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2034000000\nPASS kernel log copy status=0 time_ns=2133000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3210 frees=3161 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4841 frees=4813 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3875 frees=2221 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=151 frees=150 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=73 frees=13 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=limine console=framebuffer ticks=8799 pages=19110/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> ",
+      "child_cpu_seconds": 4.707402000000001,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.008013499900698662
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.01020058337599039
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.04313758295029402
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0380413755774498
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04016233328729868
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.053208375349640846
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.06314708385616541
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05608012527227402
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.10669362545013428
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0522591657936573
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.049610541202127934
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.050784749910235405
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05116737447679043
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.050733291544020176
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04991495795547962
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.049879792146384716
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0496417498216033
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04965125024318695
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05014970898628235
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04924045782536268
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.049358041025698185
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.049564000219106674
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05002758279442787
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.9393356246873736
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.09004262462258339
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.016629124991595745
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.421257625333965,
+        "startup_seconds": 1.9667031252756715,
+        "prelude_seconds": 0.008017375133931637,
+        "workload_seconds": 3.4463730417191982,
+        "cleanup_seconds": 0.00016408320516347885
+      }
+    },
+    {
+      "label": "candidate",
+      "firmware": "uefi",
+      "repeat": 0,
+      "before": "sys\nsys boot=limine console=framebuffer ticks=143 pages=19144/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3196 frees=3147 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=257 frees=229 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3742 frees=2088 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=30 frees=29 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.0281669152900577,
+      "runner_seconds": 1.854136542417109,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x3aa000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-ffbeb80f2b64e0fe/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=809000000\nrun-tests: hardware snapshots\nPASS structured catalog status=0 time_ns=820000000\nPASS system snapshot status=0 time_ns=825000000\nPASS PCI snapshot status=0 time_ns=830000000\nPASS USB boot snapshot status=0 time_ns=835000000\nPASS lshw status=0 time_ns=870000000\nPASS lspci status=0 time_ns=887000000\nPASS lsusb status=0 time_ns=894000000\nPASS lsblk status=0 time_ns=901000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=910000000\nPASS disk write/sync/read status=0 time_ns=915000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=926000000\nSKIP expected USB mouse status=-12 time_ns=931000000\nSKIP physical stimulus observed status=0 time_ns=1950000000\nSKIP physical stimulus observed status=0 time_ns=1964000000\nPASS USB after input status=0 time_ns=1974000000\nrun-tests: log capture\nPASS log export status=0 time_ns=1985000000\nPASS kernel log copy status=0 time_ns=2015000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3212 frees=3163 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4854 frees=4826 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3878 frees=2224 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=154 frees=153 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=74 frees=14 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=limine console=framebuffer ticks=8686 pages=19107/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> ",
+      "child_cpu_seconds": 4.563265,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.00919912476092577
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.009983040392398834
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.04544150084257126
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.03589237481355667
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.03344583325088024
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.049989291466772556
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05500779114663601
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05532687529921532
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0488456254824996
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.10165400058031082
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05141645763069391
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04863062500953674
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04860879201442003
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05144604202359915
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0485638752579689
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.051331207156181335
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04800941701978445
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04864775016903877
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.051551041193306446
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05133387539535761
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.048177000135183334
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.048563082702457905
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.051714541390538216
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.8541351659223437
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.15814141742885113
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.019715375266969204
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.339444249868393,
+        "startup_seconds": 1.9460068326443434,
+        "prelude_seconds": 0.009203917346894741,
+        "workload_seconds": 3.3839907916262746,
+        "cleanup_seconds": 0.0002427082508802414
+      }
+    },
+    {
+      "label": "baseline",
+      "firmware": "uefi",
+      "repeat": 1,
+      "before": "sys\nsys boot=limine console=framebuffer ticks=139 pages=19147/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3195 frees=3146 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=253 frees=225 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3741 frees=2087 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=29 frees=28 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.0765722077339888,
+      "runner_seconds": 1.8515949994325638,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x3aa000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-d9271e6cf2f68603/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=861000000\nrun-tests: hardware snapshots\nPASS system snapshot status=0 time_ns=872000000\nPASS PCI snapshot status=0 time_ns=878000000\nPASS USB boot snapshot status=0 time_ns=883000000\nPASS lshw status=0 time_ns=931000000\nPASS lspci status=0 time_ns=949000000\nPASS lsusb status=0 time_ns=956000000\nPASS lsblk status=0 time_ns=963000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=970000000\nPASS disk write/sync/read status=0 time_ns=977000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=989000000\nSKIP expected USB mouse status=-12 time_ns=994000000\nSKIP physical stimulus observed status=0 time_ns=2026000000\nSKIP physical stimulus observed status=0 time_ns=2037000000\nPASS USB after input status=0 time_ns=2047000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2058000000\nPASS kernel log copy status=0 time_ns=2092000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3210 frees=3161 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4844 frees=4816 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3875 frees=2221 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=151 frees=150 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=73 frees=13 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=limine console=framebuffer ticks=8561 pages=19110/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> ",
+      "child_cpu_seconds": 4.6189820000000035,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.00801929086446762
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.010179375298321247
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.04280766658484936
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04189670830965042
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.03675737511366606
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05515312496572733
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.059519415721297264
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05383566673845053
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.10747816599905491
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05455400049686432
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05523187480866909
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05049070809036493
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0504123754799366
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05323462560772896
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05298412498086691
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05005037412047386
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.049511540681123734
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.050137375481426716
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0516745001077652
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.052558708004653454
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05005437508225441
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05207033455371857
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04895008448511362
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.8515935828909278
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.08890237472951412
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.01626554224640131
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.383358582854271,
+        "startup_seconds": 1.954857999458909,
+        "prelude_seconds": 0.008022624999284744,
+        "workload_seconds": 3.4203100418671966,
+        "cleanup_seconds": 0.00016791652888059616
+      }
+    },
+    {
+      "label": "candidate",
+      "firmware": "uefi",
+      "repeat": 1,
+      "before": "sys\nsys boot=limine console=framebuffer ticks=136 pages=19144/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3196 frees=3147 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=256 frees=228 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3742 frees=2088 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=30 frees=29 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.046994916163385,
+      "runner_seconds": 1.9240832086652517,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x3aa000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-ffbeb80f2b64e0fe/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=842000000\nrun-tests: hardware snapshots\nPASS structured catalog status=0 time_ns=855000000\nPASS system snapshot status=0 time_ns=861000000\nPASS PCI snapshot status=0 time_ns=867000000\nPASS USB boot snapshot status=0 time_ns=871000000\nPASS lshw status=0 time_ns=920000000\nPASS lspci status=0 time_ns=939000000\nPASS lsusb status=0 time_ns=945000000\nPASS lsblk status=0 time_ns=951000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=958000000\nPASS disk write/sync/read status=0 time_ns=965000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=974000000\nSKIP expected USB mouse status=-12 time_ns=979000000\nSKIP physical stimulus observed status=0 time_ns=1996000000\nSKIP physical stimulus observed status=0 time_ns=2007000000\nPASS USB after input status=0 time_ns=2017000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2026000000\nPASS kernel log copy status=0 time_ns=2058000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=179 free=512 live=2364 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3212 frees=3163 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4857 frees=4829 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3878 frees=2224 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=154 frees=153 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=21 free=2 live=61 peak=61 alloc=75 frees=14 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=limine console=framebuffer ticks=8670 pages=19106/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> ",
+      "child_cpu_seconds": 4.614124999999997,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.009249291382730007
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.006892583332955837
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.04586100019514561
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0390912089496851
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.034288582392036915
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05036829225718975
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05878375004976988
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05321837496012449
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.10961550008505583
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05035445839166641
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05160699971020222
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.050505416467785835
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.052084832452237606
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04927737545222044
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0483833746984601
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0485017504543066
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0517963757738471
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.048691749572753906
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.051522125490009785
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.048419415950775146
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04868174996227026
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.051748959347605705
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05004145763814449
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.9240817092359066
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.09006941691040993
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.016468667425215244
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.396064541302621,
+        "startup_seconds": 1.9615862499922514,
+        "prelude_seconds": 0.009252207353711128,
+        "workload_seconds": 3.4250555839389563,
+        "cleanup_seconds": 0.0001705000177025795
+      }
+    },
+    {
+      "label": "baseline",
+      "firmware": "uefi",
+      "repeat": 2,
+      "before": "sys\nsys boot=limine console=framebuffer ticks=137 pages=19147/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3195 frees=3146 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=253 frees=225 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3741 frees=2087 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=29 frees=28 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.0653784172609448,
+      "runner_seconds": 1.8399902088567615,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x3aa000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-d9271e6cf2f68603/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=828000000\nrun-tests: hardware snapshots\nPASS system snapshot status=0 time_ns=836000000\nPASS PCI snapshot status=0 time_ns=840000000\nPASS USB boot snapshot status=0 time_ns=846000000\nPASS lshw status=0 time_ns=903000000\nPASS lspci status=0 time_ns=916000000\nPASS lsusb status=0 time_ns=924000000\nPASS lsblk status=0 time_ns=931000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=939000000\nPASS disk write/sync/read status=0 time_ns=945000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=956000000\nSKIP expected USB mouse status=-12 time_ns=961000000\nSKIP physical stimulus observed status=0 time_ns=1981000000\nSKIP physical stimulus observed status=0 time_ns=1995000000\nPASS USB after input status=0 time_ns=2006000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2017000000\nPASS kernel log copy status=0 time_ns=2023000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=178 free=510 live=2363 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3210 frees=3161 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4843 frees=4815 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3875 frees=2221 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=151 frees=150 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=20 free=0 live=60 peak=60 alloc=73 frees=13 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=limine console=framebuffer ticks=8700 pages=19109/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> ",
+      "child_cpu_seconds": 4.616386999999994,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.008087209425866604
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.010318207554519176
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.04311120789498091
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.03836466744542122
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.036358416080474854
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.052049292251467705
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05987379141151905
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.056014833971858025
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.10297616571187973
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05509262438863516
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05035654176026583
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05300262477248907
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04976724926382303
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04885654244571924
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05176016688346863
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.052784000523388386
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04932470805943012
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05028362479060888
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.053779042325913906
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.049793750047683716
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.048819332383573055
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05501324962824583
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.051091874949634075
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.839988791383803
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.14627216570079327
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.015779375098645687
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.36438374966383,
+        "startup_seconds": 1.9472991665825248,
+        "prelude_seconds": 0.008090042509138584,
+        "workload_seconds": 3.4088557912036777,
+        "cleanup_seconds": 0.0001387493684887886
+      }
+    },
+    {
+      "label": "candidate",
+      "firmware": "uefi",
+      "repeat": 2,
+      "before": "sys\nsys boot=limine console=framebuffer ticks=143 pages=19144/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> kmem\nkmem global caches=13 slab_pages=173 free=471 live=2349 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3196 frees=3147 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=1 free=13 live=28 peak=33 alloc=257 frees=229 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=852 frees=306 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3742 frees=2088 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=4 alloc=30 frees=29 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=9 frees=5 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=16 free=2 live=46 peak=46 alloc=46 frees=0 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=12 frees=4 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> ",
+      "context_seconds": 1.0477081248536706,
+      "runner_seconds": 1.9072279995307326,
+      "runner_output": "run-tests --machine measurement\nwarning: interpreting --machine as text; quote literal text\nwarning: interpreting measurement as text; quote literal text\nroot alloc 0x3aa000\nrun-tests: results /disk/tests/m-measurement-e50406ee8c20a528/k-ffbeb80f2b64e0fe/b0000000000000001-r0000000000000001\nPASS initial kernel log copy status=0 time_ns=830000000\nrun-tests: hardware snapshots\nPASS structured catalog status=0 time_ns=845000000\nPASS system snapshot status=0 time_ns=849000000\nPASS PCI snapshot status=0 time_ns=854000000\nPASS USB boot snapshot status=0 time_ns=859000000\nPASS lshw status=0 time_ns=906000000\nPASS lspci status=0 time_ns=925000000\nPASS lsusb status=0 time_ns=932000000\nPASS lsblk status=0 time_ns=939000000\nrun-tests: file roundtrips\nPASS tmp write/read status=0 time_ns=946000000\nPASS disk write/sync/read status=0 time_ns=953000000\nrun-tests: native input\nPASS input acquisition/state/subscriptions status=0 time_ns=963000000\nSKIP expected USB mouse status=-12 time_ns=967000000\nSKIP physical stimulus observed status=0 time_ns=1985000000\nSKIP physical stimulus observed status=0 time_ns=1999000000\nPASS USB after input status=0 time_ns=2010000000\nrun-tests: log capture\nPASS log export status=0 time_ns=2020000000\nPASS kernel log copy status=0 time_ns=2051000000\nrun-tests: PASS; saved results\nos1> ",
+      "after": "kmem\nkmem global caches=13 slab_pages=179 free=512 live=2364 fail=0\nkmem cache kmalloc-16 obj=16 align=16 slabs=1 free=33 live=49 peak=53 alloc=3212 frees=3163 fail=0\nkmem cache kmalloc-32 obj=32 align=32 slabs=2 free=54 live=28 peak=43 alloc=4859 frees=4831 fail=0\nkmem cache kmalloc-64 obj=64 align=64 slabs=32 free=94 live=546 peak=632 alloc=876 frees=330 fail=0\nkmem cache kmalloc-128 obj=128 align=64 slabs=113 free=41 live=1654 peak=1689 alloc=3878 frees=2224 fail=0\nkmem cache kmalloc-256 obj=256 align=64 slabs=1 free=9 live=1 peak=7 alloc=154 frees=153 fail=0\nkmem cache kmalloc-512 obj=512 align=64 slabs=1 free=2 live=4 peak=5 alloc=31 frees=27 fail=0\nkmem cache kmalloc-1024 obj=1024 align=64 slabs=21 free=2 live=61 peak=61 alloc=75 frees=14 fail=0\nkmem cache thread obj=664 align=8 slabs=2 free=2 live=8 peak=9 alloc=13 frees=5 fail=0\nkmem cache process obj=1752 align=8 slabs=2 free=1 live=3 peak=4 alloc=4 frees=1 fail=0\nkmem cache irq_route obj=32 align=8 slabs=1 free=78 live=4 peak=4 alloc=4 frees=0 fail=0\nkmem cache dma_allocation obj=40 align=8 slabs=1 free=67 live=3 peak=3 alloc=3 frees=0 fail=0\nkmem cache pci_bar_claim obj=40 align=8 slabs=1 free=68 live=2 peak=2 alloc=2 frees=0 fail=0\nkmem cache device_binding obj=48 align=8 slabs=1 free=61 live=1 peak=1 alloc=1 frees=0 fail=0\nkmem complete\nos1> sys\nsys boot=limine console=framebuffer ticks=8675 pages=19106/24676 procs=3 runnable=2 cpus=4 pci=7 virtio_blk=yes sectors=67584 bootloader=Limine 11.4.0\nos1> ",
+      "child_cpu_seconds": 4.614801000000004,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.009180041030049324
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.010069875046610832
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.045106250792741776
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.03648766689002514
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.03653316665440798
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05313725024461746
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05654366686940193
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.055217333137989044
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04997962526977062
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.10346137546002865
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05164537485688925
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05184008367359638
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.050475457683205605
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05150316562503576
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05243387445807457
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05357637442648411
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05190895963460207
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.05172820761799812
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.04828887525945902
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.048332249745726585
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.048159874975681305
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.048253499902784824
+          },
+          {
+            "command": "context os.input.keyboard1",
+            "completed": true,
+            "seconds": 0.0481861662119627
+          },
+          {
+            "command": "run-tests --machine measurement",
+            "completed": true,
+            "seconds": 1.9072265420109034
+          },
+          {
+            "command": "kmem",
+            "completed": true,
+            "seconds": 0.08973766677081585
+          },
+          {
+            "command": "sys",
+            "completed": true,
+            "seconds": 0.016321458853781223
+          }
+        ],
+        "completed": true,
+        "total_seconds": 5.381968207657337,
+        "startup_seconds": 1.9643017910420895,
+        "prelude_seconds": 0.009184249676764011,
+        "workload_seconds": 3.407905417494476,
+        "cleanup_seconds": 0.0005767494440078735
+      }
+    },
+    {
+      "label": "baseline",
+      "firmware": "uefi-diagnostic",
+      "repeat": 0,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.008170625194907188
+          },
+          {
+            "command": "os.system.log.info",
+            "completed": true,
+            "seconds": 0.03670479264110327
+          }
+        ],
+        "completed": true,
+        "total_seconds": 2.4227359583601356,
+        "startup_seconds": 1.991589916869998,
+        "prelude_seconds": 0.008173665963113308,
+        "workload_seconds": 0.42280850000679493,
+        "cleanup_seconds": 0.0001638755202293396
+      }
+    },
+    {
+      "label": "candidate",
+      "firmware": "uefi-diagnostic",
+      "repeat": 0,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.07337516732513905
+          },
+          {
+            "command": "os.system.log.info",
+            "completed": true,
+            "seconds": 0.039445958100259304
+          }
+        ],
+        "completed": true,
+        "total_seconds": 4.795527665875852,
+        "startup_seconds": 3.689498250372708,
+        "prelude_seconds": 0.0733782909810543,
+        "workload_seconds": 1.0324837500229478,
+        "cleanup_seconds": 0.00016737449914216995
+      }
+    },
+    {
+      "label": "baseline",
+      "firmware": "uefi-diagnostic",
+      "repeat": 1,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.008347542025148869
+          },
+          {
+            "command": "os.system.log.info",
+            "completed": true,
+            "seconds": 0.03929583262652159
+          }
+        ],
+        "completed": true,
+        "total_seconds": 2.3940907903015614,
+        "startup_seconds": 1.9662149995565414,
+        "prelude_seconds": 0.008352207951247692,
+        "workload_seconds": 0.41937862522900105,
+        "cleanup_seconds": 0.00014495756477117538
+      }
+    },
+    {
+      "label": "candidate",
+      "firmware": "uefi-diagnostic",
+      "repeat": 1,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.007687041535973549
+          },
+          {
+            "command": "os.system.log.info",
+            "completed": true,
+            "seconds": 0.03917420841753483
+          }
+        ],
+        "completed": true,
+        "total_seconds": 4.769338582642376,
+        "startup_seconds": 3.7329722084105015,
+        "prelude_seconds": 0.007690041325986385,
+        "workload_seconds": 1.028133749961853,
+        "cleanup_seconds": 0.0005425829440355301
+      }
+    },
+    {
+      "label": "baseline",
+      "firmware": "uefi-diagnostic",
+      "repeat": 2,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.007987250573933125
+          },
+          {
+            "command": "os.system.log.info",
+            "completed": true,
+            "seconds": 0.03656329121440649
+          }
+        ],
+        "completed": true,
+        "total_seconds": 2.407109917141497,
+        "startup_seconds": 1.9824262084439397,
+        "prelude_seconds": 0.007989916950464249,
+        "workload_seconds": 0.41654137428849936,
+        "cleanup_seconds": 0.00015241745859384537
+      }
+    },
+    {
+      "label": "candidate",
+      "firmware": "uefi-diagnostic",
+      "repeat": 2,
+      "profile": {
+        "phase": "measure",
+        "commands": [
+          {
+            "command": "ls /bin",
+            "completed": true,
+            "seconds": 0.0072779580950737
+          },
+          {
+            "command": "os.system.log.info",
+            "completed": true,
+            "seconds": 0.1015133336186409
+          }
+        ],
+        "completed": true,
+        "total_seconds": 4.774550333619118,
+        "startup_seconds": 3.6813717084005475,
+        "prelude_seconds": 0.007284332998096943,
+        "workload_seconds": 1.0857455423101783,
+        "cleanup_seconds": 0.0001487499102950096
+      }
+    }
+  ],
+  "artifacts": {
+    "baseline": {
+      "kernel.elf": {
+        "bytes": 614440,
+        "sha256": "fd05f4a7603b1901da4f2eaaf0de57c993c2da4ee2fce38c7aad7425a3477512"
+      },
+      "kernel_limine.elf": {
+        "bytes": 41368,
+        "sha256": "856c25c74cd0c9a9e500dab7663aa77a99ff1ebf7768d5e790683387a36a4b88"
+      },
+      "initrd.cpio": {
+        "bytes": 7680,
+        "sha256": "e9a703216e7ca289dc4900f5fcde2130bc5ddfa7d830a30d030faf60d276bf0a"
+      },
+      "os1.raw": {
+        "bytes": 1474560,
+        "sha256": "66915fd55a2edf048a61b67b1551d36a845ffd6ddd5815d37cfc7cba15f77db4"
+      },
+      "os1.iso": {
+        "bytes": 4349952,
+        "sha256": "2a2c0c0f66cd4b2a6922244447c0d7179849ae478169b218bdfb9c63c83a41d5"
+      },
+      "program-test-disk.raw": {
+        "bytes": 34603008,
+        "sha256": "09194131bcf27a0be54d95378b9ef19edb521dca6b86f3705c961c59a8959e9b"
+      }
+    },
+    "candidate": {
+      "kernel.elf": {
+        "bytes": 614952,
+        "sha256": "bec7b2d6bef2f24670409868166b5586c9726c2d17b825ddd5a9266038ead482"
+      },
+      "kernel_limine.elf": {
+        "bytes": 41368,
+        "sha256": "856c25c74cd0c9a9e500dab7663aa77a99ff1ebf7768d5e790683387a36a4b88"
+      },
+      "initrd.cpio": {
+        "bytes": 10240,
+        "sha256": "a7a860e8c66f1cbd05aae2ecba94cbb757306f0b83d9b2ade72d1fd851293c5c"
+      },
+      "os1.raw": {
+        "bytes": 1474560,
+        "sha256": "b0c9dd219dbf19eea253d7d7ce8d2f373963c44491f6bbbe02c552ba2f906e43"
+      },
+      "os1.iso": {
+        "bytes": 4352000,
+        "sha256": "0e833c686fe502efc2a393f4eaf46c6ac0abed9470da00fae7710a8703cec810"
+      },
+      "program-test-disk.raw": {
+        "bytes": 34603008,
+        "sha256": "4942c03a61297e6ac89897ccc00c712132723bfd17e78347c3e5ecd76bcc5003"
+      }
+    }
+  },
+  "configuration": {
+    "machine": "q35",
+    "cpus": 4,
+    "ram_mib": 128,
+    "repeats": 3,
+    "accelerator": "TCG",
+    "host": "macOS 26.6.2, Mac16,5, Apple M4 Max",
+    "host_cpus": 16,
+    "host_ram_bytes": 68719476736,
+    "compiler": "GCC 11.2.0",
+    "cmake": "4.4.5",
+    "qemu": "11.1.3",
+    "build_profile": "Debug:GNU:11.2.0::ON:ON:OFF:OFF",
+    "transport": "virtio",
+    "bios": "bundled SeaBIOS"
+  },
+  "baseline_revision": "c2fbfd131065299f5fa26d174466885b64f92a0a",
+  "baseline_build_hash": "d9271e6cf2f68603dbab39abb9d485202990cbefd6ed45aae9caf23c615ffd13",
+  "candidate_build_hash": "ffbeb80f2b64e0fe8ba80e2b88b5858e83f42511fa2979a50049a06b49ca0b2b",
+  "candidate_source": "baseline plus task diff, before commit",
+  "firmware": {
+    "/opt/homebrew/share/qemu/edk2-x86_64-code.fd": "33090cc07675baa5190d9f1e84bf5176b33bcbfa9bacac522961150cdb6dbb2a",
+    "/opt/homebrew/share/qemu/edk2-i386-vars.fd": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "commands": [
+    "python3 -B build/input-collections/measure.py --qemu /opt/homebrew/bin/qemu-system-x86_64 --code /opt/homebrew/share/qemu/edk2-x86_64-code.fd --vars /opt/homebrew/share/qemu/edk2-i386-vars.fd"
+  ],
+  "measurement_script": "import argparse, sys, json, shutil, re, time, hashlib, resource\nfrom pathlib import Path\nfrom types import SimpleNamespace\nsys.dont_write_bytecode=True\nsys.path.insert(0,str(Path.cwd()/'tests/scripts'))\nfrom test_ext2_persistence import boot\np=argparse.ArgumentParser()\nfor name in ('qemu','code','vars'):p.add_argument('--'+name,required=True)\na=p.parse_args();root=Path('build/input-collections/measurements');root.mkdir(exist_ok=True)\nreport={'samples':[], 'artifacts':{}, 'configuration':{'machine':'q35','cpus':4,'ram_mib':128,'repeats':3,'accelerator':'TCG'}}\nfor label in ('baseline','candidate'):\n source=Path('build/input-collections/baseline' if label=='baseline' else 'build/artifacts')\n report['artifacts'][label]={}\n for name in ('kernel.elf','kernel_limine.elf','initrd.cpio','os1.raw','os1.iso','program-test-disk.raw'):\n  data=(source/name).read_bytes();report['artifacts'][label][name]={'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}\nfor firmware in ('bios','uefi'):\n for repeat in range(3):\n  for label in ('baseline','candidate'):\n   source=Path('build/input-collections/baseline' if label=='baseline' else 'build/artifacts')\n   stem=root/f'{label}-{firmware}-{repeat}';disk=stem.with_suffix('.raw');shutil.copyfile(source/'program-test-disk.raw',disk)\n   args=SimpleNamespace(qemu=a.qemu,image=str(source/('os1.raw' if firmware=='bios' else 'os1.iso')),code=a.code if firmware=='uefi' else None,vars=a.vars if firmware=='uefi' else None,log=str(stem.with_suffix('.log')),poweroff=True)\n   row={'label':label,'firmware':firmware,'repeat':repeat}\n   def exercise(run,expect):\n    row['before']=(run('sys')+run('kmem')).decode()\n    t=time.monotonic()\n    for _ in range(20):run('context os.input.keyboard1')\n    row['context_seconds']=time.monotonic()-t\n    t=time.monotonic();out=run('run-tests --machine measurement');row['runner_seconds']=time.monotonic()-t\n    assert b'run-tests: PASS; saved results' in out,out\n    row['runner_output']=out.decode();row['after']=(run('kmem')+run('sys')).decode()\n   cpu=resource.getrusage(resource.RUSAGE_CHILDREN)\n   boot(args,disk,'measure',exercise=exercise)\n   endcpu=resource.getrusage(resource.RUSAGE_CHILDREN)\n   row['child_cpu_seconds']=endcpu.ru_utime+endcpu.ru_stime-cpu.ru_utime-cpu.ru_stime\n   row['profile']=json.loads(stem.with_suffix('.measure.profile.json').read_text())\n   report['samples'].append(row);(root/'measurements.json').write_text(json.dumps(report,indent=2)+'\\n')\n   if label=='candidate' and firmware=='uefi' and repeat==0:\n    (root/'returned-data.ext2').write_bytes(disk.read_bytes()[2048*512:])\n   disk.unlink()\n# Compare normal and diagnostic first-prompt latency using three fresh UEFI boots per revision.\nfor repeat in range(3):\n for label in ('baseline','candidate'):\n  source=Path('build/input-collections/baseline' if label=='baseline' else 'build/artifacts')\n  stem=root/f'{label}-diagnostic-{repeat}';disk=stem.with_suffix('.raw');shutil.copyfile(source/'program-test-disk.raw',disk)\n  args=SimpleNamespace(qemu=a.qemu,image=str(source/'os1.iso'),code=a.code,vars=a.vars,log=str(stem.with_suffix('.log')),poweroff=True,boot_menu_entry=2)\n  boot(args,disk,'measure',exercise=lambda run,expect:run('os.system.log.info'))\n  log=stem.with_suffix('.measure.log').read_bytes()\n  assert (b'run-tests: PASS; saved results' in log)==(label=='candidate')\n  report['samples'].append({'label':label,'firmware':'uefi-diagnostic','repeat':repeat,'profile':json.loads(stem.with_suffix('.measure.profile.json').read_text())})\n  (root/'measurements.json').write_text(json.dumps(report,indent=2)+'\\n');disk.unlink()\n",
+  "limits": [
+    "Three repeats do not establish a performance improvement.",
+    "Guest pages are net system usage, not peak process memory.",
+    "Physical hardware behavior remains unmeasured for this change."
+  ],
+  "summary": [
+    {
+      "firmware": "bios",
+      "metric": "startup_seconds",
+      "baseline_median": 0.45873758289963007,
+      "candidate_median": 0.4646062506362796,
+      "absolute_difference": 0.005868667736649513,
+      "relative_percent": 1.279308248422617
+    },
+    {
+      "firmware": "bios",
+      "metric": "context_seconds",
+      "baseline_median": 1.9832889577373862,
+      "candidate_median": 1.9738302500918508,
+      "absolute_difference": -0.009458707645535469,
+      "relative_percent": -0.4769202999207134
+    },
+    {
+      "firmware": "bios",
+      "metric": "runner_seconds",
+      "baseline_median": 1.9653094997629523,
+      "candidate_median": 1.995063291862607,
+      "absolute_difference": 0.029753792099654675,
+      "relative_percent": 1.5139494366278372
+    },
+    {
+      "firmware": "bios",
+      "metric": "child_cpu_seconds",
+      "baseline_median": 4.430137000000002,
+      "candidate_median": 4.507089000000001,
+      "absolute_difference": 0.07695199999999858,
+      "relative_percent": 1.7370117447834899
+    },
+    {
+      "firmware": "uefi",
+      "metric": "startup_seconds",
+      "baseline_median": 1.954857999458909,
+      "candidate_median": 1.9615862499922514,
+      "absolute_difference": 0.0067282505333423615,
+      "relative_percent": 0.3441810369451126
+    },
+    {
+      "firmware": "uefi",
+      "metric": "context_seconds",
+      "baseline_median": 1.0653784172609448,
+      "candidate_median": 1.046994916163385,
+      "absolute_difference": -0.01838350109755993,
+      "relative_percent": -1.7255372175478567
+    },
+    {
+      "firmware": "uefi",
+      "metric": "runner_seconds",
+      "baseline_median": 1.8515949994325638,
+      "candidate_median": 1.9072279995307326,
+      "absolute_difference": 0.05563300009816885,
+      "relative_percent": 3.004598744067577
+    },
+    {
+      "firmware": "uefi",
+      "metric": "child_cpu_seconds",
+      "baseline_median": 4.6189820000000035,
+      "candidate_median": 4.614124999999997,
+      "absolute_difference": -0.0048570000000065505,
+      "relative_percent": -0.10515304021549987
+    },
+    {
+      "firmware": "uefi-diagnostic",
+      "metric": "startup_seconds",
+      "baseline_median": 1.9824262084439397,
+      "candidate_median": 3.689498250372708,
+      "absolute_difference": 1.7070720419287682,
+      "relative_percent": 86.11024383443234
+    }
+  ],
+  "baseline_embedded_revision": "89030709910c056b3004125dec5427911455df66",
+  "candidate_embedded_revision": "c2fbfd131065299f5fa26d174466885b64f92a0a",
+  "runner_static_bytes": {
+    "baseline": 109049,
+    "candidate": 110057,
+    "delta": 1008,
+    "relative_percent": 0.9243551064200497
+  },
+  "offline_image_check": {
+    "command": "python3 -B tools/compare_hardware.py --image build/input-collections/measurements/returned-data.ext2 --output build/input-collections/qemu-comparison.json",
+    "exit_status": 2,
+    "outcome": "INCONCLUSIVE: QEMU hardware matches neither physical reference",
+    "run_count": 1,
+    "on_device_failures": 0
+  },
+  "storage_samples": [
+    {
+      "label": "baseline",
+      "repeat_count": 1,
+      "firmware": "uefi",
+      "files": {
+        "manifest.txt": 413,
+        "progress.txt": 1131,
+        "storage-probe.bin": 4096,
+        "summary.txt": 74,
+        "captures.tar": 104448
+      },
+      "total_bytes": 110162
+    },
+    {
+      "label": "candidate",
+      "repeat_count": 1,
+      "firmware": "uefi",
+      "files": {
+        "manifest.txt": 434,
+        "progress.txt": 1184,
+        "storage-probe.bin": 4096,
+        "summary.txt": 74,
+        "captures.tar": 110080
+      },
+      "total_bytes": 115868
+    }
+  ],
+  "storage_measurement_script": "import sys, shutil, subprocess, json\nfrom pathlib import Path\nfrom types import SimpleNamespace\nsys.dont_write_bytecode=True\nsys.path.insert(0,str(Path.cwd()/'tests/scripts'))\nfrom test_ext2_persistence import boot\nroot=Path('build/input-collections/storage-measurements');root.mkdir(exist_ok=True)\nrows=[]\nfor label in ('baseline','candidate'):\n source=Path('build/input-collections/baseline' if label=='baseline' else 'build/artifacts')\n disk=root/(label+'.raw');shutil.copyfile(source/'program-test-disk.raw',disk)\n args=SimpleNamespace(qemu='/opt/homebrew/bin/qemu-system-x86_64',image=str(source/'os1.iso'),code='/opt/homebrew/share/qemu/edk2-x86_64-code.fd',vars='/opt/homebrew/share/qemu/edk2-i386-vars.fd',log=str(root/(label+'.log')),poweroff=True)\n def exercise(run,expect):\n  out=run('run-tests --machine measurement')\n  assert b'run-tests: PASS; saved results' in out,out\n boot(args,disk,'storage',exercise=exercise)\n part=disk.with_suffix('.ext2');part.write_bytes(disk.read_bytes()[2048*512:])\n target=root/(label+'-files');target.mkdir()\n subprocess.run(['/opt/homebrew/opt/e2fsprogs/sbin/debugfs','-R',f'rdump /tests {target}',str(part)],check=True,capture_output=True)\n files=list(target.rglob('*'));row={'label':label,'repeat_count':1,'firmware':'uefi','files':{p.name:p.stat().st_size for p in files if p.is_file()}}\n row['total_bytes']=sum(row['files'].values());rows.append(row)\n (root/'measurements.json').write_text(json.dumps(rows,indent=2)+'\\n')\n",
+  "storage_delta": {
+    "bytes": 5706,
+    "relative_percent": 5.179644523519907,
+    "repeat_count": 1,
+    "excludes": "ext2 allocation overhead"
+  },
+  "validation": {
+    "command": "./scripts/check-local.sh",
+    "log": "build/input-collections/full-local-verified.log",
+    "host": {
+      "passed": 657,
+      "seconds": 19.96
+    },
+    "normal": {
+      "passed": 92,
+      "seconds": 458.17
+    },
+    "diagnostic": {
+      "passed": 3,
+      "seconds": 9.76
+    }
+  }
+}

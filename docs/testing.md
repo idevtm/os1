@@ -115,3 +115,12 @@ The subset is not full acceptance evidence.
 Known failures outside the subset remain open requirements.
 Do not change selection to hide a failure.
 The [implementation record](archive/tooling/2026-11-09-strategic-ci.md) retains measurements and known limitations.
+
+## Physical device results
+
+Use [`run-tests`](hardware/device-test-runner-plan.md) to save traceable checks on the attached ext2 data partition.
+Each run retains machine and build identity, a progress journal, hardware snapshots, and kernel logs.
+The optional input window records stimulus counters; idle input remains unverified.
+The local `os1_smoke_device_runner_bios` and `os1_smoke_device_runner_uefi` checks verify capture and reboot preservation.
+They also verify an expected-device failure and mouse events from QEMU.
+These checks do not establish physical hardware acceptance.

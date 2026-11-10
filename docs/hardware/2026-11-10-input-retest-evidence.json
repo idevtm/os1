@@ -1,0 +1,322 @@
+{
+  "image_sha256": "df8dd41d56dd9fcb16f88c4493129e6793d3c016069de519e53f12b9ad2f1b1d",
+  "runs": [
+    {
+      "machine": "desktop",
+      "run": "tests/m-a15c974cde8bf3c2/k-cac27a99b8099d0b/b000000062631bf10-r0000000000000001",
+      "manifest": {
+        "boot_id": "26410598160",
+        "boot_mode": "2",
+        "deployed_runner_fnv64": "14536748131672008176",
+        "diagnostic": "1",
+        "expect_usb_mouse": "0",
+        "format_version": "1",
+        "input_observation": "0",
+        "kernel_build": "cac27a99b8099d0b419bba361fa022668e03d228e9aa7b65e09eed371f0ed1e6",
+        "kernel_revision": "b350facc04303aeff646024384d0a72279a82cff",
+        "machine_fingerprint": "11627334694370800578",
+        "machine_label": "auto",
+        "pid": "4",
+        "runner_version": "2",
+        "start_ns": "2047000000",
+        "test_suite_version": "2",
+        "wall_ns": "1794328224119000000"
+      },
+      "summary": {
+        "end_ns": "46679000000",
+        "failed": "23",
+        "io_failed": "0",
+        "passed": "15",
+        "skipped": "5",
+        "state": "complete"
+      },
+      "lshw_bytes": 72218,
+      "lshw_pass": true,
+      "lshw_ends_with_newline": true,
+      "input": [
+        {
+          "device": 1,
+          "kind": 1,
+          "catalog_id": 1376256,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 2,
+          "kind": 1,
+          "catalog_id": 1376384,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 3,
+          "kind": 2,
+          "catalog_id": 1376384,
+          "connected": 1,
+          "observed_events": 108,
+          "movement_events": 108,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 4,
+          "kind": 1,
+          "catalog_id": 0,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        }
+      ],
+      "failure_counts": {
+        "FAIL input removed, lost, or invalid": 23,
+        "FAIL input stream closed or invalid": 0
+      },
+      "archive_sha256": "548af9d05137855faa6519a22f7a1964776c03b1a68cb7c9629b484006eedfd2",
+      "storage_probe_valid": true
+    },
+    {
+      "machine": "laptop",
+      "run": "tests/m-da00c1febcd0571d/k-cac27a99b8099d0b/b0000000567901872-r0000000000000001",
+      "manifest": {
+        "boot_id": "23212333170",
+        "boot_mode": "2",
+        "deployed_runner_fnv64": "14536748131672008176",
+        "diagnostic": "1",
+        "expect_usb_mouse": "0",
+        "format_version": "1",
+        "input_observation": "0",
+        "kernel_build": "cac27a99b8099d0b419bba361fa022668e03d228e9aa7b65e09eed371f0ed1e6",
+        "kernel_revision": "b350facc04303aeff646024384d0a72279a82cff",
+        "machine_fingerprint": "15708768800101914397",
+        "machine_label": "auto",
+        "pid": "4",
+        "runner_version": "2",
+        "start_ns": "1835000000",
+        "test_suite_version": "2",
+        "wall_ns": "1794327975150000000"
+      },
+      "summary": {
+        "end_ns": "55619000000",
+        "failed": "0",
+        "io_failed": "0",
+        "passed": "15",
+        "skipped": "4",
+        "state": "complete"
+      },
+      "lshw_bytes": 65422,
+      "lshw_pass": true,
+      "lshw_ends_with_newline": true,
+      "input": [
+        {
+          "device": 1,
+          "kind": 2,
+          "catalog_id": 1376640,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 2,
+          "kind": 1,
+          "catalog_id": 0,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 3,
+          "kind": 2,
+          "catalog_id": 0,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        }
+      ],
+      "failure_counts": {
+        "FAIL input removed, lost, or invalid": 0,
+        "FAIL input stream closed or invalid": 0
+      },
+      "archive_sha256": "5b97ea06057c175cf4e00f0e3f4e3cbd628251eef9cd2425c8eb3e6a88530005",
+      "storage_probe_valid": true
+    },
+    {
+      "machine": "desktop",
+      "run": "tests/m-desktop-a15c974cde8bf3c2/k-cac27a99b8099d0b/b0000000000000003-r0000000000000001",
+      "manifest": {
+        "boot_id": "3",
+        "boot_mode": "2",
+        "deployed_runner_fnv64": "14536748131672008176",
+        "diagnostic": "1",
+        "expect_usb_mouse": "1",
+        "format_version": "1",
+        "input_observation": "1",
+        "kernel_build": "cac27a99b8099d0b419bba361fa022668e03d228e9aa7b65e09eed371f0ed1e6",
+        "kernel_revision": "b350facc04303aeff646024384d0a72279a82cff",
+        "machine_fingerprint": "11627334694370800578",
+        "machine_label": "desktop",
+        "pid": "5",
+        "runner_version": "2",
+        "start_ns": "96105000000",
+        "test_suite_version": "2",
+        "wall_ns": "1794328318468000000"
+      },
+      "summary": {
+        "end_ns": "173223000000",
+        "failed": "86",
+        "io_failed": "0",
+        "passed": "17",
+        "skipped": "3",
+        "state": "complete"
+      },
+      "lshw_bytes": 72218,
+      "lshw_pass": true,
+      "lshw_ends_with_newline": true,
+      "input": [
+        {
+          "device": 1,
+          "kind": 1,
+          "catalog_id": 1376256,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 2,
+          "kind": 1,
+          "catalog_id": 1376384,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 3,
+          "kind": 2,
+          "catalog_id": 1376384,
+          "connected": 1,
+          "observed_events": 191,
+          "movement_events": 182,
+          "button_changes": 12,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 4,
+          "kind": 1,
+          "catalog_id": 0,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        }
+      ],
+      "failure_counts": {
+        "FAIL input removed, lost, or invalid": 86,
+        "FAIL input stream closed or invalid": 0
+      },
+      "archive_sha256": "a1c356716b3e8f7266fd3f024bc334aa36ccd439a0ae38dc3ef6170eab1c8894",
+      "storage_probe_valid": true
+    },
+    {
+      "machine": "laptop",
+      "run": "tests/m-laptop-da00c1febcd0571d/k-cac27a99b8099d0b/b0000000000000002-r0000000000000001",
+      "manifest": {
+        "boot_id": "2",
+        "boot_mode": "2",
+        "deployed_runner_fnv64": "14536748131672008176",
+        "diagnostic": "1",
+        "expect_usb_mouse": "1",
+        "format_version": "1",
+        "input_observation": "1",
+        "kernel_build": "cac27a99b8099d0b419bba361fa022668e03d228e9aa7b65e09eed371f0ed1e6",
+        "kernel_revision": "b350facc04303aeff646024384d0a72279a82cff",
+        "machine_fingerprint": "15708768800101914397",
+        "machine_label": "laptop",
+        "pid": "5",
+        "runner_version": "2",
+        "start_ns": "93240000000",
+        "test_suite_version": "2",
+        "wall_ns": "1794328067796000000"
+      },
+      "summary": {
+        "end_ns": "161351000000",
+        "failed": "2",
+        "io_failed": "0",
+        "passed": "18",
+        "skipped": "1",
+        "state": "complete"
+      },
+      "lshw_bytes": 65422,
+      "lshw_pass": true,
+      "lshw_ends_with_newline": true,
+      "input": [
+        {
+          "device": 1,
+          "kind": 2,
+          "catalog_id": 1376640,
+          "connected": 1,
+          "observed_events": 29,
+          "movement_events": 29,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 2,
+          "kind": 1,
+          "catalog_id": 0,
+          "connected": 1,
+          "observed_events": 0,
+          "movement_events": 0,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        },
+        {
+          "device": 3,
+          "kind": 2,
+          "catalog_id": 0,
+          "connected": 1,
+          "observed_events": 35,
+          "movement_events": 35,
+          "button_changes": 0,
+          "left_shift_changes": 0
+        }
+      ],
+      "failure_counts": {
+        "FAIL input removed, lost, or invalid": 1,
+        "FAIL input stream closed or invalid": 1
+      },
+      "archive_sha256": "b172381e76307a13ac32fabdc445c30706d93e00fbbef5135e001544fee7a95a",
+      "storage_probe_valid": true
+    }
+  ],
+  "conclusions": {
+    "lshw": "PASS in all four captures; desktop exceeds the old 64 KiB limit.",
+    "laptop": "Movement delivered, then unexpected retirement and replacement. User confirms no unplug during observation. Not fully fixed.",
+    "desktop": "Logitech enumeration, movement and button changes work; generic input failures remain, so full acceptance fails."
+  },
+  "limitations": [
+    "Generic input failures combine lost, removed and invalid events; source flags and device IDs are not retained in those lines.",
+    "Retained persistent logs only contain a late portion of desktop boot 3. Captured kernel snapshots show substantial overwritten-record counts.",
+    "Desktop event-buffer overflow is plausible, not proven. Laptop transport failure cause remains unknown.",
+    "Laptop mouse/touchpad buttons and keyboard Shift were not observed. Replacement mouse movement was not tested.",
+    "Laptop Bluetooth reference mismatch remains separate."
+  ],
+  "review": "Independent read-only evidence/source review confirmed findings; no blockers in the analysis."
+}
