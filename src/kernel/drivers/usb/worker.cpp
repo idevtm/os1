@@ -2,6 +2,7 @@
 
 #include "console/console_input.hpp"
 #include "drivers/usb/ehci.hpp"
+#include "drivers/usb/stall_trace.hpp"
 #include "drivers/usb/xhci.hpp"
 #include "ipc/channel.hpp"
 namespace
@@ -12,6 +13,7 @@ void worker()
     unsigned ticks = 0;
     for(;;)
     {
+        usb::stall_trace::sample(OS1_EHCI_TRACE_WORKER);
         ehci_poll_devices(*allocator, ticks % 50 == 0);
         if(ticks % 50 == 0)
             xhci_poll_devices(*allocator);

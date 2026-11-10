@@ -235,3 +235,105 @@ There is no equivalent event measurement from the polling demo.
 The two samples cannot establish a latency trend or reproduce continuous motion.
 See `build/artifacts/test-runs/os1_smoke_display_session_uefi-v92tnd9f/guest.display.log`.
 The laptop pause, maximum geometry restoration cost, and IRQ CPU cost remain unmeasured.
+
+## Laptop EHCI stall capture
+
+The laptop user reported visible pauses with the SIGMACHIP USB mouse and smooth motion with the built-in touchpad.
+
+| Observation | USB mouse | Touchpad |
+| --- | ---: | ---: |
+| Published events received | 247 | 689 |
+| Longest publication gap | About 1.84 s | About 0.49 s |
+| Maximum event age | About 0.82 ms | About 1.54 ms |
+| Maximum cursor redraw | About 0.74 ms | About 2.12 ms |
+| Lost input ring records | 0 | 0 |
+
+Publication gaps can include stationary time. The user saw pauses during USB mouse movement.
+The observed event age and draw duration do not account for those pauses.
+
+```text
+worker cadence -> controller admission -> endpoint poll -> HID report -> event publication
+stop trace -> read bounded snapshot -> save trace and gfxdemo report in one test archive
+```
+
+The optional interactive check records worker gaps, controller busy skips, endpoint poll gaps, and report gaps.
+It also counts errors and retries. It retains the first slow samples and counts subsequent drops.
+Use a shared high-resolution clock when available. Label the fallback clock in the report.
+Keep capture I/O outside the observation window. Preserve the default unattended QEMU workflow.
+
+| Area | Impact |
+| --- | --- |
+| Scope | Add an opt-in diagnostic for the observed laptop input stalls. |
+| Boot and platform | Use the existing worker, EHCI controller, and measurement clock. Keep both boot paths. |
+| Memory and isolation | Bound trace memory and capture time. Use system-control authority for start and stop. |
+| Concurrency | Keep trace state under a separate short lock. Copy snapshots after releasing it. |
+| Interfaces | Add system trace controls, a passive observe record, and a runner option. |
+| Resources | Measure image and trace memory costs. Keep disk writes outside the active window. |
+| Validation | Check trace retention, default runner behavior, and paired demo artifacts. Retest the laptop. |
+
+
+The [runner procedure](device-test-runner-plan.md#interactive-ehci-stall-capture) describes the laptop retest.
+The [input ABI](../native-api/abi/input-abi.md#ehci-stall-trace) defines the trace layout and clock rules.
+The final design starts after demo setup. This excludes its USB program load and initial rendering.
+The trace records publication gaps as well as report-to-publication delay.
+It retains one selected pointer and checks the ticket before it saves the paired files.
+
+### Stall trace validation
+
+The final `./scripts/check-local.sh` run used `c7127c0` plus the recorded source and test changes.
+The normal build identity is `3c0b9166e66b128c3752b2f83bb3d435951a5d44ab6fe38f406d571d6b520877`.
+The executable and test diff SHA-256 is `d7d624a828fb808a96b2da3f2ec59fc5dc178a9f7eb1e6196848eadfac445485`.
+
+| Profile | Passed | Duration |
+| --- | ---: | ---: |
+| Host | 685 / 685 | 21.01 s |
+| Normal image | 94 / 94 | 401.01 s |
+| Diagnostic image | 3 / 3 | 10.25 s |
+
+The command log is `build/ehci-stall/full-local-qualified.log`. Profile logs are in `build/local-validation/`.
+The host tests verify bounded retention, expiry without a new worker sample, and publication timing for the selected pointer.
+The UEFI smoke verifies both archive members on the data disk and matches the ticket and input identity.
+The fixture uses an xHCI mouse. It does not exercise EHCI endpoint timing.
+See `build/artifacts/test-runs/os1_smoke_display_session_uefi-13m99ixe/guest.display.log`.
+
+Independent review covered capture timing, locking, the launch grant, snapshot copying, and ABI documentation.
+Review corrections exclude program loading, reject stale tickets, and handle clock loss.
+The host compile failure remains in `build/ehci-stall/host-compile-failure.log`. The corrected build passed.
+The full suite ran after the final review corrections.
+An injected HPET loss and a physical EHCI capture remain untested.
+
+### Stall trace resource measurements
+
+The comparison uses a clean build of `c7127c0` and the final source diff.
+Both builds use the same GCC 11.2.0 toolchain, Debug configuration, and kernel `-Os`.
+
+| Artifact | Baseline bytes | Candidate bytes | Difference |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 627,264 | 630,280 | +3,016 bytes, +0.48% |
+| UEFI ISO | 4,364,288 | 4,366,336 | +2,048 bytes, +0.05% |
+| Demo ELF | 10,608 | 11,928 | +1,320 bytes, +12.44% |
+| Runner ELF | 44,832 | 60,160 | +15,328 bytes, +34.19% |
+| BIOS image | 1,474,560 | 1,474,560 | 0 bytes, 0% |
+| Initrd | 10,240 | 10,240 | 0 bytes, 0% |
+
+The program disk remains 34,603,008 bytes. The ext2 fixture uses five more 4 KiB blocks.
+Used blocks increase from 166 to 171, or 3.01%. The fixture retains 58 used inodes.
+Trace symbols use 2,929 bytes of static storage, excluding alignment.
+The baseline has no trace, so its relative storage difference is undefined.
+Capture CPU cost and physical transfer timing remain unmeasured.
+
+
+The isolated comparison uses QEMU 11.1.3 TCG on arm64 macOS 26.6.2.
+Each q35 guest uses four CPUs and 128 MiB, with one guest at a time.
+The UEFI profile uses Homebrew OVMF and USB storage. The BIOS profile uses virtio storage.
+Each row shows the median of three samples with tracing disabled.
+Samples and artifact hashes are in `build/ehci-stall/boot-comparison.json`.
+
+| Workload | Baseline | Candidate | Difference |
+| --- | ---: | ---: | ---: |
+| UEFI startup | 2.371 s | 2.374 s | +0.002 s, +0.10% |
+| UEFI echo | 5.135 ms | 5.340 ms | +0.205 ms, +3.99% |
+| BIOS startup | 0.461 s | 0.464 s | +0.003 s, +0.69% |
+| BIOS echo | 13.885 ms | 11.982 ms | -1.903 ms, -13.70% |
+
+These short runs do not establish a performance trend.

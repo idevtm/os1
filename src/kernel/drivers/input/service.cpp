@@ -320,25 +320,25 @@ void boot_keyboard(uint64_t id, const uint8_t* report, unsigned bytes)
     }
     keyboard(id, keys);
 }
-void pointer(uint64_t id, unsigned buttons, int dx, int dy, int wheel)
+bool pointer(uint64_t id, unsigned buttons, int dx, int dy, int wheel)
 {
     IrqSpinGuard guard(lock);
     auto* d = find(id);
     if(!d || !d->info.connected || d->info.kind != OS1_INPUT_POINTER)
-        return;
+        return false;
     buttons &= 7;
     if(!dx && !dy && !wheel && buttons == d->state.buttons)
-        return;
+        return false;
     d->state.buttons = buttons;
     d->state.x += uint64_t(int64_t(dx));
     d->state.y += uint64_t(int64_t(dy));
     d->state.wheel += uint64_t(int64_t(wheel));
     publish(*d, OS1_INPUT_CHANGED, dx, dy, wheel);
+    return true;
 }
-void boot_pointer(uint64_t id, const uint8_t* report, unsigned bytes)
+bool boot_pointer(uint64_t id, const uint8_t* report, unsigned bytes)
 {
-    if(report && bytes >= 3)
-        pointer(id, report[0], int8_t(report[1]), int8_t(report[2]));
+    return report && bytes >= 3 && pointer(id, report[0], int8_t(report[1]), int8_t(report[2]));
 }
 bool ready(const NativeObject* object)
 {

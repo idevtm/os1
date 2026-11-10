@@ -131,6 +131,7 @@ os1_add_user_cxx_program(sh "${CMAKE_CURRENT_SOURCE_DIR}/programs/sh.cpp" OS1_US
 os1_add_user_cxx_program(gfxdemo "${CMAKE_CURRENT_SOURCE_DIR}/programs/gfxdemo.cpp" OS1_USER_GFXDEMO_ELF)
 add_custom_command(OUTPUT "${OS1_USER_GFXDEMO_ELF}" APPEND DEPENDS
   "${PROJECT_SOURCE_DIR}/src/uapi/os1/display.h"
+  "${PROJECT_SOURCE_DIR}/src/uapi/os1/system.h"
   "${PROJECT_SOURCE_DIR}/src/uapi/os1/input.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/console.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/input.hpp")
@@ -140,6 +141,8 @@ add_custom_command(OUTPUT "${OS1_USER_RUN_TESTS_ELF}" APPEND DEPENDS
   "${PROJECT_SOURCE_DIR}/src/common/hardware/archive_stream.hpp"
   "${PROJECT_SOURCE_DIR}/src/common/hardware/capture.hpp"
   "${PROJECT_SOURCE_DIR}/src/uapi/os1/input.h"
+  "${PROJECT_SOURCE_DIR}/src/uapi/os1/observe.h"
+  "${PROJECT_SOURCE_DIR}/src/uapi/os1/system.h"
   "${PROJECT_SOURCE_DIR}/src/common/log/frame.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/input.hpp")
 os1_add_user_cxx_program(init "${CMAKE_CURRENT_SOURCE_DIR}/programs/init.cpp" OS1_USER_INIT_ELF)

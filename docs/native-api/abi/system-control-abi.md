@@ -1,6 +1,6 @@
 # SystemControl ABI
 
-SystemControl synchronizes persistent storage and requests shutdown or reboot. It uses the existing kernel provider adapter and copied IPC records.
+SystemControl synchronizes persistent storage, requests power transitions, and controls the EHCI stall trace. It uses the existing kernel provider adapter and copied IPC records.
 
 ```text
 bootstrap root grant: SYSTEM_CONTROL
@@ -22,9 +22,14 @@ This bootstrap policy grants system control to ordinary children of the administ
 | 1 | `sync` | Empty | Synchronize a dirty persistent volume. A clean volume requires no extra flush. |
 | 2 | `shutdown` | Empty | Freeze and synchronize storage, then request ACPI S5. |
 | 3 | `reboot` | Empty | Freeze and synchronize storage, then use the ACPI reset register. |
+| 4 | `ehci_trace_start` | u32 input identity | Start an [EHCI stall trace](input-abi.md#ehci-stall-trace) and return a positive ticket as application status. |
+| 5 | `ehci_trace_stop` | u32 ticket | Stop the matching trace. |
 
-Requests and replies use the existing IPC envelopes. No payload bytes or returned capabilities are defined.
-Authority failure returns ACCESS. A nonempty payload returns INVALID. An unknown method returns UNSUPPORTED.
+Requests and replies use the existing IPC envelopes. Replies carry no payload bytes or capabilities.
+Authority failure returns ACCESS. A request with the wrong payload size returns INVALID.
+An unknown method returns UNSUPPORTED.
+A trace start returns WOULD_BLOCK while another capture is active.
+A stop with a different ticket returns NOT_FOUND.
 A busy transition or filesystem returns WOULD_BLOCK. Storage failure returns IO and prevents the power operation.
 If no persistent volume is mounted, synchronization succeeds without disk I/O.
 A successful power transition does not return to the running guest. A failed platform transition returns an error and reopens filesystem admission.
@@ -32,7 +37,7 @@ An accepted asynchronous request can continue after its Operation descriptor clo
 
 ## Ordering and platform limits
 
-One admission flag serializes system requests. The ext2 admission guard rejects a busy volume.
+One admission flag serializes synchronization and power requests. Trace controls use separate admission. The ext2 admission guard rejects a busy volume.
 Successful admission excludes concurrent filesystem operations.
 Successful final synchronization freezes new filesystem operations until the machine stops or transition failure reopens admission.
 This prevents a concurrent process from making the volume dirty after the final sync.

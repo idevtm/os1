@@ -5,6 +5,7 @@
 
 #include "console/console.hpp"
 #include "debug/log_export.hpp"
+#include "drivers/usb/stall_trace.hpp"
 #include "freestanding/string.hpp"
 #include "platform/acpica_diagnostics.hpp"
 #include "platform/system_power.hpp"
@@ -27,8 +28,12 @@ void report_failure(unsigned member, const PowerDiagnostic& diagnostic)
     write_console_bytes(line, freestanding::string_length(line));
 }
 }  // namespace
-long system_control(unsigned member)
+long system_control(unsigned member, unsigned argument)
 {
+    if(member == OS1_SYSTEM_EHCI_TRACE_START)
+        return usb::stall_trace::start(argument);
+    if(member == OS1_SYSTEM_EHCI_TRACE_STOP)
+        return usb::stall_trace::stop(argument);
     if(member < OS1_SYSTEM_SYNC || member > OS1_SYSTEM_REBOOT)
         return OS1_ERR_UNSUPPORTED;
     const bool transition = member != OS1_SYSTEM_SYNC;

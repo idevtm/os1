@@ -3,6 +3,7 @@
 #include <os1/console.hpp>
 #include <os1/file_tools.hpp>
 #include <os1/input.hpp>
+#include <os1/system.hpp>
 
 namespace u = os1::user;
 namespace f = u::files;
@@ -121,9 +122,12 @@ struct PointerStats
     uint64_t events{}, losses{}, gaps{}, delayed{}, slow_draws{};
     uint64_t previous_event{}, gap_max{}, age_max{}, draw_max{};
     uint64_t gap_samples{}, age_samples{}, draw_samples{};
+    uint64_t input_id{}, start_ns{}, end_ns{}, trace_ticket{};
 
     void event(const os1_input_event& e)
     {
+        if(trace_ticket && start_ns && !(e.flags & OS1_INPUT_COARSE_CLOCK) && e.time_ns < start_ns)
+            return;
         ++events;
         if(e.flags & OS1_INPUT_COARSE_CLOCK)
             return;
@@ -163,7 +167,11 @@ struct PointerStats
                                 " draw_max_ns=",
                                 " gap_samples=",
                                 " age_samples=",
-                                " draw_samples="};
+                                " draw_samples=",
+                                " input_id=",
+                                " start_hpet_ns=",
+                                " end_hpet_ns=",
+                                " trace_ticket="};
         const uint64_t values[] = {events,
                                    losses,
                                    gaps,
@@ -174,7 +182,11 @@ struct PointerStats
                                    draw_max,
                                    gap_samples,
                                    age_samples,
-                                   draw_samples};
+                                   draw_samples,
+                                   input_id,
+                                   start_ns,
+                                   end_ns,
+                                   trace_ticket};
         for(unsigned i = 0; i < sizeof(values) / sizeof(values[0]); ++i)
         {
             print(1, labels[i]);
@@ -189,7 +201,8 @@ long interactive(int client,
                  int keys,
                  int key_client,
                  int pointer,
-                 PointerStats& stats)
+                 PointerStats& stats,
+                 bool trace)
 {
     os1_ipc_result r{};
     f::Handle subscription(u::input::call(
@@ -210,10 +223,21 @@ long interactive(int client,
     os1_input_state previous{};
     if(!pointer_state(pointer, previous))
         return OS1_ERR_CLOSED;
+    stats.input_id = previous.device;
     unsigned x = (mode.width - cursor_size) / 2, y = (mode.height - cursor_size) / 2;
     long status = draw_cursor(client, x, y, previous.buttons ? 0xffcb54 : 0xffffff);
     if(status < 0)
         return status;
+    if(trace)
+    {
+        const long ticket = u::system_control(OS1_SYSTEM_EHCI_TRACE_START, previous.device);
+        if(ticket <= 0)
+            return ticket < 0 ? ticket : OS1_ERR_INVALID;
+        stats.trace_ticket = ticket;
+    }
+    os1_measurement start{};
+    if(!u::ipc_measure(start) && start.source == OS1_MEASUREMENT_HPET)
+        stats.start_ns = start.nanoseconds;
     const int waits[] = {keys, subscription.fd};
     for(;;)
     {
@@ -334,7 +358,7 @@ long check_session(int display, const os1_display_mode& mode)
     return 0;
 }
 
-long run(bool check)
+long run(bool check, int menu)
 {
     f::Handle display(bind_display(u::root(), OS1_DISPLAY_INTERFACE_ID));
     if(display.fd < 0)
@@ -377,20 +401,20 @@ long run(bool check)
     f::Handle key_client(u::console_input_bind(keys.fd));
     if(key_client.fd < 0)
         return key_client.fd;
-    print(1, "Video modes\n");
+    print(menu, "Video modes\n");
     for(unsigned i = 0; i < modes.count; ++i)
     {
         const auto& mode = modes.modes[i];
-        f::number(1, i + 1);
-        print(1, ". ");
-        f::number(1, mode.width);
-        print(1, " x ");
-        f::number(1, mode.height);
-        print(1, " x ");
-        f::number(1, mode.bits_per_pixel);
-        print(1, i ? "\n" : " (boot mode)\n");
+        f::number(menu, i + 1);
+        print(menu, ". ");
+        f::number(menu, mode.width);
+        print(menu, " x ");
+        f::number(menu, mode.height);
+        print(menu, " x ");
+        f::number(menu, mode.bits_per_pixel);
+        print(menu, i ? "\n" : " (boot mode)\n");
     }
-    print(1, "Choose a mode. Enter uses the boot mode. Esc or q exits.\n");
+    print(menu, "Choose a mode. Enter uses the boot mode. Esc or q exits.\n");
     unsigned selected = 0;
     for(;;)
     {
@@ -417,7 +441,17 @@ long run(bool check)
     if(client.fd < 0)
         return client.fd;
     PointerStats stats{};
-    status = interactive(client.fd, mode, keys.fd, key_client.fd, pointer_client.fd, stats);
+    status =
+        interactive(client.fd, mode, keys.fd, key_client.fd, pointer_client.fd, stats, menu == 2);
+    os1_measurement end{};
+    if(!u::ipc_measure(end) && end.source == OS1_MEASUREMENT_HPET)
+        stats.end_ns = end.nanoseconds;
+    if(stats.trace_ticket)
+    {
+        long stopped = u::system_control(OS1_SYSTEM_EHCI_TRACE_STOP, stats.trace_ticket);
+        if(stopped < 0 && !status)
+            status = stopped;
+    }
     client.reset();
     session.reset();
     stats.report();
@@ -428,12 +462,13 @@ long run(bool check)
 int main(int argc, char** argv)
 {
     const bool check = argc == 2 && equal(argv[1], "--check");
-    if(argc != 1 && !check)
+    const bool report = argc == 2 && equal(argv[1], "--stall-report");
+    if(argc != 1 && !check && !report)
     {
-        print(2, "usage: gfxdemo [--check]\n");
+        print(2, "usage: gfxdemo [--check | --stall-report]\n");
         return 1;
     }
-    long status = run(check);
+    long status = run(check, report ? 2 : 1);
     if(status < 0)
     {
         print(2, "gfxdemo: ");

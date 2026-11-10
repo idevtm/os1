@@ -311,3 +311,25 @@ QEMU fixtures install this setting only in their private program-disk copies.
 They retain the one-second observation and all unattended checks.
 The dedicated pointer-activity test retains its existing 20-second window and verifies the new defaults.
 Production images do not install this setting.
+
+
+## Interactive EHCI stall capture
+
+Use this opt-in check to reproduce the laptop mouse pause and save timing evidence.
+
+```text
+run-tests "--machine" "laptop" "--no-input" "--ehci-stalls"
+```
+
+Boot normal `os1` with the USB mouse connected.
+When the demo opens, select the boot mode.
+Move the USB mouse continuously for 20 to 30 seconds.
+Press `q` to return to the runner.
+Wait for the saved-results message. Run `shutdown` before removing the stick.
+
+The demo starts tracing after it loads and draws its initial screen.
+It stops the trace before it restores the console.
+The runner saves `ehci-stalls.bin` and `gfxdemo-diagnostics.txt` in the same `captures.tar`.
+The trace ticket and input identity pair the records.
+The [input ABI](../native-api/abi/input-abi.md#ehci-stall-trace) defines the binary layout.
+The normal unattended check does not open a graphics demo.

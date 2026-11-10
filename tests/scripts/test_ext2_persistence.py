@@ -106,7 +106,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             assert forbidden not in result, result[-2000:]
         return result
 
-    def run(text, marker=None, allow_errors=False, timeout=60):
+    def run(text, marker=None, allow_errors=False, timeout=60, action=None):
         command_started = time.monotonic()
         completed = False
         try:
@@ -114,6 +114,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 menu.reset()
             child.stdin.write((text + '\n').encode())
             child.stdin.flush()
+            if action:
+                action()
             out = expect(allow_errors=allow_errors, timeout=timeout)
             if marker:
                 assert marker in out, out

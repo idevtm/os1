@@ -8,6 +8,8 @@ import json
 import subprocess
 import sys
 import tempfile
+import struct
+import tarfile
 import time
 
 from test_ext2_persistence import boot
@@ -83,6 +85,29 @@ def exercise_graphics(args, run, expect):
             assert pixels[:3] != bytes.fromhex('14283e'), 'graphics background remains after release'
             assert b'\xaa\xaa\xaa' in pixels, 'console text did not redraw after release'
         run('gfxdemo "--check"', b'gfxdemo: session checks passed')
+
+        def trace_demo():
+            trace_demo.prefix = expect(b'Choose a mode.', timeout=40)
+            key('1')
+            before = await_cursor(lambda _: True)
+            for step in (1, 2):
+                qmp.execute('input-send-event', {'events': [
+                    {'type': 'rel', 'data': {'axis': 'x', 'value': 19}}
+                ]})
+                await_cursor(lambda p: p == (before[0] + 19 * step, before[1]))
+            time.sleep(.025)
+            key('q')
+
+        # The mouse is xHCI. This exercises the paired capture even on a guest
+        # with no EHCI reports, without claiming to reproduce the physical stall.
+        out = run('run-tests "--no-input" "--ehci-stalls"', b'run-tests: PASS; saved results',
+                  action=trace_demo)
+        match = re.search(rb'run-tests: results (/disk/tests/[^\s]+)', out)
+        if not match:
+            # The prompt wait in trace_demo consumed the early runner output.
+            match = re.search(rb'run-tests: results (/disk/tests/[^\s]+)', trace_demo.prefix)
+        assert match, out
+        args.capture_path = match[1].decode().removeprefix('/disk') + '/captures.tar'
     finally:
         qmp.close()
 
@@ -115,6 +140,25 @@ def main():
 
         boot(args, disk, 'display', exercise=exercise)
         if args.code:
+            trace_part = Path(temporary) / 'trace.ext2'
+            trace_tar = Path(temporary) / 'trace.tar'
+            trace_part.write_bytes(disk.read_bytes()[2048 * 512:])
+            subprocess.run([tool('debugfs'), '-R', f'dump {args.capture_path} {trace_tar}',
+                            str(trace_part)], check=True, capture_output=True)
+            with tarfile.open(trace_tar, 'r:') as capture:
+                trace = capture.extractfile('ehci-stalls.bin').read()
+                demo = capture.extractfile('gfxdemo-diagnostics.txt').read()
+            version, kind, record_size, count = struct.unpack_from('<4I', trace)
+            assert (version, kind, count) == (1, 15, 1)
+            assert len(trace) == 16 + record_size
+            start, end, clock, retained = struct.unpack_from('<QQII', trace, 16)
+            selected, ticket = struct.unpack_from('<II', trace, 48)
+            worker, busy, polls, reports = struct.unpack_from('<4Q', trace, 56)
+            assert end >= start and clock in (1, 2) and retained <= 48
+            assert worker > 0 and reports == 0 and polls == 0 and busy == 0
+            assert re.search(rb'pointer diagnostics events=[1-9]', demo), demo
+            assert f' input_id={selected} '.encode() in demo and selected > 0, demo
+            assert f' trace_ticket={ticket}\n'.encode() in demo and ticket > 0, demo
             module = json.loads(Path(args.metadata).read_text())['image'].removeprefix('/disk')
             part = Path(temporary) / 'program.ext2'
             bad = Path(temporary) / 'corrupt.elf'

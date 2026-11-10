@@ -50,6 +50,7 @@ set(KERNEL_DRIVER_SOURCES
   drivers/timer/tsc_clock.cpp
   drivers/watchdog/intel_tco.cpp
   drivers/usb/diagnostics.cpp
+  drivers/usb/stall_trace.cpp
   drivers/usb/ehci.cpp
   drivers/usb/ehci_controller.cpp
   drivers/usb/hub.cpp

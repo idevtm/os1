@@ -12,6 +12,7 @@
 #include "drivers/usb/hid_keyboard.hpp"
 #include "drivers/usb/hub.hpp"
 #include "drivers/usb/mass_storage.hpp"
+#include "drivers/usb/stall_trace.hpp"
 #include "drivers/usb/worker.hpp"
 #include "handoff/memory_layout.h"
 #include "input/hid_boot.hpp"
@@ -566,6 +567,9 @@ void poll_input(Controller& c)
     {
         if(!d.input_armed || d.failed)
             continue;
+        const bool pointer = d.hid.protocol == 2;
+        if(pointer)
+            usb::stall_trace::sample(OS1_EHCI_TRACE_POLL, c.owner.index, d.input_identity);
         if(d.recovery.pending)
         {
             if(diagnostic_log::monotonic() < d.recovery.due_ns)
@@ -595,14 +599,22 @@ void poll_input(Controller& c)
             reinterpret_cast<ehci::Qtd*>(static_cast<uint8_t*>(d.input_dma.virtual_address) + 128);
         if(td->token & ehci::active)
             continue;
+        const uint64_t completed =
+            pointer && usb::stall_trace::enabled() ? usb::stall_trace::now() : 0;
         if(!periodic_schedule(c, false))
             return;
         dma_sync_for_cpu(d.input_dma);
         unsigned bytes = d.hid.packet;
         if((td->token & ehci::errors) || ehci::remaining(td->token) > bytes)
         {
+            if(pointer)
+                usb::stall_trace::sample(
+                    OS1_EHCI_TRACE_ERROR, c.owner.index, d.input_identity, 0, td->token);
             if(d.recovery.schedule(td->token, bytes, d.speed, diagnostic_log::monotonic()))
             {
+                if(pointer)
+                    usb::stall_trace::sample(
+                        OS1_EHCI_TRACE_RETRY, c.owner.index, d.input_identity, 0, td->token);
                 // The halted QH keeps its frame slots reserved during backoff.
                 // Other endpoints continue; descriptor reuse waits for PSS to clear.
                 if(!periodic_schedule(c, true))
@@ -628,7 +640,14 @@ void poll_input(Controller& c)
                     usb_queue_console_char(chars[i]);
         }
         else
-            native_input::boot_pointer(d.input_identity, report, actual);
+        {
+            if(completed && actual >= 3)
+                usb::stall_trace::sample(
+                    OS1_EHCI_TRACE_REPORT, c.owner.index, d.input_identity, completed);
+            if(native_input::boot_pointer(d.input_identity, report, actual) && completed)
+                usb::stall_trace::sample(
+                    OS1_EHCI_TRACE_PUBLISH, c.owner.index, d.input_identity, completed);
+        }
         if(!arm_input(d))
         {
             retire(c);
@@ -1011,8 +1030,13 @@ void ehci_poll_devices(PageFrameContainer&, bool topology)
     for(auto* c : controllers)
     {
         SchedulingGuard scheduling;
-        if(!c || c->failed || __atomic_exchange_n(&c->busy, 1, __ATOMIC_ACQUIRE))
+        if(!c || c->failed)
             continue;
+        if(__atomic_exchange_n(&c->busy, 1, __ATOMIC_ACQUIRE))
+        {
+            usb::stall_trace::sample(OS1_EHCI_TRACE_BUSY, c->owner.index);
+            continue;
+        }
         poll_input(*c);
         if(topology && !c->failed)
         {

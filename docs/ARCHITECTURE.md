@@ -160,6 +160,12 @@ The [failure diagnostics plan](hardware/input-failure-diagnostics-plan.md) recor
 Removed attachments keep unavailable identities; new attachments receive new identities.
 Existing storage mounts do not automatically switch to replacement media.
 
+### EHCI stall diagnostics
+
+The [stall trace](native-api/abi/input-abi.md#ehci-stall-trace) correlates USB worker timing with one pointer's reports.
+The worker records bounded samples in memory during the interactive demo.
+The runner saves the trace and demo summary after the capture ends.
+
 ## Glossary
 
 The [project glossary](GLOSSARY.md) defines the terms used here and throughout

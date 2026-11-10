@@ -279,7 +279,8 @@ inline long run_program(const char* path,
                         const char* raw_parameters = nullptr,
                         parameters::Diagnostic* diagnostic = nullptr,
                         int retained_executable = -1,
-                        const os1_constructor_args* prepared_constructor = nullptr)
+                        const os1_constructor_args* prepared_constructor = nullptr,
+                        int stdout_source = -1)
 {
     struct ExecutableOwner
     {
@@ -342,15 +343,16 @@ inline long run_program(const char* path,
     }
     if(!replace)
     {
-        int sources[] = {0, 1, 2, root(), cwd()};
+        const int targets[] = {0, 1, 2, root(), cwd()};
         for(unsigned i = 0; i < 5; ++i)
         {
-            const int fd = sources[i];
+            const int target = targets[i];
+            const int fd = i == 1 && stdout_source >= 0 ? stdout_source : target;
             if(fd < 0)
                 continue;
             bool seen = false;
             for(unsigned j = 0; j < i; ++j)
-                if(sources[j] == fd)
+                if(targets[j] == target)
                     seen = true;
             if(seen)
                 continue;
@@ -369,7 +371,7 @@ inline long run_program(const char* path,
                     return result;
                 ceiling = detail.descendant_rights;
             }
-            request.grants[request.grant_count++] = {fd, fd, info.rights, 0, ceiling, 0};
+            request.grants[request.grant_count++] = {fd, target, info.rights, 0, ceiling, 0};
         }
     }
     // Ownership of a retained search result enters this helper and is released below.

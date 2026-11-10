@@ -124,6 +124,7 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/drivers/bus/pci_bus.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/net/arp_cache.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/usb/diagnostics.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/drivers/usb/stall_trace.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/usb/ehci_controller.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/usb/hub.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/usb/mass_storage.cpp"
@@ -216,6 +217,7 @@ add_executable(os1_host_tests
   kernel/usb_storage_tests.cpp
   kernel/hid_keyboard_tests.cpp
   kernel/input_service_tests.cpp
+  kernel/ehci_stall_trace_tests.cpp
   kernel/ipi_tests.cpp
   kernel/ext2_tests.cpp
   kernel/xhci_controller_tests.cpp

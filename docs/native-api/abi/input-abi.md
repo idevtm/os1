@@ -295,3 +295,57 @@ The first retirement cause remains immutable.
 The rules follow EHCI 1.0, Table 3-16 and Section 4.12.2.4.2.
 The [Intel specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/ehci-specification-for-usb.pdf) distinguishes split ERR from normal NAK responses.
 Normal NAK responses do not consume software recovery attempts.
+
+## EHCI stall trace
+
+Use this diagnostic to compare worker scheduling, EHCI reports, and pointer publication.
+The trace covers one selected input identity for one capture.
+
+```text
+gfxdemo ready -> start(input identity) -> bounded RAM capture -> stop(ticket)
+run-tests -> observe kind 15 -> save paired artifacts
+```
+
+The [SystemControl ABI](system-control-abi.md) defines the start and stop requests.
+A capture expires after 120 seconds of scheduler time.
+The kernel checks expiry when it samples the trace or handles a trace request.
+A new capture replaces the previous capture. The ticket identifies each capture during the boot.
+A read during an active capture or before the first capture returns `OS1_ERR_NOT_FOUND`.
+
+`OS1_OBSERVE_EHCI_STALL_TRACE` uses observe ABI version 1 and kind 15.
+The standard observe header precedes one 2,856-byte record.
+The kernel copies a stable snapshot after it releases the trace lock.
+The record uses little-endian fields.
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 16 | `start_ns`, `end_ns` as two u64 values |
+| 16 | 24 | `clock`, `count`, `dropped`, `flags`, `input`, `ticket` as six u32 values |
+| 40 | 64 | Eight u64 sample counts indexed by kind |
+| 104 | 64 | Eight u64 maximum intervals indexed by kind |
+| 168 | 2,688 | Up to 48 records of 56 bytes each |
+
+Each record contains two u64 times, four u32 identifiers, and three u64 counters.
+The times are the sample timestamp and interval. The identifiers are kind, PCI index, input identity, and EHCI token.
+The counters are cumulative controller-busy skips, errors, and scheduled retries.
+Controller-busy skips are aggregate across EHCI controllers. The report and poll measurements cover the selected pointer.
+The worker and controller samples use input identity zero.
+
+| Kind | Measurement |
+| ---: | --- |
+| 0 | Time since the previous USB worker iteration |
+| 1 | EHCI controller admission skipped because it was busy |
+| 2 | Time since the previous poll of the selected endpoint |
+| 3 | Time since the previous valid HID report completion observed by the worker |
+| 4 | Time from observed report completion to native pointer publication |
+| 5 | Transfer error |
+| 6 | Transfer retry scheduled |
+| 7 | Time since the previous native pointer publication |
+
+Counts and maxima include all captured samples.
+The trace retains the first 48 intervals of at least 50 ms, errors, and retries.
+The dropped count covers subsequent qualifying records.
+The trace counts busy skips without adding a record for each skip.
+Clock 2 uses HPET and aligns with the demo report. Clock 1 uses the scheduler tick.
+An invalid HPET read ends the trace at its last valid timestamp.
+Flags bit 0 marks expiry. Bit 1 marks clock loss.
