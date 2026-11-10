@@ -245,7 +245,8 @@ Intermediate runs do not replace that requirement.
 | `observe-coalesce-tests.log` | Three BIOS and three UEFI observation runs passed in 24.29 seconds. |
 
 No assertions were removed or weakened. Diagnostic reruns preserve the earlier failure evidence.
-Physical recovery remains unmeasured until the user repeats the hardware tests.
+The subsequent [physical retest](2026-11-10-input-acceptance.md) found neither previous mouse symptom.
+Recovery execution and sustained reliability remain unmeasured.
 
 ### Final qualification
 
@@ -295,4 +296,5 @@ The final pair passed in 36.55 seconds; logs remain in `build/input-recovery/can
 The separate I/O worker adds one 16,384-byte kernel stack and a Thread allocation.
 Aggregate allocator overhead and physical input latency remain unmeasured.
 EHCI recovery adds bounded retry state and at most three configured backoff delays per window.
-The user must confirm physical recovery, latency, and loss behavior on both devices.
+The [physical acceptance report](2026-11-10-input-acceptance.md) records loss-free observations on both devices.
+Physical latency and recovery execution remain unmeasured.

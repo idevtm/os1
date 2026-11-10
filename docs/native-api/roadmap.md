@@ -314,7 +314,8 @@ This document promotion does not imply ABI stability or approval of every illust
 
 ## Remaining priorities
 
-The selected storage, Console, and bounded native input slices are implemented. Physical input acceptance remains pending.
+The selected storage, Console, and bounded native input slices are implemented.
+[Physical input retests](../hardware/2026-11-10-input-acceptance.md) pass on both reference machines; extended reliability qualification remains pending.
 This table records priority, acceptance, and dependencies without assigning new ABI numbers.
 
 | Order | Work | Acceptance | Dependency |
