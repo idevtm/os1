@@ -79,8 +79,9 @@ struct HubFixture
     // Port 1 is a high-speed storage child, port 2 disconnected, port 3 full-speed.
     std::array<uint32_t, 3> status{0x10101, 0x100, 0x10101};
     std::vector<unsigned> children, power, resets, delays;
+    std::vector<std::pair<unsigned, unsigned>> unsupported;
     unsigned requests{}, fail_request{}, reset_polls{};
-    bool reset_stuck{}, child_fails{}, overcurrent{}, power_waited{};
+    bool reset_stuck{}, child_fails{}, overcurrent{}, power_waited{}, low_speed{};
     static bool control(void* context,
                         uint8_t type,
                         uint8_t request,
@@ -111,7 +112,7 @@ struct HubFixture
             {
                 ++f.reset_polls;
                 if(!f.reset_stuck)
-                    status = port == 1 ? 0x110503 : 0x110103;
+                    status = port == 1 ? 0x110503 : (f.low_speed ? 0x110303 : 0x110103);
             }
             if(f.overcurrent)
                 status |= 8;
@@ -161,7 +162,17 @@ struct HubFixture
     }
     bool run()
     {
-        return usb::hub::enumerate({this, control, delay, child}, {3, 40});
+        return usb::hub::enumerate({this,
+                                    control,
+                                    delay,
+                                    child,
+                                    [](void* p, uint8_t port, unsigned speed) {
+                                        auto& f = *static_cast<HubFixture*>(p);
+                                        EXPECT_NE(f.status[port - 1] & 2,
+                                                  0u);  // Captured before isolation.
+                                        f.unsupported.emplace_back(port, speed);
+                                    }},
+                                   {3, 40});
     }
 };
 }  // namespace
@@ -185,12 +196,35 @@ TEST(UsbHub, EveryControlFailureStopsEnumeration)
         EXPECT_EQ(f.requests, request);
     }
 }
+TEST(UsbHub, UnsupportedChildrenRetainKnownSpeedWithoutAddressing)
+{
+    for(bool low : {false, true})
+    {
+        HubFixture f;
+        f.low_speed = low;
+        ASSERT_TRUE(f.run());
+        EXPECT_EQ(f.unsupported,
+                  (std::vector<std::pair<unsigned, unsigned>>{{3, low ? 15u : 120u}}));
+        EXPECT_EQ(f.children, (std::vector<unsigned>{1}));
+        EXPECT_EQ(f.status[2] & 2, 0u);  // Existing isolation policy is preserved.
+        HubFixture without_observer;
+        without_observer.low_speed = low;
+        ASSERT_TRUE(usb::hub::enumerate(
+            {&without_observer, HubFixture::control, HubFixture::delay, HubFixture::child},
+            {3, 40}));
+        EXPECT_EQ(f.requests, without_observer.requests);
+        EXPECT_EQ(f.delays, without_observer.delays);
+    }
+    for(uint32_t status : {0x100u, 0x101u, 0x503u, 0x10bu, 0x113u, 0x107u, 0x10103u})
+        EXPECT_EQ(usb::hub::unsupported_speed(status), 0u);
+}
 TEST(UsbHub, ResetTimeoutAndOvercurrentNeverEnumerateChildren)
 {
     HubFixture stuck;
     stuck.reset_stuck = true;
     EXPECT_FALSE(stuck.run());
     EXPECT_TRUE(stuck.children.empty());
+    EXPECT_TRUE(stuck.unsupported.empty());
     EXPECT_EQ(stuck.reset_polls, 50u);
     EXPECT_EQ(stuck.resets, (std::vector<unsigned>{1}));
     // Even if port 1 completes late, no sibling was reset or addressed.
@@ -201,6 +235,7 @@ TEST(UsbHub, ResetTimeoutAndOvercurrentNeverEnumerateChildren)
     EXPECT_TRUE(overcurrent.run());
     EXPECT_TRUE(overcurrent.resets.empty());
     EXPECT_TRUE(overcurrent.children.empty());
+    EXPECT_TRUE(overcurrent.unsupported.empty());
     HubFixture failed_child;
     failed_child.child_fails = true;
     EXPECT_FALSE(failed_child.run());

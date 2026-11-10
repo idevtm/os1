@@ -286,9 +286,14 @@ bool hub_child(void* p, uint8_t port)
     return !hub.controller->failed && control(hub, 0x23, 1, 1, port, nullptr, 0) &&
            control(hub, 0xa3, 0, 0, port, status, sizeof(status)) && !(status[0] & 0x12);
 }
+void hub_unsupported(void* p, uint8_t port, unsigned speed)
+{
+    auto& hub = *static_cast<Device*>(p);
+    hardware_catalog::usb_unenumerated(hub.catalog_id, hub.root, port, speed);
+}
 usb::hub::Transport hub_transport(Device& d)
 {
-    return {&d, hub_control, delay_ms, hub_child};
+    return {&d, hub_control, delay_ms, hub_child, hub_unsupported};
 }
 bool path_connected(Device& d)
 {
@@ -642,6 +647,8 @@ bool probe(VirtualMemory& vm,
         if(!ehci::root_usable(c.root_after[port - 1]))
         {
             c.root_stage[port - 1] = "not-usable";
+            if(c.root_after[port - 1] & 1)
+                hardware_catalog::usb_unenumerated(c.catalog_ports[port - 1], port, port, 0);
             debug("ehci: unsupported root speed port=")(port)();
             continue;
         }

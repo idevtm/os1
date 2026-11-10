@@ -30,7 +30,7 @@ Version 1 retains the original diagnostic-backed USB view. Version 2 adds the no
 Driver names and states are captured before the first user process starts.
 The snapshot stores up to 16 distinct driver names, matching the existing PCI driver registry limit.
 It copies each name once and retains a small name index and state for each PCI function.
-CPU records describe firmware discovery, not current scheduler activity.
+Logical processor records describe firmware discovery, not current scheduler activity.
 USB records describe captured port and enumeration outcomes.
 Normal and diagnostic boots retain xHCI outcomes.
 
@@ -46,12 +46,14 @@ Normal and diagnostic boots retain xHCI outcomes.
 | `os.devices.coverage` | Text that identifies the boot-snapshot scope |
 | `os.devices.usb_records_dropped` | USB records lost because the capture array was full |
 | `os.firmware.acpi` | Cached ACPI device records, including inactive records |
-| `os.system.processors` | Firmware-discovered processor records |
+| `os.system.processors` | Firmware-discovered logical processor records |
+| `os.system.platform` | Cached CPU identity, boot memory totals, and boot handoff facts |
 
 Class and driver views return the canonical record IDs.
 They do not imply that a functional native interface exists.
 Controller and mount diagnostic records do not create duplicate physical device objects.
-ACPI records remain separate from physical topology because firmware associations are not yet resolved.
+ACPI records remain separate from physical topology.
+Version 2 exposes verified PCI associations through separate relationship collections.
 The ACPI collection is a device list, not the complete AML namespace.
 
 Each PCI or USB node exposes `children` for known physical attachments.
@@ -224,7 +226,16 @@ Unknown numeric fields return `NOT_FOUND` and do not appear in child enumeration
 `state` describes the captured record outcome; it does not promise current physical presence or usable service authority.
 The catalog has no functional device endpoints in this slice.
 
-Capture allocates one bounded catalog during boot. Its capacity is 256 normalized records across all new sources.
+EHCI publishes an anonymous USB device for a stable connected low/full-speed hub child.
+Its `state` is `unsupported_speed`; its speed, parent, and port fields remain available.
+Vendor ID, product ID, class, version, configuration, and assigned address remain absent.
+A connected unusable EHCI root port publishes `not_enumerated`, with no assumed speed.
+These records describe observed presence, not successful enumeration or usable device authority.
+Capture uses existing status reads and does not add transfers or change port isolation.
+A failed status read can still prevent capture; this profile does not guarantee every physical device appears.
+
+Capture allocates one bounded catalog during boot. Its capacity is 256 normalized USB and storage records.
+Three separate fixed records hold CPU identity, boot memory totals, and boot handoff facts.
 Allocation failure or capacity exhaustion increments the loss counter and does not fail device startup.
 Partial captures can contain unknown backing relationships. Utilities return failure when the loss counter is nonzero.
 The boot thread freezes publication before the first user process runs.
@@ -244,15 +255,24 @@ These programs provide native summaries, not full Linux command-line compatibili
 
 | Command | Default view |
 | --- | --- |
-| `lshw` | Physical topology, logical consumers, processors, ACPI records, and block devices |
+| `lshw` | Platform facts, physical topology, logical consumers, processors, ACPI records, and block devices |
 | `lspci` | PCI functions and their captured fields |
 | `lsusb` | USB ports and devices |
 | `lsblk` | Block devices and their partition, filesystem, and mount relationships |
 
 Use `-v` to include all scalar fields. Use `-t` to follow physical children and logical consumers.
 `lshw` and `lsblk` enable relationship traversal by default.
-Repeated IDs print a reference marker. Traversal stops at 16 levels or 4096 distinct records.
+Repeated records print once. Traversal stops at 16 levels or 4096 distinct records.
 All programs support `--help`, standard output redirection, and nonzero error status.
+Default summaries include type-specific fields instead of a fixed field-position subset.
+PCI summaries include the segment, bus, slot, function, vendor/device IDs, class, state, and driver.
+USB summaries include known IDs, BCD version, speed, port, state, and interface class.
+Storage summaries include exact byte sizes with binary units, partition numbers, filesystem names, and mount paths.
+Verbose numeric bus IDs use hexadecimal notation. The underlying observation fields remain integers.
+`lsusb -t` starts at USB PCI controllers, then follows ports, devices, interfaces, and consumers.
+Records with missing parents remain visible after the connected trees.
+The tools use class labels and a bounded vendor/model table; complete naming databases remain outside this profile.
+
 Unknown options return status 2. Observation, output, traversal, or capture failure returns status 1.
 Empty collections are valid and return status 0.
 
@@ -269,3 +289,52 @@ os.storage.devices.block_0.sector_size
 Type `os.storage.` to explore storage collections with Tab.
 Follow `backing` toward a provider or `consumers` toward a logical resource.
 Completion resolves canonical paths when a relationship points to an existing record.
+
+## Platform descriptions and firmware associations
+
+These version 2 additions expose boot observations without new control authority.
+They retain the existing query layout and canonical identities.
+
+```text
+os.system.platform
+  cpu       -> CPUID vendor, name, family, model, stepping, address widths
+  memory    -> boot map totals by type, region count
+  boot      -> boot source, bootloader identifier, table-presence flags, framebuffer dimensions
+pci_N.firmware -> acpi_N
+acpi_N.devices -> pci_N
+```
+
+`cpu` describes the logical processor that runs the boot capture.
+Its `name` contains the CPUID brand string when available; otherwise it contains `Boot processor`.
+`vendor` contains the CPUID vendor string.
+Family, model, and stepping use the architectural CPUID decoding rules.
+Physical and virtual address widths appear only when the extended leaf supplies valid values.
+This record does not establish package topology, heterogeneous processor identity, or current frequency.
+
+`memory` reports bytes for each normalized `BootMemoryType`, plus unknown types and `region_count`.
+`usable_bytes` measures the boot map, not current free memory or installed DIMM capacity.
+Reserved ranges can include non-RAM addresses; do not add every field to estimate installed RAM.
+The record has `invalid_map` state and no totals if ranges overlap, overflow, or exceed the handoff limit.
+The cache does not retain pointers to caller-owned data.
+
+`boot.name` identifies the boot frontend; `limine` alone does not establish the firmware mode.
+`boot.identifier` retains the bootloader name.
+`acpi_available` and `smbios_available` indicate nonzero handoff table pointers, not complete table validation.
+Framebuffer fields appear only when the handoff supplies a framebuffer address.
+SMBIOS system, board, and memory-module descriptions remain unavailable.
+
+PCI and USB `name` values use a small vendor/model table with class fallbacks.
+The table does not replace numeric identifiers and requires no device string requests.
+Unknown models retain vendor/class descriptions; unknown vendors retain bus/class descriptions.
+All text remains bounded and printable.
+
+PCI `firmware` and ACPI `devices` collections return at most one canonical record.
+Their scalar references are `firmware_id` and `device_id`; zero means no verified match.
+Matching uses cached root `_SEG`/`_BBN`, child `_ADR`, and enumerated bridge secondary buses.
+Absent root location objects default to zero; invalid objects prevent a match.
+Duplicate root locations, duplicate addresses, and non-PCI parent devices prevent associations.
+The search stops after 16 device levels; deeper associations can remain absent.
+USB, processor, and arbitrary AML associations are not inferred from names.
+
+Inspection never evaluates AML or executes CPUID.
+Capture runs before immutable publication and uses bounded memory.

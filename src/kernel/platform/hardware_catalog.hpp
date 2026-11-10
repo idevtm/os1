@@ -7,6 +7,7 @@ unsigned add(unsigned kind, const os1::hardware::Record&);
 os1::hardware::Record* edit(unsigned id);
 unsigned usb_port(unsigned pci, unsigned port, bool connected);
 unsigned usb_device(unsigned parent, unsigned root, unsigned port, unsigned speed_mbps_x10);
+unsigned usb_unenumerated(unsigned parent, unsigned root, unsigned port, unsigned speed_mbps_x10);
 void usb_descriptor(unsigned id, const void* bytes, unsigned length);
 void usb_configuration(unsigned id,
                        const void* bytes,

@@ -117,6 +117,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/ipc.hpp"
       "${PROJECT_SOURCE_DIR}/src/uapi/os1/hardware.h"
       "${PROJECT_SOURCE_DIR}/src/common/hardware/tree.hpp"
+      "${PROJECT_SOURCE_DIR}/src/common/hardware/presentation.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/hardware.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/hardware_tools.hpp"
       "${USER_LINKER_SCRIPT}"

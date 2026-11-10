@@ -17,6 +17,7 @@ def main():
     parser.add_argument('--vars')
     parser.add_argument('--transport', choices=('virtio', 'usb', 'ehci'), default='virtio')
     args = parser.parse_args()
+    args.ehci_unsupported = args.transport == 'ehci'
     disk = Path(args.log).with_suffix('.raw')
     shutil.copyfile(args.program_disk, disk)
 
@@ -51,9 +52,37 @@ def main():
         output = run('lsblk -v')
         for marker in (b'BlockDeviceInfo', b'PartitionInfo', b'FilesystemInfo', b'MountInfo', b'name=/disk'):
             assert marker in output, output
-        assert b'PciFunction' in run('lspci')
+        pci_output = run('lspci')
+        assert b'PciFunction' in pci_output
+        assert re.search(rb'0000:00:[0-9a-f]{2}\.[0-7].*\[[0-9a-f]{4}:[0-9a-f]{4}\] class=', pci_output), pci_output
+        assert b'MiB)' in output
         assert b'boot snapshot' in run('lsusb -v')
-        assert b'Processor' in run('lshw')
+        platform = context('os.system.platform')
+        assert b'cpu [object]' in platform and b'memory [object]' in platform
+        assert integer('os.system.platform.cpu.family') > 0
+        assert integer('os.system.platform.memory.usable_bytes') > 0
+        assert b'name [field] String = ' in context('os.system.platform.cpu')
+        assert b'family [field] Integer' in run('context os.system.platform.cpu.fami\t')
+        lshw = run('lshw')
+        for marker in (b'Processor', b'CpuIdentity', b'BootMemory', b'usable_bytes='):
+            assert marker in lshw, lshw
+        # Firmware references use the same IDs in both directions.
+        pci_records = context('os.devices.inventory.pci')
+        associations = 0
+        for name in re.findall(rb'(pci_\d+) \[object\]', pci_records):
+            path = 'os.devices.inventory.pci.' + name.decode()
+            firmware_id = integer(path + '.firmware_id')
+            if not firmware_id:
+                continue
+            associations += 1
+            firmware = context(path + '.firmware')
+            acpi_name = re.search(rb'(acpi_\d+) \[object\]', firmware)[1].decode()
+            acpi = 'os.firmware.acpi.' + acpi_name
+            assert integer(acpi + '.id') == firmware_id
+            assert integer(acpi + '.device_id') == integer(path + '.id')
+            assert name in context(acpi + '.devices')
+            break
+        assert associations > 0, pci_records
         run('lsblk > /tmp/catalog-output')
         assert b'name=/disk' in run('cat /tmp/catalog-output')
         if args.transport != 'virtio':
@@ -66,7 +95,26 @@ def main():
             assert integer(device + '.vendor_id') > 0
             assert b'port_' in context(device + '.attachment')
             assert b'configured' in context(device)
-            assert b'UsbInterface' in run('lsusb -t')
+            usb_output = run('lsusb -t')
+            assert b'UsbInterface' in usb_output
+            assert b'USB controller' in usb_output
+            assert usb_output.index(b'PciFunction') < usb_output.index(b'UsbPort') < usb_output.index(b'UsbDevice')
+            assert b'[reference]' not in usb_output
+            assert b'Mbit/s' in usb_output
+            if args.ehci_unsupported:
+                assert b'identity=unknown speed=unknown' in usb_output, usb_output
+                assert b'state=not_enumerated' in usb_output, usb_output
+                records = context('os.devices.inventory.usb')
+                unknown = []
+                for name in re.findall(rb'(usb_\d+) \[object\]', records):
+                    path = 'os.devices.inventory.usb.' + name.decode()
+                    record = context(path)
+                    if b'not_enumerated' in record:
+                        unknown.append(path)
+                        assert b'vendor_id' not in record and b'product_id' not in record, record
+                        assert b'speed_mbps_x10' not in record, record
+                        assert b'port_' in context(path + '.attachment')
+                assert len(unknown) == 1, records
         else:
             assert b'pci_' in context(block + '.backing')
         invalid = run('lsblk --invalid', allow_errors=True)

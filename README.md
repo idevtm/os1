@@ -602,8 +602,15 @@ See the [log export ABI](docs/native-api/abi/log-export-abi.md) for recovery, pr
 The ext2 deployment includes `lshw`, `lspci`, `lsusb`, and `lsblk`.
 They use the same passive catalog as `context` and Tab navigation.
 Use `-v` for all scalar fields or `-t` for relationships.
+Default summaries show readable device names, conventional bus IDs, and readable capacities.
+`lshw` includes cached CPU identity and boot memory totals under `os.system.platform`.
+`lsusb -t` starts at controllers and prints each record once.
+Unsupported connected EHCI devices can appear with unknown identity; this does not enable device transfers.
 
 ```text
+context os.system.platform
+context os.system.platform.cpu
+context os.system.platform.memory
 lsblk -v
 lsusb -t
 context os.storage.devices

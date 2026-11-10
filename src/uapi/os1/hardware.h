@@ -35,6 +35,7 @@ enum
     OS1_HARDWARE_MOUNTS,
     OS1_HARDWARE_CATALOG_DROPPED,
     OS1_HARDWARE_USB_INTERFACES,
+    OS1_HARDWARE_PLATFORM,
 };
 
 // Read-only, boot-local identities. No field is a device-control capability.

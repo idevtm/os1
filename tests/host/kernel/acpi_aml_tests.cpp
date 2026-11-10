@@ -1131,3 +1131,50 @@ TEST_F(AcpiObservation, BootCacheBoundsAndMissingRoutesRemainPassiveAtObservatio
     EXPECT_EQ(123u, g_platform.acpi_pci_routes[kAcpiMaxPciRoutes - 1].irq);
     expect_unchanged_power();
 }
+
+TEST_F(AcpiAml, PciRootLocationDefaultsDoNotHideInvalidFirmwareValues)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto root = [](const char* name, std::vector<std::vector<uint8_t>> fields) {
+        fields.insert(fields.begin(), make_name_eisa_id("_HID", "PNP0A08"));
+        return make_device(name, fields);
+    };
+    const auto dsdt =
+        make_scope("\\_SB_",
+                   {root("PCI0", {}),
+                    root("PCI1", {make_name_integer("_SEG", 2), make_name_integer("_BBN", 7)}),
+                    root("PCI2", {make_name_integer("_SEG", 65536)}),
+                    root("PCI3", {make_name_integer("_BBN", 256)}),
+                    root("PCI4", {make_name_package("_SEG", {std::vector<uint8_t>{0x00}})})});
+    write_definition_block(arena, kDsdtPhysical, "DSDT", dsdt);
+    build_acpica_firmware_tables(arena, false);
+    std::array<AcpiDefinitionBlock, kPlatformMaxAcpiDefinitionBlocks> blocks{};
+    blocks[0].active = true;
+    std::memcpy(blocks[0].signature, "DSDT", 4);
+    blocks[0].length = static_cast<uint32_t>(sizeof(TestSdtHeader) + dsdt.size());
+    blocks[0].physical_address = kDsdtPhysical;
+    PageFrameContainer frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    AcpicaScopedReset acpica_reset;
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info()));
+    ASSERT_TRUE(acpi_namespace_load(vm, blocks.data(), 1));
+    std::array<AcpiDeviceInfo, kAcpiMaxDevices> devices{};
+    size_t device_count = 0, route_count = 0;
+    std::array<AcpiPciRoute, kAcpiMaxPciRoutes> routes{};
+    ASSERT_TRUE(acpi_build_device_info(devices.data(), device_count, routes.data(), route_count));
+    for(unsigned i = 0; i < 5; ++i)
+    {
+        char path[] = "\\_SB_.PCI0";
+        path[9] += i;
+        const auto* d = find_device(devices, device_count, path);
+        ASSERT_NE(nullptr, d) << path;
+        EXPECT_TRUE(d->flags & kAcpiDevicePciRoot);
+        EXPECT_EQ(i < 2, bool(d->flags & kAcpiDeviceRootLocation));
+        if(i < 2)
+        {
+            EXPECT_EQ(i ? 2u : 0u, d->pci_segment);
+            EXPECT_EQ(i ? 7u : 0u, d->bus_number);
+        }
+    }
+}

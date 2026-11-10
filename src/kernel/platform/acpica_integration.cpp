@@ -457,6 +457,19 @@ bool evaluate_integer(ACPI_HANDLE handle, const char* path, uint64_t& value)
     return true;
 }
 
+// ACPI defaults apply only to absent objects, not evaluation failures.
+bool optional_pci_integer(ACPI_HANDLE handle, const char* name, uint64_t& value)
+{
+    ACPI_HANDLE child = nullptr;
+    auto status = AcpiGetHandle(handle, const_cast<char*>(name), &child);
+    if(status == AE_NOT_FOUND)
+    {
+        value = 0;
+        return true;
+    }
+    return ACPI_SUCCESS(status) && evaluate_integer(child, nullptr, value);
+}
+
 bool get_full_path(ACPI_HANDLE handle, char* output, size_t output_capacity)
 {
     if((nullptr == output) || (0u == output_capacity))
@@ -1045,19 +1058,27 @@ ACPI_STATUS collect_device_callback(ACPI_HANDLE handle,
         device.flags |= kAcpiDeviceHasUid;
         device.uid = value;
     }
-    if(evaluate_integer(handle, "_BBN", value))
+    if(0 != (object_info->Flags & ACPI_PCI_ROOT_BRIDGE))
+    {
+        device.flags |= kAcpiDevicePciRoot;
+        uint64_t segment = 0, bus = 0;
+        if(optional_pci_integer(handle, "_SEG", segment) && segment <= 65535 &&
+           optional_pci_integer(handle, "_BBN", bus) && bus <= 255)
+        {
+            device.flags |= kAcpiDeviceRootLocation;
+            device.pci_segment = static_cast<uint16_t>(segment);
+            device.bus_number = static_cast<uint8_t>(bus);
+            if(has_named_child(handle, "_BBN"))
+                device.flags |= kAcpiDeviceHasBbn;
+        }
+    }
+    else if(evaluate_integer(handle, "_BBN", value))
     {
         device.flags |= kAcpiDeviceHasBbn;
         device.bus_number = static_cast<uint8_t>(value & 0xFFu);
     }
-    else if(0 != (object_info->Flags & ACPI_PCI_ROOT_BRIDGE))
-    {
-        device.bus_number = 0u;
-    }
     else
-    {
         device.bus_number = inherit_bus_number(handle);
-    }
     if(evaluate_integer(handle, "_STA", value))
     {
         device.status = static_cast<uint32_t>(value);

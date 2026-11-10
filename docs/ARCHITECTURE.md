@@ -564,7 +564,7 @@ The 2880-sector raw image, firmware ceiling, and boot-log placement remain uncha
 Kernel C++ and bundled userspace use `-Os`; userspace discards unreferenced sections while retaining metadata.
 
 ELF-aware checks enforce file size, staging limits, execution extent, reserve space, initrd capacity, and disk overlap.
-The reserved execution window ends at `0x1A0000`, where the page-frame bitmap starts. The 16 KiB post-image requirement remains unchanged.
+The reserved execution window ends at `0x1C0000`, where the page-frame bitmap starts. The 16 KiB post-image requirement remains unchanged.
 The [temporary filesystem record](archive/filesystems/2026-11-06-tmpfs-implementation.md) contains current sizes and validation.
 The [reliability record](archive/kernel/2026-11-05-reliability-and-clock-plan.md) preserves the preceding layout measurements.
 
@@ -623,7 +623,7 @@ Key addresses:
 | `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
 | `0x8C000` | BIOS initrd load buffer (64 KiB slot, ending at `0x9C000`) |
 | `0x100000` | shared kernel physical load base |
-| `0x1A0000-0x21FFFF` | page-frame bitmap |
+| `0x1C0000-0x23FFFF` | page-frame bitmap |
 
 The modern path deliberately mirrors this layout before entering `kernel_main`. That is not nostalgia. It is a compatibility technique that keeps the shared kernel bootloader-agnostic while the frontends converge on the same higher-half kernel ABI.
 
@@ -1603,7 +1603,8 @@ Explicit shutdown installs device-scoped [Embedded Controller handlers](kernel/a
 Validated firmware I/O resources select the ports. Bounded, serialized byte transactions support AML EC regions without SCI event handling.
 Controllers that require the ACPI Global Lock remain unsupported. Ordinary boot and passive observation do not activate these handlers.
 The [CI boot-envelope correction](kernel/acpi-embedded-controller.md#ci-boot-envelope-correction--2026-11-08) set the reserved end and page-frame bitmap base to `0x194000`.
-Log export extends that window to `0x1A0000`; the post-image reserve and staging limits remain checked.
+Log export extended that window to `0x1A0000`.
+Platform descriptions extend it to `0x1C0000`; the post-image reserve and staging limits remain checked.
 The 16 KiB post-image reserve and low-memory firmware ceiling remain unchanged.
 
 ## Memory logging and correlation
@@ -1665,6 +1666,14 @@ Driver enumeration publishes descriptors and bindings without additional device 
 Existing storage reads publish partition facts; successful ext2 mounts publish backing relationships.
 The runtime adds `os.storage` and `os.fs.mounts` as passive views.
 The four hardware utilities use the same observation profile as context and Tab.
+Their summaries format typed bus and storage fields; USB trees start at controllers.
+EHCI captures anonymous unsupported devices from existing port-status reads without adding transfers.
+Missing device identity fields remain absent.
+Connected unusable EHCI root ports have unknown speed; later descriptor failures can retain a known speed.
+`os.system.platform` adds cached CPU identity, boot memory totals, and boot handoff facts.
+Boot capture uses CPUID and owned BootInfo; queries use copied records.
+Unique ACPI root and child addresses associate PCI functions with firmware descriptions through enumerated bridge buses.
+Readable device names use bounded tables and numeric fallbacks without extra USB requests.
 The [catalog plan](native-api/hardware-catalog-plan.md) records scope, validation, and planned hotplug updates.
 
 ## Live context exploration

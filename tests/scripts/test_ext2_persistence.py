@@ -45,8 +45,12 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                     '-device', 'usb-storage,id=usbdata,bus=xhci.0,drive=data' + (',bootindex=1' if getattr(args, 'combined', False) else ''),
                     '-device', 'usb-kbd,bus=xhci.0']
     elif getattr(args, 'transport', '') == 'ehci':
-        command += ['-device', 'usb-ehci,id=ehci',
+        controller = 'ich9-usb-ehci1' if getattr(args, 'ehci_unsupported', False) else 'usb-ehci'
+        command += ['-device', controller + ',id=ehci',
                     '-device', 'usb-storage,id=usbdata,bus=ehci.0,drive=data' + (',bootindex=1' if getattr(args, 'combined', False) else '')]
+        if getattr(args, 'ehci_unsupported', False):
+            command += ['-device', 'ich9-usb-uhci1,masterbus=ehci.0,firstport=0',
+                        '-device', 'usb-hub,bus=ehci.0,port=2']
         if getattr(args, 'coexist', False):
             command += ['-device', 'qemu-xhci,id=xhci', '-device', 'usb-kbd,bus=xhci.0']
     else:

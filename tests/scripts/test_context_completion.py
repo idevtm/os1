@@ -101,7 +101,7 @@ def main():
         fields = run('context os.devices.inventory.pci.pci_0')
         assert b'vendor_id [field] Integer' in fields, fields
         assert b'vendor_id [field] Integer = 32902\n' in fields, fields
-        assert b'name [field] String = PCI function\n' in fields, fields
+        assert b'name [field] String = Intel Bridge\n' in fields, fields
         assert b'vendor_id [field] Integer = 32902\n' in run('context os.devices.inventory.pci.pci_0.vendor_id')
         if args.keyboard != 'usb':
             assert b'(no children)\n' in run('context os.devices.inventory.usb')
@@ -109,7 +109,7 @@ def main():
         assert b'shutdown [method' in run('context os.system.shutdown')
         assert b'after-inspection\n' in run('echo "after-inspection"')
         assert b'32902\n' in run('os.devices.inventory.pci.pci_0.vendor_id')
-        assert b'PCI function\n' in run('echo os.devices.inventory.pci.pci_0.name')
+        assert b'Intel Bridge\n' in run('echo os.devices.inventory.pci.pci_0.name')
         run('vendor = os.devices.inventory.pci.pci_0.vendor_id')
         assert b'32902\n' in run('vendor')
         run('drop vendor')

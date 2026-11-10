@@ -447,6 +447,7 @@ bool prepare_scheduler_timer()
     }
     debug.set_mirror(nullptr);
     xhci_capture_catalog_state();
+    hardware_capture_platform(*g_boot_info);
     hardware_freeze_bindings();
     write_console_line("starting first user process");
     mark_thread_ready(init_thread);

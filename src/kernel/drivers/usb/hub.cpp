@@ -48,6 +48,13 @@ bool stable_high_speed(uint32_t status)
 {
     return (status & 0x503u) == 0x503u && !(status & (0x1fu << 16 | 0x21cu));
 }
+unsigned unsupported_speed(uint32_t status)
+{
+    // Connected, enabled, powered, and stable; neither high-speed nor faulted.
+    if((status & 0x103u) != 0x103u || (status & (0x1fu << 16 | 0x41cu)))
+        return 0;
+    return status & 0x200u ? 15 : 120;
+}
 bool enumerate(const Transport& t, const Descriptor& hub)
 {
     if(!hub.ports || hub.ports > 15)
@@ -100,9 +107,15 @@ bool enumerate(const Transport& t, const Descriptor& hub)
             if(!t.child(t.context, port))
                 return false;
         }
-        else if((status & (0x1fu << 16)) || !t.control(t.context, 0x23, 1, 1, port, nullptr, 0) ||
-                !port_status(t, port, status) || (status & 0x12))
-            return false;
+        else
+        {
+            unsigned speed = unsupported_speed(status);
+            if(speed && t.unsupported)
+                t.unsupported(t.context, port, speed);
+            if((status & (0x1fu << 16)) || !t.control(t.context, 0x23, 1, 1, port, nullptr, 0) ||
+               !port_status(t, port, status) || (status & 0x12))
+                return false;
+        }
     }
     return true;
 }
