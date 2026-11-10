@@ -37,3 +37,5 @@ Qualification of additional firmware paths, controllers, and physical failure ca
 
 The [input failure diagnostics plan](input-failure-diagnostics-plan.md) records the November 10 physical retest and retained diagnostic contracts.
 The [evidence summary](2026-11-10-input-retest-evidence.json) contains build identities, archive hashes, and per-device observations.
+
+See the [input recovery plan](input-recovery-plan.md) for the latest normal-boot results and fixes.

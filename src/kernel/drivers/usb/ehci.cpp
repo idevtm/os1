@@ -1,12 +1,13 @@
+#include "proc/thread.hpp"
 // Bounded, polling EHCI storage transport. Schedules are stopped before reuse.
-#include "drivers/usb/ehci.hpp"
-
 #include "debug/debug.hpp"
+#include "debug/log.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/resource.hpp"
 #include "drivers/input/service.hpp"
 #include "drivers/timer/tsc_clock.hpp"
 #include "drivers/usb/diagnostics.hpp"
+#include "drivers/usb/ehci.hpp"
 #include "drivers/usb/ehci_controller.hpp"
 #include "drivers/usb/hid_keyboard.hpp"
 #include "drivers/usb/hub.hpp"
@@ -49,6 +50,7 @@ struct Device
     DmaBuffer input_dma{};
     unsigned phase{}, period{};
     bool input_armed{};
+    ehci::InputRecovery recovery{};
 
     bool hub{}, failed{}, published{}, in_toggle{}, out_toggle{};
     usb::storage::Interface interface{};
@@ -87,6 +89,8 @@ void input_failure(
     uint64_t ns = 0, resolution = 0;
     if(!platform_measurement_sample(ns, resolution))
         record.flags = OS1_USB_INPUT_CLOCK_UNAVAILABLE;
+    if(d.recovery.retried)
+        record.flags |= OS1_USB_INPUT_RETRIED;
     record.time_ns = ns;
     record.input_device = d.input_identity;
     record.catalog_id = d.catalog_id;
@@ -408,6 +412,7 @@ bool submit(BlockDevice& block, BlockRequest& request)
         block_request_complete(request, BlockRequestStatus::Invalid);
         return false;
     }
+    SchedulingGuard scheduling;
     if(__atomic_exchange_n(&c.busy, 1, __ATOMIC_ACQUIRE))
     {
         request.status = BlockRequestStatus::Busy;
@@ -561,6 +566,30 @@ void poll_input(Controller& c)
     {
         if(!d.input_armed || d.failed)
             continue;
+        if(d.recovery.pending)
+        {
+            if(diagnostic_log::monotonic() < d.recovery.due_ns)
+                continue;
+            if(!path_connected(d))
+            {
+                input_failure(d, OS1_USB_INPUT_DISCONNECTED);
+                d.failed = true;
+                stop_input(d);
+                hardware_catalog::unavailable(d.catalog_id);
+                continue;
+            }
+            if(!periodic_schedule(c, false))
+                return;
+            d.recovery.pending = false;
+            if(!arm_input(d))
+            {
+                retire(c);
+                return;
+            }
+            if(!periodic_schedule(c, true))
+                return;
+            continue;
+        }
         dma_sync_for_cpu(d.input_dma);
         auto* td =
             reinterpret_cast<ehci::Qtd*>(static_cast<uint8_t*>(d.input_dma.virtual_address) + 128);
@@ -572,6 +601,14 @@ void poll_input(Controller& c)
         unsigned bytes = d.hid.packet;
         if((td->token & ehci::errors) || ehci::remaining(td->token) > bytes)
         {
+            if(d.recovery.schedule(td->token, bytes, d.speed, diagnostic_log::monotonic()))
+            {
+                // The halted QH keeps its frame slots reserved during backoff.
+                // Other endpoints continue; descriptor reuse waits for PSS to clear.
+                if(!periodic_schedule(c, true))
+                    return;
+                continue;
+            }
             input_failure(d, OS1_USB_INPUT_TRANSFER, td->token, bytes, c.op[1]);
             d.failed = true;
             stop_input(d);
@@ -973,6 +1010,7 @@ void ehci_poll_devices(PageFrameContainer&, bool topology)
 {
     for(auto* c : controllers)
     {
+        SchedulingGuard scheduling;
         if(!c || c->failed || __atomic_exchange_n(&c->busy, 1, __ATOMIC_ACQUIRE))
             continue;
         poll_input(*c);

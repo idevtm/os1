@@ -1,6 +1,8 @@
 #include "ipc/channel.hpp"
 
 #include <os1/console.h>
+#include <os1/system.h>
+#include <os1/tmpfs.h>
 
 #include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
@@ -137,21 +139,32 @@ bool ready_locked(NativeObject* object)
             return true;
     return c->client_closed;
 }
-bool kernel_ready_locked()
+bool in_kernel_lane(const Operation* op, KernelDispatch lane)
+{
+    bool exporting = op->connection->interface_id == OS1_SYSTEM_INTERFACE_ID ||
+                     op->connection->interface_id == OS1_FILE_INTERFACE_ID ||
+                     op->connection->interface_id == OS1_DIRECTORY_INTERFACE_ID ||
+                     (op->connection->interface_id == OS1_LOG_INTERFACE_ID &&
+                      op->request.member == OS1_LOG_EXPORT);
+    return lane == KernelDispatch::Any || exporting == (lane == KernelDispatch::Export);
+}
+bool kernel_ready_locked(KernelDispatch lane)
 {
     for(auto* op = kernel_head; op; op = op->kernel_next)
-        if(op->kernel_retry_ns <= monotonic_ns)
+        if(in_kernel_lane(op, lane) && op->kernel_retry_ns <= monotonic_ns)
             return true;
     return false;
 }
 long ready_selection_locked(const IpcWaitState& wait)
 {
-    // Only the kernel worker registers an empty selection; user WAIT_MANY
+    // Only kernel dispatch workers register an empty selection; user WAIT_MANY
     // validates count >= 1. It shares IPC's post-context-save wakeup discipline.
     if(wait.timer_only)
         return OS1_ERR_WOULD_BLOCK;
     if(!wait.count)
-        return kernel_ready_locked() ? 0 : OS1_ERR_WOULD_BLOCK;
+        return kernel_ready_locked(static_cast<KernelDispatch>(wait.kernel_lane))
+                   ? 0
+                   : OS1_ERR_WOULD_BLOCK;
     for(unsigned i = 0; i < wait.count; ++i)
         if(ready_locked(wait.instances[i]->object))
             return i;
@@ -1521,14 +1534,14 @@ bool ipc_matching_endpoints(NativeObject* provider, NativeObject* client)
                static_cast<Endpoint*>(client)->connection;
 }
 
-bool ipc_run_kernel_request()
+bool ipc_run_kernel_request(KernelDispatch lane)
 {
     Operation* op;
     {
         IrqSpinGuard guard(waiters.lock);
         Operation* previous = nullptr;
         op = kernel_head;
-        while(op && op->kernel_retry_ns > monotonic_ns)
+        while(op && (!in_kernel_lane(op, lane) || op->kernel_retry_ns > monotonic_ns))
         {
             previous = op;
             op = op->kernel_next;
@@ -1548,9 +1561,12 @@ bool ipc_run_kernel_request()
     auto* c = op->connection;
     os1_ipc_result response{};
     DescriptorEntry output{};
-    if(c->kernel->try_invoke)
+    log_export::ForegroundGuard foreground(c->interface_id == OS1_FILE_INTERFACE_ID ||
+                                           c->interface_id == OS1_DIRECTORY_INTERFACE_ID);
+    if(!foreground.held || c->kernel->try_invoke)
     {
-        if(!c->kernel->try_invoke(
+        if(!foreground.held ||
+           !c->kernel->try_invoke(
                *c->source, c->service_rights, c->service_ceiling, op->request, response, output))
         {
             IrqSpinGuard guard(waiters.lock);
@@ -1594,20 +1610,21 @@ bool ipc_run_kernel_request()
     ipc_drain_wakeups();
     return true;
 }
-bool ipc_wait_kernel_work(Thread* thread)
+bool ipc_wait_kernel_work(Thread* thread, KernelDispatch lane)
 {
     if(!thread || thread->user_mode)
         return false;
     IrqSpinGuard process_guard(g_process_table_lock);
     IrqSpinGuard guard(waiters.lock);
-    if(kernel_ready_locked())
+    if(kernel_ready_locked(lane))
         return false;
     thread->wait = {};
     thread->wait.reason = ThreadWaitReason::Ipc;
     thread->wait.ipc = {};
+    thread->wait.ipc.kernel_lane = static_cast<uint8_t>(lane);
     thread->wait.ipc.deadline_ns = monotonic_ns + 250000000;
     for(auto* op = kernel_head; op; op = op->kernel_next)
-        if(op->kernel_retry_ns < thread->wait.ipc.deadline_ns)
+        if(in_kernel_lane(op, lane) && op->kernel_retry_ns < thread->wait.ipc.deadline_ns)
             thread->wait.ipc.deadline_ns = op->kernel_retry_ns;
     thread->state = ThreadState::Blocked;
     thread->process->state = ProcessState::Ready;
@@ -1643,12 +1660,13 @@ void kernel_sleep_for(Thread* thread, uint64_t delay_ns)
 namespace
 {
 #ifndef OS1_HOST_TEST
-void kernel_provider_worker()
+void kernel_worker(KernelDispatch lane)
 {
     for(;;)
     {
-        log_export::poll();
-        if(ipc_run_kernel_request() || !ipc_wait_kernel_work(current_thread()))
+        if(lane == KernelDispatch::Export)
+            log_export::poll();
+        if(ipc_run_kernel_request(lane) || !ipc_wait_kernel_work(current_thread(), lane))
             continue;
         while(current_thread()->wait.reason == ThreadWaitReason::Ipc)
         {
@@ -1662,6 +1680,14 @@ void kernel_provider_worker()
         }
     }
 }
+void kernel_provider_worker()
+{
+    kernel_worker(KernelDispatch::Service);
+}
+void kernel_export_worker()
+{
+    kernel_worker(KernelDispatch::Export);
+}
 #endif
 }  // namespace
 bool ipc_start_kernel_worker(Process* process, PageFrameContainer& frames)
@@ -1671,6 +1697,7 @@ bool ipc_start_kernel_worker(Process* process, PageFrameContainer& frames)
     (void)frames;
     return true;
 #else
-    return create_kernel_thread(process, kernel_provider_worker, frames) != nullptr;
+    return create_kernel_thread(process, kernel_provider_worker, frames) != nullptr &&
+           create_kernel_thread(process, kernel_export_worker, frames) != nullptr;
 #endif
 }

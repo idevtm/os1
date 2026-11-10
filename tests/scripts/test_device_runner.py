@@ -30,7 +30,7 @@ def main():
     shutil.copyfile(args.program_disk, disk)
     paths = []
 
-    def run_case(run, expected, extra=''):
+    def run_case(run, expected, extra=' --no-input --no-expect-usb-mouse'):
         out = run('run-tests --machine qemu' + extra, allow_errors=not expected)
         assert (b'run-tests: PASS; saved results' if expected else
                 b'run-tests: FAIL; saved results') in out, out
@@ -46,7 +46,7 @@ def main():
         one = run_case(run, True)
         two = run_case(run, True)
         assert one.rsplit('/', 1)[0] == two.rsplit('/', 1)[0]
-        run_case(run, False, ' --expect-usb-mouse')
+        run_case(run, False, ' --no-input')
         run('mv "/disk/tests" "/disk/saved-tests"')
         run('touch "/disk/tests"')
         blocked = run('run-tests --machine blocked', allow_errors=True)
@@ -81,6 +81,8 @@ def main():
         assert re.search(rb'kernel_build=[a-f0-9]{64}\n', manifest), manifest
         assert b'machine_label=qemu\n' in manifest
         assert b'runner_version=3\n' in manifest
+        assert b'input_observation=0\n' in manifest
+        assert (b'expect_usb_mouse=1\n' in manifest) == (index == 2)
         assert b'failure_occurrences=0\n' in before[key + '/progress.txt']
         assert b'state=complete\n' in summary and b'io_failed=0\n' in summary, summary
         assert (b'failed=0' in summary.splitlines()) == (index < 2), summary
@@ -127,7 +129,7 @@ def main():
             worker = threading.Thread(target=move)
             worker.start()
             try:
-                run_case(run, True, ' --input --expect-usb-mouse')
+                run_case(run, True, '')
             finally:
                 stop.set()
                 worker.join(15)
@@ -147,6 +149,8 @@ def main():
     key = paths[-1].removeprefix('/disk/')
     assert re.search(rb'movement_events=[1-9][0-9]*\n', after[key + '/progress.txt'])
     assert b'failed=0' in after[key + '/summary.txt'].splitlines()
+    assert b'input_observation=1\n' in after[key + '/manifest.txt']
+    assert b'expect_usb_mouse=1\n' in after[key + '/manifest.txt']
     with tarfile.open(fileobj=io.BytesIO(after[key + '/captures.tar'])) as archive:
         records = catalog(archive.extractfile('catalog.bin').read())
         devices = {r['id'] for r in records if r['source'] == 5}

@@ -1,6 +1,7 @@
 // Generic synchronous block-I/O wrappers and request completion helpers.
 #include "storage/block_device.hpp"
 
+#include "ipc/channel.hpp"
 #include "proc/thread.hpp"
 
 namespace
@@ -59,7 +60,8 @@ bool submit_sync_request(BlockDevice& device,
         request.sector = sector;
         request.buffer = buffer;
         request.sector_count = sector_count;
-        if(device.submit(device, request))
+        auto submit = operation == BlockOperation::Flush ? device.flush : device.submit;
+        if(submit(device, request))
         {
             return block_request_wait(request) && block_request_succeeded(request);
         }
@@ -68,10 +70,26 @@ bool submit_sync_request(BlockDevice& device,
             return false;
         }
 
-        relax_block_wait();
+        block_retry_wait(can_sleep_current_thread() ? current_thread() : nullptr,
+                         0 != (read_rflags() & kInterruptFlag));
     }
 }
 }  // namespace
+
+void block_retry_wait(Thread* thread, bool interrupts_enabled)
+{
+    if(interrupts_enabled && thread && thread->process && !thread->user_mode)
+    {
+        // Busy has no completion producer. An AP may have no periodic timer.
+        kernel_sleep_for(thread, 1'000'000);
+        return;
+    }
+#ifndef OS1_HOST_TEST
+    // Syscall kernel frames cannot park through the kernel-thread scheduler path.
+    ipi_poll_tlb_shootdown();
+#endif
+    cpu_pause();
+}
 
 void block_request_complete(BlockRequest& request,
                             BlockRequestStatus status,
@@ -176,8 +194,5 @@ bool block_flush_sync(BlockDevice& device)
 {
     if(!device.flush)
         return false;
-    BlockRequest request{};
-    request.operation = BlockOperation::Flush;
-    return device.flush(device, request) && block_request_wait(request) &&
-           block_request_succeeded(request);
+    return submit_sync_request(device, BlockOperation::Flush, 0, nullptr, 0);
 }

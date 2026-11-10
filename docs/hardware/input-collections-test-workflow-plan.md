@@ -71,7 +71,7 @@ The diagnostic boot selection starts the noninteractive test group before the fi
 Normal boot, nested shells, and restarted top-level shells do not start another automatic run.
 Failure returns to an interactive prompt and preserves incomplete evidence.
 Unavailable disk programs use the existing rescue path; they cannot claim a completed test run.
-Physical stimulus remains opt-in with `run-tests --input`.
+Physical stimulus observation is enabled by default; `run-tests --no-input` disables it.
 Diagnostic watchdog deadlines remain a limit on unattended execution.
 
 ## Evidence
@@ -104,7 +104,7 @@ Reconnect can change positions; retain an open object when attachment identity m
 
 Select `os1 diagnostics` to run the default acceptance group before the first prompt.
 The runner records results under `/disk/tests` and returns control to the shell.
-Use `run-tests --input` for an additional, supervised physical-input window.
+Use `run-tests` for an additional, supervised physical-input window.
 The automatic group does not establish that a person moved each pointer or pressed each key.
 
 After copying the ext2 data partition, run the offline comparison:

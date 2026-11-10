@@ -63,8 +63,11 @@ run-tests --machine desktop --input --expect-usb-mouse
 During the 20-second observation, move each pointer and press and release its buttons.
 Press and release Left Shift on each keyboard.
 Keep the devices connected during this test.
-The default run observes input for one second without requiring user action.
-Use `--expect-usb-mouse` only when a USB mouse must be available.
+The default run observes input for 20 seconds and prompts for physical activity.
+With `--no-input`, the runner uses a one-second unattended observation.
+Input observation and a USB-mouse expectation are enabled by default.
+Use `--no-input` to skip the supervised observation window.
+Use `--no-expect-usb-mouse` when no USB mouse is required.
 
 ```text
 /disk/tests/
@@ -294,3 +297,17 @@ The runner measurement driver remains at `build/hardware-tests/measure_runner.py
 That driver runs `sys`, `kmem`, and `run-tests --machine measurement` three times per firmware.
 Raw measurement output remains under `build/hardware-tests/measurements/` and `build/hardware-tests/runner-measurements/`.
 Functional and bounded-capture checks pass; physical mouse acceptance and peak-memory measurement remain pending.
+
+### Unattended automatic tests
+
+Physical runs enable `--input` and `--expect-usb-mouse` by default.
+Manual runs accept `--no-input --no-expect-usb-mouse` for unattended checks.
+Automatic diagnostic boot also accepts a deployment setting in `/disk/etc/run-tests-mode`.
+The exact file contents must be `unattended` followed by a newline.
+The shell then supplies both opt-outs and prints the selected mode.
+Missing or different contents preserve the physical defaults. Manual commands ignore this file.
+
+QEMU fixtures install this setting only in their private program-disk copies.
+They retain the one-second observation and all unattended checks.
+The dedicated pointer-activity test retains its existing 20-second window and verifies the new defaults.
+Production images do not install this setting.

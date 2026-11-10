@@ -78,7 +78,9 @@ An object handle selects a rights-bearing entry, which retains an open instance 
 The current handle encoding is `fd`; it is not global object identity.
 The [approved handle model](native-api/object-contract.md#object-handles-and-interoperability) defines ownership, transfer, typed-reference direction, and compatibility boundaries.
 The [Console ABI](native-api/abi/kernel-console-abi.md) binds a ready IPC client from an existing console grant.
-A single kernel worker invokes bounded callbacks outside IRQ context and global IPC locks.
+Two kernel workers invoke callbacks outside IRQ context and global IPC locks.
+One worker serves memory-only providers, including input.
+The other serves File, Directory, system control, and explicit log export, plus automatic persistence.
 Accepted Operations retain their source resource through completion and result delivery.
 The [roadmap](native-api/roadmap.md#shared-service-foundation) extends this boundary without moving hardware drivers into userspace.
 It records the bounded `/tmp` slice and the remaining input-service and persistent USB milestones.
@@ -94,6 +96,26 @@ The selected [reflective hierarchy](native-api/object-hierarchy.md) organizes fu
 It separates local values, resource references, and service providers.
 The [shell command proposal](shell/object-commands.md) defines user-facing bindings separately.
 These proposals change no current ABI or runtime behavior.
+
+## Storage retry scheduling
+
+Storage waits must preserve progress for the controller owner.
+
+```text
+Busy kernel worker -> registered timer -> retry
+controller ownership -> IRQ service without scheduling -> release -> pending reschedule
+```
+
+Unaccepted Busy block requests retry after a one-millisecond scheduler timer when the caller is an interrupt-enabled kernel worker.
+The shared IPC timer wait supplies an explicit reschedule and wakeup, including on BIOS APs without periodic ticks.
+Interrupt handlers, early boot, and user syscall frames poll instead of halting without a wake source.
+User syscall frames cannot park through the kernel-thread scheduling path.
+Read, write, and flush requests share this rule; accepted requests retain completion-based waiting.
+EHCI and xHCI defer scheduling while they own a controller busy flag.
+IRQ service continues, but scheduling and deferred filesystem work wait until ownership ends.
+The outermost guard requests a pending reschedule when local runnable work exists, including on APs without periodic ticks.
+These synchronous scopes cannot sleep or yield. They can delay other tasks on their CPU during controller timeouts.
+The [input recovery plan](hardware/input-recovery-plan.md#bios-startup-failure-found-during-validation) records the discovered deadlock and controlled regression evidence.
 
 ## Input services and attachment changes
 
@@ -121,6 +143,8 @@ Inventory reports stream through a 4096-byte buffer, with a 256 KiB limit per ar
 xHCI negotiates control packet sizes and supports two boot HID interfaces on each attachment.
 Each interface has its own input identity and endpoint buffers; removal retires both identities.
 Input lifetime records and EHCI failure details support returned-stick diagnosis without logging raw key contents.
+Eligible EHCI split errors receive bounded recovery before retirement.
+The [recovery plan](hardware/input-recovery-plan.md) records hardware evidence, retry limits, and validation.
 The first diagnostic shell starts the runner before its prompt; normal boot and shell restarts do not.
 A bounded binary catalog supports offline comparison against hashed Linux reference profiles.
 The [acceptance workflow](hardware/input-collections-test-workflow-plan.md) defines identity, comparison outcomes, and capture limits.
@@ -1677,11 +1701,12 @@ kernel provider worker -> timed drain -> bounded rotation -> periodic synchroniz
 process reaping -> retained closing history -> export or counted loss -> release
 ```
 
-The existing kernel provider worker wakes at bounded intervals and performs export outside capture locks.
-Export reserves admission against syscall entry and deferred descriptor I/O.
+A separate I/O provider worker checks export deadlines at bounded intervals.
+Export reserves admission against filesystem-capable syscalls, file providers, and deferred descriptor I/O.
 Conflicting syscalls yield before side effects and retry `INT 0x80`; queued descriptor operations wait for a later interrupt.
 This avoids foreground failures from the current nonblocking ext2 guard.
-It adds bounded syscall latency during export; interrupt capture and device completion continue.
+Filesystem calls can wait during export; input IPC, clock calls, descriptor cleanup, and memory queries remain available.
+A locked snapshot publishes completed export status without exposing concurrent writer fields.
 Explicit export requires log-read and system-control authority; status requires log-read authority.
 Its retained Operation waits for admission, with one-millisecond dispatch backoff.
 Other ready requests can proceed while export waits.

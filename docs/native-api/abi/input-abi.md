@@ -246,7 +246,7 @@ User-buffer validation follows the existing observe contract.
 | 56 | u32 | Transfer token, when available |
 | 60 | u32 | Requested transfer bytes, when available |
 | 64 | u32 | Source-specific status, when available |
-| 68 | u32 | Flags; bit 0 means the measurement clock was unavailable |
+| 68 | u32 | Flags; bit 0 means clock unavailable; bit 1 means endpoint recovery was attempted |
 
 Reason 1 means transfer failure; reason 2 means controller retirement.
 Reasons 3 and 4 mean root-port and hub-port changes.
@@ -261,3 +261,33 @@ It does not count lost mouse movements alone.
 Runner result totals count failing categories per device; separate occurrence counters retain repetition counts.
 A successful later event does not erase earlier failures.
 Failure metadata excludes key bitmaps and input payload contents.
+
+
+## Bounded EHCI endpoint recovery
+
+Recovery preserves the input identity and endpoint data toggle after an eligible periodic split error.
+The [recovery plan](../../hardware/input-recovery-plan.md) records hardware evidence and pending physical acceptance.
+
+```text
+halted IN split ERR -> quiesce periodic schedule -> reserve halted QH slots
+  -> timed backoff -> verify connection path -> rebuild QH/qTD -> same input object
+other error OR exhausted budget -> retained first cause -> removal
+```
+
+Only low/full-speed interrupt IN errors with exhausted CERR and no transferred bytes qualify.
+Active transfers, STALL, babble, buffer errors, transaction errors, and malformed lengths do not qualify.
+Each endpoint receives at most three recovery attempts per ten-second window.
+Backoff durations are 20, 40, and 80 milliseconds.
+The USB worker sleeps normally during backoff; other endpoints continue.
+The halted queue head retains its frame slots, which prevents another device from claiming them.
+Descriptor reuse requires confirmation that the periodic schedule stopped.
+The driver preserves the hardware data toggle and restores CERR to three.
+It checks the root and ancestor hub ports before rearming.
+Recovery does not reset the device, create a new input object, or clear an endpoint STALL.
+A later retirement marks the existing evidence record with `OS1_USB_INPUT_RETRIED` when recovery was attempted.
+This flag does not establish that recovery succeeded or caused the later retirement.
+The first retirement cause remains immutable.
+
+The rules follow EHCI 1.0, Table 3-16 and Section 4.12.2.4.2.
+The [Intel specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/ehci-specification-for-usb.pdf) distinguishes split ERR from normal NAK responses.
+Normal NAK responses do not consume software recovery attempts.

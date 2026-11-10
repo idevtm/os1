@@ -6,9 +6,12 @@ namespace log_export
 struct ForegroundGuard
 {
     bool held;
-    ForegroundGuard();
+    bool acquired;
+    explicit ForegroundGuard(bool required = true);
     ~ForegroundGuard();
 };
+// Only calls that can enter a filesystem backend need export admission.
+bool syscall_needs_filesystem(uint64_t number, uint64_t operation);
 void initialize();
 void poll();
 long run(unsigned target);

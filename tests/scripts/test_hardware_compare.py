@@ -72,6 +72,17 @@ class Compare(unittest.TestCase):
         self.assertEqual([row], report['usb_input_failures']['after'])
         self.assertEqual([], report['usb_input_failures']['before'])
 
+    def test_usb_retirement_recovery_flag(self):
+        for flags in (0, 1, 2, 3):
+            record = c.USB_FAILURE.pack(1, 123, 7, 1376640, 1, 9, 1, 1, 2, 3, 0x81,
+                                       0x80040141, 4, 0x200f, flags)
+            row, = c.usb_input_failures(struct.pack('<4I', 1, 14, 72, 1) + record)
+            self.assertEqual(bool(flags & 2), row['recovery_attempted'])
+        record = c.USB_FAILURE.pack(1, 123, 7, 1376640, 1, 9, 1, 1, 2, 3, 0x81,
+                                   0x80040141, 4, 0x200f, 4)
+        with self.assertRaises(ValueError):
+            c.usb_input_failures(struct.pack('<4I', 1, 14, 72, 1) + record)
+
     def test_usb_retirement_capture_rejects_truncation_and_duplicates(self):
         record = c.USB_FAILURE.pack(1, 123, 7, 1376640, 1, 9, 1, 1, 2, 3, 0x81,
                                    0x30d52, 4, 0x2005, 0)

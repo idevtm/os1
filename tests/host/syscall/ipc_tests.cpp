@@ -1,4 +1,6 @@
+#include "arch/x86_64/apic/ipi.hpp"
 #include "debug/log.hpp"
+#include "support/lapic_stub.hpp"
 extern void (*host_console_after_ready)();
 extern int host_console_session_allocation_budget;
 #include "arch/x86_64/cpu/cpu.hpp"
@@ -10,6 +12,7 @@ extern int host_console_session_allocation_budget;
 #include "mm/user_copy.hpp"
 #include "platform/state.hpp"
 #include "proc/user_program.hpp"
+#include "storage/block_device.hpp"
 #include "support/physical_memory.hpp"
 #ifdef assert
 #undef assert
@@ -19,6 +22,8 @@ extern int host_console_session_allocation_budget;
 #endif
 #include <gtest/gtest.h>
 #include <os1/console.h>
+#include <os1/input.h>
+#include <os1/syscall_numbers.h>
 #include <os1/system.h>
 #include <os1/tmpfs.h>
 
@@ -2792,4 +2797,246 @@ TEST_F(Ipc, KernelTimerWaitDoesNotWakeOnUnrelatedObjectReadiness)
     ipc_timer_tick(1'000'000);
     EXPECT_EQ(ThreadState::Ready, thread->state);
     EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+}
+
+TEST_F(NormalLogIpc, NativeInputPollingDoesNotOverwriteFailures)
+{
+    os1_log_query query{};
+    query.version = 1;
+    query.size = sizeof(query);
+    query.after = diagnostic_log::info().latest;
+    os1_log_record origin{}, record{};
+    for(auto interface : {OS1_INPUT_INTERFACE_ID,
+                          OS1_KEYBOARD_INTERFACE_ID,
+                          OS1_POINTER_INTERFACE_ID,
+                          OS1_INPUT_SUBSCRIPTION_INTERFACE_ID})
+    {
+        for(unsigned i = 0; i < 300; ++i)
+        {
+            diagnostic_log::ipc_begin(origin, thread->process, interface, 1);
+            diagnostic_log::ipc_end(origin, OS1_ERR_WOULD_BLOCK);
+            diagnostic_log::ipc_end(origin, 0);
+        }
+        EXPECT_EQ(0, diagnostic_log::read(query, record));
+        diagnostic_log::ipc_end(origin, OS1_ERR_CLOSED);
+        ASSERT_EQ(1, diagnostic_log::read(query, record));
+        EXPECT_EQ(OS1_LOG_WARNING, record.level);
+        EXPECT_EQ(OS1_ERR_CLOSED, record.status);
+        query.after = record.sequence;
+    }
+}
+
+TEST_F(NormalLogIpc, SuccessfulDescriptorCleanupDoesNotTracePollingMechanics)
+{
+    os1_log_query query{};
+    query.version = 1;
+    query.size = sizeof(query);
+    query.after = diagnostic_log::info().latest;
+    os1_log_record record{};
+    for(auto operation : {OS1_RESOURCE_CLOSE, OS1_RESOURCE_QUERY})
+    {
+        diagnostic_log::syscall_begin(thread, os1_sys_resource, operation);
+        diagnostic_log::syscall_end(thread, 0);
+        EXPECT_EQ(0, diagnostic_log::read(query, record));
+        diagnostic_log::syscall_begin(thread, os1_sys_resource, operation);
+        diagnostic_log::syscall_end(thread, OS1_ERR_BAD_DESCRIPTOR);
+        ASSERT_EQ(1, diagnostic_log::read(query, record));
+        EXPECT_EQ(OS1_ERR_BAD_DESCRIPTOR, record.status);
+        query.after = record.sequence;
+    }
+}
+
+TEST_F(NormalLogIpc, TimedPollingWaitsPreserveWarningsForUnexpectedFailures)
+{
+    os1_log_query query{};
+    query.version = 1;
+    query.size = sizeof(query);
+    query.after = diagnostic_log::info().latest;
+    os1_log_record record{};
+    for(auto action : {OS1_IPC_WAIT_UNTIL, OS1_IPC_WAIT_MANY})
+    {
+        for(unsigned i = 0; i < 1000; ++i)
+        {
+            diagnostic_log::syscall_begin(thread, os1_sys_ipc, action);
+            diagnostic_log::syscall_end(thread, OS1_ERR_TIMED_OUT);
+        }
+        EXPECT_EQ(0, diagnostic_log::read(query, record));
+        diagnostic_log::syscall_begin(thread, os1_sys_ipc, action);
+        diagnostic_log::syscall_end(thread, OS1_ERR_ACCESS);
+        ASSERT_EQ(1, diagnostic_log::read(query, record));
+        EXPECT_EQ(OS1_ERR_ACCESS, record.status);
+        query.after = record.sequence;
+    }
+    diagnostic_log::syscall_begin(thread, os1_sys_ipc, OS1_IPC_SUBMIT);
+    diagnostic_log::syscall_end(thread, OS1_ERR_TIMED_OUT);
+    ASSERT_EQ(1, diagnostic_log::read(query, record));
+    EXPECT_EQ(OS1_ERR_TIMED_OUT, record.status);
+    query.after = record.sequence;
+    // Diagnostic capture still records expected timer expiration.
+    diagnostic_log::test_reset();
+    diagnostic_log::initialize(true);
+    query.after = diagnostic_log::info().latest;
+    diagnostic_log::syscall_begin(thread, os1_sys_ipc, OS1_IPC_WAIT_UNTIL);
+    diagnostic_log::syscall_end(thread, OS1_ERR_TIMED_OUT);
+    ASSERT_EQ(1, diagnostic_log::read(query, record));
+    EXPECT_EQ(OS1_ERR_TIMED_OUT, record.status);
+}
+
+TEST_F(Ipc, BusyStorageRetryRegistersTimerWithoutAnApTick)
+{
+    thread->user_mode = false;
+    block_retry_wait(thread, true);
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    EXPECT_EQ(ThreadWaitReason::Ipc, thread->wait.reason);
+    EXPECT_TRUE(thread->wait.ipc.timer_only);
+    set_current_thread(nullptr);
+    ipc_timer_tick(999'999);
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    ipc_timer_tick(1);
+    EXPECT_EQ(ThreadState::Ready, thread->state);
+    set_current_thread(thread);
+}
+
+TEST_F(Ipc, BusyStorageRetryDoesNotParkUserSyscallFrames)
+{
+    thread->user_mode = true;
+    const auto state = thread->state;
+    const auto reason = thread->wait.reason;
+    block_retry_wait(thread, true);
+    EXPECT_EQ(state, thread->state);
+    EXPECT_EQ(reason, thread->wait.reason);
+    EXPECT_EQ(thread, current_thread());
+}
+
+TEST_F(Ipc, BusyStorageRetryDoesNotParkInterruptDisabledKernelFrames)
+{
+    thread->user_mode = false;
+    const auto state = thread->state;
+    const auto reason = thread->wait.reason;
+    block_retry_wait(thread, false);
+    EXPECT_EQ(state, thread->state);
+    EXPECT_EQ(reason, thread->wait.reason);
+    EXPECT_EQ(thread, current_thread());
+}
+
+TEST(BlockRetry, ReadWriteAndFlushRetryOnlyUnacceptedBusyRequests)
+{
+    struct State
+    {
+        unsigned attempts;
+        BlockOperation operation;
+    } state{};
+    BlockDevice device{};
+    device.sector_size = 512;
+    device.sector_count = 8;
+    device.max_sectors_per_request = 1;
+    device.driver_state = &state;
+    device.submit = device.flush = [](BlockDevice& d, BlockRequest& r) {
+        auto& state = *static_cast<State*>(d.driver_state);
+        EXPECT_EQ(state.operation, r.operation);
+        if(++state.attempts < 3)
+        {
+            EXPECT_FALSE(completion_done(r.completion));
+            r.status = BlockRequestStatus::Busy;
+            return false;
+        }
+        block_request_complete(r, BlockRequestStatus::Success, r.sector_count * 512);
+        return true;
+    };
+    uint8_t bytes[512]{};
+    EXPECT_TRUE(block_read_sync(device, 0, bytes, 1));
+    EXPECT_EQ(3u, state.attempts);
+    state = {0, BlockOperation::Write};
+    EXPECT_TRUE(block_write_sync(device, 0, bytes, 1));
+    EXPECT_EQ(3u, state.attempts);
+    state = {0, BlockOperation::Flush};
+    EXPECT_TRUE(block_flush_sync(device));
+    EXPECT_EQ(3u, state.attempts);
+    device.submit = device.flush = [](BlockDevice& d, BlockRequest& r) {
+        ++static_cast<State*>(d.driver_state)->attempts;
+        r.status = BlockRequestStatus::DeviceError;
+        return false;
+    };
+    state.attempts = 0;
+    EXPECT_FALSE(block_flush_sync(device));
+    EXPECT_EQ(1u, state.attempts);
+}
+
+TEST_F(Ipc, ControllerOwnershipDefersIrqFilesystemWorkAndScheduling)
+{
+    thread->user_mode = false;
+    cpu_cur()->reschedule_pending = 0;
+    lapic_stub_reset();
+    ASSERT_TRUE(ipi_initialize());
+    EXPECT_FALSE(defer_irq_work(false));
+    EXPECT_TRUE(host_interrupts_enabled);
+    Thread* other = create_user_thread(thread->process, address, address + 4096, frames, false);
+    ASSERT_NE(nullptr, other);
+    mark_thread_ready(other, cpu_cur());
+    {
+        SchedulingGuard owner;
+        EXPECT_TRUE(host_interrupts_enabled);
+        EXPECT_TRUE(defer_irq_work(false));
+        EXPECT_EQ(0u, cpu_cur()->reschedule_pending);
+        {
+            SchedulingGuard nested;
+            EXPECT_EQ(2u, thread->scheduling_depth);
+            EXPECT_TRUE(defer_irq_work(true));
+            EXPECT_EQ(1u, cpu_cur()->reschedule_pending);
+            EXPECT_EQ(thread, current_thread());
+        }
+        EXPECT_EQ(1u, thread->scheduling_depth);
+        EXPECT_EQ(0u, lapic_stub_icr_send_count());
+        EXPECT_TRUE(defer_irq_work(false));
+    }
+    EXPECT_EQ(0u, thread->scheduling_depth);
+    EXPECT_EQ(1u, lapic_stub_icr_send_count());
+    EXPECT_EQ(ipi_reschedule_vector(), lapic_stub_last_icr_low());
+    EXPECT_EQ(0u, cpu_cur()->reschedule_pending);
+    EXPECT_EQ(other, next_runnable_thread(thread));
+    EXPECT_FALSE(defer_irq_work(false));
+    EXPECT_TRUE(host_interrupts_enabled);
+}
+
+TEST_F(Ipc, ControllerOwnershipDoesNotSendRescheduleWithoutRunnableWork)
+{
+    thread->user_mode = false;
+    lapic_stub_reset();
+    ASSERT_TRUE(ipi_initialize());
+    ASSERT_EQ(0u, cpu_run_queue_length(cpu_cur()));
+    for(unsigned i = 0; i < 1000; ++i)
+    {
+        SchedulingGuard owner;
+        EXPECT_TRUE(defer_irq_work(true));
+    }
+    EXPECT_EQ(0u, lapic_stub_icr_send_count());
+    EXPECT_EQ(0u, thread->scheduling_depth);
+    EXPECT_TRUE(host_interrupts_enabled);
+}
+
+TEST_F(Ipc, ControllerOwnershipCoalescesRequestsInsideUserSyscalls)
+{
+    thread->user_mode = true;
+    Thread* other = create_user_thread(thread->process, address, address + 4096, frames, false);
+    ASSERT_NE(nullptr, other);
+    mark_thread_ready(other, cpu_cur());
+    lapic_stub_reset();
+    ASSERT_TRUE(ipi_initialize());
+    static unsigned sent;
+    sent = 0;
+    lapic_stub_on_reschedule([](const cpu*) { ++sent; });
+    {
+        IrqGuard irq;
+        cpu_cur()->reschedule_pending = 1;
+        for(unsigned i = 0; i < 1000; ++i)
+        {
+            SchedulingGuard owner;
+        }
+        EXPECT_EQ(1u, sent);
+        EXPECT_EQ(0u, cpu_cur()->reschedule_pending);
+        EXPECT_FALSE(host_interrupts_enabled);
+    }
+    lapic_stub_on_reschedule(nullptr);
+    EXPECT_EQ(other, next_runnable_thread(thread));
+    EXPECT_TRUE(host_interrupts_enabled);
 }

@@ -1,5 +1,6 @@
 #include "drivers/usb/diagnostics.hpp"
 #include "platform/hardware_catalog.hpp"
+#include "proc/thread.hpp"
 #include "util/fixed_string.hpp"
 // Early xHCI PCI driver. This owns controller reset, MMIO resource claims,
 // DMA ring allocation, interrupter 0 setup, and lifecycle teardown.
@@ -1389,6 +1390,7 @@ bool storage_submit(BlockDevice& block, BlockRequest& request)
         block_request_complete(request, BlockRequestStatus::Invalid);
         return false;
     }
+    SchedulingGuard scheduling;
     if(__atomic_exchange_n(&controller.storage_busy, 1, __ATOMIC_ACQUIRE))
     {
         request.status = BlockRequestStatus::Busy;
@@ -2131,6 +2133,7 @@ void xhci_poll_devices(PageFrameContainer& frames)
 {
     for(auto* c : g_xhci_controllers)
     {
+        SchedulingGuard scheduling;
         if(!c || __atomic_load_n(&c->failed, __ATOMIC_ACQUIRE) ||
            __atomic_exchange_n(&c->storage_busy, 1, __ATOMIC_ACQUIRE))
             continue;

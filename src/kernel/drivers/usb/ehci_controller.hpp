@@ -62,3 +62,15 @@ void retire_root_devices(Range& devices, unsigned root, Retire retire)
             retire(device);
 }
 }  // namespace ehci
+
+namespace ehci
+{
+// Software recovery supplements CERR without resetting the endpoint data toggle.
+struct InputRecovery
+{
+    uint64_t window_ns = 0, due_ns = 0;
+    unsigned attempts = 0;
+    bool pending = false, retried = false;
+    bool schedule(uint32_t token, unsigned bytes, unsigned speed, uint64_t now);
+};
+}  // namespace ehci

@@ -67,9 +67,13 @@ Structured capture covers traps, selected device/timer events, corruption, user-
 Scheduler and individual interrupt records remain in the existing observation ring, outside this capture profile.
 
 Normal syscall tracing records failures and resource/launch/exec/exit outcomes.
+Successful descriptor close and query calls are omitted because input polling also uses them.
 Normal IPC tracing records failures and mutating filesystem methods; unknown service methods are conservatively traced.
 Successful console, input-session, and filesystem read methods are omitted in normal mode.
-Expected input-session WOULD_BLOCK results are also omitted; genuine failures retain warning records.
+Successful native-input listing, state queries, and subscription reads are also omitted.
+Expected empty-input WOULD_BLOCK results are omitted; genuine failures retain warning records.
+Expected WAIT_UNTIL and WAIT_MANY timer expirations are omitted in normal mode.
+Other timeout failures remain recorded.
 Diagnostic mode also records instrumented non-IPC syscall entries and completions, plus all admitted Native API requests and completions.
 IPC mechanism failures are recorded separately; polling outcomes such as WOULD_BLOCK are excluded.
 Log-query Operations do not trace themselves. Local runtime methods without kernel calls are not instrumented.

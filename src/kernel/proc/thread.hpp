@@ -47,6 +47,7 @@ struct IpcWaitState
     OpenInstance* instances[OS1_IPC_WAIT_LIMIT]{};
     uint32_t count = 0;
     bool timer_only = false;
+    uint8_t kernel_lane = 0;
     uint64_t deadline_ns = UINT64_MAX;
     long result = 0;
 };
@@ -117,6 +118,7 @@ struct Thread
     uint64_t last_migration_tick = 0;
     os1_log_record log_trace{};
     bool log_pending = false;
+    uint32_t scheduling_depth = 0;
 };
 
 #define THREAD_STATIC_ASSERT(name, expr) typedef char thread_static_assert_##name[(expr) ? 1 : -1]
@@ -196,3 +198,18 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
+
+// Synchronous controller ownership must not sleep or yield inside this scope.
+// IRQ service continues, but scheduling and deferred filesystem work wait.
+class SchedulingGuard
+{
+public:
+    SchedulingGuard();
+    ~SchedulingGuard();
+    SchedulingGuard(const SchedulingGuard&) = delete;
+    SchedulingGuard& operator=(const SchedulingGuard&) = delete;
+
+private:
+    Thread* thread_;
+};
+bool defer_irq_work(bool reschedule);

@@ -363,3 +363,44 @@ TEST(Ehci, FailedAddressZeroProbeDisablesPortAndWaitsForResetBeforeSibling)
     state.calls = 0;
     EXPECT_FALSE(ehci::isolate_root(state.port, [](void*) {}, nullptr, 2));
 }
+
+TEST(Ehci, SplitInputRecoveryIsBoundedAndRejectsOtherFailures)
+{
+    constexpr uint32_t observed = 0x80040141;
+    ehci::InputRecovery recovery{};
+    uint64_t now = 1'000'000'000;
+    for(unsigned i = 0; i < 3; ++i)
+    {
+        ASSERT_TRUE(recovery.schedule(observed, 4, 1, now));
+        EXPECT_EQ(now + (20'000'000ull << i), recovery.due_ns);
+        EXPECT_TRUE(recovery.pending);
+        EXPECT_FALSE(recovery.schedule(observed, 4, 1, now));
+        recovery.pending = false;
+        now = recovery.due_ns;
+        ehci::Qtd td{};
+        ASSERT_TRUE(ehci::prepare_qtd(td, 0x1000, 4, 1, observed >> 31));
+        EXPECT_NE(0u, td.token & (1u << 31));
+        EXPECT_EQ(3u, (td.token >> 10) & 3);
+        EXPECT_EQ(ehci::active, td.token & 255);
+    }
+    EXPECT_FALSE(recovery.schedule(observed, 4, 1, now));
+    EXPECT_TRUE(recovery.retried);
+    EXPECT_TRUE(recovery.schedule(observed, 4, 1, 11'000'000'000));
+    EXPECT_EQ(1u, recovery.attempts);
+    for(uint32_t bad : {observed | ehci::active,
+                        observed | 0x20,
+                        observed | 0x10,
+                        observed | 8,
+                        observed | 4,
+                        observed & ~1u,
+                        observed | (1u << 10),
+                        observed ^ (1u << 8),
+                        observed - (1u << 16)})
+    {
+        ehci::InputRecovery rejected{};
+        EXPECT_FALSE(rejected.schedule(bad, 4, 1, now)) << std::hex << bad;
+        EXPECT_FALSE(rejected.retried);
+    }
+    ehci::InputRecovery high_speed{};
+    EXPECT_FALSE(high_speed.schedule(observed, 4, 2, now));
+}

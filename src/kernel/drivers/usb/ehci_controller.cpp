@@ -102,3 +102,25 @@ bool isolate_root(volatile uint32_t& port, void (*poll)(void*), void* context, u
     return !(port & (4u | (1u << 8)));
 }
 }  // namespace ehci
+
+namespace ehci
+{
+bool InputRecovery::schedule(uint32_t token, unsigned bytes, unsigned speed, uint64_t now)
+{
+    // Only an exhausted, untransferred interrupt IN split ERR is recoverable.
+    // STALL, babble, buffer errors, active work, and malformed lengths retire normally.
+    if(pending || speed > 1 || !bytes || bytes > 8 || (token & 0xff) != 0x41 ||
+       ((token >> 8) & 3) != 1 || (token & (3u << 10)) || remaining(token) != bytes)
+        return false;
+    if(!attempts || now - window_ns >= 10'000'000'000ull)
+    {
+        window_ns = now;
+        attempts = 0;
+    }
+    if(attempts == 3)
+        return false;
+    due_ns = now + (20'000'000ull << attempts++);
+    pending = retried = true;
+    return true;
+}
+}  // namespace ehci

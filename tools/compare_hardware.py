@@ -194,9 +194,10 @@ def usb_input_failures(data):
         record = dict(zip(names, USB_FAILURE.unpack_from(data, 16 + index * size)))
         identity = record['input_device']
         if (record['sequence'] != index + 1 or not 1 <= identity <= 64 or identity in seen
-                or record['reason'] not in USB_FAILURE_REASONS or record['flags'] & ~1):
+                or record['reason'] not in USB_FAILURE_REASONS or record['flags'] & ~3):
             raise ValueError('invalid USB input failure record')
         record['reason_name'] = USB_FAILURE_REASONS[record['reason']]
+        record['recovery_attempted'] = bool(record['flags'] & 2)
         seen.add(identity)
         records.append(record)
     return records

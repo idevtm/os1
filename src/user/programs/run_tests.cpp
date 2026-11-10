@@ -649,11 +649,15 @@ void observe_input(bool stimulus)
 int main(int argc, char** argv)
 {
     const char* label = nullptr;
-    bool stimulus = false, expect_mouse = false;
+    bool stimulus = true, expect_mouse = true;
     for(int i = 1; i < argc; ++i)
     {
         if(u::hardware_tools::equal(argv[i], "--input"))
             stimulus = true;
+        else if(u::hardware_tools::equal(argv[i], "--no-input"))
+            stimulus = false;
+        else if(u::hardware_tools::equal(argv[i], "--no-expect-usb-mouse"))
+            expect_mouse = false;
         else if(u::hardware_tools::equal(argv[i], "--expect-usb-mouse"))
             expect_mouse = true;
         else if(u::hardware_tools::equal(argv[i], "--machine") && i + 1 < argc &&
@@ -661,7 +665,7 @@ int main(int argc, char** argv)
             label = argv[++i];
         else
         {
-            f::message("usage: run-tests [--machine NAME] [--input] [--expect-usb-mouse]\n");
+            f::message("usage: run-tests [--machine NAME] [--no-input] [--no-expect-usb-mouse]\n");
             return 2;
         }
     }

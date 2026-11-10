@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 from test_ext2_persistence import boot
+from device_test_mode import unattended
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +31,7 @@ def main():
     for entry in (None, 1, 2):
         for sample in range(args.repeat):
             shutil.copyfile(args.program_disk, disk)
+            unattended(disk, args.debugfs)
             args.boot_menu_entry = entry
             phase = f'entry-{entry}-sample-{sample}'
             profile = 1 if entry is None else entry
@@ -61,6 +63,8 @@ def main():
             transcript = Path(args.log).with_suffix(f'.{phase}.log').read_bytes()
             assert transcript.count(b'shell: diagnostic tests starting') == (profile == 2), transcript[-3000:]
             assert (b'run-tests: PASS; saved results' in transcript) == (profile == 2), transcript[-3000:]
+            assert (b'diagnostic tests use unattended mode' in transcript) == (profile == 2)
+            assert b'20 seconds' not in transcript
             partition = disk.with_suffix('.ext2')
             partition.write_bytes(disk.read_bytes()[2048 * 512:])
             destination = disk.parent / (disk.stem + '-' + phase)

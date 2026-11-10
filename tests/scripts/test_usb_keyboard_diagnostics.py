@@ -10,6 +10,7 @@ import socket
 import struct
 import subprocess
 import time
+from device_test_mode import unattended
 
 
 def fat_logs(image):
@@ -65,6 +66,9 @@ def main():
     args.log.parent.mkdir(parents=True, exist_ok=True)
     disk = args.log.with_suffix('.img')
     shutil.copyfile(args.image, disk)
+    program_disk = args.log.with_suffix('.programs.raw')
+    shutil.copyfile(args.program_disk, program_disk)
+    unattended(program_disk)
     # Use a short path: macOS Unix socket names have a small limit.
     monitor = Path('/tmp') / f'os1-kbd-{os.getpid()}.sock'
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
@@ -72,7 +76,7 @@ def main():
                '-drive', f'if=none,id=stick,format=raw,file={disk}',
                '-device', 'qemu-xhci,id=xhci',
                '-device', 'usb-storage,bus=xhci.0,drive=stick,bootindex=1']
-    command += ['-drive', f'if=none,id=system,format=raw,file={args.program_disk},snapshot=on',
+    command += ['-drive', f'if=none,id=system,format=raw,file={program_disk},snapshot=on',
                 '-device', 'virtio-blk-pci,drive=system,disable-legacy=on']
     if not args.no_keyboard:
         command += ['-device', 'usb-kbd,bus=xhci.0,port=4']
@@ -112,6 +116,8 @@ def main():
         assert transcript.count(b'shell: diagnostic tests starting') == (not args.normal), transcript[-4000:]
         if not args.normal:
             assert b'run-tests: PASS; saved results' in transcript, transcript[-4000:]
+            assert b'diagnostic tests use unattended mode' in transcript
+            assert b'20 seconds' not in transcript
             assert b'shell: diagnostic tests completed' in transcript, transcript[-4000:]
         elapsed = time.monotonic() - started
         connection.connect(str(monitor))
