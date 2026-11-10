@@ -57,7 +57,8 @@ for entry in packages:
     seen.add(name)
     assert entry['destination'].endswith(f'/{name}/manifest.json')
     image = str(Path(entry['destination']).with_name('driver.elf'))
-    assert package['abi'] == 1 and package['image'] == image
+    assert package['image'] == image
+    assert package['abi'] == (1 if name == 'virtio-net' else 2)
     assert image in program_paths
     assert installed[image.removeprefix('/disk')][1] == package['sha256']
     if name == 'virtio-net':

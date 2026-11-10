@@ -24,6 +24,10 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
                '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
+    if getattr(args, 'vga', None):
+        command += ['-vga', args.vga]
+    if getattr(args, 'vga_mmio_off', False):
+        command += ['-global', 'VGA.mmio=off']
     if getattr(args, 'poweroff', False):
         command.remove('-no-shutdown')
     if getattr(args, 'allow_reboot', False):

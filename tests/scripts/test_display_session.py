@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import shutil
+import re
 import json
 import subprocess
 import sys
@@ -59,26 +60,28 @@ def exercise_graphics(args, run, expect):
                 time.sleep(.05)
             raise AssertionError('graphics cursor did not appear at expected position')
 
-        def drive_demo():
-            expect(b'Press 1 or Enter to start.', timeout=15)
-            key('1')
+        boot_width, boot_height, _ = screenshot()
+        for choice, resolution in [('2', (800, 600)), ('3', (1280, 720))]:
+            # Emulated keys allow observation before the next shell prompt.
+            for code in ('g', 'f', 'x', 'd', 'e', 'm', 'o', 'ret'):
+                key(code)
+            expect(b'Choose a mode.', timeout=15)
+            key(choice)
             before = await_cursor(lambda _: True)
+            assert screenshot()[:2] == resolution
             qmp.execute('input-send-event', {'events': [
                 {'type': 'rel', 'data': {'axis': 'x', 'value': 19}},
                 {'type': 'rel', 'data': {'axis': 'y', 'value': 13}},
             ]})
             await_cursor(lambda p: p == (before[0] + 19, before[1] + 13))
             key('q')
-
-        # Send the interactive command through emulated keys. The harness can
-        # then observe its intermediate output before waiting for the prompt.
-        for code in ('g', 'f', 'x', 'd', 'e', 'm', 'o', 'ret'):
-            key(code)
-        drive_demo()
-        expect()
-        _, _, pixels = screenshot()
-        assert pixels[:3] != bytes.fromhex('14283e'), 'graphics background remains after release'
-        assert b'\xaa\xaa\xaa' in pixels, 'console text did not redraw after release'
+            output = expect()
+            match = re.search(rb'pointer diagnostics events=(\d+)', output)
+            assert match and int(match[1]) > 0, output
+            width, height, pixels = screenshot()
+            assert (width, height) == (boot_width, boot_height)
+            assert pixels[:3] != bytes.fromhex('14283e'), 'graphics background remains after release'
+            assert b'\xaa\xaa\xaa' in pixels, 'console text did not redraw after release'
         run('gfxdemo "--check"', b'gfxdemo: session checks passed')
     finally:
         qmp.close()
@@ -92,6 +95,7 @@ def main():
     parser.add_argument('--code')
     parser.add_argument('--vars')
     args = parser.parse_args()
+    args.vga = 'std'
     args.transport = 'usb' if args.code else 'virtio'
     disk = Path(args.log).with_suffix('.raw')
     shutil.copyfile(args.program_disk, disk)
@@ -102,7 +106,7 @@ def main():
             out = run('context os.display')
             assert (b'available [field] Integer = ' + (b'1' if args.code else b'0')) in out, out
             if args.code:
-                assert b'firmware-framebuffer' in out and b'mode_count [field] Integer = 1' in out
+                assert b'bochs-display' in out and b'mode_count [field] Integer = 3' in out
                 exercise_graphics(args, run, expect)
             else:
                 out = run('gfxdemo "--check"', allow_errors=True)
@@ -134,6 +138,16 @@ def main():
             boot(args, disk, 'corrupt', exercise=fallback)
             log = Path(args.log).with_suffix('.corrupt.log').read_bytes()
             assert b'/firmware-framebuffer/driver.elf digest rejected' in log, log[-2000:]
+
+            shutil.copyfile(args.program_disk, disk)
+            args.vga_mmio_off = True
+
+            def fixed(run, expect):
+                out = run('context os.display')
+                assert b'firmware-framebuffer' in out and b'mode_count [field] Integer = 1' in out, out
+                run('gfxdemo "--check"', b'gfxdemo: session checks passed')
+
+            boot(args, disk, 'fixed', exercise=fixed)
     disk.unlink()
 
 

@@ -25,6 +25,7 @@ struct Store
 };
 Spinlock lock{"native-input"};
 Store* store;
+bool readiness_changed;
 void lifecycle(const Device& device, const char* action)
 {
     os1_log_record record{};
@@ -68,6 +69,7 @@ void publish(Device& d, unsigned flags, int dx = 0, int dy = 0, int wheel = 0)
     d.state.sequence = e.sequence;
     d.state.time_ns = ns;
     d.state.flags = flags & OS1_INPUT_COARSE_CLOCK;
+    __atomic_store_n(&readiness_changed, true, __ATOMIC_RELEASE);
 }
 void destroy(NativeObject* object)
 {
@@ -93,7 +95,8 @@ long make_handle(uint64_t id, bool subscription, DescriptorEntry& output)
     h->kind = subscription                        ? OS1_OBJECT_INPUT_SUBSCRIPTION
               : d->info.kind == OS1_INPUT_POINTER ? OS1_OBJECT_POINTER
                                                   : OS1_OBJECT_INPUT_DEVICE;
-    h->allowed_rights = OS1_RIGHT_INPUT_READ | OS1_RIGHT_INSPECT;
+    h->allowed_rights =
+        OS1_RIGHT_INPUT_READ | OS1_RIGHT_INSPECT | (subscription ? OS1_RIGHT_READ : 0u);
     h->destroy = destroy;
     h->device = id;
     h->cursor = store->sequence;
@@ -107,7 +110,7 @@ long make_handle(uint64_t id, bool subscription, DescriptorEntry& output)
     if(subscription)
         ++store->subscriptions;
     object_release(h);
-    output = {instance, OS1_RIGHT_INPUT_READ | OS1_RIGHT_INSPECT, OS1_DESCRIPTOR_CLOEXEC, 0};
+    output = {instance, h->allowed_rights, OS1_DESCRIPTOR_CLOEXEC, 0};
     return 0;
 }
 bool root(const NativeObject* object)
@@ -337,6 +340,23 @@ void boot_pointer(uint64_t id, const uint8_t* report, unsigned bytes)
     if(report && bytes >= 3)
         pointer(id, report[0], int8_t(report[1]), int8_t(report[2]));
 }
+bool ready(const NativeObject* object)
+{
+    IrqSpinGuard guard(lock);
+    const auto& handle = *static_cast<const Handle*>(object);
+    const auto* device = find(handle.device);
+    if(handle.closed || !device || !device->info.connected)
+        return true;
+    return store->sequence - handle.cursor > OS1_INPUT_EVENT_LIMIT ||
+           device->state.sequence > handle.cursor;
+}
+
+bool take_readiness_change()
+{
+    return __atomic_load_n(&readiness_changed, __ATOMIC_RELAXED) &&
+           __atomic_exchange_n(&readiness_changed, false, __ATOMIC_ACQ_REL);
+}
+
 bool inspect(uint64_t id, os1_input_device& info)
 {
     IrqSpinGuard guard(lock);

@@ -120,6 +120,7 @@ Thread* handle_irq(TrapFrame* frame)
     // A preempted controller owner cannot release Busy for a syscall or IRQ reader.
     if(defer_irq_work(scheduler_tick || reschedule_ipi))
         return current_thread();
+    ipc_refresh_input_waiters();
     if(cpu_on_boot())
     {
         wake_console_readers(page_frames);

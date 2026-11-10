@@ -136,7 +136,11 @@ Worker delays and controller contention can extend the nominal topology interval
 Device configuration and failures run outside IRQ context and outside the native API dispatch worker.
 
 `try_read` returns `OS1_ERR_WOULD_BLOCK` when no matching event is available.
-This profile uses explicit polling; native input subscriptions do not yet support `WAIT_MANY` readiness.
+Native input subscriptions support `WAIT`, `WAIT_UNTIL`, and `WAIT_MANY` with `OS1_RIGHT_READ`.
+Readiness covers a matching event, ring loss, unsubscribe, or removal.
+Readiness does not consume an event. Use `try_read` after a wake.
+Hardware dispatch refreshes waiters after it releases input and controller locks.
+The scheduler tick also checks readiness and timeouts.
 Clients can use asynchronous Operations for individual requests.
 Allocation, admission, rights, and malformed-request failures use existing native error codes.
 

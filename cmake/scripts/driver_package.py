@@ -32,7 +32,7 @@ def main():
                 'dependencies': ['kernel.virtio_queue.v1'], 'firmware': [],
                 'image': directory + '/driver.elf'}
     if args.display:
-        metadata.update(driver='firmware-framebuffer', dependencies=['kernel.firmware_framebuffer.v1'],
+        metadata.update(driver='firmware-framebuffer', abi=2, dependencies=['kernel.firmware_framebuffer.v1'],
                         image=directory.replace('/virtio-net', '/firmware-framebuffer') + '/driver.elf',
                         match='validated firmware framebuffer')
         del metadata['pci']

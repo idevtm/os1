@@ -130,3 +130,108 @@ The reviewer verified the corrections and found no merge blockers.
 
 Physical graphics acceptance remains pending.
 The complete ASD-STE100 dictionary was unavailable. The prose received a manual check against the project rules.
+
+## Pointer stalls and runtime modes
+
+The user reports smooth pointer movement on the desktop.
+The laptop pointer paused every few seconds during continuous movement.
+The cause remains unknown.
+
+```text
+pointer events -> wait-many readiness -> bounded event batch -> cursor redraw
+display mode list -> exclusive acquire -> QEMU mode switch -> restore on close
+```
+
+Make native input subscriptions waitable before changing the display backend.
+Measure input publication gaps, event age at consumption, and draw time separately.
+Print the summary after the display session closes.
+Test keyboard exit with an idle pointer, actual pointer movement, and ring-loss readiness.
+
+Match QEMU Standard VGA by PCI identity and use the Bochs display registers.
+Publish only modes the backend can set. Restore the boot mode before the console redraw.
+Keep the firmware framebuffer fallback for physical machines.
+Defer NVIDIA mode setting to a separate hardware milestone.
+
+
+### Impact and checks
+
+| Area | Impact |
+| --- | --- |
+| Scope | The display and input milestones gain runtime mode selection and a test for the reported pauses. |
+| Boot and platform | Keep the existing BootInfo layout. Enable mode changes only on matching QEMU Standard VGA. |
+| Memory and isolation | Claim and bound the additional mappings. Retain the target geometry in each session. |
+| Concurrency | Signal input waiters after controller dispatch. Serialize graphics and console ownership through session lifetime. |
+| Interfaces | Add Display `list_modes` and native input readiness. Use internal graphics module ABI 2. |
+| Resources | Measure image size, event age, draw duration, and restoration. Keep the diagnostics out of the polling and IRQ paths. |
+| Validation | Cover BIOS, UEFI, two output resolutions, fallback, corrupt packages, and native input readiness. |
+
+Run `gfxdemo` on the same laptop with the same mouse to investigate the reported pauses.
+Move continuously for at least 20 seconds. Press `q` to stop.
+Record the pointer diagnostics and compare the input gaps with the event age and draw duration.
+Physical testing of the new event path remains pending.
+
+For QEMU with an existing data disk, run `./os1.sh storage_deploy` before `./os1.sh run`.
+Inspect `context os.display` to confirm the backend.
+Select an alternate resolution from the `gfxdemo` menu.
+The Standard VGA test verifies the new screenshot dimensions and the return to the boot dimensions.
+
+
+### Runtime display validation
+
+The final `./scripts/check-local.sh` run passed on `16c6086` plus the runtime display changes.
+The normal build identity is `aa512090513633ed3c1f24c69885eadfd452ccccf9423bacb453aa456ff92bc9`.
+The executable and test diff SHA-256 is `e2b53207c7919273b3cde360635ce4d7b4a29a93d44d756781c4c962e532df1a`.
+
+| Profile | Passed | Duration |
+| --- | ---: | ---: |
+| Host | 682 / 682 | 22.25 s |
+| Normal image | 94 / 94 | 388.70 s |
+| Diagnostic image | 3 / 3 | 9.82 s |
+
+The command log is `build/display/runtime-full-qualified.log`. Profile logs are in `build/local-validation/`.
+The UEFI display test verified 800 by 600 and 1280 by 720 screenshots and restored text at the boot resolution.
+It also verified the fixed framebuffer with VGA MMIO disabled and rejection of a corrupt driver.
+The host test covers readiness for matching input, overflow, and removal.
+The QEMU test covers pointer motion and idle keyboard exit after an event.
+Injected restoration failure and demo resynchronization after overflow remain untested.
+
+The first event-only display checks passed on both boot paths.
+The initial combined build lacked two declarations. The build logs remain in `build/display/modes-build*.log`.
+Independent review identified producer notification, cursor edge order, restoration failure, and timing sample issues.
+The changes address those findings. The final readiness check avoids an atomic exchange on idle IRQs.
+The full suite ran again after that correction.
+
+### Runtime display measurements
+
+The isolated comparison uses the same host and QEMU settings as the previous section.
+The baseline is a clean build of `16c6086`. The candidate adds the recorded source and test diff.
+Each timing row shows the median of three samples per tree.
+See `build/display/runtime-boot-comparison.json` for the samples and artifact hashes.
+
+| Workload | Baseline | Candidate | Difference |
+| --- | ---: | ---: | ---: |
+| UEFI startup | 2.413 s | 2.420 s | +0.008 s, +0.32% |
+| UEFI echo | 5.730 ms | 4.971 ms | -0.759 ms, -13.25% |
+| BIOS startup | 0.473 s | 0.472 s | -0.001 s, -0.17% |
+| BIOS echo | 11.957 ms | 11.830 ms | -0.127 ms, -1.06% |
+
+| Artifact | Baseline bytes | Candidate bytes | Difference |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 625,184 | 626,856 | +1,672 bytes, +0.27% |
+| UEFI ISO | 4,362,240 | 4,364,288 | +2,048 bytes, +0.05% |
+| Display module | 8,952 | 9,112 | +160 bytes, +1.79% |
+| Demo ELF | 8,024 | 10,608 | +2,584 bytes, +32.20% |
+| BIOS image | 1,474,560 | 1,474,560 | 0 bytes, 0% |
+| Initrd | 10,240 | 10,240 | 0 bytes, 0% |
+
+Four boot-mode closes per tree had median elapsed times of 15.036 and 15.279 ms.
+The difference is +0.242 ms, or +1.61%.
+The eight alternate-mode closes took 15.459 to 15.840 ms.
+This includes register restoration and text redraw. There is no alternate-mode baseline.
+
+The final QEMU test measured two pointer events, one at each alternate resolution.
+The event ages were 2.461 and 3.775 ms. Cursor draw durations were 0.327 and 0.304 ms.
+There is no equivalent event measurement from the polling demo.
+The two samples cannot establish a latency trend or reproduce continuous motion.
+See `build/artifacts/test-runs/os1_smoke_display_session_uefi-v92tnd9f/guest.display.log`.
+The laptop pause, maximum geometry restoration cost, and IRQ CPU cost remain unmeasured.

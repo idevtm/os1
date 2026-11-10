@@ -899,7 +899,7 @@ The active backend is chosen from `BootInfo`:
 
 ### Graphics sessions
 
-The [fixed display service](native-api/abi/display-abi.md) exposes the firmware framebuffer through an exclusive session.
+The [display service](native-api/abi/display-abi.md) exposes graphics through an exclusive session.
 
 ```text
 validated framebuffer -> ext2 driver match -> os.display -> DisplaySession
@@ -910,7 +910,9 @@ The boot driver loader checks the framebuffer before it reads the graphics packa
 The kernel verifies the package digest and maps the module in its own supervisor window.
 The graphics module converts RGB values and writes bounded rectangles.
 The console keeps its logical text state while a session owns pixel output.
-The final session release restores the active terminal.
+The QEMU Standard VGA backend switches the scanout resolution during session acquisition.
+The final session release restores the boot mode before it redraws the active terminal.
+The demo uses waitable pointer subscriptions. It reports input and draw timing after it releases the display.
 
 ### Framebuffer Text Rendering
 

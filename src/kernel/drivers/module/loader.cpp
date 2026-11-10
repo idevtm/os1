@@ -191,7 +191,9 @@ void load_display()
        exports->version != OS1_DISPLAY_MODULE_ABI || exports->bytes != sizeof(*exports) ||
        !driver::contains(image, reinterpret_cast<uint64_t>(exports->probe), 1, 5) ||
        !driver::contains(image, reinterpret_cast<uint64_t>(exports->fill), 1, 5) ||
-       !native_display::bind(*exports))
+       !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_read), 1, 5) ||
+       !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_set), 1, 5) ||
+       !native_display::bind(*exports, vm))
     {
         debug("driver: firmware-framebuffer rejected")();
         return;

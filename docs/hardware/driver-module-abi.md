@@ -108,6 +108,13 @@ compatible BootInfo framebuffer -> trusted display ELF -> probe -> publish Displ
 The build installs the module under `/disk/system/drivers/<build-id-prefix>/firmware-framebuffer/`.
 The kernel checks the active framebuffer format and geometry before package access.
 This firmware match uses the boot display metadata. The PCI inventory remains separate.
-The module exports `probe` and `fill` in the [internal table](../../src/common/driver/display.h).
+The [internal table](../../src/common/driver/display.h) uses ABI 2 and exports framebuffer and Bochs operations.
 Only the kernel passes the framebuffer address, layout, and validated rectangle.
 The [Display ABI](../native-api/abi/display-abi.md) defines application authority and session lifetime.
+
+
+The kernel enables Bochs operations only for PCI `1234:1111` with the boot framebuffer at BAR 0.
+The boot mode and pixel layout must agree with the register state.
+The kernel claims the framebuffer and MMIO BARs and maps only the required ranges.
+The module sets the requested geometry and checks the register values.
+A failed probe leaves the fixed framebuffer backend available.

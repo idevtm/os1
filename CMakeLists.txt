@@ -703,6 +703,8 @@ if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
       "${OS1_QEMU_EXECUTABLE}"
       -machine
       q35
+      -vga
+      std
       -smp
       4
       -drive

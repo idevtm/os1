@@ -138,12 +138,15 @@ long console_display_acquire(NativeObject* owner)
     IrqSpinGuard guard(g_console_output_lock);
     if(graphics_owner)
         return OS1_ERR_WOULD_BLOCK;
+    auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
+    if(!display.available)
+        return OS1_ERR_UNSUPPORTED;
     graphics_owner = owner;
-    static_cast<FramebufferTextDisplay*>(g_text_display->instance)->graphics_owned = true;
+    display.graphics_owned = true;
     return 0;
 }
 
-void console_display_release(NativeObject* owner)
+void console_display_release(NativeObject* owner, bool restored)
 {
     IrqSpinGuard guard(g_console_output_lock);
     if(graphics_owner != owner)
@@ -151,6 +154,11 @@ void console_display_release(NativeObject* owner)
     graphics_owner = nullptr;
     auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
     display.graphics_owned = false;
+    if(!restored)
+    {
+        display.available = false;
+        return;
+    }
     reset_framebuffer_text_display(display);
     if(active_terminal)
         active_terminal->link(g_text_display);
