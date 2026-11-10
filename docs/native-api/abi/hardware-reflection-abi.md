@@ -104,6 +104,8 @@ The structures use natural eight-byte alignment.
 Each node has four 32-bit fields: `id`, `parent`, `type`, and `reserved`.
 An eight-byte integer follows them. The name and text buffers contain 64 and 96 bytes, including terminators.
 Node type 0 describes an object; type 1 describes an integer; type 2 describes a string.
+Type 3 describes a method in the separate [live input tree](input-abi.md#passive-discovery-transport).
+Hardware catalog nodes remain passive objects and fields; their existing layouts do not change.
 The node `parent` describes canonical discovery placement, not physical attachment.
 Use `parent_id` for physical attachment.
 
@@ -225,7 +227,9 @@ Mount `name` contains the mount path.
 
 Unknown numeric fields return `NOT_FOUND` and do not appear in child enumeration.
 `state` describes the captured record outcome; it does not promise current physical presence or usable service authority.
-The catalog grants no functional authority. USB input records can expose an `input_identity` for explicit authorized `os.input.open` calls.
+The catalog grants no functional authority.
+USB input records expose an `input_identity` that matches the corresponding live `os.input` child.
+The child provides its own authorized `open` method.
 
 EHCI enumerates low/full-speed children through high-speed hubs with transaction translators.
 It publishes descriptors and binds supported boot keyboards or pointers. Other interfaces remain unbound.

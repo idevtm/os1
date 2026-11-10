@@ -1,5 +1,6 @@
 #pragma once
 #include <os1/console.h>
+#include <os1/hardware.h>
 #include <os1/input.h>
 #include <os1/log.h>
 #include <os1/system.h>
@@ -407,24 +408,9 @@ struct View
         }
         if(g.root.rights & OS1_RIGHT_INPUT_READ)
         {
-            unsigned input = add(
-                os, "input", Kind::Object, "Input", OS1_RIGHT_INPUT_READ, OS1_INPUT_INTERFACE_ID);
-            add(input,
-                "list",
-                Kind::Method,
-                "after:Integer=0 -> InputDevice",
-                OS1_RIGHT_INPUT_READ,
-                OS1_INPUT_INTERFACE_ID,
-                OS1_INPUT_LIST,
-                Native);
-            add(input,
-                "open",
-                Kind::Method,
-                "device:Integer -> KeyboardOrPointer",
-                OS1_RIGHT_INPUT_READ,
-                OS1_INPUT_INTERFACE_ID,
-                OS1_INPUT_OPEN,
-                Native);
+            unsigned input = add(os, "input", Kind::Object, "InputDevices", OS1_RIGHT_INPUT_READ);
+            nodes[input].flags = Alias;
+            nodes[input].target = OS1_HARDWARE_INPUT_ROOT;
         }
         unsigned system = 0;
         if(g.root.rights & (OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL))

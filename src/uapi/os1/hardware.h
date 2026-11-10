@@ -10,6 +10,10 @@ enum
     OS1_HARDWARE_OBJECT = 0,
     OS1_HARDWARE_INTEGER = 1,
     OS1_HARDWARE_STRING = 2,
+    OS1_HARDWARE_METHOD = 3,
+    // Live input descriptions use a separate identity and generation domain.
+    OS1_HARDWARE_INPUT_ROOT = 0x40000000,
+    OS1_HARDWARE_INPUT_STRIDE = 8,
     OS1_HARDWARE_DEVICES = 65536,
     OS1_HARDWARE_INVENTORY,
     OS1_HARDWARE_PCI,

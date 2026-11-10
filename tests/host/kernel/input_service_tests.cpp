@@ -180,6 +180,120 @@ TEST_F(InputService, AttachmentAdmissionStopsWithoutReusingIdentity)
     ASSERT_TRUE(native_input::inspect(id, info));
     EXPECT_EQ(0u, info.connected);
 }
+TEST_F(InputService, ListExcludesRetiredAttachments)
+{
+    native_input::remove(id);
+    auto replacement = native_input::attach(OS1_INPUT_POINTER, "mouse");
+    NativeObject root{};
+    root.kind = OS1_OBJECT_DIRECTORY;
+    OpenInstance source{};
+    source.object = &root;
+    os1_ipc_message request{};
+    request.member = OS1_INPUT_LIST;
+    request.payload_bytes = sizeof(os1_input_list);
+    os1_ipc_result result{};
+    DescriptorEntry unused{};
+    native_input::provider(OS1_INPUT_INTERFACE_ID, 1)
+        ->invoke(source, OS1_RIGHT_INPUT_READ, 0, request, result, unused);
+    ASSERT_EQ(sizeof(os1_input_device), result.payload_bytes);
+    os1_input_device info{};
+    std::memcpy(&info, result.payload, sizeof(info));
+    EXPECT_EQ(replacement, info.device);
+    EXPECT_EQ(1u, info.connected);
+}
+Os1HardwareQuery input_query(unsigned id = OS1_HARDWARE_INPUT_ROOT,
+                             unsigned operation = OS1_HARDWARE_CHILDREN)
+{
+    Os1HardwareQuery q{};
+    q.version = OS1_HARDWARE_VERSION;
+    q.operation = operation;
+    q.id = id;
+    return q;
+}
+TEST_F(InputService, DiscoveryIsPassiveAndNamesRemainStable)
+{
+    auto pointer = native_input::attach(OS1_INPUT_POINTER, "touchpad", 123);
+    auto q = input_query();
+    ASSERT_EQ(0, native_input::query(q));
+    ASSERT_EQ(2u, q.count);
+    EXPECT_STREQ("keyboard1", q.nodes[0].name);
+    EXPECT_STREQ("mouse1", q.nodes[1].name);
+    const auto original = q;
+    for(unsigned i = 0; i < 100; ++i)
+    {
+        q = input_query();
+        ASSERT_EQ(0, native_input::query(q));
+        EXPECT_EQ(0, std::memcmp(&original, &q, sizeof(q)));
+    }
+    auto fields = input_query(q.nodes[1].id);
+    ASSERT_EQ(0, native_input::query(fields));
+    ASSERT_EQ(6u, fields.count);
+    EXPECT_EQ(pointer, fields.nodes[0].integer);
+    EXPECT_STREQ("touchpad", fields.nodes[1].text);
+    EXPECT_EQ(123u, fields.nodes[4].integer);
+    EXPECT_STREQ("open", fields.nodes[5].name);
+    EXPECT_EQ(OS1_HARDWARE_METHOD, fields.nodes[5].type);
+    EXPECT_EQ(pointer, fields.nodes[5].integer);
+    native_input::remove(pointer);
+    auto stale = input_query();
+    stale.generation = original.generation;
+    EXPECT_EQ(OS1_ERR_CANCELLED, native_input::query(stale));
+    auto missing = input_query(original.nodes[1].id, OS1_HARDWARE_DESCRIBE);
+    EXPECT_EQ(OS1_ERR_NOT_FOUND, native_input::query(missing));
+    auto next = native_input::attach(OS1_INPUT_POINTER, "USB mouse");
+    EXPECT_EQ(pointer + 1, next);  // Observation created no identities.
+    q = input_query();
+    ASSERT_EQ(0, native_input::query(q));
+    ASSERT_EQ(2u, q.count);
+    EXPECT_STREQ("keyboard1", q.nodes[0].name);
+    EXPECT_STREQ("mouse2", q.nodes[1].name);
+    EXPECT_NE(original.nodes[1].id, q.nodes[1].id);
+}
+TEST_F(InputService, DiscoveryPagesAndMalformedRequests)
+{
+    for(unsigned i = 1; i < OS1_INPUT_DEVICE_LIMIT; ++i)
+        ASSERT_NE(0u, native_input::attach(OS1_INPUT_POINTER, "mouse"));
+    native_input::remove(3);
+    unsigned count = 0, start = 0;
+    uint64_t generation = 0;
+    for(;;)
+    {
+        auto q = input_query();
+        q.start = start;
+        q.generation = generation;
+        ASSERT_EQ(0, native_input::query(q));
+        count += q.count;
+        start = q.next;
+        generation = q.generation;
+        if(q.end)
+        {
+            EXPECT_STREQ("mouse63", q.nodes[q.count - 1].name);
+            break;
+        }
+        ASSERT_EQ(OS1_HARDWARE_PAGE, q.count);
+    }
+    EXPECT_EQ(63u, count);
+    auto invalid = input_query();
+    invalid.start = 64;
+    EXPECT_EQ(OS1_ERR_INVALID, native_input::query(invalid));
+    invalid = input_query();
+    invalid.nodes[7].text[95] = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, native_input::query(invalid));
+    invalid = input_query();
+    invalid.version = 1;
+    EXPECT_EQ(OS1_ERR_INVALID, native_input::query(invalid));
+    invalid = input_query(OS1_HARDWARE_INPUT_ROOT + 7);
+    EXPECT_EQ(OS1_ERR_NOT_FOUND, native_input::query(invalid));
+    invalid = input_query(OS1_HARDWARE_INPUT_ROOT + OS1_HARDWARE_INPUT_STRIDE + 6);
+    EXPECT_EQ(OS1_ERR_INVALID, native_input::query(invalid));
+    auto unchanged = input_query();
+    unchanged.generation = generation;
+    uint8_t keys[32]{};
+    keys[0] = 16;
+    native_input::keyboard(id, keys);
+    ASSERT_EQ(0, native_input::query(unchanged));
+    EXPECT_EQ(generation, unchanged.generation);  // Input reports do not invalidate discovery.
+}
 TEST(Ps2Input, PointerSignAndOverflowAndSynchronization)
 {
     os1::input::Ps2Pointer p;

@@ -423,9 +423,7 @@ inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false);
         files::Handle client(input::bind(service ? root() : source(path), m.interface_id));
         if(client.fd < 0)
             return fail("input binding failed", client.fd);
-        os1_input_selector selector{uint64_t(f.number(0))};
-        if(service && f.number(0) < 0)
-            return fail("negative input identity");
+        os1_input_selector selector{m.target};
         bool owned = m.member == 2 && m.interface_id != OS1_INPUT_SUBSCRIPTION_INTERFACE_ID;
         os1_ipc_result r{};
         long status = input::call(client.fd,

@@ -2,6 +2,7 @@
 
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/driver_registry.hpp"
+#include "drivers/input/service.hpp"
 #include "drivers/usb/diagnostics.hpp"
 #include "freestanding/string.hpp"
 #include "hardware/names.hpp"
@@ -287,6 +288,10 @@ void hardware_freeze_bindings()
 }
 long hardware_query(Os1HardwareQuery& request)
 {
+    if(request.id >= OS1_HARDWARE_INPUT_ROOT &&
+       request.id <
+           OS1_HARDWARE_INPUT_ROOT + (OS1_INPUT_DEVICE_LIMIT + 1) * OS1_HARDWARE_INPUT_STRIDE)
+        return native_input::query(request);
     IrqSpinGuard guard(catalog_lock);
     if(driver_names_overflow)
         return OS1_ERR_LIMIT;

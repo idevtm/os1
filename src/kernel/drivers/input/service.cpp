@@ -1,5 +1,6 @@
 #include "drivers/input/service.hpp"
 
+#include "freestanding/string.hpp"
 #include "fs/initrd.hpp"
 #include "mm/kmem.hpp"
 #include "platform/platform.hpp"
@@ -19,6 +20,7 @@ struct Store
     os1_input_event events[OS1_INPUT_EVENT_LIMIT]{};
     unsigned count{}, subscriptions{};
     uint64_t sequence{};
+    uint64_t generation{};
 };
 Spinlock lock{"native-input"};
 Store* store;
@@ -143,7 +145,8 @@ void invoke(OpenInstance& source,
         {
             if(store)
                 for(unsigned i = 0; i < store->count; ++i)
-                    if(store->devices[i].info.device > selector.device)
+                    if(store->devices[i].info.connected &&
+                       store->devices[i].info.device > selector.device)
                     {
                         reply(result, store->devices[i].info);
                         break;
@@ -242,6 +245,7 @@ uint64_t attach(unsigned kind, const char* name, unsigned catalog_id)
     if(!store || store->count == OS1_INPUT_DEVICE_LIMIT)
         return 0;
     auto& d = store->devices[store->count++];
+    ++store->generation;
     d.info.device = store->count;
     d.info.kind = kind;
     d.info.connected = 1;
@@ -260,6 +264,7 @@ void remove(uint64_t id)
     if(!d || !d->info.connected)
         return;
     d->info.connected = d->state.connected = 0;
+    ++store->generation;
     d->state.buttons = 0;
     memset(d->state.keys, 0, sizeof(d->state.keys));
     publish(*d, OS1_INPUT_REMOVED);
@@ -323,6 +328,116 @@ bool inspect(uint64_t id, os1_input_device& info)
         return false;
     info = d->info;
     return true;
+}
+long query(Os1HardwareQuery& q)
+{
+    IrqSpinGuard guard(lock);
+    if(q.version != OS1_HARDWARE_VERSION || q.reserved || q.next || q.count || q.end ||
+       (q.operation != OS1_HARDWARE_DESCRIBE && q.operation != OS1_HARDWARE_CHILDREN))
+        return OS1_ERR_INVALID;
+    for(const auto& node : q.nodes)
+    {
+        const auto* bytes = reinterpret_cast<const unsigned char*>(&node);
+        for(unsigned i = 0; i < sizeof(node); ++i)
+            if(bytes[i])
+                return OS1_ERR_INVALID;
+    }
+    const uint64_t generation = store ? store->generation : 0;
+    // Zero is the caller's unpinned cursor. The empty registry still has generation 1.
+    const uint64_t epoch = generation + 1;
+    if(q.generation && q.generation != epoch)
+        return OS1_ERR_CANCELLED;
+    auto describe = [&](unsigned id, Os1HardwareNode& out) {
+        out = {};
+        out.id = id;
+        if(id == OS1_HARDWARE_INPUT_ROOT)
+        {
+            freestanding::copy_string(out.name, sizeof(out.name), "input");
+            freestanding::copy_string(out.text, sizeof(out.text), "InputDevices");
+            return true;
+        }
+        if(id < OS1_HARDWARE_INPUT_ROOT + OS1_HARDWARE_INPUT_STRIDE)
+            return false;
+        unsigned index = (id - OS1_HARDWARE_INPUT_ROOT) / OS1_HARDWARE_INPUT_STRIDE;
+        unsigned field = (id - OS1_HARDWARE_INPUT_ROOT) % OS1_HARDWARE_INPUT_STRIDE;
+        auto* d = find(index);
+        if(!d || !d->info.connected || field > 6)
+            return false;
+        out.parent = field ? id - field : OS1_HARDWARE_INPUT_ROOT;
+        bool keyboard = d->info.kind == OS1_INPUT_KEYBOARD;
+        if(!field)
+        {
+            unsigned ordinal = 0;
+            for(unsigned i = 0; i < index; ++i)
+                ordinal += store->devices[i].info.kind == d->info.kind;
+            const char* prefix = keyboard ? "keyboard" : "mouse";
+            freestanding::copy_string(out.name, sizeof(out.name), prefix);
+            unsigned at = keyboard ? 8 : 5;
+            if(ordinal >= 10)
+                out.name[at++] = '0' + ordinal / 10;
+            out.name[at] = '0' + ordinal % 10;
+            freestanding::copy_string(
+                out.text, sizeof(out.text), keyboard ? "KeyboardDevice" : "PointerDevice");
+            return true;
+        }
+        const char* names[] = {"", "device", "name", "kind", "connected", "catalog_id", "open"};
+        freestanding::copy_string(out.name, sizeof(out.name), names[field]);
+        out.type = OS1_HARDWARE_INTEGER;
+        if(field == 1)
+            out.integer = d->info.device;
+        else if(field == 2)
+        {
+            out.type = OS1_HARDWARE_STRING;
+            freestanding::copy_string(out.text, sizeof(out.text), d->info.name);
+        }
+        else if(field == 3)
+            out.integer = d->info.kind;
+        else if(field == 4)
+            out.integer = d->info.connected;
+        else if(field == 5)
+            out.integer = d->info.catalog_id;
+        else
+        {
+            out.type = OS1_HARDWARE_METHOD;
+            out.integer = d->info.device;
+            freestanding::copy_string(
+                out.text, sizeof(out.text), keyboard ? "() -> Keyboard" : "() -> Pointer");
+        }
+        return true;
+    };
+    Os1HardwareNode parent{};
+    if(!describe(q.id, parent))
+        return OS1_ERR_NOT_FOUND;
+    q.generation = epoch;
+    if(q.operation == OS1_HARDWARE_DESCRIBE)
+    {
+        if(q.start)
+            return OS1_ERR_INVALID;
+        q.nodes[0] = parent;
+        q.count = q.end = 1;
+        return 0;
+    }
+    if(parent.type != OS1_HARDWARE_OBJECT)
+        return OS1_ERR_INVALID;
+    unsigned matched = 0;
+    auto emit = [&](unsigned id) {
+        Os1HardwareNode node{};
+        if(describe(id, node) && matched++ >= q.start && q.count < OS1_HARDWARE_PAGE)
+            q.nodes[q.count++] = node;
+    };
+    if(q.id == OS1_HARDWARE_INPUT_ROOT)
+    {
+        for(unsigned i = 1; store && i <= store->count; ++i)
+            emit(OS1_HARDWARE_INPUT_ROOT + i * OS1_HARDWARE_INPUT_STRIDE);
+    }
+    else
+        for(unsigned field = 1; field <= 6; ++field)
+            emit(q.id + field);
+    if(q.start > matched)
+        return OS1_ERR_INVALID;
+    q.next = q.start + q.count;
+    q.end = q.next == matched;
+    return 0;
 }
 const KernelProvider* provider(uint64_t id, unsigned version)
 {

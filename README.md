@@ -628,21 +628,23 @@ Keyboard and Pointer objects provide independent volatile subscriptions and stat
 They preserve Console typing. Explicit input authority permits raw events.
 
 ```text
-os.input.list -> os.input.open -> get_state / subscribe -> try_read / unsubscribe
+os.input.keyboardN / mouseN -> open -> get_state / subscribe -> try_read / unsubscribe
 ```
 
 ```text
 context os.input
-os.input.list
-keyboard = os.input.open device:1
+context os.input.keyboard1
+keyboard = os.input.keyboard1.open
 keys = keyboard.subscribe
 keys.try_read
 keyboard.get_state
 keys.unsubscribe
-process.shell.bindings.remove "keys"
-process.shell.bindings.remove "keyboard"
+drop keys
+drop keyboard
 ```
 
-Select the device identity returned by `list`; the example uses identity 1.
+Select a connected child from `context os.input`; its `name` field identifies the device.
+Press Tab after `os.input.` to explore connected devices.
+Removed names disappear and are not reused during the boot.
 Press Tab after `keyboard.` or `keys.` to explore callable methods.
 See the [input ABI](docs/native-api/abi/input-abi.md) for loss recovery, transport limits, and authority.

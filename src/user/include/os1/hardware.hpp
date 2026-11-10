@@ -36,7 +36,8 @@ inline bool member(const os1::discovery::View& view, unsigned id, os1::discovery
         return false;
     out = {};
     out.parent = node.parent;
-    if(id == OS1_HARDWARE_DEVICES || id == OS1_HARDWARE_FIRMWARE || id == OS1_HARDWARE_STORAGE_ROOT)
+    if(id == OS1_HARDWARE_DEVICES || id == OS1_HARDWARE_FIRMWARE ||
+       id == OS1_HARDWARE_STORAGE_ROOT || id == OS1_HARDWARE_INPUT_ROOT)
         out.parent = view.resolve("os");
     if(id == OS1_HARDWARE_MOUNTS)
         out.parent = view.resolve("os.fs");
@@ -44,15 +45,29 @@ inline bool member(const os1::discovery::View& view, unsigned id, os1::discovery
         out.parent = view.resolve("os.system");
     out.kind = node.type == OS1_HARDWARE_OBJECT ? os1::discovery::Kind::Object
                                                 : os1::discovery::Kind::Field;
+    if(node.type == OS1_HARDWARE_METHOD)
+    {
+        if(id < OS1_HARDWARE_INPUT_ROOT ||
+           id >= OS1_HARDWARE_INPUT_ROOT + (OS1_INPUT_DEVICE_LIMIT + 1) * OS1_HARDWARE_INPUT_STRIDE)
+            return false;
+        out.kind = os1::discovery::Kind::Method;
+        out.target = node.integer;
+        out.interface_id = OS1_INPUT_INTERFACE_ID;
+        out.interface_version = 1;
+        out.member = OS1_INPUT_OPEN;
+        out.rights = OS1_RIGHT_INPUT_READ;
+    }
     out.type = node.type == OS1_HARDWARE_STRING    ? OS1_VALUE_STRING
                : node.type == OS1_HARDWARE_INTEGER ? OS1_VALUE_INTEGER
                                                    : 0;
-    out.flags = os1::discovery::External;
+    out.flags =
+        os1::discovery::External | (node.type == OS1_HARDWARE_METHOD ? os1::discovery::Native : 0);
     os1::discovery::copy(out.name, sizeof(out.name), node.name);
-    os1::discovery::copy(
-        out.signature,
-        sizeof(out.signature),
-        node.type == OS1_HARDWARE_OBJECT ? node.text : os1::discovery::type_name(out.type));
+    os1::discovery::copy(out.signature,
+                         sizeof(out.signature),
+                         (node.type == OS1_HARDWARE_OBJECT || node.type == OS1_HARDWARE_METHOD)
+                             ? node.text
+                             : os1::discovery::type_name(out.type));
     return true;
 }
 inline long page(const os1::discovery::View&,

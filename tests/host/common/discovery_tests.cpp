@@ -29,6 +29,10 @@ struct Discovery : testing::Test
 };
 TEST_F(Discovery, LiveRightsExcludeUnavailableServicesAndStreamMethods)
 {
+    int input = view.resolve("os.input");
+    ASSERT_GE(input, 0);
+    EXPECT_EQ(OS1_HARDWARE_INPUT_ROOT, view.nodes[input].target);
+    EXPECT_EQ(discovery::Alias, view.nodes[input].flags);
     EXPECT_GE(view.resolve("os.system.log.print"), 0);
     EXPECT_GE(view.resolve("process.streams.output.write"), 0);
     EXPECT_LT(view.resolve("process.streams.output.try_read"), 0);
@@ -37,6 +41,7 @@ TEST_F(Discovery, LiveRightsExcludeUnavailableServicesAndStreamMethods)
     g.root.rights = OS1_RIGHT_LOOKUP;
     g.ceiling = OS1_RIGHT_READ;
     ASSERT_TRUE(view.build(g, data, 2));
+    EXPECT_LT(view.resolve("os.input"), 0);
     EXPECT_LT(view.resolve("os.system"), 0);
     EXPECT_LT(view.resolve("fs.create_file"), 0);
     EXPECT_GE(view.resolve("fs.copy"), 0);

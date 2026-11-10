@@ -109,6 +109,11 @@ It uses timed scheduler waits; enumeration cannot block the native provider work
 Local APIC destination and command writes use one IRQ-masked transaction. Nested timer wakeups cannot redirect an interrupted sender.
 PS/2 and xHCI Console behavior remains available alongside native input.
 
+The input registry exposes connected `os.input.keyboardN` and `os.input.mouseN` children through passive observation.
+Each child supplies descriptive fields and an explicit `open` method.
+Its separate discovery generation changes on attachment or removal, but not on input reports.
+Removed child names are not reused; retained handles keep their original identity.
+
 The hardware catalog serializes USB updates and queries with a generation counter.
 Changed generations cancel stale pagination cursors.
 Platform and firmware records remain boot observations.

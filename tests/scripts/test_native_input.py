@@ -28,32 +28,37 @@ def main():
         def exercise(run, expect):
             qmp = Qmp(args.qmp)
             try:
-                assert b'open' in run('context os.input')
+                assert b'keyboard1 [object]' in run('context os.input')
                 qmp.execute('device_add', {'driver': 'usb-mouse', 'id': 'pointer', 'bus': 'xhci.0'})
 
                 def devices():
-                    after = 0
+                    out = run('context os.input')
                     found = []
-                    for _ in range(64):
-                        out = run(f'os.input.list after:{after}')
-                        match = re.search(rb'device[:= ]+([0-9]+)', out)
-                        if not match:
-                            break
-                        after = int(match[1])
-                        found.append((after, out))
+                    for child in re.findall(rb'^(mouse[0-9]+) \[object\]', out, re.MULTILINE):
+                        name = child.decode()
+                        fields = run(f'context os.input.{name}')
+                        match = re.search(rb'device \[field\] Integer = ([0-9]+)', fields)
+                        assert match, fields
+                        assert b'open [method, native]' in fields, fields
+                        found.append((int(match[1]), name, fields))
                     return found
 
                 def await_pointer(after=0):
                     end = time.monotonic()+15
                     while time.monotonic() < end:
-                        for identity, out in devices():
+                        for identity, name, out in devices():
                             if identity > after and b'USB pointer' in out:
-                                return identity
+                                return identity, name
                         time.sleep(.1)
                     raise AssertionError('USB pointer not published')
 
-                identity = await_pointer()
-                run(f'p = os.input.open device:{identity}')
+                identity, name = await_pointer()
+                stable = devices()
+                for _ in range(12):
+                    assert devices() == stable, 'discovery changed without hotplug'
+                assert b'USB pointer' in run(f'os.input.{name}.name')
+                # Tab accepts the discovered leaf. Enter invokes its zero-argument method.
+                run(f'p = os.input.{name}.op\t')
                 assert b'get_state' in run('context p')
                 run('a = p.subscribe')
                 run('b = p.subscribe')
@@ -84,14 +89,20 @@ def main():
                         break
                     assert time.monotonic() < end, state
                 assert b'input closed' in run('p.subscribe', allow_errors=True)
+                assert name.encode() + b' [object]' not in run('context os.input')
                 qmp.execute('device_add', {'driver': 'usb-mouse', 'id': 'replacement', 'bus': 'xhci.0'})
-                replacement = await_pointer(identity)
-                assert replacement > identity
+                replacement, next_name = await_pointer(identity)
+                assert replacement > identity and next_name != name
+                run(f'q = os.input.{next_name}.open')
+                run('c = q.subscribe')
+                run('c.unsubscribe')
+                run('drop c')
+                run('drop q')
                 assert b'unavailable' in run('lsusb -v')
                 assert b'input_identity' in run('lsusb -v')
-                run('process.shell.bindings.remove "a"')
-                run('process.shell.bindings.remove "b"')
-                run('process.shell.bindings.remove "p"')
+                run('drop a')
+                run('drop b')
+                run('drop p')
             finally:
                 qmp.close()
         boot(args, disk, 'input', exercise=exercise)
