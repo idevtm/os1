@@ -897,6 +897,21 @@ The active backend is chosen from `BootInfo`:
 - Limine/UEFI uses the framebuffer backend when the format is supported
 - otherwise the kernel continues with serial-only diagnostics
 
+### Graphics sessions
+
+The [fixed display service](native-api/abi/display-abi.md) exposes the firmware framebuffer through an exclusive session.
+
+```text
+validated framebuffer -> ext2 driver match -> os.display -> DisplaySession
+text cells -> console output lock -> text redraw when the session ends
+```
+
+The boot driver loader checks the framebuffer before it reads the graphics package.
+The kernel verifies the package digest and maps the module in its own supervisor window.
+The graphics module converts RGB values and writes bounded rectangles.
+The console keeps its logical text state while a session owns pixel output.
+The final session release restores the active terminal.
+
 ### Framebuffer Text Rendering
 
 The framebuffer backend is intentionally minimal:

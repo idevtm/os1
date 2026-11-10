@@ -8,14 +8,12 @@
 #if !defined(OS1_HOST_TEST)
 #include "arch/x86_64/cpu/io_port.hpp"
 #endif
-#include "console/terminal.hpp"
+#include "console/console.hpp"
 #include "debug/debug.hpp"
-#include "sync/wait_queue.hpp"
 #include "sync/smp.hpp"
+#include "sync/wait_queue.hpp"
 #include "util/ctype.hpp"
 #include "util/memory.h"
-
-OS1_BSP_ONLY extern Terminal* active_terminal;
 
 #ifdef OS1_HOST_TEST
 void (*host_console_after_ready)() = nullptr;
@@ -35,8 +33,10 @@ constexpr size_t kConsoleInputCompletedLineCapacity = 8;
 OS1_LOCKED_BY(g_console_input_lock) char g_pending_line[kConsoleInputMaxLineBytes]{};
 OS1_LOCKED_BY(g_console_input_lock) size_t g_pending_length = 0;
 OS1_LOCKED_BY(g_console_input_lock) bool g_pending_overflow = false;
-OS1_LOCKED_BY(g_console_input_lock) char g_completed_lines[kConsoleInputCompletedLineCapacity][kConsoleInputMaxLineBytes]{};
-OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_lengths[kConsoleInputCompletedLineCapacity]{};
+OS1_LOCKED_BY(g_console_input_lock)
+char g_completed_lines[kConsoleInputCompletedLineCapacity][kConsoleInputMaxLineBytes]{};
+OS1_LOCKED_BY(g_console_input_lock)
+size_t g_completed_lengths[kConsoleInputCompletedLineCapacity]{};
 OS1_LOCKED_BY(g_console_input_lock) long g_completed_status[kConsoleInputCompletedLineCapacity]{};
 OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_head = 0;
 OS1_LOCKED_BY(g_console_input_lock) size_t g_completed_tail = 0;
@@ -53,22 +53,12 @@ OS1_LOCKED_BY(g_console_input_lock) bool g_key_overflow = false;
 
 void echo_byte(char c)
 {
-    debug.write_unmirrored(c);
-    if(active_terminal)
-    {
-        active_terminal->write(c);
-    }
+    write_console_bytes(&c, 1);
 }
 
 void echo_backspace()
 {
-    debug.write_unmirrored('\b');
-    debug.write_unmirrored(' ');
-    debug.write_unmirrored('\b');
-    if(active_terminal)
-    {
-        active_terminal->write('\b');
-    }
+    console_echo_backspace();
 }
 
 void commit_pending_line(bool newline = true)
@@ -210,7 +200,9 @@ void console_input_poll_serial()
         return;
     }
     IrqSpinGuard guard(g_console_input_lock);
-    for(uint32_t i = 0; (i < kMaxBytesPerPoll) && ((inb(kSerialLineStatusPort) & kSerialDataReady) != 0); ++i)
+    for(uint32_t i = 0;
+        (i < kMaxBytesPerPoll) && ((inb(kSerialLineStatusPort) & kSerialDataReady) != 0);
+        ++i)
     {
         handle_input_char((char)inb(kSerialPortBase));
     }
@@ -239,7 +231,8 @@ bool console_input_reserve(char* buffer, size_t capacity, size_t& count, long* s
     if(status)
         *status = g_completed_status[g_completed_head];
     count = g_completed_lengths[g_completed_head];
-    if(count > capacity) count = capacity;
+    if(count > capacity)
+        count = capacity;
     memcpy(buffer, g_completed_lines[g_completed_head], count);
     g_read_reserved = true;
     g_reserved_bytes = count;
@@ -314,7 +307,8 @@ bool console_input_ready(const void* owner)
         ready = g_input_owner != owner || g_key_count || g_key_overflow;
     }
 #ifdef OS1_HOST_TEST
-    if(host_console_after_ready) host_console_after_ready();
+    if(host_console_after_ready)
+        host_console_after_ready();
 #endif
     return ready;
 }
@@ -322,7 +316,8 @@ bool console_input_ready(const void* owner)
 void console_input_finish(size_t delivered, bool commit)
 {
     IrqSpinGuard guard(g_console_input_lock);
-    if(!g_read_reserved) return;
+    if(!g_read_reserved)
+        return;
     if(!commit || delivered > g_reserved_bytes)
     {
         g_read_reserved = false;
@@ -333,7 +328,8 @@ void console_input_finish(size_t delivered, bool commit)
     for(size_t i = 0; i < remaining; ++i)
         g_completed_lines[g_completed_head][i] = g_completed_lines[g_completed_head][i + delivered];
     g_completed_lengths[g_completed_head] = remaining;
-    if(remaining == 0) {
+    if(remaining == 0)
+    {
         g_completed_head = (g_completed_head + 1) % kConsoleInputCompletedLineCapacity;
         --g_completed_count;
     }

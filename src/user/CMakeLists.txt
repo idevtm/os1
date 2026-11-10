@@ -128,6 +128,12 @@ function(os1_add_user_cxx_program program_name source_file output_var)
 endfunction()
 
 os1_add_user_cxx_program(sh "${CMAKE_CURRENT_SOURCE_DIR}/programs/sh.cpp" OS1_USER_SH_ELF)
+os1_add_user_cxx_program(gfxdemo "${CMAKE_CURRENT_SOURCE_DIR}/programs/gfxdemo.cpp" OS1_USER_GFXDEMO_ELF)
+add_custom_command(OUTPUT "${OS1_USER_GFXDEMO_ELF}" APPEND DEPENDS
+  "${PROJECT_SOURCE_DIR}/src/uapi/os1/display.h"
+  "${PROJECT_SOURCE_DIR}/src/uapi/os1/input.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/console.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/input.hpp")
 os1_add_user_cxx_program(run-tests "${CMAKE_CURRENT_SOURCE_DIR}/programs/run_tests.cpp" OS1_USER_RUN_TESTS_ELF)
 add_custom_command(OUTPUT "${OS1_USER_RUN_TESTS_ELF}" APPEND DEPENDS
   "${PROJECT_SOURCE_DIR}/src/common/hardware/test_run.hpp"
@@ -205,13 +211,15 @@ add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json"
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"
     --base "${OS1_GENERATED_DIR}/storage-programs-base.json"
     --metadata "${OS1_DRIVER_METADATA}" --image "${OS1_DRIVER_ELF}"
+    --metadata "${OS1_DISPLAY_DRIVER_METADATA}" --image "${OS1_DISPLAY_DRIVER_ELF}"
     --output "${OS1_GENERATED_DIR}/storage-programs.json"
   DEPENDS "${OS1_GENERATED_DIR}/storage-programs-base.json" "${OS1_DRIVER_METADATA}"
-    "${OS1_DRIVER_ELF}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"
+    "${OS1_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_METADATA}"
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
   VERBATIM)
 add_custom_target(os1_storage_manifest ALL DEPENDS "${OS1_GENERATED_DIR}/storage-programs.json")
-list(APPEND OS1_USER_PROGRAM_FILES "${OS1_DRIVER_ELF}" "${OS1_GENERATED_DIR}/storage-programs.json")
+list(APPEND OS1_USER_PROGRAM_FILES "${OS1_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_ELF}" "${OS1_GENERATED_DIR}/storage-programs.json")
 set(OS1_USER_PROGRAM_FILES "${OS1_USER_PROGRAM_FILES}" PARENT_SCOPE)
 
 add_custom_command(

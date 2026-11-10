@@ -41,6 +41,7 @@ set(KERNEL_DRIVER_SOURCES
   drivers/bus/pci_bus.cpp
   drivers/bus/resource.cpp
   drivers/display/text_display.cpp
+  drivers/display/service.cpp
   drivers/input/service.cpp
   drivers/input/ps2_keyboard.cpp
   drivers/module/loader.cpp
@@ -260,8 +261,36 @@ add_custom_target(os1_driver_package ALL
   DEPENDS "${OS1_GENERATED_DIR}/driver_trust.hpp" "${OS1_DRIVER_METADATA}")
 set(OS1_DRIVER_ELF "${OS1_DRIVER_ELF}" PARENT_SCOPE)
 set(OS1_DRIVER_METADATA "${OS1_DRIVER_METADATA}" PARENT_SCOPE)
+set(OS1_DISPLAY_DRIVER_ELF "${OS1_ARTIFACT_DIR}/drivers/firmware-framebuffer.elf")
+set(OS1_DISPLAY_DRIVER_METADATA "${OS1_GENERATED_DIR}/display-driver-package.json")
+add_custom_command(OUTPUT "${OS1_DISPLAY_DRIVER_ELF}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}/drivers"
+  COMMAND "${CMAKE_CXX_COMPILER}" -std=gnu++20 -ffreestanding -mno-red-zone
+    -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -no-pie -Os
+    -fno-stack-protector -fno-exceptions -fno-rtti -fno-threadsafe-statics
+    -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nostartfiles
+    "-I${PROJECT_SOURCE_DIR}/src/common" "-I${OS1_GENERATED_DIR}"
+    "-Wl,-T,${PROJECT_SOURCE_DIR}/src/drivers/firmware-framebuffer/linker.ld"
+    -Wl,--build-id=none -Wl,-z,max-page-size=4096
+    "${PROJECT_SOURCE_DIR}/src/drivers/firmware-framebuffer/driver.cpp" -o "${OS1_DISPLAY_DRIVER_ELF}"
+  DEPENDS os1_log_build_identity "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+    "${PROJECT_SOURCE_DIR}/src/drivers/firmware-framebuffer/driver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/drivers/firmware-framebuffer/linker.ld"
+    "${PROJECT_SOURCE_DIR}/src/common/driver/display.h"
+  VERBATIM)
+add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/display_driver_trust.hpp" "${OS1_DISPLAY_DRIVER_METADATA}"
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
+    --display --image "${OS1_DISPLAY_DRIVER_ELF}" --identity "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+    --header "${OS1_GENERATED_DIR}/display_driver_trust.hpp" --metadata "${OS1_DISPLAY_DRIVER_METADATA}"
+  DEPENDS "${OS1_DISPLAY_DRIVER_ELF}" "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
+  VERBATIM)
+add_custom_target(os1_display_driver_package ALL
+  DEPENDS "${OS1_GENERATED_DIR}/display_driver_trust.hpp" "${OS1_DISPLAY_DRIVER_METADATA}")
+set(OS1_DISPLAY_DRIVER_ELF "${OS1_DISPLAY_DRIVER_ELF}" PARENT_SCOPE)
+set(OS1_DISPLAY_DRIVER_METADATA "${OS1_DISPLAY_DRIVER_METADATA}" PARENT_SCOPE)
 add_library(kernel_core_objects OBJECT ${KERNEL_CXX_SOURCES})
-add_dependencies(kernel_core_objects os1_log_build_identity os1_driver_package)
+add_dependencies(kernel_core_objects os1_log_build_identity os1_driver_package os1_display_driver_package)
 target_include_directories(kernel_core_objects PRIVATE
   "${PROJECT_SOURCE_DIR}/src/common"
   "${OS1_ACPICA_CUSTOM_INCLUDE_DIR}"

@@ -1902,6 +1902,14 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --log "${OS1_ARTIFACT_DIR}/smoke-native-input-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_native_input_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_native_input_${boot})
+    os1_add_qemu_test(NAME os1_smoke_display_session_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_display_session.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}"
+        --metadata "${OS1_DISPLAY_DRIVER_METADATA}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-display-session-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_display_session_${boot} PROPERTIES TIMEOUT 150)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_display_session_${boot})
     os1_add_qemu_test(NAME os1_smoke_driver_module_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_driver_module.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"

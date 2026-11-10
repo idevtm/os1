@@ -7,6 +7,7 @@
 #include "console/console_input.hpp"
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
+#include "drivers/display/service.hpp"
 #include "drivers/input/service.hpp"
 #include "fs/initrd.hpp"
 #include "mm/kmem.hpp"
@@ -744,5 +745,9 @@ const KernelProvider* kernel_provider(uint64_t id, uint32_t version)
     for(auto* provider : providers)
         if(id == provider->interface_id && version == provider->interface_version)
             return provider;
+#ifndef OS1_HOST_TEST
+    if(auto* display = native_display::provider(id, version))
+        return display;
+#endif
     return native_input::provider(id, version);
 }

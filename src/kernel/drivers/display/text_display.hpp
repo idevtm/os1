@@ -28,6 +28,7 @@ struct VgaTextDisplay
 struct FramebufferTextDisplay
 {
     bool available = false;
+    bool graphics_owned = false;
     uint8_t* framebuffer = nullptr;
     uint32_t width = 0;
     uint32_t height = 0;
@@ -40,6 +41,7 @@ struct FramebufferTextDisplay
     uint16_t last_cursor_x = 0;
     uint16_t last_cursor_y = 0;
     bool cursor_valid = false;
+    bool shadow_valid = false;
     BootFramebufferPixelFormat pixel_format = BootFramebufferPixelFormat::Unknown;
 };
 
@@ -59,3 +61,5 @@ void present_text_display(const TextDisplayBackend* backend,
                           uint16_t cursor_y);
 // Stop presenting a terminal through this backend.
 void detach_text_display(const TextDisplayBackend* backend);
+
+void reset_framebuffer_text_display(FramebufferTextDisplay& display);

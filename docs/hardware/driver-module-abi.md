@@ -1,6 +1,6 @@
 # Initial kernel driver module profile
 
-This profile loads one optional virtio-net module from ext2.
+This profile loads optional virtio-net and firmware framebuffer modules from ext2.
 It defines an internal kernel boundary, not a stable application ABI or Linux module format.
 
 ```text
@@ -18,7 +18,7 @@ The kernel embeds the exact ELF SHA-256 digest and its PCI match, `1af4:1041`.
 The informational disk manifest does not authorize execution or modify matching.
 A trusted kernel image is the trust anchor; this profile does not implement verified boot.
 
-The loader reads no package when no PCI function matches.
+The loader skips the virtio-net package when no PCI function matches.
 It runs once after ext2 mount and before the first user process.
 It resolves a root-relative VFS path and reads one bounded snapshot under namespace admission.
 Missing files, modified bytes, foreign builds, unsupported ELF layouts, and allocation failures produce diagnostic records.
@@ -36,7 +36,7 @@ A new kernel needs its matching driver package before network binding can succee
 | --- | --- |
 | Architecture | Little-endian ELF64, x86-64, `ET_EXEC` |
 | Input limit | 128 KiB |
-| Virtual window | `0xffffffffa0000000` through `0xffffffffa001ffff` |
+| Virtio-net virtual window | `0xffffffffa0000000` through `0xffffffffa001ffff` |
 | Segments | One to three nonoverlapping `PT_LOAD` segments |
 | Alignment | 4096-byte segment addresses and file offsets |
 | Permissions | Supervisor RX, R, or RW/NX; no writable executable segment |
@@ -53,7 +53,7 @@ Kernel modules are trusted code and do not provide memory isolation.
 ## C-compatible boundary
 
 [src/common/driver/abi.h](../../src/common/driver/abi.h) defines the function tables.
-The entry receives a host table and returns an export table.
+The virtio-net entry receives a host table and returns an export table.
 Both tables contain a version and byte size.
 Kernel C++ objects do not cross this boundary.
 The first implementation supplies one opaque virtio transport handle.
@@ -95,3 +95,19 @@ Built-in drivers without a quiescence callback cannot use this removal entry poi
 This is a boot-loading and lifecycle foundation.
 It does not yet implement live USB events, module unloading, dependency-graph execution, or runtime catalog generations.
 Those requirements remain in the [accepted architecture](driver-architecture.md).
+
+
+## Firmware framebuffer module
+
+The second module uses the same trusted loader and a separate 128 KiB window at `0xffffffffa0020000`.
+
+```text
+compatible BootInfo framebuffer -> trusted display ELF -> probe -> publish Display
+```
+
+The build installs the module under `/disk/system/drivers/<build-id-prefix>/firmware-framebuffer/`.
+The kernel checks the active framebuffer format and geometry before package access.
+This firmware match uses the boot display metadata. The PCI inventory remains separate.
+The module exports `probe` and `fill` in the [internal table](../../src/common/driver/display.h).
+Only the kernel passes the framebuffer address, layout, and validated rectangle.
+The [Display ABI](../native-api/abi/display-abi.md) defines application authority and session lifetime.
