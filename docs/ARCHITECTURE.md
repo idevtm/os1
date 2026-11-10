@@ -114,6 +114,11 @@ Each child supplies descriptive fields and an explicit `open` method.
 Its separate discovery generation changes on attachment or removal, but not on input reports.
 Removed child names are not reused; retained handles keep their original identity.
 
+The [device test runner](hardware/device-test-runner-plan.md) uses these native interfaces to collect physical test evidence.
+It writes separate machine, build, boot, and run directories under `/disk/tests`.
+A progress journal records completed stages; a tar archive contains bounded snapshots and kernel logs.
+Input lifetime records and EHCI failure details support returned-stick diagnosis without logging raw key contents.
+
 The hardware catalog serializes USB updates and queries with a generation counter.
 Changed generations cancel stale pagination cursors.
 Platform and firmware records remain boot observations.

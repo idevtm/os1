@@ -1,5 +1,6 @@
 #include "drivers/input/service.hpp"
 
+#include "debug/log.hpp"
 #include "freestanding/string.hpp"
 #include "fs/initrd.hpp"
 #include "mm/kmem.hpp"
@@ -24,6 +25,20 @@ struct Store
 };
 Spinlock lock{"native-input"};
 Store* store;
+void lifecycle(const Device& device, const char* action)
+{
+    os1_log_record record{};
+    record.kind = OS1_LOG_EVENT;
+    record.level = OS1_LOG_INFO_LEVEL;
+    record.interface_id = OS1_INPUT_INTERFACE_ID;
+    record.arg0 = device.info.device;
+    record.arg1 = device.info.catalog_id;
+    record.status = device.info.kind;
+    freestanding::copy_string(record.text, sizeof(record.text), action);
+    while(record.text[record.text_bytes])
+        ++record.text_bytes;
+    diagnostic_log::append(record);
+}
 struct Handle : NativeObject
 {
     uint64_t device, cursor;
@@ -255,6 +270,7 @@ uint64_t attach(unsigned kind, const char* name, unsigned catalog_id)
     d.state.device = d.info.device;
     d.state.connected = 1;
     publish(d, OS1_INPUT_CHANGED);
+    lifecycle(d, "input attached");
     return d.info.device;
 }
 void remove(uint64_t id)
@@ -268,6 +284,7 @@ void remove(uint64_t id)
     d->state.buttons = 0;
     memset(d->state.keys, 0, sizeof(d->state.keys));
     publish(*d, OS1_INPUT_REMOVED);
+    lifecycle(*d, "input removed");
 }
 void keyboard(uint64_t id, const uint8_t keys[32])
 {

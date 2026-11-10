@@ -1872,6 +1872,14 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
           ${file_test_firmware})
       set_tests_properties(os1_smoke_log_export_${boot} PROPERTIES TIMEOUT 180)
       list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_log_export_${boot})
+      os1_add_qemu_test(NAME os1_smoke_device_runner_${boot}
+        COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_device_runner.py"
+          --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+          --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-device-runner-${boot}.log"
+          --debugfs "${OS1_DEBUGFS_EXECUTABLE}" --e2fsck "${OS1_E2FSCK_EXECUTABLE}"
+          ${file_test_firmware})
+      set_tests_properties(os1_smoke_device_runner_${boot} PROPERTIES TIMEOUT 180)
+      list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_device_runner_${boot})
     endif()
     os1_add_qemu_test(NAME os1_smoke_memory_logging_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_memory_logging.py"

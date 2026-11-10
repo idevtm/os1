@@ -128,6 +128,12 @@ function(os1_add_user_cxx_program program_name source_file output_var)
 endfunction()
 
 os1_add_user_cxx_program(sh "${CMAKE_CURRENT_SOURCE_DIR}/programs/sh.cpp" OS1_USER_SH_ELF)
+os1_add_user_cxx_program(run-tests "${CMAKE_CURRENT_SOURCE_DIR}/programs/run_tests.cpp" OS1_USER_RUN_TESTS_ELF)
+add_custom_command(OUTPUT "${OS1_USER_RUN_TESTS_ELF}" APPEND DEPENDS
+  "${PROJECT_SOURCE_DIR}/src/common/hardware/test_run.hpp"
+  "${PROJECT_SOURCE_DIR}/src/uapi/os1/input.h"
+  "${PROJECT_SOURCE_DIR}/src/common/log/frame.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/input.hpp")
 os1_add_user_cxx_program(init "${CMAKE_CURRENT_SOURCE_DIR}/programs/init.cpp" OS1_USER_INIT_ELF)
 os1_add_user_cxx_program(rescue "${CMAKE_CURRENT_SOURCE_DIR}/programs/rescue.cpp" OS1_USER_RESCUE_ELF)
 os1_add_user_cxx_program(yield "${CMAKE_CURRENT_SOURCE_DIR}/programs/yield.cpp" OS1_USER_YIELD_ELF)

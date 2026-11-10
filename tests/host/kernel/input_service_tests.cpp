@@ -3,6 +3,7 @@
 #include <array>
 #include <cstring>
 
+#include "debug/log.hpp"
 #include "drivers/input/service.hpp"
 #include "handoff/memory_layout.h"
 #include "input/hid_boot.hpp"
@@ -293,6 +294,29 @@ TEST_F(InputService, DiscoveryPagesAndMalformedRequests)
     native_input::keyboard(id, keys);
     ASSERT_EQ(0, native_input::query(unchanged));
     EXPECT_EQ(generation, unchanged.generation);  // Input reports do not invalidate discovery.
+}
+TEST_F(InputService, LifecycleLogIdentifiesAttachmentAndRemovalOnce)
+{
+    diagnostic_log::initialize(false);
+    auto pointer = native_input::attach(OS1_INPUT_POINTER, "mouse", 123);
+    native_input::remove(pointer);
+    native_input::remove(pointer);
+    os1_log_query query{1, sizeof(query), 0, 0, 0, 0, OS1_LOG_INFO_LEVEL, OS1_LOG_EVENT};
+    unsigned count = 0;
+    os1_log_record record{};
+    while(diagnostic_log::read(query, record) == 1)
+    {
+        query.after = record.sequence;
+        if(record.interface_id != OS1_INPUT_INTERFACE_ID)
+            continue;
+        EXPECT_EQ(pointer, record.arg0);
+        EXPECT_EQ(123u, record.arg1);
+        EXPECT_EQ(OS1_INPUT_POINTER, record.status);
+        EXPECT_STREQ(count ? "input removed" : "input attached", record.text);
+        ++count;
+    }
+    EXPECT_EQ(2u, count);
+    diagnostic_log::test_reset();
 }
 TEST(Ps2Input, PointerSignAndOverflowAndSynchronization)
 {

@@ -542,6 +542,9 @@ void poll_input(Controller& c)
         unsigned bytes = d.hid.protocol == 1 ? 8 : 3;
         if((td->token & ehci::errors) || ehci::remaining(td->token) > bytes)
         {
+            debug("ehci: HID failed input=")(d.input_identity)(" root=")(d.root)(" port=")(d.port)(
+                " address=")(d.address)(" endpoint=")(d.hid.endpoint)(" token=0x")(
+                td->token, 16)(" expected=")(bytes)();
             d.failed = true;
             stop_input(d);
             hardware_catalog::unavailable(d.catalog_id);

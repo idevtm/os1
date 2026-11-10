@@ -176,3 +176,10 @@ After `motion.`, Tab lists subscription methods.
 
 If `try_read` reports `no input event`, the subscription is open but has no queued event.
 After removal or unsubscribe, it eventually reports `input closed` as defined above.
+
+## Automated hardware evidence
+
+The [device test runner](../../hardware/device-test-runner-plan.md) records input identities and subscription checks through this ABI.
+Its optional observation records event counts, movement, button changes, and Left Shift changes.
+Input attachment and removal also produce bounded memory-log events with input and catalog identities.
+These diagnostics preserve the existing rights, record layouts, and subscription semantics.

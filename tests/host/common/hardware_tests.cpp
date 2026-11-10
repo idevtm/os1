@@ -9,6 +9,7 @@
 #include "drivers/usb/diagnostics.hpp"
 #include "handoff/memory_layout.h"
 #include "hardware/presentation.hpp"
+#include "hardware/test_run.hpp"
 #include "hardware/tree.hpp"
 #include "mm/kmem.hpp"
 #include "platform/hardware.hpp"
@@ -733,4 +734,57 @@ TEST(Hardware, RuntimeUsbDiscoveryCannotMutateBootDiagnostics)
     EXPECT_EQ(1u, usb::diagnostics::at(0)->port);
     EXPECT_EQ(0u, usb::diagnostics::dropped());
     usb::diagnostics::reset_for_test();
+}
+
+TEST(DeviceTestIdentity, LabelsRejectPathsAndBoundLength)
+{
+    using os1::hardware::test_run::label_valid;
+    EXPECT_TRUE(label_valid("asus-laptop_1"));
+    EXPECT_FALSE(label_valid(""));
+    EXPECT_FALSE(label_valid("../laptop"));
+    EXPECT_FALSE(label_valid("two words"));
+    EXPECT_FALSE(label_valid("0123456789012345678901234"));
+}
+TEST(DeviceTestIdentity, NamesSeparateBootsAndRuns)
+{
+    char a[40]{}, b[40]{}, c[40]{};
+    os1::hardware::test_run::run_name(1, 1, a);
+    os1::hardware::test_run::run_name(1, 2, b);
+    os1::hardware::test_run::run_name(2, 1, c);
+    EXPECT_STRNE(a, b);
+    EXPECT_STRNE(a, c);
+    EXPECT_STREQ("b0000000000000001-r0000000000000001", a);
+}
+
+TEST(DeviceTestIdentity, ArchiveRejectsOversizeAndPathMembers)
+{
+    char header[512]{};
+    using os1::hardware::test_run::tar_header;
+    EXPECT_FALSE(tar_header("", 0, header));
+    EXPECT_FALSE(tar_header("../kernel.bin", 1, header));
+    EXPECT_FALSE(tar_header("kernel.bin", 262145, header));
+    ASSERT_TRUE(tar_header("kernel.bin", 262144, header));
+    EXPECT_STREQ("00001000000", header + 124);
+    EXPECT_STREQ("ustar", header + 257);
+    unsigned sum = 0, stored = 0;
+    for(unsigned i = 0; i < sizeof(header); ++i)
+        sum += i >= 148 && i < 156 ? ' ' : static_cast<unsigned char>(header[i]);
+    for(unsigned i = 148; i < 154; ++i)
+        stored = stored * 8 + header[i] - '0';
+    EXPECT_EQ(sum, stored);
+}
+
+TEST(DeviceTestIdentity, FirstSubscriptionProbeCannotDiscardLossOrMalformedEvents)
+{
+    os1_input_event event{};
+    event.device = 7;
+    event.kind = OS1_INPUT_POINTER;
+    using os1::hardware::test_run::usable_input_event;
+    EXPECT_TRUE(usable_input_event(event, sizeof(event), 7));
+    EXPECT_FALSE(usable_input_event(event, sizeof(event) - 1, 7));
+    EXPECT_FALSE(usable_input_event(event, sizeof(event), 8));
+    event.flags = OS1_INPUT_LOST;
+    EXPECT_FALSE(usable_input_event(event, sizeof(event), 7));
+    event.flags = OS1_INPUT_REMOVED;
+    EXPECT_FALSE(usable_input_event(event, sizeof(event), 7));
 }
