@@ -3,11 +3,13 @@
 #include <array>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "discovery/completion.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "drivers/usb/diagnostics.hpp"
 #include "handoff/memory_layout.h"
+#include "hardware/archive_stream.hpp"
 #include "hardware/presentation.hpp"
 #include "hardware/test_run.hpp"
 #include "hardware/tree.hpp"
@@ -787,4 +789,87 @@ TEST(DeviceTestIdentity, FirstSubscriptionProbeCannotDiscardLossOrMalformedEvent
     EXPECT_FALSE(usable_input_event(event, sizeof(event), 7));
     event.flags = OS1_INPUT_REMOVED;
     EXPECT_FALSE(usable_input_event(event, sizeof(event), 7));
+}
+
+#include <vector>
+
+#include "hardware/archive_stream.hpp"
+namespace
+{
+struct ArchiveMemory
+{
+    std::vector<char> data;
+    long cursor{};
+    bool fail_write{}, fail_seek{};
+    long position()
+    {
+        return cursor;
+    }
+    bool seek(long offset)
+    {
+        if(fail_seek || offset < 0 || size_t(offset) > data.size())
+            return false;
+        cursor = offset;
+        return true;
+    }
+    bool write(const char* bytes, unsigned size)
+    {
+        if(fail_write)
+            return false;
+        if(cursor + size > data.size())
+            data.resize(cursor + size);
+        std::memcpy(data.data() + cursor, bytes, size);
+        cursor += size;
+        return true;
+    }
+};
+}  // namespace
+TEST(HardwareArchive, StreamsLargeReportsWithoutTemporaryFileLimit)
+{
+    ArchiveMemory output;
+    const char prefix[] = "existing archive prefix";
+    ASSERT_TRUE(output.write(prefix, sizeof(prefix)));
+    std::string report(100003, 'x');
+    for(unsigned i = 0; i < report.size(); ++i)
+        report[i] = 'a' + i % 26;
+    hardware::test_run::ArchiveStream<ArchiveMemory> stream(output, "lshw.txt");
+    for(unsigned at = 0; at < report.size();)
+    {
+        unsigned chunk = std::min(37u, unsigned(report.size()) - at);
+        ASSERT_TRUE(stream.write(report.data() + at, chunk));
+        at += chunk;
+    }
+    ASSERT_TRUE(stream.finish());
+    EXPECT_EQ(0, std::memcmp(output.data.data(), prefix, sizeof(prefix)));
+    char expected[512];
+    ASSERT_TRUE(hardware::test_run::tar_header("lshw.txt", report.size(), expected));
+    EXPECT_EQ(0, std::memcmp(output.data.data() + sizeof(prefix), expected, 512));
+    EXPECT_EQ(0,
+              std::memcmp(output.data.data() + sizeof(prefix) + 512, report.data(), report.size()));
+    EXPECT_EQ(output.position(), sizeof(prefix) + 512 + ((report.size() + 511) & ~511u));
+    hardware::test_run::ArchiveStream<ArchiveMemory> next(output, "next.txt");
+    ASSERT_TRUE(next.write("next", 4));
+    ASSERT_TRUE(next.finish());
+    EXPECT_EQ(0, std::memcmp(output.data.data() + output.data.size() - 512, "next", 4));
+}
+TEST(HardwareArchive, EnforcesMemberLimitAndReportsIoFailures)
+{
+    std::string bytes(262144, 'z');
+    ArchiveMemory output;
+    hardware::test_run::ArchiveStream<ArchiveMemory> stream(output, "maximum.txt");
+    ASSERT_TRUE(stream.write(bytes.data(), bytes.size()));
+    ASSERT_TRUE(stream.finish());
+    hardware::test_run::ArchiveStream<ArchiveMemory> large(output, "too-large.txt");
+    EXPECT_FALSE(large.write(bytes.data(), bytes.size() + 1));
+    EXPECT_FALSE(large.finish());
+    ArchiveMemory broken;
+    hardware::test_run::ArchiveStream<ArchiveMemory> failure(broken, "failure.txt");
+    broken.fail_write = true;
+    EXPECT_FALSE(failure.write(bytes.data(), 4096));
+    EXPECT_FALSE(failure.finish());
+    ArchiveMemory unseekable;
+    hardware::test_run::ArchiveStream<ArchiveMemory> seek_failure(unseekable, "failure.txt");
+    ASSERT_TRUE(seek_failure.write("data", 4));
+    unseekable.fail_seek = true;
+    EXPECT_FALSE(seek_failure.finish());
 }

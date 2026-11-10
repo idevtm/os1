@@ -392,3 +392,53 @@ TEST_F(InputService, TypedCollectionsCompactUnderOneGeneration)
     ASSERT_EQ(0, native_input::query(fields));
     EXPECT_EQ(second, fields.nodes[5].integer);
 }
+
+TEST(HidBoot, EnumeratesBothLogitechReceiverBootInterfaces)
+{
+    // Interface, endpoint, packet, and interval fields from the stored 046d:c539 capture.
+    uint8_t config[]{9,  2,    57, 0, 3, 1, 0, 0xa0, 49, 9, 4, 0, 0, 1, 3,    1, 1,  0,    7,
+                     5,  0x81, 3,  8, 0, 1, 9, 4,    1,  0, 1, 3, 1, 2, 0,    7, 5,  0x82, 3,
+                     16, 0,    1,  9, 4, 2, 0, 1,    3,  0, 0, 0, 7, 5, 0x83, 3, 32, 0,    1};
+    os1::input::HidBoot keyboard{}, pointer{}, extra{};
+    ASSERT_TRUE(os1::input::hid_boot(config, sizeof(config), keyboard, 0, 64));
+    ASSERT_TRUE(os1::input::hid_boot(config, sizeof(config), pointer, 1, 64));
+    EXPECT_EQ(keyboard.interface, 0);
+    EXPECT_EQ(keyboard.protocol, 1);
+    EXPECT_EQ(keyboard.packet, 8);
+    EXPECT_EQ(pointer.interface, 1);
+    EXPECT_EQ(pointer.protocol, 2);
+    EXPECT_EQ(pointer.endpoint, 0x82);
+    EXPECT_EQ(pointer.packet, 16);
+    EXPECT_FALSE(os1::input::hid_boot(config, sizeof(config), extra, 2, 64));
+    EXPECT_FALSE(os1::input::hid_boot(config, sizeof(config), extra, 1, 8));
+    config[34] = 0;  // Reject a malformed later endpoint instead of returning an earlier match.
+    EXPECT_FALSE(os1::input::hid_boot(config, sizeof(config), extra, 0, 64));
+}
+
+TEST_F(InputService, BootMouseAcceptsEndpointPacketWithTrailingWheelByte)
+{
+    auto pointer = native_input::attach(OS1_INPUT_POINTER, "SIGMACHIP");
+    const uint8_t report[]{1, 2, 0xfd, 1};
+    native_input::boot_pointer(pointer, report, sizeof(report));
+    NativeObject root{};
+    root.kind = OS1_OBJECT_DIRECTORY;
+    OpenInstance source{};
+    source.object = &root;
+    os1_ipc_message message{};
+    message.member = OS1_INPUT_OPEN;
+    message.payload_bytes = sizeof(pointer);
+    std::memcpy(message.payload, &pointer, sizeof(pointer));
+    os1_ipc_result result{};
+    native_input::provider(OS1_INPUT_INTERFACE_ID, 1)
+        ->invoke(source, OS1_RIGHT_INPUT_READ, 0, message, result, first);
+    ASSERT_EQ(result.application_status, 0);
+    DescriptorEntry unused{};
+    result = call(first, OS1_POINTER_INTERFACE_ID, OS1_INPUT_GET_STATE, unused);
+    ASSERT_EQ(result.application_status, 0);
+    ASSERT_EQ(result.payload_bytes, sizeof(os1_input_state));
+    os1_input_state state{};
+    std::memcpy(&state, result.payload, sizeof(state));
+    EXPECT_EQ(state.buttons, 1);
+    EXPECT_EQ(state.x, 2);
+    EXPECT_EQ(state.y, uint64_t(0) - 3);
+}

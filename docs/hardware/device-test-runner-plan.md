@@ -115,8 +115,12 @@ Preserve its journal and files for investigation.
 
 The runner creates five files per run and one run directory.
 It does not remove older results when ext2 runs out of file entries or data blocks.
-Snapshots use temporary RAM files before archive serialization.
-Each archive member is bounded to 256 KiB; existing API and temporary-filesystem limits can be smaller.
+Binary snapshots use temporary RAM files before archive serialization.
+Inventory reports stream into the archive through a 4096-byte buffer; they do not use temporary files.
+Each archive member is bounded to 256 KiB; binary snapshots retain the existing API and temporary-file limits.
+The writer patches each report header after completion and restores the append position.
+A write, seek, or size-limit failure marks the run as failed and preserves its earlier evidence.
+The [returned hardware record](input-hardware-fixes-plan.md) describes the 64 KiB capture failure and its correction.
 The runner synchronizes completed stages and the final result.
 This reduces pending writes but cannot guarantee recovery after interrupted ext2 updates.
 

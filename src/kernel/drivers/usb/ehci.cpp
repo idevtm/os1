@@ -438,8 +438,7 @@ bool arm_input(Device& d)
                            d.tt_address,
                            d.tt_port,
                            true) ||
-       !ehci::prepare_qtd(
-           *td, d.input_dma.physical_address + 256, d.hid.protocol == 1 ? 8 : 3, 1, toggle))
+       !ehci::prepare_qtd(*td, d.input_dma.physical_address + 256, d.hid.packet, 1, toggle))
         return false;
     qh->next = ehci::terminate;
     dma_sync_for_device(d.input_dma);
@@ -539,7 +538,7 @@ void poll_input(Controller& c)
         if(!periodic_schedule(c, false))
             return;
         dma_sync_for_cpu(d.input_dma);
-        unsigned bytes = d.hid.protocol == 1 ? 8 : 3;
+        unsigned bytes = d.hid.packet;
         if((td->token & ehci::errors) || ehci::remaining(td->token) > bytes)
         {
             debug("ehci: HID failed input=")(d.input_identity)(" root=")(d.root)(" port=")(d.port)(

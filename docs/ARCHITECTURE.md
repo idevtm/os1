@@ -117,6 +117,9 @@ Collection indexes and short aliases compact after removal; retained handles kee
 The [device test runner](hardware/device-test-runner-plan.md) uses these native interfaces to collect physical test evidence.
 It writes separate machine, build, boot, and run directories under `/disk/tests`.
 A progress journal records completed stages; a tar archive contains bounded snapshots and kernel logs.
+Inventory reports stream through a 4096-byte buffer, with a 256 KiB limit per archive member.
+xHCI negotiates control packet sizes and supports two boot HID interfaces on each attachment.
+Each interface has its own input identity and endpoint buffers; removal retires both identities.
 Input lifetime records and EHCI failure details support returned-stick diagnosis without logging raw key contents.
 The first diagnostic shell starts the runner before its prompt; normal boot and shell restarts do not.
 A bounded binary catalog supports offline comparison against hashed Linux reference profiles.

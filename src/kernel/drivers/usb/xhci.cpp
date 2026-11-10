@@ -16,6 +16,7 @@
 #include "drivers/usb/xhci.hpp"
 #include "drivers/usb/xhci_controller.hpp"
 #include "handoff/memory_layout.h"
+#include "input/hid_boot.hpp"
 #include "mm/boot_mapping.hpp"
 #include "mm/dma.hpp"
 #include "mm/page_frame.hpp"
@@ -53,7 +54,6 @@ constexpr size_t kXhciCommandRingBytes = kPageSize;
 constexpr size_t kXhciEventRingBytes = kPageSize;
 constexpr size_t kXhciTransferRingBytes = kPageSize;
 constexpr size_t kXhciControlBufferBytes = 512u;
-constexpr size_t kXhciReportBufferBytes = 8u;
 constexpr uint32_t kXhciInitTimeoutSpins = 1000000u;
 constexpr uint64_t kXhciMaxBarBytes = 16ull * 1024 * 1024;
 constexpr uint16_t kPciCommandMemorySpace = 0x0002u;
@@ -158,21 +158,28 @@ struct [[gnu::packed]] UsbEndpointDescriptor
     uint8_t interval;
 };
 
-struct HidInterfaceSelection
+constexpr unsigned kXhciInputInterfaces = 2;
+struct XhciInputState
 {
-    bool valid = false;
+    uint64_t input_identity = 0;
     HidBootProtocol protocol = HidBootProtocol::None;
-    uint8_t configuration_value = 0;
     uint8_t interface_number = 0;
     uint8_t endpoint_address = 0;
-    uint8_t interval = 0;
-    uint16_t max_packet_size = 0;
+    uint8_t endpoint_dci = 0;
+    uint8_t endpoint_interval = 0;
+    uint16_t endpoint_max_packet_size = 8;
+    DmaBuffer interrupt_ring_dma{}, report_buffer_dma{};
+    xhci::CommandRingInfo interrupt_ring{};
+    usb::hid::BootKeyboardState keyboard_state{};
+    bool interrupt_transfer_armed = false;
+    uint64_t interrupt_transfer_trb = 0;
+    uint32_t report_count = 0;
+    uint8_t diagnostic_reports = 0;
 };
 
 struct XhciControllerState;
 struct XhciDeviceState
 {
-    uint64_t input_identity = 0;
     bool present = false;
     bool configured = false;
     bool failed = false;
@@ -190,32 +197,20 @@ struct XhciDeviceState
     uint8_t port_id = 0;
     uint8_t slot_id = 0;
     uint8_t speed = 0;
-    HidBootProtocol protocol = HidBootProtocol::None;
     uint8_t configuration_value = 0;
-    uint8_t interface_number = 0;
-    uint8_t endpoint_address = 0;
-    uint8_t endpoint_dci = 0;
-    uint8_t endpoint_interval = 0;
+    XhciInputState inputs[kXhciInputInterfaces]{};
+    unsigned input_count = 0;
     uint16_t control_max_packet_size = 8;
-    uint16_t endpoint_max_packet_size = 8;
     DmaBuffer input_context_dma{};
     DmaBuffer device_context_dma{};
     DmaBuffer control_ring_dma{};
     xhci::CommandRingInfo control_ring{};
-    DmaBuffer interrupt_ring_dma{};
-    xhci::CommandRingInfo interrupt_ring{};
     DmaBuffer control_buffer_dma{};
-    DmaBuffer report_buffer_dma{};
-    usb::hid::BootKeyboardState keyboard_state{};
     xhci::ControlTransfer control_transfer{};
     bool synchronous_transfer_complete = false;
     uint8_t synchronous_transfer_completion_code = 0;
     uint32_t synchronous_transfer_residual = 0;
     uint64_t synchronous_transfer_trb = 0;
-    bool interrupt_transfer_armed = false;
-    uint64_t interrupt_transfer_trb = 0;
-    uint32_t report_count = 0;
-    uint8_t diagnostic_reports = 0;
     uint8_t diagnostic_controls = 0;
     uint8_t diagnostic_ep0_events = 0;
 };
@@ -269,7 +264,8 @@ bool initialize_storage(PageFrameContainer&,
                         const usb::storage::Interface&);
 void fail_device(XhciDeviceState& device)
 {
-    native_input::remove(device.input_identity);
+    for(auto& input : device.inputs)
+        native_input::remove(input.input_identity);
     __atomic_store_n(&device.failed, true, __ATOMIC_RELEASE);
     device.storage.invalidate();
 }
@@ -314,9 +310,11 @@ void release_dma(PageFrameContainer& frames, DmaBuffer& buffer)
 
 [[nodiscard]] bool device_has_resources(const XhciDeviceState& device)
 {
+    for(const auto& input : device.inputs)
+        if(input.interrupt_ring_dma.active || input.report_buffer_dma.active)
+            return true;
     return device.input_context_dma.active || device.device_context_dma.active ||
-           device.control_ring_dma.active || device.interrupt_ring_dma.active ||
-           device.control_buffer_dma.active || device.report_buffer_dma.active ||
+           device.control_ring_dma.active || device.control_buffer_dma.active ||
            device.bulk_in_ring_dma.active || device.bulk_out_ring_dma.active ||
            device.bulk_buffer_dma.active;
 }
@@ -431,9 +429,12 @@ void release_device(PageFrameContainer& frames,
     release_dma(frames, device.bulk_buffer_dma);
     release_dma(frames, device.bulk_out_ring_dma);
     release_dma(frames, device.bulk_in_ring_dma);
-    release_dma(frames, device.report_buffer_dma);
+    for(auto& input : device.inputs)
+    {
+        release_dma(frames, input.report_buffer_dma);
+        release_dma(frames, input.interrupt_ring_dma);
+    }
     release_dma(frames, device.control_buffer_dma);
-    release_dma(frames, device.interrupt_ring_dma);
     release_dma(frames, device.control_ring_dma);
     release_dma(frames, device.device_context_dma);
     release_dma(frames, device.input_context_dma);
@@ -614,7 +615,7 @@ void configure_endpoint_context(XhciControllerState& controller,
                   (static_cast<uint32_t>(max_packet_size) << 16);
     endpoint[2] = static_cast<uint32_t>((ring_dma.physical_address & ~0xFull) | 1ull);
     endpoint[3] = static_cast<uint32_t>(ring_dma.physical_address >> 32);
-    endpoint[4] = average_trb_length;
+    endpoint[4] = average_trb_length | (endpoint_type == 7 ? uint32_t(max_packet_size) << 16 : 0);
 }
 
 bool allocate_device_resources(PageFrameContainer& frames,
@@ -638,19 +639,9 @@ bool allocate_device_resources(PageFrameContainer& frames,
                             device.control_ring_dma) ||
        !dma_allocate_buffer(frames,
                             controller.owner,
-                            kXhciTransferRingBytes,
-                            DmaDirection::Bidirectional,
-                            device.interrupt_ring_dma) ||
-       !dma_allocate_buffer(frames,
-                            controller.owner,
                             kXhciControlBufferBytes,
                             DmaDirection::Bidirectional,
-                            device.control_buffer_dma) ||
-       !dma_allocate_buffer(frames,
-                            controller.owner,
-                            kXhciReportBufferBytes,
-                            DmaDirection::Bidirectional,
-                            device.report_buffer_dma))
+                            device.control_buffer_dma))
     {
         return false;
     }
@@ -658,11 +649,7 @@ bool allocate_device_resources(PageFrameContainer& frames,
     if(!xhci::initialize_command_ring(device.control_ring_dma.virtual_address,
                                       device.control_ring_dma.size_bytes,
                                       device.control_ring_dma.physical_address,
-                                      device.control_ring) ||
-       !xhci::initialize_command_ring(device.interrupt_ring_dma.virtual_address,
-                                      device.interrupt_ring_dma.size_bytes,
-                                      device.interrupt_ring_dma.physical_address,
-                                      device.interrupt_ring))
+                                      device.control_ring))
     {
         return false;
     }
@@ -674,17 +661,17 @@ bool allocate_device_resources(PageFrameContainer& frames,
     return true;
 }
 
-void handle_keyboard_report(XhciDeviceState& device)
+void handle_keyboard_report(XhciDeviceState& device, XhciInputState& input)
 {
     native_input::boot_keyboard(
-        device.input_identity,
-        static_cast<const uint8_t*>(device.report_buffer_dma.virtual_address),
+        input.input_identity,
+        static_cast<const uint8_t*>(input.report_buffer_dma.virtual_address),
         8);
     char output[6]{};
     size_t output_count = 0;
     if(!usb::hid::boot_keyboard_apply_report(
-           device.keyboard_state,
-           static_cast<const uint8_t*>(device.report_buffer_dma.virtual_address),
+           input.keyboard_state,
+           static_cast<const uint8_t*>(input.report_buffer_dma.virtual_address),
            usb::hid::kBootKeyboardReportBytes,
            output,
            sizeof(output),
@@ -693,7 +680,7 @@ void handle_keyboard_report(XhciDeviceState& device)
         return;
     }
 
-    if(bootlog_diagnostics_enabled() && device.diagnostic_reports <= 8u)
+    if(bootlog_diagnostics_enabled() && input.diagnostic_reports <= 8u)
         debug("usbdiag: decoded port=")(device.port_id)(" chars=")(output_count)(" queued=")(
             g_input_count)();
     for(size_t index = 0; index < output_count; ++index)
@@ -706,45 +693,46 @@ void handle_keyboard_report(XhciDeviceState& device)
     }
 }
 
-void handle_mouse_report(XhciDeviceState& device)
+void handle_mouse_report(XhciInputState& input)
 {
-    native_input::boot_pointer(
-        device.input_identity,
-        static_cast<const uint8_t*>(device.report_buffer_dma.virtual_address),
-        3);
-    ++device.report_count;
+    native_input::boot_pointer(input.input_identity,
+                               static_cast<const uint8_t*>(input.report_buffer_dma.virtual_address),
+                               3);
+    ++input.report_count;
 }
 
-bool arm_interrupt_transfer(XhciControllerState& controller, XhciDeviceState& device)
+bool arm_interrupt_transfer(XhciControllerState& controller,
+                            XhciDeviceState& device,
+                            XhciInputState& input)
 {
     if(!device.present || !device.configured || __atomic_load_n(&device.failed, __ATOMIC_ACQUIRE))
     {
         return false;
     }
 
-    memset(device.report_buffer_dma.virtual_address, 0, device.report_buffer_dma.size_bytes);
-    dma_sync_for_device(device.report_buffer_dma);
+    memset(input.report_buffer_dma.virtual_address, 0, input.report_buffer_dma.size_bytes);
+    dma_sync_for_device(input.report_buffer_dma);
 
     xhci::TrbFields trb{};
-    trb.parameter = device.report_buffer_dma.physical_address;
-    trb.status = static_cast<uint32_t>(device.report_buffer_dma.size_bytes);
+    trb.parameter = input.report_buffer_dma.physical_address;
+    trb.status = input.endpoint_max_packet_size;
     trb.control =
         (xhci::kTrbTypeNormal << 10) | kTrbInterruptOnShortPacket | kTrbInterruptOnCompletion;
     uint64_t trb_physical = 0;
-    if(!xhci::enqueue_command_trb(device.interrupt_ring_dma.virtual_address,
-                                  device.interrupt_ring_dma.size_bytes,
-                                  device.interrupt_ring_dma.physical_address,
-                                  device.interrupt_ring,
+    if(!xhci::enqueue_command_trb(input.interrupt_ring_dma.virtual_address,
+                                  input.interrupt_ring_dma.size_bytes,
+                                  input.interrupt_ring_dma.physical_address,
+                                  input.interrupt_ring,
                                   trb,
                                   &trb_physical))
     {
         return false;
     }
 
-    device.interrupt_transfer_trb = trb_physical;
-    device.interrupt_transfer_armed = true;
-    dma_sync_for_device(device.interrupt_ring_dma);
-    xhci::ring_doorbell(controller.controller, device.slot_id, device.endpoint_dci);
+    input.interrupt_transfer_trb = trb_physical;
+    input.interrupt_transfer_armed = true;
+    dma_sync_for_device(input.interrupt_ring_dma);
+    xhci::ring_doorbell(controller.controller, device.slot_id, input.endpoint_dci);
     return true;
 }
 
@@ -790,36 +778,39 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
             return;
         }
 
-        if(event.endpoint_id == device.endpoint_dci && device.interrupt_transfer_armed &&
-           (device.interrupt_transfer_trb == event.parameter))
+        for(auto& input : device.inputs)
         {
-            if(bootlog_diagnostics_enabled() && device.diagnostic_reports < 8u)
+            if(event.endpoint_id == input.endpoint_dci && input.interrupt_transfer_armed &&
+               (input.interrupt_transfer_trb == event.parameter))
             {
-                ++device.diagnostic_reports;
-                debug("usbdiag: input pci=")(controller.pci_index)(" port=")(device.port_id)(
-                    " cc=")(event.completion_code)(" residual=")(event.transfer_length)();
-            }
-            else if(bootlog_diagnostics_enabled() && device.diagnostic_reports == 8u)
-                ++device.diagnostic_reports;
-            device.interrupt_transfer_armed = false;
-            dma_sync_for_cpu(device.report_buffer_dma);
-            if(transfer_completion_ok(event.completion_code))
-            {
-                if(HidBootProtocol::Keyboard == device.protocol &&
-                   event.transfer_length <= device.report_buffer_dma.size_bytes &&
-                   device.report_buffer_dma.size_bytes - event.transfer_length == 8)
+                if(bootlog_diagnostics_enabled() && input.diagnostic_reports < 8u)
                 {
-                    handle_keyboard_report(device);
+                    ++input.diagnostic_reports;
+                    debug("usbdiag: input pci=")(controller.pci_index)(" port=")(device.port_id)(
+                        " cc=")(event.completion_code)(" residual=")(event.transfer_length)();
                 }
-                else if(HidBootProtocol::Mouse == device.protocol &&
-                        event.transfer_length <= device.report_buffer_dma.size_bytes &&
-                        device.report_buffer_dma.size_bytes - event.transfer_length >= 3)
+                else if(bootlog_diagnostics_enabled() && input.diagnostic_reports == 8u)
+                    ++input.diagnostic_reports;
+                input.interrupt_transfer_armed = false;
+                dma_sync_for_cpu(input.report_buffer_dma);
+                if(transfer_completion_ok(event.completion_code))
                 {
-                    handle_mouse_report(device);
+                    if(HidBootProtocol::Keyboard == input.protocol &&
+                       event.transfer_length <= input.endpoint_max_packet_size &&
+                       input.endpoint_max_packet_size - event.transfer_length == 8)
+                    {
+                        handle_keyboard_report(device, input);
+                    }
+                    else if(HidBootProtocol::Mouse == input.protocol &&
+                            event.transfer_length <= input.endpoint_max_packet_size &&
+                            input.endpoint_max_packet_size - event.transfer_length >= 3)
+                    {
+                        handle_mouse_report(input);
+                    }
                 }
+                (void)arm_interrupt_transfer(controller, device, input);
+                return;
             }
-            (void)arm_interrupt_transfer(controller, device);
-            return;
         }
     }
 }
@@ -1076,6 +1067,9 @@ bool submit_control_transfer(XhciControllerState& controller,
     }
     if(!completed || completion_code != kXhciCompletionSuccess || residual_length > buffer_length)
     {
+        debug("xhci: control failed port=")(device.port_id)(" request=")(setup.request)(
+            " value=0x")(setup.value, 16)(" requested=")(buffer_length)(" completed=")(
+            completed)(" cc=")(completion_code)(" residual=")(residual_length)();
         fail_device(device);
         return false;
     }
@@ -1126,98 +1120,19 @@ bool usb_set_configuration(XhciControllerState& controller,
     return submit_control_transfer(controller, device, setup, nullptr, nullptr, 0u, actual_length);
 }
 
-bool usb_set_boot_protocol(XhciControllerState& controller, XhciDeviceState& device)
+bool usb_set_boot_protocol(XhciControllerState& controller,
+                           XhciDeviceState& device,
+                           uint8_t interface_number)
 {
     const UsbSetupPacket setup{
         .request_type = kUsbRequestTypeClassOutInterface,
         .request = kUsbHidRequestSetProtocol,
         .value = 0u,
-        .index = device.interface_number,
+        .index = interface_number,
         .length = 0u,
     };
     size_t actual_length = 0u;
     return submit_control_transfer(controller, device, setup, nullptr, nullptr, 0u, actual_length);
-}
-
-bool parse_hid_boot_configuration(const void* buffer,
-                                  size_t buffer_length,
-                                  HidInterfaceSelection& out)
-{
-    out = {};
-    if((nullptr == buffer) || (buffer_length < sizeof(UsbConfigurationDescriptor)))
-    {
-        return false;
-    }
-
-    const auto* bytes = static_cast<const uint8_t*>(buffer);
-    uint8_t active_configuration = 0u;
-    bool active_interface_matches = false;
-    HidBootProtocol active_protocol = HidBootProtocol::None;
-    uint8_t active_interface_number = 0u;
-    for(size_t offset = 0; (offset + 2u) <= buffer_length;)
-    {
-        const uint8_t length = bytes[offset];
-        const uint8_t descriptor_type = bytes[offset + 1u];
-        if((length < 2u) || ((offset + length) > buffer_length))
-        {
-            break;
-        }
-
-        switch(descriptor_type)
-        {
-            case kUsbDescriptorConfiguration: {
-                const auto* descriptor =
-                    reinterpret_cast<const UsbConfigurationDescriptor*>(bytes + offset);
-                active_configuration = descriptor->configuration_value;
-                active_interface_matches = false;
-                active_protocol = HidBootProtocol::None;
-                break;
-            }
-            case kUsbDescriptorInterface: {
-                const auto* descriptor =
-                    reinterpret_cast<const UsbInterfaceDescriptor*>(bytes + offset);
-                active_interface_number = descriptor->interface_number;
-                active_interface_matches =
-                    (0u == descriptor->alternate_setting) &&
-                    (kUsbClassHid == descriptor->interface_class) &&
-                    (kUsbSubclassBoot == descriptor->interface_subclass) &&
-                    ((kUsbProtocolKeyboard == descriptor->interface_protocol) ||
-                     (kUsbProtocolMouse == descriptor->interface_protocol));
-                active_protocol = (kUsbProtocolKeyboard == descriptor->interface_protocol)
-                                      ? HidBootProtocol::Keyboard
-                                      : ((kUsbProtocolMouse == descriptor->interface_protocol)
-                                             ? HidBootProtocol::Mouse
-                                             : HidBootProtocol::None);
-                break;
-            }
-            case kUsbDescriptorEndpoint:
-                if(active_interface_matches)
-                {
-                    const auto* descriptor =
-                        reinterpret_cast<const UsbEndpointDescriptor*>(bytes + offset);
-                    if(((descriptor->endpoint_address & kUsbEndpointDirectionIn) != 0u) &&
-                       ((descriptor->attributes & 0x03u) == kUsbEndpointTransferInterrupt))
-                    {
-                        out.valid = true;
-                        out.protocol = active_protocol;
-                        out.configuration_value = active_configuration;
-                        out.interface_number = active_interface_number;
-                        out.endpoint_address = descriptor->endpoint_address;
-                        out.interval = descriptor->interval;
-                        out.max_packet_size =
-                            static_cast<uint16_t>(descriptor->max_packet_size & 0x07FFu);
-                        return true;
-                    }
-                }
-                break;
-            default:
-                break;
-        }
-
-        offset += length;
-    }
-
-    return false;
 }
 
 bool reset_port(XhciControllerState& controller, uint8_t port_id)
@@ -1284,22 +1199,58 @@ bool address_device(XhciControllerState& controller, XhciDeviceState& device)
            (slot_id == device.slot_id);
 }
 
+bool update_control_packet(XhciControllerState& controller,
+                           XhciDeviceState& device,
+                           uint16_t packet)
+{
+    if(packet == device.control_max_packet_size)
+        return true;
+    dma_sync_for_cpu(device.device_context_dma);
+    if(!xhci::prepare_control_packet_context(device.input_context_dma.virtual_address,
+                                             device.input_context_dma.size_bytes,
+                                             device.device_context_dma.virtual_address,
+                                             device.device_context_dma.size_bytes,
+                                             controller.controller.capability.context_size_bytes,
+                                             packet))
+        return false;
+    dma_sync_for_device(device.input_context_dma);
+    xhci::TrbFields command{};
+    command.parameter = device.input_context_dma.physical_address;
+    command.control =
+        (xhci::kTrbTypeEvaluateContextCommand << 10) | (uint32_t(device.slot_id) << 24);
+    uint8_t completion = 0, slot = 0;
+    if(!submit_command(controller, command, completion, slot, kXhciInitTimeoutSpins) ||
+       slot != device.slot_id)
+        return false;
+    debug("xhci: control packet port=")(device.port_id)(" old=")(device.control_max_packet_size)(
+        " new=")(packet)();
+    device.control_max_packet_size = packet;
+    return true;
+}
+
 bool configure_interrupt_endpoint(XhciControllerState& controller, XhciDeviceState& device)
 {
     memset(device.input_context_dma.virtual_address, 0, device.input_context_dma.size_bytes);
     auto* control = input_control_context(device);
     control[0] = 0u;
-    control[1] = kInputContextAddSlot | (1u << device.endpoint_dci);
-    configure_slot_context(controller, device, device.endpoint_dci);
-    configure_endpoint_context(
-        controller,
-        device,
-        device.endpoint_dci,
-        7u,
-        device.endpoint_max_packet_size,
-        (device.endpoint_interval > 0u) ? static_cast<uint8_t>(device.endpoint_interval - 1u) : 0u,
-        device.interrupt_ring_dma,
-        device.endpoint_max_packet_size);
+    control[1] = kInputContextAddSlot;
+    uint8_t last = 1;
+    for(unsigned i = 0; i < device.input_count; ++i)
+    {
+        auto& input = device.inputs[i];
+        control[1] |= 1u << input.endpoint_dci;
+        if(input.endpoint_dci > last)
+            last = input.endpoint_dci;
+        configure_endpoint_context(controller,
+                                   device,
+                                   input.endpoint_dci,
+                                   7u,
+                                   input.endpoint_max_packet_size,
+                                   xhci::interrupt_interval(device.speed, input.endpoint_interval),
+                                   input.interrupt_ring_dma,
+                                   input.endpoint_max_packet_size);
+    }
+    configure_slot_context(controller, device, last);
     dma_sync_for_device(device.input_context_dma);
 
     xhci::TrbFields command{};
@@ -1608,6 +1559,16 @@ bool initialize_port(PageFrameContainer& frames,
     observation.stage = "device-descriptor-failed";
     UsbDeviceDescriptor descriptor{};
     size_t actual_length = 0u;
+    uint16_t packet = 0;
+    if(!usb_get_descriptor(
+           controller, *device, kUsbDescriptorDevice, 0, &descriptor, 8, actual_length) ||
+       !xhci::device_control_packet(device->speed, &descriptor, actual_length, packet) ||
+       !update_control_packet(controller, *device, packet))
+    {
+        debug("xhci: control packet negotiation failed port=")(port_id)();
+        release_device(frames, controller, *device);
+        return false;
+    }
     if(!usb_get_descriptor(controller,
                            *device,
                            kUsbDescriptorDevice,
@@ -1658,7 +1619,6 @@ bool initialize_port(PageFrameContainer& frames,
         return false;
     }
 
-    HidInterfaceSelection hid{};
     if(!usb_get_descriptor(controller,
                            *device,
                            kUsbDescriptorConfiguration,
@@ -1702,69 +1662,111 @@ bool initialize_port(PageFrameContainer& frames,
         return false;
     }
     observation.stage = "unsupported-interface";
-    if(!parse_hid_boot_configuration(
-           device->control_buffer_dma.virtual_address, actual_length, hid))
+    os1::input::HidBoot selections[kXhciInputInterfaces]{};
+    for(unsigned i = 0; i < kXhciInputInterfaces; ++i)
+    {
+        auto& selected = selections[i];
+        if(!os1::input::hid_boot(
+               static_cast<const uint8_t*>(device->control_buffer_dma.virtual_address),
+               actual_length,
+               selected,
+               i,
+               device->speed == 2 ? 8 : 64))
+            break;
+        auto& input = device->inputs[i];
+        input.protocol =
+            selected.protocol == 1 ? HidBootProtocol::Keyboard : HidBootProtocol::Mouse;
+        input.interface_number = selected.interface;
+        input.endpoint_address = selected.endpoint;
+        input.endpoint_dci = endpoint_dci_from_address(selected.endpoint);
+        input.endpoint_interval = selected.interval;
+        input.endpoint_max_packet_size = selected.packet;
+        for(unsigned prior = 0; prior < i; ++prior)
+            if(device->inputs[prior].endpoint_dci == input.endpoint_dci ||
+               device->inputs[prior].interface_number == input.interface_number)
+            {
+                release_device(frames, controller, *device);
+                return false;
+            }
+        if(!dma_allocate_buffer(frames,
+                                controller.owner,
+                                kXhciTransferRingBytes,
+                                DmaDirection::Bidirectional,
+                                input.interrupt_ring_dma) ||
+           !dma_allocate_buffer(frames,
+                                controller.owner,
+                                selected.packet,
+                                DmaDirection::Bidirectional,
+                                input.report_buffer_dma) ||
+           !xhci::initialize_command_ring(input.interrupt_ring_dma.virtual_address,
+                                          input.interrupt_ring_dma.size_bytes,
+                                          input.interrupt_ring_dma.physical_address,
+                                          input.interrupt_ring))
+        {
+            release_device(frames, controller, *device);
+            return false;
+        }
+        ++device->input_count;
+        device->configuration_value = selected.configuration;
+    }
+    if(!device->input_count)
     {
         debug("xhci: no supported interface port=")(port_id)();
         release_device(frames, controller, *device);
         return false;
     }
-
-    if(bootlog_diagnostics_enabled())
-        debug("usbdiag: HID port=")(port_id)(" interface=")(hid.interface_number)(" protocol=")(
-            static_cast<uint8_t>(hid.protocol))(" ep=0x")(
-            hid.endpoint_address, 16)(" mps=")(hid.max_packet_size)(" interval=")(hid.interval)();
-    hardware_catalog::usb_bind(
-        catalog_device, hid.configuration_value, hid.interface_number, "usb-hid", false);
     observation.stage = "hid-configuration-failed";
-    device->protocol = hid.protocol;
-    device->configuration_value = hid.configuration_value;
-    device->interface_number = hid.interface_number;
-    device->endpoint_address = hid.endpoint_address;
-    device->endpoint_dci = endpoint_dci_from_address(hid.endpoint_address);
-    device->endpoint_interval = hid.interval;
-    device->endpoint_max_packet_size = (0u != hid.max_packet_size)
-                                           ? hid.max_packet_size
-                                           : static_cast<uint16_t>(kXhciReportBufferBytes);
-
     if(!usb_set_configuration(controller, *device, device->configuration_value) ||
-       !configure_interrupt_endpoint(controller, *device) ||
-       !usb_set_boot_protocol(controller, *device))
+       !configure_interrupt_endpoint(controller, *device))
     {
-        debug("xhci: HID endpoint setup failed port=")(port_id)();
         release_device(frames, controller, *device);
         return false;
     }
-
-    device->input_identity = native_input::attach(
-        device->protocol == HidBootProtocol::Keyboard ? OS1_INPUT_KEYBOARD : OS1_INPUT_POINTER,
-        device->protocol == HidBootProtocol::Keyboard ? "USB keyboard" : "USB pointer",
-        catalog_device);
-    if(!device->input_identity)
+    for(unsigned i = 0; i < device->input_count; ++i)
     {
-        observation.stage = "input-capacity";
-        release_device(frames, controller, *device);
-        return false;
+        auto& input = device->inputs[i];
+        hardware_catalog::usb_bind(
+            catalog_device, device->configuration_value, input.interface_number, "usb-hid", false);
+        if(!usb_set_boot_protocol(controller, *device, input.interface_number))
+        {
+            release_device(frames, controller, *device);
+            return false;
+        }
+        input.input_identity = native_input::attach(
+            input.protocol == HidBootProtocol::Keyboard ? OS1_INPUT_KEYBOARD : OS1_INPUT_POINTER,
+            input.protocol == HidBootProtocol::Keyboard ? "USB keyboard" : "USB pointer",
+            catalog_device);
+        if(!input.input_identity)
+        {
+            observation.stage = "input-capacity";
+            release_device(frames, controller, *device);
+            return false;
+        }
+        // Legacy device-level identity names the first function. Each native object
+        // retains its own identity and the shared physical catalog association.
+        if(i == 0)
+            hardware_catalog::usb_input(catalog_device, input.input_identity);
     }
-    hardware_catalog::usb_input(catalog_device, device->input_identity);
     device->configured = true;
-    bool armed = false;
     {
         IrqSpinGuard guard(g_event_lock);
-        armed = arm_interrupt_transfer(controller, *device);
+        for(unsigned i = 0; i < device->input_count; ++i)
+            if(!arm_interrupt_transfer(controller, *device, device->inputs[i]))
+            {
+                fail_device(*device);
+                return false;
+            }
     }
-    if(!armed)
+    for(unsigned i = 0; i < device->input_count; ++i)
     {
-        debug("xhci: interrupt arm failed port=")(port_id)();
-        release_device(frames, controller, *device);
-        return false;
+        auto& input = device->inputs[i];
+        debug("xhci: HID ")((HidBootProtocol::Keyboard == input.protocol) ? "keyboard" : "mouse")(
+            " ready port=")(port_id)(" slot=")(device->slot_id)(" ep=0x")(
+            input.endpoint_address, 16, 2)(" mps=")(input.endpoint_max_packet_size)();
+        hardware_catalog::usb_bind(
+            catalog_device, device->configuration_value, input.interface_number, "usb-hid", true);
     }
 
-    debug("xhci: HID ")((HidBootProtocol::Keyboard == device->protocol) ? "keyboard" : "mouse")(
-        " ready port=")(port_id)(" slot=")(device->slot_id)(" ep=0x")(
-        device->endpoint_address, 16, 2)(" mps=")(device->endpoint_max_packet_size)();
-    hardware_catalog::usb_bind(
-        catalog_device, hid.configuration_value, hid.interface_number, "usb-hid", true);
     observation.stage = "hid-ready";
     return true;
 }
@@ -2111,12 +2113,15 @@ void xhci_diagnostic_summary()
         {
             if(!device.present)
                 continue;
-            const bool keyboard = device.protocol == HidBootProtocol::Keyboard;
-            debug("usbdiag: port=")(device.port_id)(" speed=")(device.speed)(" keyboard=")(
-                keyboard)(" configured=")(device.configured)(" failed=")(device.failed)(" armed=")(
-                device.interrupt_transfer_armed)();
-            if(keyboard && device.configured && !device.failed)
-                ++ready;
+            for(const auto& input : device.inputs)
+            {
+                const bool keyboard = input.protocol == HidBootProtocol::Keyboard;
+                debug("usbdiag: port=")(device.port_id)(" speed=")(device.speed)(" keyboard=")(
+                    keyboard)(" configured=")(device.configured)(" failed=")(device.failed)(
+                    " armed=")(input.interrupt_transfer_armed)();
+                if(keyboard && device.configured && !device.failed)
+                    ++ready;
+            }
         }
     }
     debug("usbdiag: configured keyboards=")(ready)();

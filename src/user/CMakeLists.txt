@@ -131,6 +131,7 @@ os1_add_user_cxx_program(sh "${CMAKE_CURRENT_SOURCE_DIR}/programs/sh.cpp" OS1_US
 os1_add_user_cxx_program(run-tests "${CMAKE_CURRENT_SOURCE_DIR}/programs/run_tests.cpp" OS1_USER_RUN_TESTS_ELF)
 add_custom_command(OUTPUT "${OS1_USER_RUN_TESTS_ELF}" APPEND DEPENDS
   "${PROJECT_SOURCE_DIR}/src/common/hardware/test_run.hpp"
+  "${PROJECT_SOURCE_DIR}/src/common/hardware/archive_stream.hpp"
   "${PROJECT_SOURCE_DIR}/src/common/hardware/capture.hpp"
   "${PROJECT_SOURCE_DIR}/src/uapi/os1/input.h"
   "${PROJECT_SOURCE_DIR}/src/common/log/frame.hpp"

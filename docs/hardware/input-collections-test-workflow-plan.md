@@ -300,3 +300,9 @@ The credential review treated build hashes and numeric hardware identities as ex
 The complete ASD-STE100 dictionary was unavailable; technical prose received manual review.
 The current hardware result is unmeasured on both physical devices.
 The next validation step is diagnostic boot on each device, followed by returned-stick comparison and optional input stimulus.
+
+## Returned hardware follow-up
+
+The [hardware correction record](input-hardware-fixes-plan.md) records the laptop and desktop runs from November 10, 2026.
+Both PCI comparisons pass, but the runs expose report truncation and separate USB pointer failures.
+Normal-mode captures do not establish diagnostic autorun or physical stimulus delivery.

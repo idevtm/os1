@@ -124,6 +124,7 @@ A new attachment receives a new identity; old objects never select the replaceme
 | Input identities | 64 attachment lifetimes per boot |
 | Event retention | 256 records, shared across devices |
 | Subscriptions | 128 live objects globally, plus process descriptor limits |
+| xHCI boot HID interfaces | Two per attachment; maximum packet 8 bytes at low speed, 64 bytes at other supported speeds |
 | USB attachments | 16 retained device slots per controller |
 | Controller count | Four xHCI and four EHCI controllers |
 | USB worker cadence | Five-millisecond sleep; topology pass every 50 iterations |
@@ -142,11 +143,23 @@ Allocation, admission, rights, and malformed-request failures use existing nativ
 ## Transport and physical acceptance
 
 xHCI supports boot keyboards and mice directly connected to root ports.
+It supports the first two eligible boot HID interfaces in one configuration, including composite keyboard and mouse receivers.
+Each interface receives separate endpoint buffers, an input identity, and a native object.
+Both objects reference the same physical USB catalog record.
+The device-level `input_identity` catalog field names the first function; enumerate input collections to find all functions.
+Additional interfaces remain unbound; general HID report parsing remains unsupported.
+An eight-byte descriptor prefix supplies the control packet size before the complete descriptor request.
+Evaluate Context updates a changed packet size without resetting the endpoint dequeue position.
+The reference is the [xHCI specification](https://www.intel.ie/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), section 4.6.5.
+Low/full-speed interrupt intervals convert from milliseconds to xHCI microframe exponents.
 Runtime root changes retire the old slot before replacement enumeration.
 Published allocations remain retained even after successful Disable Slot.
 xHCI hubs remain deferred.
 
 EHCI supports boot HID through high-speed hubs with transaction translators.
+Transfers receive one complete endpoint packet within the existing eight-byte admission limit.
+The decoder uses the first three boot-mouse bytes and ignores trailing extension bytes.
+This preserves movement and buttons without claiming wheel support.
 The periodic schedule admits one split transaction per frame and uses disjoint frame phases.
 The selected period is the largest power of two no greater than the endpoint interval, capped at 128 frames.
 Insufficient schedule capacity rejects the new interface.
@@ -157,7 +170,8 @@ The reference is the [EHCI specification](https://www.intel.com/content/www/us/e
 PS/2 auxiliary initialization selects relative compatibility packets for mouse and touchpad input.
 Pause-key event decoding remains unsupported; ordinary keys and extended navigation keys use the common bitmap.
 The user verified keyboard Left Shift state and laptop touchpad movement and buttons on 2026-11-10.
-USB mouse acceptance remains pending after discovery changes.
+The [returned hardware tests](../../hardware/input-hardware-fixes-plan.md) exposed EHCI mouse and xHCI receiver failures.
+Physical acceptance of their corrections remains pending.
 QEMU results do not establish that acceptance.
 
 ## Shell example

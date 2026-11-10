@@ -12,6 +12,8 @@ namespace os1::user::hardware_tools
 struct Printer
 {
     bool verbose{}, tree{}, failed{};
+    bool (*output)(void*, const char*, unsigned){};
+    void* output_context{};
     unsigned seen[4096]{}, used{};
     uint64_t generation{};
     void text(const char* s)
@@ -19,6 +21,12 @@ struct Printer
         size_t n = 0;
         while(s[n])
             ++n;
+        if(output)
+        {
+            if(!failed && !output(output_context, s, n))
+                failed = true;
+            return;
+        }
         while(n && !failed)
         {
             long written = os1::user::write(1, s, n);

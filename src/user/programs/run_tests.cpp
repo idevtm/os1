@@ -4,6 +4,7 @@
 #include <os1/system.hpp>
 
 #include "freestanding/string.hpp"
+#include "hardware/archive_stream.hpp"
 #include "hardware/capture.hpp"
 #include "hardware/test_run.hpp"
 #include "log/frame.hpp"
@@ -251,16 +252,27 @@ long snapshot(const char* name, unsigned kind)
 }
 long inventory(const char* name, unsigned mode)
 {
-    os1_resource_info original{};
-    if(u::query(1, &original) < 0)
-        return OS1_ERR_ACCESS;
-    Artifact output(name);
-    f::Handle saved(u::duplicate(1, original.rights));
-    if(output.fd < 0 || saved.fd < 0)
-        return OS1_ERR_IO;
-    if(u::duplicate(output.fd, OS1_RIGHT_WRITE, 0, 1) < 0)
-        return OS1_ERR_IO;
+    struct ArchiveIO
+    {
+        long position()
+        {
+            return u::seek(archive, 0, OS1_SEEK_CUR);
+        }
+        bool seek(long offset)
+        {
+            return u::seek(archive, offset) == offset;
+        }
+        bool write(const char* data, unsigned count)
+        {
+            return f::put(archive, data, count);
+        }
+    } io;
+    tr::ArchiveStream<ArchiveIO> stream(io, name);
     printer = {};
+    printer.output_context = &stream;
+    printer.output = [](void* context, const char* data, unsigned count) {
+        return static_cast<tr::ArchiveStream<ArchiveIO>*>(context)->write(data, count);
+    };
     printer.verbose = true;
     printer.tree = true;
     printer.text("platform boot snapshot; USB attachments updated at runtime\n");
@@ -280,8 +292,12 @@ long inventory(const char* name, unsigned mode)
     }
     else
         printer.collection(OS1_HARDWARE_BLOCKS);
-    bool restored = u::duplicate(saved.fd, original.rights, original.descriptor_flags, 1) >= 0;
-    return restored && !printer.failed ? 0 : OS1_ERR_IO;
+    bool saved = stream.finish();
+    printer.output = nullptr;
+    printer.output_context = nullptr;
+    if(!saved)
+        io_failed = true;
+    return saved && !printer.failed ? 0 : OS1_ERR_IO;
 }
 long copy_log(const char* source, const char* name)
 {

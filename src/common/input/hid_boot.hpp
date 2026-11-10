@@ -6,13 +6,18 @@ struct HidBoot
 {
     unsigned configuration{}, interface{}, protocol{}, endpoint{}, packet{}, interval{};
 };
-inline bool hid_boot(const uint8_t* p, unsigned length, HidBoot& out)
+inline bool hid_boot(const uint8_t* p,
+                     unsigned length,
+                     HidBoot& out,
+                     unsigned selection = 0,
+                     unsigned max_packet = 8)
 {
     out = {};
     if(!p || length < 9 || p[0] != 9 || p[1] != 2 || !p[5] ||
        (unsigned(p[2]) | unsigned(p[3]) << 8) != length)
         return false;
     HidBoot candidate{};
+    unsigned matching = 0;
     bool active = false, found = false;
     for(unsigned at = 9; at < length; at += p[at])
     {
@@ -33,13 +38,17 @@ inline bool hid_boot(const uint8_t* p, unsigned length, HidBoot& out)
             unsigned packet = p[at + 4] | unsigned(p[at + 5]) << 8;
             if(active && !found && (p[at + 2] & 0x80) && (p[at + 2] & 15) && !(p[at + 2] & 0x70) &&
                (p[at + 3] & 3) == 3 && packet >= (candidate.protocol == 1 ? 8u : 3u) &&
-               packet <= 8 && p[at + 6])
+               packet <= max_packet && p[at + 6])
             {
                 candidate.endpoint = p[at + 2];
                 candidate.packet = packet;
                 candidate.interval = p[at + 6];
-                out = candidate;
-                found = true;
+                active = false;  // One interrupt IN endpoint per interface.
+                if(matching++ == selection)
+                {
+                    out = candidate;
+                    found = true;
+                }
             }
         }
     }

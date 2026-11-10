@@ -1,0 +1,129 @@
+{
+  "baseline_source_revision": "65fae14 at task start; source changes since 7fb69e7 contain only user Linux reference captures.",
+  "baseline_executable_revision": "Unmeasured for the baseline emulator runs; expected 7fb69e7 from the unchanged executable source, not attested by retained manifests.",
+  "candidate_source": "65fae14 plus hardware corrections; source diff retained with validation",
+  "environment": {
+    "host": "macOS 26.6.2 (25G83), arm64",
+    "qemu": "11.1.3",
+    "guest": "q35, TCG, 4 CPUs, 128 MiB RAM; two concurrent QEMU guests",
+    "compiler": "x86_64-elf-g++ GCC 11.2.0",
+    "profile": "Debug, KMEM_DEBUG ON, QEMU_DEBUGCON ON, normal boot",
+    "uefi_code": "/opt/homebrew/share/qemu/edk2-x86_64-code.fd",
+    "uefi_vars": "/opt/homebrew/share/qemu/edk2-i386-vars.fd"
+  },
+  "workload": "First two default run-tests commands in the existing device-runner test; one test invocation per tree and firmware. Subsequent runner stages also verify input, result preservation, and reboot.",
+  "timings": [
+    {
+      "firmware": "bios",
+      "baseline": {
+        "samples_seconds": [
+          1.7991419583559036,
+          1.741853041574359
+        ],
+        "median_seconds": 1.7704974999651313,
+        "evidence": "build/artifacts/test-runs/os1_smoke_device_runner_bios-xebcuo2g",
+        "first_run_file_bytes": 115862
+      },
+      "candidate": {
+        "samples_seconds": [
+          2.4237232077866793,
+          1.8710443750023842
+        ],
+        "median_seconds": 2.1473837913945317,
+        "evidence": "build/artifacts/test-runs/os1_smoke_device_runner_bios-bo4zxrly",
+        "first_run_file_bytes": 115864
+      },
+      "difference_seconds": 0.37688629142940044,
+      "difference_percent": 21.287027597430832
+    },
+    {
+      "firmware": "uefi",
+      "baseline": {
+        "samples_seconds": [
+          1.5227434579283,
+          1.6132851671427488
+        ],
+        "median_seconds": 1.5680143125355244,
+        "evidence": "build/artifacts/test-runs/os1_smoke_device_runner_uefi-fltkv1i1",
+        "first_run_file_bytes": 115862
+      },
+      "candidate": {
+        "samples_seconds": [
+          1.518571083433926,
+          1.617985749617219
+        ],
+        "median_seconds": 1.5682784165255725,
+        "evidence": "build/artifacts/test-runs/os1_smoke_device_runner_uefi-kin5hg02",
+        "first_run_file_bytes": 115863
+      },
+      "difference_seconds": 0.0002641039900481701,
+      "difference_percent": 0.0168432129692175
+    }
+  ],
+  "artifacts": [
+    {
+      "artifact": "kernel.elf",
+      "baseline": {
+        "bytes": 614952,
+        "evidence": "build/input-hardware-fixes/baseline/artifacts.json",
+        "sha256": null
+      },
+      "candidate": {
+        "path": "build/artifacts/kernel.elf",
+        "bytes": 616328,
+        "sha256": "26a0f6f94fc8634234fc2b67b2ed303020765857b616edeb79242b82972cf848"
+      },
+      "difference_bytes": 1376,
+      "difference_percent": 0.22375730138287217
+    },
+    {
+      "artifact": "user/run-tests.elf",
+      "baseline": {
+        "bytes": 29688,
+        "evidence": "build/input-hardware-fixes/baseline/artifacts.json",
+        "sha256": null
+      },
+      "candidate": {
+        "path": "build/artifacts/user/run-tests.elf",
+        "bytes": 30768,
+        "sha256": "55bdbbfa67bd23b0d04bcf695196d375685bf25900ae7d684ed841ad154e2e75"
+      },
+      "difference_bytes": 1080,
+      "difference_percent": 3.637833468067906
+    }
+  ],
+  "elf_size_output": "   text\t   data\t    bss\t    dec\t    hex\tfilename\n 426259\t  31560\t 249581\t 707400\t  acb48\tbuild/usb-write/artifacts/kernel.elf\n 427219\t  31560\t 260909\t 719688\t  afb48\tbuild/artifacts/kernel.elf\n  20101\t   4460\t  85496\t 110057\t  1ade9\tbuild/usb-write/artifacts/user/run-tests.elf\n  20890\t   4460\t  85528\t 110878\t  1b11e\tbuild/artifacts/user/run-tests.elf\n",
+  "limitations": [
+    "Two command samples do not establish a performance trend. BIOS cold-run timing increased; UEFI timing is nearly unchanged.",
+    "First-run output sizes vary slightly with timestamps and counter text.",
+    "Peak process memory, physical-device latency, and composite endpoint operation remain unmeasured.",
+    "Each second xHCI input function requires two additional DMA pages, 8192 bytes; published pages remain quarantined until reboot.",
+    "Non-HID xHCI devices no longer allocate two unused input DMA pages. Inventory streaming uses a 4096-byte stack buffer."
+  ],
+  "section_measurement_note": "ELF section comparison uses the preserved USB build with QEMU_DEBUGCON OFF versus normal candidate ON. It describes storage sizes, not a controlled runtime-memory comparison.",
+  "baseline_hash_note": "The isolated test wrapper removed the extracted baseline manifests and archives after success. Timing logs and at-start normal artifact byte sizes remain. Baseline embedded revision and binary hashes are not available for these specific emulator runs.",
+  "firmware_hashes": {
+    "/opt/homebrew/share/qemu/edk2-x86_64-code.fd": "33090cc07675baa5190d9f1e84bf5176b33bcbfa9bacac522961150cdb6dbb2a",
+    "/opt/homebrew/share/qemu/edk2-i386-vars.fd": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+  },
+  "candidate_log_identity": "#pragma once\n#define OS1_LOG_REVISION \"65fae14cbdbbd6002018a29dd5ca18d03fa97a5d\"\n#define OS1_LOG_IMAGE \"94a4d9ebd04b8f5a4e42c0608b49a798ffb96be3cf0e853c2a77a45c2bfa3baa\"\n",
+  "validation": {
+    "command": "./scripts/check-local.sh",
+    "output": "build/input-hardware-fixes/full-local-first.log",
+    "logs": "build/input-hardware-fixes/final-suite",
+    "profiles": {
+      "host": {
+        "passed": 664,
+        "seconds": 21.66
+      },
+      "normal": {
+        "passed": 92,
+        "seconds": 466.06
+      },
+      "diagnostic": {
+        "passed": 3,
+        "seconds": 9.51
+      }
+    }
+  }
+}
