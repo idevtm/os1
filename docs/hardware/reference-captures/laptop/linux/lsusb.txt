@@ -1,0 +1,10 @@
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 001 Device 002: ID 8087:0024 Intel Corp. Integrated Rate Matching Hub
+Bus 001 Device 004: ID 13d3:5134 IMC Networks Integrated Webcam
+Bus 001 Device 005: ID 0bda:0139 Realtek Semiconductor Corp. RTS5139 Card Reader Controller
+Bus 001 Device 006: ID 0cf3:3005 Qualcomm Atheros Communications AR3011 Bluetooth
+Bus 002 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 003 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 003 Device 002: ID 8087:0024 Intel Corp. Integrated Rate Matching Hub
+Bus 003 Device 003: ID 1c4f:0034 SiGma Micro XM102K Optical Wheel Mouse
+Bus 004 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub

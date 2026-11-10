@@ -1,0 +1,349 @@
+moon
+    description: Computer
+    width: 64 bits
+    capabilities: smp vsyscall32
+  *-core
+       description: Motherboard
+       physical id: 0
+     *-memory
+          description: System memory
+          physical id: 0
+          size: 16GiB
+     *-cpu
+          product: Intel(R) Core(TM) i5-4460  CPU @ 3.20GHz
+          vendor: Intel Corp.
+          physical id: 1
+          bus info: cpu@0
+          version: 6.60.3
+          size: 3276MHz
+          capacity: 3400MHz
+          width: 64 bits
+          capabilities: fpu fpu_exception wp vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp x86-64 constant_tsc arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm cpuid_fault pti ssbd ibrs ibpb stibp tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid xsaveopt dtherm ida arat pln pts vnmi md_clear flush_l1d cpufreq
+          configuration: microcode=40
+     *-pci
+          description: Host bridge
+          product: 4th Gen Core Processor DRAM Controller
+          vendor: Intel Corporation
+          physical id: 100
+          bus info: pci@0000:00:00.0
+          version: 06
+          width: 32 bits
+          clock: 33MHz
+          configuration: driver=hsw_uncore
+          resources: irq:0
+        *-pci:0
+             description: PCI bridge
+             product: Xeon E3-1200 v3/4th Gen Core Processor PCI Express x16 Controller
+             vendor: Intel Corporation
+             physical id: 1
+             bus info: pci@0000:00:01.0
+             version: 06
+             width: 32 bits
+             clock: 33MHz
+             capabilities: pci normal_decode bus_master cap_list
+             configuration: driver=pcieport
+             resources: irq:26 ioport:e000(size=4096) memory:f6000000-f70fffff ioport:e0000000(size=301989888)
+           *-display
+                description: VGA compatible controller
+                product: GM206 [GeForce GTX 950]
+                vendor: NVIDIA Corporation
+                physical id: 0
+                bus info: pci@0000:01:00.0
+                logical name: /dev/fb0
+                version: a1
+                width: 64 bits
+                clock: 33MHz
+                capabilities: vga_controller bus_master cap_list rom fb
+                configuration: depth=32 driver=nvidia latency=0 resolution=3840,2160
+                resources: irq:40 memory:f6000000-f6ffffff memory:e0000000-efffffff memory:f0000000-f1ffffff ioport:e000(size=128) memory:c0000-dffff
+           *-multimedia
+                description: Audio device
+                product: GM206 High Definition Audio Controller
+                vendor: NVIDIA Corporation
+                physical id: 0.1
+                bus info: pci@0000:01:00.1
+                logical name: card2
+                logical name: /dev/snd/controlC2
+                logical name: /dev/snd/hwC2D0
+                logical name: /dev/snd/pcmC2D3p
+                logical name: /dev/snd/pcmC2D7p
+                logical name: /dev/snd/pcmC2D8p
+                logical name: /dev/snd/pcmC2D9p
+                version: a1
+                width: 32 bits
+                clock: 33MHz
+                capabilities: hda_compatible bus_master cap_list
+                configuration: driver=snd_hda_intel latency=0
+                resources: irq:17 memory:f7080000-f7083fff
+              *-input:0
+                   product: HDA NVidia HDMI/DP,pcm=3
+                   physical id: 0
+                   logical name: input23
+                   logical name: /dev/input/event13
+              *-input:1
+                   product: HDA NVidia HDMI/DP,pcm=7
+                   physical id: 1
+                   logical name: input24
+                   logical name: /dev/input/event14
+              *-input:2
+                   product: HDA NVidia HDMI/DP,pcm=8
+                   physical id: 2
+                   logical name: input25
+                   logical name: /dev/input/event15
+              *-input:3
+                   product: HDA NVidia HDMI/DP,pcm=9
+                   physical id: 3
+                   logical name: input26
+                   logical name: /dev/input/event16
+        *-display
+             description: VGA compatible controller
+             product: Xeon E3-1200 v3/4th Gen Core Processor Integrated Graphics Controller
+             vendor: Intel Corporation
+             physical id: 2
+             bus info: pci@0000:00:02.0
+             version: 06
+             width: 64 bits
+             clock: 33MHz
+             capabilities: vga_controller bus_master cap_list rom
+             configuration: driver=i915 latency=0
+             resources: irq:37 memory:f7400000-f77fffff memory:d0000000-dfffffff ioport:f000(size=64) memory:c0000-dffff
+        *-multimedia:0
+             description: Audio device
+             product: Xeon E3-1200 v3/4th Gen Core Processor HD Audio Controller
+             vendor: Intel Corporation
+             physical id: 3
+             bus info: pci@0000:00:03.0
+             logical name: card0
+             logical name: /dev/snd/controlC0
+             logical name: /dev/snd/hwC0D0
+             logical name: /dev/snd/pcmC0D3p
+             logical name: /dev/snd/pcmC0D7p
+             logical name: /dev/snd/pcmC0D8p
+             version: 06
+             width: 64 bits
+             clock: 33MHz
+             capabilities: hda_compatible bus_master cap_list
+             configuration: driver=snd_hda_intel latency=0
+             resources: irq:38 memory:f7914000-f7917fff
+           *-input:0
+                product: HDA Intel HDMI HDMI/DP,pcm=3
+                physical id: 0
+                logical name: input16
+                logical name: /dev/input/event6
+           *-input:1
+                product: HDA Intel HDMI HDMI/DP,pcm=7
+                physical id: 1
+                logical name: input17
+                logical name: /dev/input/event7
+           *-input:2
+                product: HDA Intel HDMI HDMI/DP,pcm=8
+                physical id: 2
+                logical name: input18
+                logical name: /dev/input/event8
+        *-usb:0
+             description: USB controller
+             product: 8 Series/C220 Series Chipset Family USB xHCI
+             vendor: Intel Corporation
+             physical id: 14
+             bus info: pci@0000:00:14.0
+             version: 05
+             width: 64 bits
+             clock: 33MHz
+             capabilities: xhci bus_master cap_list
+             configuration: driver=xhci_hcd latency=0
+             resources: irq:29 memory:f7900000-f790ffff
+        *-communication
+             description: Communication controller
+             product: 8 Series/C220 Series Chipset Family MEI Controller #1
+             vendor: Intel Corporation
+             physical id: 16
+             bus info: pci@0000:00:16.0
+             version: 04
+             width: 64 bits
+             clock: 33MHz
+             capabilities: bus_master cap_list
+             configuration: driver=mei_me latency=0
+             resources: irq:36 memory:f791e000-f791e00f
+        *-usb:1
+             description: USB controller
+             product: 8 Series/C220 Series Chipset Family USB EHCI #2
+             vendor: Intel Corporation
+             physical id: 1a
+             bus info: pci@0000:00:1a.0
+             version: 05
+             width: 32 bits
+             clock: 33MHz
+             capabilities: ehci bus_master cap_list
+             configuration: driver=ehci-pci latency=0
+             resources: irq:16 memory:f791c000-f791c3ff
+        *-multimedia:1
+             description: Audio device
+             product: 8 Series/C220 Series Chipset High Definition Audio Controller
+             vendor: Intel Corporation
+             physical id: 1b
+             bus info: pci@0000:00:1b.0
+             logical name: card1
+             logical name: /dev/snd/controlC1
+             logical name: /dev/snd/hwC1D2
+             logical name: /dev/snd/pcmC1D0c
+             logical name: /dev/snd/pcmC1D0p
+             logical name: /dev/snd/pcmC1D2c
+             version: 05
+             width: 64 bits
+             clock: 33MHz
+             capabilities: hda_compatible bus_master cap_list
+             configuration: driver=snd_hda_intel latency=0
+             resources: irq:39 memory:f7910000-f7913fff
+           *-input:0
+                product: HDA Intel PCH Rear Mic
+                physical id: 0
+                logical name: input19
+                logical name: /dev/input/event9
+           *-input:1
+                product: HDA Intel PCH Front Mic
+                physical id: 1
+                logical name: input20
+                logical name: /dev/input/event10
+           *-input:2
+                product: HDA Intel PCH Line
+                physical id: 2
+                logical name: input21
+                logical name: /dev/input/event11
+           *-input:3
+                product: HDA Intel PCH Line Out
+                physical id: 3
+                logical name: input22
+                logical name: /dev/input/event12
+        *-pci:1
+             description: PCI bridge
+             product: 8 Series/C220 Series Chipset Family PCI Express Root Port #1
+             vendor: Intel Corporation
+             physical id: 1c
+             bus info: pci@0000:00:1c.0
+             version: d5
+             width: 32 bits
+             clock: 33MHz
+             capabilities: pci normal_decode bus_master cap_list
+             configuration: driver=pcieport
+             resources: irq:27
+        *-pci:2
+             description: PCI bridge
+             product: 8 Series/C220 Series Chipset Family PCI Express Root Port #3
+             vendor: Intel Corporation
+             physical id: 1c.2
+             bus info: pci@0000:00:1c.2
+             version: d5
+             width: 32 bits
+             clock: 33MHz
+             capabilities: pci normal_decode bus_master cap_list
+             configuration: driver=pcieport
+             resources: irq:28 ioport:d000(size=4096) memory:f7800000-f78fffff ioport:f2100000(size=1048576)
+           *-network
+                description: Ethernet interface
+                product: RTL8111/8168/8211/8411 PCI Express Gigabit Ethernet Controller
+                vendor: Realtek Semiconductor Co., Ltd.
+                physical id: 0
+                bus info: pci@0000:03:00.0
+                logical name: enp3s0
+                version: 06
+                serial: 40:8d:5c:f3:f7:dd
+                size: 1Gbit/s
+                capacity: 1Gbit/s
+                width: 64 bits
+                clock: 33MHz
+                capabilities: bus_master cap_list ethernet physical tp mii 10bt 10bt-fd 100bt 100bt-fd 1000bt-fd autonegotiation
+                configuration: autonegotiation=on broadcast=yes driver=r8169 driverversion=7.0.0-42-generic duplex=full firmware=rtl8168e-3_0.0.4 03/27/12 ip=192.168.100.133 latency=0 link=yes multicast=yes port=twisted pair speed=1Gbit/s
+                resources: irq:18 ioport:d000(size=256) memory:f7800000-f7800fff memory:f2100000-f2103fff
+        *-usb:2
+             description: USB controller
+             product: 8 Series/C220 Series Chipset Family USB EHCI #1
+             vendor: Intel Corporation
+             physical id: 1d
+             bus info: pci@0000:00:1d.0
+             version: 05
+             width: 32 bits
+             clock: 33MHz
+             capabilities: ehci bus_master cap_list
+             configuration: driver=ehci-pci latency=0
+             resources: irq:23 memory:f791b000-f791b3ff
+        *-isa
+             description: ISA bridge
+             product: H81 Express LPC Controller
+             vendor: Intel Corporation
+             physical id: 1f
+             bus info: pci@0000:00:1f.0
+             version: 05
+             width: 32 bits
+             clock: 33MHz
+             capabilities: isa bus_master cap_list
+             configuration: driver=lpc_ich latency=0
+             resources: irq:0
+        *-sata
+             description: SATA controller
+             product: 8 Series/C220 Series Chipset Family 6-port SATA Controller 1 [AHCI mode]
+             vendor: Intel Corporation
+             physical id: 1f.2
+             bus info: pci@0000:00:1f.2
+             version: 05
+             width: 32 bits
+             clock: 66MHz
+             capabilities: sata ahci_1.0 bus_master cap_list
+             configuration: driver=ahci latency=0
+             resources: irq:34 ioport:f0b0(size=8) ioport:f0a0(size=4) ioport:f090(size=8) ioport:f080(size=4) ioport:f060(size=32) memory:f791a000-f791a7ff
+        *-serial
+             description: SMBus
+             product: 8 Series/C220 Series Chipset Family SMBus Controller
+             vendor: Intel Corporation
+             physical id: 1f.3
+             bus info: pci@0000:00:1f.3
+             version: 05
+             width: 64 bits
+             clock: 33MHz
+             configuration: driver=i801_smbus latency=0
+             resources: irq:18 memory:f7919000-f79190ff ioport:f040(size=32)
+  *-input:0
+       product: Power Button
+       physical id: 1
+       logical name: input0
+       logical name: /dev/input/event0
+       capabilities: platform
+  *-input:1
+       product: Power Button
+       physical id: 2
+       logical name: input1
+       logical name: /dev/input/event1
+       capabilities: platform
+  *-input:2
+       product: Logitech G502
+       physical id: 3
+       logical name: input14
+       logical name: /dev/input/event4
+       logical name: input14::capslock
+       logical name: input14::compose
+       logical name: input14::kana
+       logical name: input14::numlock
+       logical name: input14::scrolllock
+       logical name: /dev/input/mouse0
+       capabilities: usb
+  *-input:3
+       product: Video Bus
+       physical id: 4
+       logical name: input15
+       logical name: /dev/input/event5
+       capabilities: platform
+  *-input:4
+       product: LiteOn Lenovo Calliope USB Keyboard G2
+       physical id: 5
+       logical name: input2
+       logical name: /dev/input/event2
+       logical name: input2::capslock
+       logical name: input2::numlock
+       logical name: input2::scrolllock
+       capabilities: usb
+  *-input:5
+       product: LiteOn Lenovo Calliope USB Keyboard G2  Consumer Control
+       physical id: 6
+       logical name: input3
+       logical name: /dev/input/event3
+       logical name: /dev/input/js0
+       capabilities: usb

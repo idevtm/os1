@@ -1,0 +1,28 @@
+NAME   MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS
+loop0    7:0    0  66.8M  1 loop /snap/core24/1643
+loop1    7:1    0     4K  1 loop /snap/bare/5
+loop2    7:2    0  66.8M  1 loop /snap/core24/2124
+loop3    7:3    0    20M  1 loop /snap/desktop-security-center/151
+loop4    7:4    0  14.2M  1 loop /snap/desktop-security-center/206
+loop5    7:5    0 260.3M  1 loop /snap/firefox/8763
+loop6    7:6    0 262.2M  1 loop /snap/firefox/8995
+loop7    7:7    0  16.5M  1 loop /snap/firmware-updater/226
+loop8    7:8    0 615.3M  1 loop /snap/gnome-46-2404/168
+loop9    7:9    0  12.7M  1 loop /snap/firmware-updater/258
+loop10   7:10   0 614.5M  1 loop /snap/gnome-46-2404/164
+loop11   7:11   0   1.5M  1 loop /snap/hwctl/123
+loop12   7:12   0  91.7M  1 loop /snap/gtk-common-themes/1535
+loop13   7:13   0   1.5M  1 loop /snap/hwctl/131
+loop14   7:14   0   402M  1 loop /snap/mesa-2404/1839
+loop15   7:15   0  50.1M  1 loop /snap/snapd/27710
+loop16   7:16   0  18.4M  1 loop /snap/prompting-client/228
+loop17   7:17   0  18.8M  1 loop /snap/prompting-client/222
+loop18   7:18   0  11.8M  1 loop /snap/snap-store/1390
+loop19   7:19   0  44.7M  1 loop /snap/snapd/28254
+loop20   7:20   0   828K  1 loop /snap/snapd-desktop-integration/391
+sda      8:0    0 476.9G  0 disk 
+├─sda1   8:1    0     1G  0 part /boot/efi
+└─sda2   8:2    0 475.9G  0 part /
+sdb      8:16   0 698.6G  0 disk 
+└─sdb1   8:17   0 698.6G  0 part 
+sr0     11:0    1  1024M  0 rom  
