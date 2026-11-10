@@ -58,7 +58,7 @@ Earlier successfully written lines remain; the command does not report success.
 | `<< marker` | Collect literal lines until a line exactly matches the marker. |
 
 ```text
-cat /etc/motd > /tmp/motd
+cat /disk/etc/motd > /tmp/motd
 cat < /tmp/motd >> /tmp/log
 cat << END > /tmp/message
 First line.

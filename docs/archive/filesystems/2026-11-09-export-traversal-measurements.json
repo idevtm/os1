@@ -1,0 +1,266 @@
+{
+  "baseline_revision": "62a69523c923aa0e4e429950a059773563b866e5",
+  "candidate": "working tree validated by full-local-2.log",
+  "repeats": 5,
+  "seconds": "host wall time unless identified as CPU time",
+  "tests": {
+    "os1_smoke_tree_tools_uefi": {
+      "baseline": [
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-32c1pp_7",
+          "execute_seconds": 5.743925417773426,
+          "child_cpu_seconds": 6.128502999999999,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-ehavsdrb",
+          "execute_seconds": 5.727404041215777,
+          "child_cpu_seconds": 6.086419,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-6h_bmaqg",
+          "execute_seconds": 5.71686187479645,
+          "child_cpu_seconds": 6.099083,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-9enoets6",
+          "execute_seconds": 5.726605708710849,
+          "child_cpu_seconds": 6.123918,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-x8bogwyt",
+          "execute_seconds": 5.69723383244127,
+          "child_cpu_seconds": 6.116486999999999,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        }
+      ],
+      "candidate": [
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-573nrif3",
+          "execute_seconds": 5.687058167532086,
+          "child_cpu_seconds": 6.098185,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-9z3k4_mp",
+          "execute_seconds": 5.7110695000737906,
+          "child_cpu_seconds": 6.123448,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-mb66budn",
+          "execute_seconds": 5.714231500402093,
+          "child_cpu_seconds": 6.107131,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-fyaqk1n9",
+          "execute_seconds": 5.731125125661492,
+          "child_cpu_seconds": 6.132159,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_tree_tools_uefi-u8vr89qu",
+          "execute_seconds": 5.731866957619786,
+          "child_cpu_seconds": 6.17638,
+          "kmem": {
+            "caches": 13,
+            "slab_pages": 180,
+            "free_objects": 521,
+            "live_objects": 2366,
+            "failures": 0
+          }
+        }
+      ],
+      "comparison": {
+        "execute_seconds": {
+          "baseline_median": 5.726605708710849,
+          "candidate_median": 5.714231500402093,
+          "absolute_difference": -0.012374208308756351,
+          "relative_percent": -0.21608277115942706
+        },
+        "child_cpu_seconds": {
+          "baseline_median": 6.116486999999999,
+          "candidate_median": 6.123448,
+          "absolute_difference": 0.006961000000000439,
+          "relative_percent": 0.11380715760534503
+        }
+      }
+    },
+    "os1_smoke_log_export_uefi": {
+      "baseline": [
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-v1kkhksy",
+          "execute_seconds": 18.941735417582095,
+          "child_cpu_seconds": 10.635425000000001,
+          "missing_phase_seconds": 10.478509250096977,
+          "missing_status_polls": 4,
+          "rescue_export_seconds": 0.005382874980568886
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-w03x73o6",
+          "execute_seconds": 18.929480915889144,
+          "child_cpu_seconds": 10.731036999999999,
+          "missing_phase_seconds": 10.477174957282841,
+          "missing_status_polls": 4,
+          "rescue_export_seconds": 0.00678387563675642
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-rp_v14va",
+          "execute_seconds": 18.927152999676764,
+          "child_cpu_seconds": 10.682441,
+          "missing_phase_seconds": 10.479793124832213,
+          "missing_status_polls": 4,
+          "rescue_export_seconds": 0.007937000133097172
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-su7q2o7s",
+          "execute_seconds": 18.912320874631405,
+          "child_cpu_seconds": 10.674289000000002,
+          "missing_phase_seconds": 10.491875374689698,
+          "missing_status_polls": 4,
+          "rescue_export_seconds": 0.007315957918763161
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-a3hjf46d",
+          "execute_seconds": 18.86065266560763,
+          "child_cpu_seconds": 10.402458,
+          "missing_phase_seconds": 10.508049624972045,
+          "missing_status_polls": 4,
+          "rescue_export_seconds": 0.007324209436774254
+        }
+      ],
+      "candidate": [
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-v61w7lba",
+          "execute_seconds": 20.160531791858375,
+          "child_cpu_seconds": 10.796509,
+          "missing_phase_seconds": 11.563491582870483,
+          "missing_status_polls": 5,
+          "rescue_export_seconds": 0.008426791988313198
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-1oa35vt5",
+          "execute_seconds": 20.086856791749597,
+          "child_cpu_seconds": 10.689216,
+          "missing_phase_seconds": 11.563429499976337,
+          "missing_status_polls": 5,
+          "rescue_export_seconds": 0.008638249710202217
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-t1fkz_nb",
+          "execute_seconds": 20.11017783265561,
+          "child_cpu_seconds": 10.682080000000001,
+          "missing_phase_seconds": 11.550393666140735,
+          "missing_status_polls": 5,
+          "rescue_export_seconds": 0.007272666320204735
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-sysniyqf",
+          "execute_seconds": 20.099395666271448,
+          "child_cpu_seconds": 10.587003,
+          "missing_phase_seconds": 11.546794541180134,
+          "missing_status_polls": 5,
+          "rescue_export_seconds": 0.006800707429647446
+        },
+        {
+          "evidence": "build/artifacts/test-runs/os1_smoke_log_export_uefi-ot_pbqa_",
+          "execute_seconds": 20.055175041779876,
+          "child_cpu_seconds": 10.609024999999999,
+          "missing_phase_seconds": 11.534391707740724,
+          "missing_status_polls": 5,
+          "rescue_export_seconds": 0.004868875257670879
+        }
+      ],
+      "comparison": {
+        "execute_seconds": {
+          "baseline_median": 18.927152999676764,
+          "candidate_median": 20.099395666271448,
+          "absolute_difference": 1.1722426665946841,
+          "relative_percent": 6.19344423651409
+        },
+        "child_cpu_seconds": {
+          "baseline_median": 10.674289000000002,
+          "candidate_median": 10.682080000000001,
+          "absolute_difference": 0.007790999999999215,
+          "relative_percent": 0.07298846789701136
+        },
+        "rescue_export_seconds": {
+          "baseline_median": 0.007315957918763161,
+          "candidate_median": 0.007272666320204735,
+          "absolute_difference": -4.32915985584259e-05,
+          "relative_percent": -0.5917420389665774
+        },
+        "missing_phase_seconds": {
+          "baseline_median": 10.479793124832213,
+          "candidate_median": 11.550393666140735,
+          "absolute_difference": 1.0706005413085222,
+          "relative_percent": 10.21585568107923
+        },
+        "missing_status_polls": {
+          "baseline_median": 4,
+          "candidate_median": 5,
+          "absolute_difference": 1,
+          "relative_percent": 25.0
+        }
+      }
+    }
+  }
+}

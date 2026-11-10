@@ -111,11 +111,12 @@ def main():
     parser.add_argument('--code')
     parser.add_argument('--vars')
     parser.add_argument('--transport', choices=['usb', 'ehci'], default='usb')
+    parser.add_argument('--programs-manifest', required=True)
     args = parser.parse_args()
     args.coexist = args.transport == 'ehci'
     log = Path(args.log)
     disk = log.with_suffix('.raw')
-    create(disk, args.utility, reset=True)
+    create(disk, args.utility, reset=True, manifest=args.programs_manifest)
     with tempfile.TemporaryDirectory(prefix='os1-usb-qmp-') as temporary:
         args.qmp = str(Path(temporary)/'qmp.sock')
         def exercise(run, expect):
@@ -164,7 +165,7 @@ def main():
     boot(args, disk, 'high-speed', commands=[('/disk/diskutil verify', b'diskutil verify ok')])
     args.readonly = True
     before = disk.read_bytes()
-    boot(args, disk, 'readonly', commands=[('echo readonly-rejected', b'readonly-rejected\n')])
+    boot(args, disk, 'readonly', commands=[('help', b'usb; retry; sync; shutdown; reboot')])
     assert disk.read_bytes() == before, 'readonly media changed'
     args.readonly = False
     if args.transport == 'ehci':
@@ -190,7 +191,7 @@ def main():
             result = connection[0].execute('human-monitor-command',
                          {'command-line': 'qemu-io data "resume init-flush"'})
             assert not result, result
-            run('echo survived-late-completion', b'survived-late-completion\n')
+            run('help', b'usb; retry; sync; shutdown; reboot')
             run('ls /tmp')
         try:
             boot(args, disk, 'init-timeout', before_boot=stall, exercise=resume)

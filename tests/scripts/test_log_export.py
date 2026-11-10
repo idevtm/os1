@@ -113,16 +113,14 @@ def main():
     def without_mount(run, expect):
         time.sleep(6.5)
         deadline = time.monotonic() + 30
-        status = run('os.system.log.export_info')
+        status = run('log_status')
         while b'suspended:1' not in status and time.monotonic() < deadline:
             time.sleep(1)
-            status = run('os.system.log.export_info')
+            status = run('log_status')
         assert b'suspended:1' in status, status
-        run('echo "memory survives missing disk"')
-        run('history limit:3', b'memory survives missing disk')
-        run('os.system.log.export target:"tmp"')
-        run('ls "/tmp/log"', b'kernel.bin')
-        status = run('os.system.log.export_info')
+        run('log_export')
+        run('ls /tmp/log', b'kernel.bin')
+        status = run('log_status')
         assert b'suspended:1' in status, status
 
     boot(args, missing, 'missing', exercise=without_mount)

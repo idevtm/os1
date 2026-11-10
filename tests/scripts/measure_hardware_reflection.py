@@ -29,7 +29,7 @@ def main():
                 stem = output / f'{label}-{firmware}-{repeat}'
                 disk = stem.with_suffix('.raw')
                 shutil.copyfile(Path(args.candidate) / 'program-test-disk.raw', disk)
-                run = SimpleNamespace(
+                run = SimpleNamespace(boot_menu_entry=None,
                     qemu=args.qemu,
                     image=str(artifacts / ('os1.raw' if firmware == 'bios' else 'os1.iso')),
                     code=args.code if firmware == 'uefi' else None,

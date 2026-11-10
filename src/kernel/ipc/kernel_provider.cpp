@@ -631,24 +631,24 @@ void invoke_system(OpenInstance&,
                                 : request.payload_bytes ? OS1_ERR_INVALID
                                                         : system_control(request.member);
 }
-void invoke_log(OpenInstance&,
-                uint32_t rights,
-                uint32_t,
-                const os1_ipc_message& request,
-                os1_ipc_result& result,
-                DescriptorEntry&)
+bool try_invoke_log(OpenInstance&,
+                    uint32_t rights,
+                    uint32_t,
+                    const os1_ipc_message& request,
+                    os1_ipc_result& result,
+                    DescriptorEntry&)
 {
     if(!(rights & OS1_RIGHT_LOG_READ))
     {
         result.application_status = OS1_ERR_ACCESS;
-        return;
+        return true;
     }
     if(request.member == OS1_LOG_EXPORT_INFO && !request.payload_bytes)
     {
         auto information = log_export::info();
         memcpy(result.payload, &information, sizeof(information));
         result.payload_bytes = sizeof(information);
-        return;
+        return true;
     }
     if(request.member == OS1_LOG_EXPORT)
     {
@@ -659,20 +659,25 @@ void invoke_log(OpenInstance&,
                 args.reserved)
             result.application_status = OS1_ERR_INVALID;
         else
-            result.application_status = log_export::run(args.target);
-        return;
+        {
+            long status;
+            if(!log_export::try_run(args.target, status))
+                return false;
+            result.application_status = status;
+        }
+        return true;
     }
     if(request.member == OS1_LOG_INFO && !request.payload_bytes)
     {
         auto information = diagnostic_log::info();
         memcpy(result.payload, &information, sizeof(information));
         result.payload_bytes = sizeof(information);
-        return;
+        return true;
     }
     if(request.member != OS1_LOG_READ || request.payload_bytes != sizeof(os1_log_query))
     {
         result.application_status = OS1_ERR_INVALID;
-        return;
+        return true;
     }
     os1_log_query query{};
     memcpy(&query, request.payload, sizeof(query));
@@ -685,13 +690,25 @@ void invoke_log(OpenInstance&,
         memcpy(result.payload, &record, sizeof(record));
         result.payload_bytes = sizeof(record);
     }
+    return true;
+}
+void invoke_log(OpenInstance& source,
+                uint32_t rights,
+                uint32_t ceiling,
+                const os1_ipc_message& request,
+                os1_ipc_result& result,
+                DescriptorEntry& output)
+{
+    if(!try_invoke_log(source, rights, ceiling, request, result, output))
+        result.application_status = OS1_ERR_WOULD_BLOCK;
 }
 const KernelProvider log_provider{OS1_LOG_INTERFACE_ID,
                                   1,
                                   OS1_OBJECT_DIRECTORY,
                                   OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL,
                                   system_root,
-                                  invoke_log};
+                                  invoke_log,
+                                  try_invoke_log};
 const KernelProvider system_provider{OS1_SYSTEM_INTERFACE_ID,
                                      1,
                                      OS1_OBJECT_DIRECTORY,

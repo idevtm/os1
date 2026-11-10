@@ -30,17 +30,20 @@ while True:
     if int(header[14:22], 16) & 0xf000 == 0x8000:
         files.add(name)
     offset = (offset + size + 3) & ~3
-assert files == {'bin/init', 'bin/sh', 'bin/ls', 'bin/cat', 'etc/motd'}, files
-programs = json.loads(a.manifest.read_text())['programs']
+assert files == {'bin/init', 'bin/rescue'}, files
+manifest = json.loads(a.manifest.read_text())
+programs = manifest['programs']
+resources = manifest['resources']
 with tempfile.TemporaryDirectory() as temporary:
     part = Path(temporary) / 'data.ext2'
     part.write_bytes(a.disk.read_bytes()[2048 * 512:])
     installed = snapshot(part)
-    for entry in programs:
+    for entry in programs + resources:
         path = entry['destination'].removeprefix('/disk')
-        assert installed[path][0] == 0o100755, path
+        assert installed[path][0] == (0o100644 if entry in resources else 0o100755), path
         assert installed[path][1] == hashlib.sha256(Path(entry['source']).read_bytes()).hexdigest(), path
-assert not any('/disk/bin/' + name in [e['destination'] for e in programs] for name in ('init', 'sh', 'ls', 'cat'))
-assert {'/disk/bin/textprocessor', '/disk/bin/counter', '/disk/bin/activation', '/disk/bin/intf',
+assert not any('/disk/bin/' + name in [e['destination'] for e in programs] for name in ('init', 'rescue'))
+assert {'/disk/bin/sh', '/disk/bin/ls', '/disk/bin/cat', '/disk/bin/textprocessor', '/disk/bin/counter', '/disk/bin/activation', '/disk/bin/intf',
         '/disk/bin/paramdemo', '/disk/bin/buffercheck'} <= {e['destination'] for e in programs}
-print(f'Four recovery executables; {len(programs)} disk entries preserve complete ELF bytes')
+assert {e['destination'] for e in resources} == {'/disk/etc/motd'}
+print(f'Two recovery executables; {len(programs)} complete disk ELFs; {len(resources)} resource defaults')

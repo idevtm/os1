@@ -33,13 +33,18 @@ def tool(name, explicit=None):
 def manifest_entries(manifest):
     manifest = Path(manifest).resolve()
     data = json.loads(manifest.read_text())
-    if not isinstance(data, dict) or set(data) != {'version', 'programs'} or data['version'] != 1:
-        raise ValueError('expected manifest version 1 and programs')
-    entries = data['programs']
-    if not isinstance(entries, list) or not 1 <= len(entries) <= 64:
-        raise ValueError('manifest must list 1..64 programs')
+    if (not isinstance(data, dict) or
+            not ((data.get('version') == 1 and set(data) == {'version', 'programs'}) or
+                 (data.get('version') == 2 and set(data) == {'version', 'programs', 'resources'}))):
+        raise ValueError('expected version 1 programs or version 2 programs and resources')
+    programs = data['programs']
+    resources = data.get('resources', [])
+    if (not isinstance(programs, list) or not isinstance(resources, list) or
+            not 1 <= len(programs) + len(resources) <= 64):
+        raise ValueError('manifest must list 1..64 files')
+    entries = [(e, 0o100755) for e in programs] + [(e, 0o100644) for e in resources]
     result = {}
-    for entry in entries:
+    for entry, mode in entries:
         if not isinstance(entry, dict) or set(entry) != {'source', 'destination'}:
             raise ValueError('each program needs source and destination')
         destination = entry['destination']
@@ -57,16 +62,17 @@ def manifest_entries(manifest):
         if not isinstance(entry['source'], str):
             raise ValueError('source must be a path')
         source = (manifest.parent / entry['source']).resolve()
-        if not source.is_file() or not 0 < source.stat().st_size <= MAX_FILE:
+        if not source.is_file() or not 0 <= source.stat().st_size <= MAX_FILE:
             raise ValueError(f'missing or oversized program: {source}')
         with source.open('rb') as stream:
             content = stream.read(MAX_FILE + 1)
         if len(content) > MAX_FILE:
             raise ValueError('program grew beyond the file limit')
         # The guest loader performs the full ELF validation. Reject obvious packaging errors here.
-        if len(content) < 64 or content[:6] != b'\x7fELF\x02\x01' or content[18:20] != b'\x3e\x00':
+        if mode == 0o100755 and (len(content) < 64 or content[:6] != b'\x7fELF\x02\x01' or
+                                  content[18:20] != b'\x3e\x00'):
             raise ValueError(f'expected an x86-64 little-endian ELF program: {source}')
-        result[name] = content
+        result[name] = (mode, content)
     for name in result:
         if any(parent.as_posix() in result for parent in Path(name).parents):
             raise ValueError('program destination is also a parent directory')
@@ -102,11 +108,14 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
                 shutil.copyfileobj(original, target, 1024 * 1024)
             before = snapshot(part)
             check(e2fsck, part)
-            for name in programs:
-                if name in before and (before[name][0] & 0xf000 != 0x8000 or not before[name][0] & 0o111):
+            for name, (mode, _) in programs.items():
+                if name in before and (before[name][0] & 0xf000 != 0x8000 or
+                                       (mode == 0o100755 and not before[name][0] & 0o111)):
                     raise ValueError(f'refusing to replace a data file or directory: /disk{name}')
-            changed = {name: data for name, data in programs.items()
-                       if name not in before or before[name][:2] != (0o100755, hashlib.sha256(data).hexdigest())}
+            # Resource defaults are create-only. Preserve existing files, including metadata.
+            changed = {name: (mode, content) for name, (mode, content) in programs.items()
+                       if name not in before or (mode == 0o100755 and
+                           before[name][:2] != (mode, hashlib.sha256(content).hexdigest()))}
             if not changed:
                 print('Programs already match; image unchanged.')
                 return False
@@ -120,7 +129,7 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
                     raise ValueError('debugfs failed: ' + result.stdout + result.stderr)
 
             directories = {name for name, info in before.items() if info[0] & 0xf000 == 0x4000}
-            for index, (name, content) in enumerate(changed.items()):
+            for index, (name, (mode, content)) in enumerate(changed.items()):
                 for parent in reversed(Path(name).parents):
                     parent = parent.as_posix()
                     if parent not in directories:
@@ -133,7 +142,7 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
                 if name in before:
                     edit('rm ' + name)
                 edit(f'write {payload.name} {name}')
-                edit(f'set_inode_field {name} mode 0100755')
+                edit(f'set_inode_field {name} mode 0{mode:o}')
             check(e2fsck, part)
             after = snapshot(part)
             for name, prior in before.items():
@@ -141,8 +150,8 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
                     raise ValueError(f'preservation check failed: /disk{name}')
             if set(after) != set(before) | set(programs) | directories:
                 raise ValueError('unexpected namespace change')
-            for name, content in programs.items():
-                if after.get(name, ())[:2] != (0o100755, hashlib.sha256(content).hexdigest()):
+            for name, (mode, content) in changed.items():
+                if after.get(name, ())[:2] != (mode, hashlib.sha256(content).hexdigest()):
                     raise ValueError(f'program verification failed: /disk{name}')
             staged = temporary / 'image.raw'
             with staged.open('w+b') as target:
@@ -166,9 +175,9 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
                 finally:
                     os.close(directory_fd)
             for name in changed:
-                print(f'Deployed /disk{name} sha256={hashlib.sha256(programs[name]).hexdigest()}')
+                print(f'Deployed /disk{name} sha256={hashlib.sha256(programs[name][1]).hexdigest()}')
             print(f'Preserved {len(before.keys() - changed.keys())} existing entries; '
-                  f'elapsed_seconds={time.monotonic()-started:.6f}; staging_bytes<={length*2+start+sum(map(len,changed.values()))}')
+                  f'elapsed_seconds={time.monotonic()-started:.6f}; staging_bytes<={length*2+start+sum(len(content) for _, content in changed.values())}')
             return True
 
 

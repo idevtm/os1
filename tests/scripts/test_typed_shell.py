@@ -64,7 +64,7 @@ def exercise(run, expect):
     ok('cat "two/new.txt"', b'payload\n')
     ok('write "here.sh"\ncat << END > "/tmp/from-script"\nheredoc body\nEND\ncat "/tmp/from-script"\n.')
     ok('sh "here.sh"', b'heredoc body\n')
-    ok('write "bad-argv.sh"\n/bin/cat missing:name > "/tmp/guard"\necho "must-not-run"\n.')
+    ok('write "bad-argv.sh"\n/disk/bin/cat missing:name > "/tmp/guard"\necho "must-not-run"\n.')
     ok('echo "preserved" > "/tmp/guard"')
     failed = run('sh "bad-argv.sh"', allow_errors=True)
     assert b'invalid executable argument' in failed and b'must-not-run\n' not in failed, failed
@@ -73,7 +73,7 @@ def exercise(run, expect):
     assert b'unknown enum name' in failed, failed
     ok('cat "/tmp/guard"', b'preserved\n')
     ok('echo "colon file" > "/tmp/with:colon"')
-    ok('/bin/cat "/tmp/with:colon"', b'colon file\n')
+    ok('/disk/bin/cat "/tmp/with:colon"', b'colon file\n')
     ok('cd "/disk"')
     ok('mkdir "move-a"')
     ok('mkdir "move-b"')

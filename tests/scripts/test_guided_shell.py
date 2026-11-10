@@ -10,6 +10,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
+from boot_menu import BootMenu
 
 
 def main():
@@ -46,6 +47,7 @@ def main():
     selector.register(child.stdout, selectors.EVENT_READ)
     pending = bytearray()
     transcript = bytearray()
+    menu = BootMenu(1 if args.code else None)
 
     def send(data):
         child.stdin.write(data.encode() if isinstance(data, str) else data)
@@ -63,6 +65,7 @@ def main():
                 raise AssertionError(f'QEMU exited {child.poll()}')
             transcript.extend(data)
             pending.extend(data.replace(b'\r', b''))
+            menu.feed(data, child.stdin)
         at = pending.index(marker) + len(marker)
         result = bytes(pending[:at])
         del pending[:at]
@@ -113,10 +116,10 @@ def main():
         ok('g = process.streams.output.geometry')
         ok('g.columns',b'80' if not args.code else None)
         ok('process.streams.output.geometry.columns',b'80' if not args.code else None)
-        ok('out.print text:path.search(path:"sh")',b'/bin/sh')
+        ok('out.print text:path.search(path:"sh")',b'/disk/bin/sh')
         nested='"sh"'
         for _ in range(7): nested='path.search(path:'+nested+')'
-        ok('out.print text:'+nested,b'/bin/sh')
+        ok('out.print text:'+nested,b'/disk/bin/sh')
         bad('process.streams.input.acquire_input()',b'exclusive result requires a with scope')
         bad('persistent = process.streams.input.acquire_input()',b'exclusive result requires a with scope')
         for prefix in ('with s = ', 'with  s = ', 'with s\t= '):

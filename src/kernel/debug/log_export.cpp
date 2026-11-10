@@ -776,20 +776,32 @@ os1_log_export_info info()
 {
     return status;
 }
-long run(unsigned target)
+bool try_run(unsigned target, long& result)
 {
     if(!atomic_load_acquire(&initialized) || !staging)
-        return OS1_ERR_NO_MEMORY;
+    {
+        result = OS1_ERR_NO_MEMORY;
+        return true;
+    }
     if(target != OS1_LOG_EXPORT_TMP && target != OS1_LOG_EXPORT_DISK)
-        return OS1_ERR_INVALID;
+    {
+        result = OS1_ERR_INVALID;
+        return true;
+    }
     bool expected = false;
     if(!atomic_compare_exchange_strong(&busy, &expected, true))
-        return OS1_ERR_WOULD_BLOCK;
+    {
+        result = OS1_ERR_WOULD_BLOCK;
+        return false;
+    }
     uint32_t idle = 0;
     if(!atomic_compare_exchange_strong(&admission, &idle, UINT32_MAX))
     {
         atomic_store_release(&busy, false);
-        return OS1_ERR_WOULD_BLOCK;
+        {
+            result = OS1_ERR_WOULD_BLOCK;
+            return false;
+        }
     }
     long r;
     if(target == OS1_LOG_EXPORT_TMP)
@@ -809,8 +821,16 @@ long run(unsigned target)
     }
     atomic_store_release(&admission, 0u);
     atomic_store_release(&busy, false);
-    return r;
+    result = r;
+    return true;
 }
+long run(unsigned target)
+{
+    long result;
+    (void)try_run(target, result);
+    return result;
+}
+
 void poll()
 {
     if(!atomic_load_acquire(&initialized) || !staging)

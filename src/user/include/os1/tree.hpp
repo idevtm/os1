@@ -114,6 +114,7 @@ struct Frame
 {
     Handle source, destination;
     uint64_t cursor = 0, identity = 0;
+    uint64_t source_generation = 0, destination_generation = 0;
     size_t path_size = 0;
     char name[256]{};
 };
@@ -121,7 +122,7 @@ struct Walk
 {
     Frame frames[16];
     char path[OS1_PATH_MAX + 1]{};
-    uint64_t generation = 0, filesystem = 0, visited = 0, completed = 0, bytes = 0;
+    uint64_t filesystem = 0, visited = 0, completed = 0, bytes = 0;
     Mode mode;
     const char* pattern;
     uint32_t filter;
@@ -131,9 +132,9 @@ struct Walk
         : mode(m), pattern(p), filter(f), logical(l), append(a)
     {
     }
-    long step(int fd, os1_tree_step& request)
+    long step(int fd, os1_tree_step& request, uint64_t& generation)
     {
-        request.version = OS1_VFS_ABI_VERSION;
+        request.version = OS1_TREE_SCOPED_VERSION;
         request.size = sizeof(request);
         request.generation = generation;
         long r = os1_syscall3(
@@ -142,12 +143,12 @@ struct Walk
             generation = request.generation;
         return r;
     }
-    long check(int fd, os1_metadata& out, int exclude = -1)
+    long check(int fd, os1_metadata& out, uint64_t& generation, int exclude = -1)
     {
         os1_tree_step request{};
         request.action = OS1_TREE_CHECK;
         request.excluded_fd = exclude;
-        long r = step(fd, request);
+        long r = step(fd, request, generation);
         out = request.metadata;
         return r;
     }
@@ -157,6 +158,7 @@ struct Walk
                uint32_t kind,
                uint64_t identity,
                bool destination,
+               uint64_t& generation,
                os1_metadata* result = nullptr)
     {
         os1_tree_step r{};
@@ -181,17 +183,18 @@ struct Walk
                                                                : read_ceiling
                                       : 0;
         }
-        long status = step(parent, r);
+        long status = step(parent, r, generation);
         if(result)
             *result = r.metadata;
         return status;
     }
-    long destination(int parent, const char* name, uint32_t kind)
+    long destination(
+        int parent, const char* name, uint32_t kind, uint64_t& generation, os1_metadata& info)
     {
-        long r = named(parent, name, OS1_TREE_OPEN, kind, 0, true);
+        long r = named(parent, name, OS1_TREE_OPEN, kind, 0, true, generation, &info);
         if(r != OS1_ERR_NOT_FOUND)
             return r;
-        r = named(parent, name, OS1_TREE_CREATE, kind, 0, true);
+        r = named(parent, name, OS1_TREE_CREATE, kind, 0, true, generation, &info);
         if(r >= 0)
             ++completed;
         return r;
@@ -270,7 +273,18 @@ struct Walk
     {
         frames[0].source.reset(source);
         filesystem = root_info.filesystem_id;
-        generation = root_info.generation;
+        os1_metadata initial_info{};
+        long initial_status = check(source, initial_info, frames[0].source_generation);
+        if(initial_status < 0)
+            return initial_status;
+        uint64_t remove_generation = 0;
+        if(mode == Mode::Remove)
+        {
+            os1_metadata ignored{};
+            initial_status = check(remove_parent, ignored, remove_generation);
+            if(initial_status < 0)
+                return initial_status;
+        }
         size_t length = files::length(initial);
         if(length > OS1_PATH_MAX)
             return OS1_ERR_RANGE;
@@ -299,11 +313,13 @@ struct Walk
         {
             excluded = source;
             os1_metadata ignored{};
-            r = check(destination_parent, ignored, source);
+            uint64_t parent_generation = 0;
+            r = check(destination_parent, ignored, parent_generation, source);
             if(r < 0)
                 return r;
-            frames[0].destination.reset(
-                destination(destination_parent, destination_name, root_info.kind));
+            frames[0].destination.reset(destination(
+                destination_parent, destination_name, root_info.kind, parent_generation, ignored));
+            frames[0].destination_generation = ignored.generation;
             if(frames[0].destination.fd < 0)
                 return frames[0].destination.fd;
             if(root_info.kind == OS1_OBJECT_FILE)
@@ -320,7 +336,7 @@ struct Walk
             entry.excluded_fd = -1;
             entry.cursor = frame.cursor;
             entry.filesystem_id = filesystem;
-            r = step(frame.source.fd, entry);
+            r = step(frame.source.fd, entry, frame.source_generation);
             if(r < 0)
                 return r;
             if(!r)
@@ -335,7 +351,8 @@ struct Walk
                               OS1_TREE_REMOVE,
                               OS1_OBJECT_DIRECTORY,
                               frame.identity,
-                              false);
+                              false,
+                              depth ? frames[depth - 1].source_generation : remove_generation);
                     if(r < 0)
                         return r;
                     ++completed;
@@ -368,7 +385,8 @@ struct Walk
                           OS1_TREE_REMOVE,
                           entry.kind,
                           entry.object_id,
-                          false);
+                          false,
+                          frame.source_generation);
                 if(r < 0)
                     return r;
                 ++completed;
@@ -380,13 +398,19 @@ struct Walk
                                    OS1_TREE_OPEN,
                                    entry.kind,
                                    entry.object_id,
-                                   false));
+                                   false,
+                                   frame.source_generation));
                 if(child.fd < 0)
                     return child.fd;
                 Handle output;
+                os1_metadata output_info{};
                 if(mode == Mode::Copy)
                 {
-                    output.reset(destination(frame.destination.fd, entry.name, entry.kind));
+                    output.reset(destination(frame.destination.fd,
+                                             entry.name,
+                                             entry.kind,
+                                             frame.destination_generation,
+                                             output_info));
                     if(output.fd < 0)
                         return output.fd;
                 }
@@ -396,6 +420,8 @@ struct Walk
                     next.source.reset(child.take());
                     next.destination.reset(output.take());
                     next.identity = entry.object_id;
+                    next.source_generation = entry.metadata.generation;
+                    next.destination_generation = output_info.generation;
                     next.cursor = 0;
                     next.path_size = pos;
                     for(unsigned i = 0; i <= entry.name_bytes; ++i)

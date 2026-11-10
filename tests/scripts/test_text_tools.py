@@ -45,7 +45,7 @@ def exercise(run, expect):
         ('grep "Beta" < "sample"', b'Beta two\n'),
         ('file "sample"', b'ASCII text\n'),
         ('fs.identify "/tmp"', b'directory\n'),
-        ('file "/bin/cat"', b'ELF64\n'),
+        ('file "/bin/init"', b'ELF64\n'),
         ('file "/disk/diskutil"', b'ELF64\n'),
     ]:
         ok(command + ' > "out"')

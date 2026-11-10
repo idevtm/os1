@@ -25,7 +25,7 @@ WINDOW = '''
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('root', 'objects', 'linker', 'link_script', 'nasm', 'strip',
-                 'physical_base', 'virtual_offset', 'image', 'qemu', 'log'):
+                 'physical_base', 'virtual_offset', 'image', 'qemu', 'log', 'program_disk'):
         parser.add_argument('--' + name.replace('_', '-'), required=True)
     parser.add_argument('--kernel-lba', type=int, required=True)
     parser.add_argument('--kernel-sectors', type=int, required=True)
@@ -72,7 +72,9 @@ def main():
                        '--send-after', "shell prompt ready::echo 'handoff-test-ok'\\n", '--',
                        args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                        '-monitor', 'none', '-serial', 'stdio', '-no-reboot', '-no-shutdown',
-                       '-drive', f'file={disk},format=raw,if=ide,snapshot=on']
+                       '-drive', f'file={disk},format=raw,if=ide,snapshot=on',
+                       '-drive', f'if=none,id=data,file={args.program_disk},format=raw,snapshot=on',
+                       '-device', 'virtio-blk-pci,drive=data,disable-legacy=on']
             result = subprocess.run(command, capture_output=True, text=True, timeout=30)
             transcript.with_suffix('.runner.log').write_text(result.stdout + result.stderr)
             output = transcript.read_bytes()

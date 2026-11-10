@@ -17,5 +17,12 @@ struct KernelProvider
                    const os1_ipc_message&,
                    os1_ipc_result&,
                    DescriptorEntry&);
+    // Optional dispatch hook: false defers before effects and leaves output empty.
+    bool (*try_invoke)(OpenInstance&,
+                       uint32_t rights,
+                       uint32_t ceiling,
+                       const os1_ipc_message&,
+                       os1_ipc_result&,
+                       DescriptorEntry&) = nullptr;
 };
 const KernelProvider* kernel_provider(uint64_t interface_id, uint32_t version);

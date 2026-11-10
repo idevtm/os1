@@ -49,7 +49,7 @@ bool check(const char* command, const char* expected, bool same = false)
     if(saved.fd < 0 || duplicate(input.fd, readable, 0, 1) != 1)
         return false;
     const char* arguments[] = {"sh", script_path};
-    long pid = run_program("/bin/sh", 2, arguments);
+    long pid = run_program("/disk/bin/sh", 2, arguments);
     // The child owns its grants. Restore this program's output before checking status.
     bool restored = duplicate(saved.fd, output.rights, output.descriptor_flags, 1) == 1;
     if(pid < 0)

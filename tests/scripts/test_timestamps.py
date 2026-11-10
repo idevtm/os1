@@ -63,9 +63,9 @@ def main():
             assert directory[0] == directory[1] == directory[2]
             run(f'fs.update_times "{path}"')
             saved[root] = times(run, path)
-        unsupported = run('stat "/bin/cat"')
+        unsupported = run('stat "/bin/init"')
         assert b'access_ns:unsupported modify_ns:unsupported change_ns:unsupported' in unsupported, unsupported
-        for command in ('touch "/bin/cat"', 'fs.update_times "/tmp/missing"'):
+        for command in ('touch "/bin/init"', 'fs.update_times "/tmp/missing"'):
             assert b'failed' in run(command, allow_errors=True)
         assert b'failed' in run('stat "/tmp/missing"', allow_errors=True)
         run('write "/tmp/times.sh"\ntouch "/tmp/script-file"\nfs.update_times "/tmp/script-file"\n.')

@@ -2,6 +2,7 @@
 """Two independent QEMU processes prove disk execution and durable file contents."""
 import argparse
 import importlib.util
+import json
 import os
 import re
 import selectors
@@ -10,17 +11,23 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from boot_menu import BootMenu
 
 sys.dont_write_bytecode = True
 
 
 def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_boot=None):
+    entered = time.monotonic()
+    timings = {'phase': phase, 'commands': [], 'completed': False}
+    startup_finished = operation = None
     log = Path(args.log).with_suffix(f'.{phase}.log')
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
                '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
     if getattr(args, 'poweroff', False):
         command.remove('-no-shutdown')
+    if getattr(args, 'allow_reboot', False):
+        command.remove('-no-reboot')
     if getattr(args, 'stall_init', False):
         command[-1] = command[-1].replace(f'file={disk}', f'file=blkdebug::{disk}')
         command += ['-S']
@@ -59,10 +66,13 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     pending = bytearray()
     transcript = bytearray()
     started = time.monotonic()
-    menu_selected = False
+    menu = BootMenu(getattr(args, 'boot_menu_entry', 1) if args.code else None)
 
-    def expect(marker=b'os1> ', timeout=60, allow_errors=False):
-        nonlocal menu_selected
+    rescue = any(getattr(args, name, False) for name in ('readonly', 'stall_init', 'missing_disk', 'rescue'))
+    prompt = b'rescue> ' if rescue else b'os1> '
+
+    def expect(marker=None, timeout=60, allow_errors=False):
+        marker = prompt if marker is None else marker
         end = time.monotonic() + timeout
         while marker not in pending:
             if time.monotonic() > end:
@@ -74,12 +84,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 raise AssertionError(f'QEMU exited: {child.poll()}')
             transcript.extend(data)
             pending.extend(data.replace(b'\r', b''))
-            if getattr(args, 'boot_menu_entry', None) and not menu_selected:
-                plain = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', bytes(transcript))
-                if b'os1 diagnostics' in plain:
-                    child.stdin.write(b'\x1b[B' * (args.boot_menu_entry - 1) + b'\r')
-                    child.stdin.flush()
-                    menu_selected = True
+            menu.feed(data, child.stdin)
         at = pending.index(marker) + len(marker)
         result = bytes(pending[:at])
         del pending[:at]
@@ -90,20 +95,29 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             assert forbidden not in result, result[-2000:]
         return result
 
-    def run(text, marker=None, allow_errors=False):
-        child.stdin.write((text + '\n').encode())
-        child.stdin.flush()
-        out = expect(allow_errors=allow_errors)
-        if marker:
-            assert marker in out, out
-        return out
+    def run(text, marker=None, allow_errors=False, timeout=60):
+        command_started = time.monotonic()
+        completed = False
+        try:
+            if text == 'reboot':
+                menu.reset()
+            child.stdin.write((text + '\n').encode())
+            child.stdin.flush()
+            out = expect(allow_errors=allow_errors, timeout=timeout)
+            if marker:
+                assert marker in out, out
+            completed = True
+            return out
+        finally:
+            timings['commands'].append({'command': text, 'completed': completed,
+                                        'seconds': time.monotonic() - command_started})
 
     try:
         if before_boot is not None:
             before_boot()
         startup = expect()
-        if getattr(args, 'boot_menu_entry', None):
-            assert menu_selected, 'shell started without selecting the requested menu entry'
+        if args.code and getattr(args, 'boot_menu_entry', 1) is not None:
+            assert menu.selected, 'shell started without selecting the requested menu entry'
         if getattr(args, 'readonly', False) or getattr(args, 'stall_init', False):
             rejected = b'ehci: storage rejected' if args.transport == 'ehci' else b'usb-storage: unsupported or failed device'
             if getattr(args, 'stall_init', False) and args.transport == 'ehci':
@@ -123,6 +137,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
         if getattr(args, 'coexist', False):
             assert b'xhci: HID keyboard ready' in startup, startup[-4000:]
         boot_seconds = time.monotonic() - started
+        startup_finished = time.monotonic()
         if getattr(args, 'transport', '') == 'ehci':
             snapshot = run('usb', b'USB boot snapshot: controller topology and USB mounts')
             assert b'controller pci=' in snapshot and b'root pci=' in snapshot, snapshot
@@ -135,9 +150,10 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 protected = next(line for line in snapshot.splitlines() if b' storage-write-protect ' in line)
                 detail = int(protected.split(b'detail=')[1].split()[0], 16)
                 assert detail & 0xffffff80 == 0x1a000080, snapshot
-            run('usb > /tmp/usb')
-            captured = run('cat /tmp/usb')
-            assert b'USB boot snapshot:' in captured and b'controller pci=' in captured, captured
+            if not rescue:
+                run('usb > /tmp/usb')
+                captured = run('cat /tmp/usb')
+                assert b'USB boot snapshot:' in captured and b'controller pci=' in captured, captured
             repeated = run('usb')
             assert snapshot == repeated, 'USB boot diagnostics must be immutable'
 
@@ -174,7 +190,9 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                     transcript.extend(os.read(child.stdout.fileno(), 4096))
             assert child.poll() == 0, bytes(transcript[-4000:])
         print(f'{phase}: boot_seconds={boot_seconds:.6f} workload_seconds={time.monotonic()-operation:.6f}')
+        timings['completed'] = True
     finally:
+        cleanup_started = time.monotonic()
         child.terminate()
         try:
             child.wait(timeout=5)
@@ -183,6 +201,13 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             child.wait()
         selector.close()
         log.write_bytes(transcript)
+        finished = time.monotonic()
+        timings.update(total_seconds=finished - entered,
+                       startup_seconds=None if startup_finished is None else startup_finished - entered,
+                       prelude_seconds=None if operation is None else operation - startup_finished,
+                       workload_seconds=None if operation is None else cleanup_started - operation,
+                       cleanup_seconds=finished - cleanup_started)
+        log.with_suffix('.profile.json').write_text(json.dumps(timings, indent=2) + '\n')
 
 
 def main():
@@ -193,6 +218,7 @@ def main():
     p.add_argument('--e2fsck')
     p.add_argument('--code')
     p.add_argument('--vars')
+    p.add_argument('--programs-manifest', required=True)
     args = p.parse_args()
     log = Path(args.log)
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -201,7 +227,7 @@ def main():
     spec = importlib.util.spec_from_file_location('ext2_builder', script)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.create(disk, args.utility, reset=True)
+    module.create(disk, args.utility, reset=True, manifest=args.programs_manifest)
     def check(stage):
         if not args.e2fsck:
             return

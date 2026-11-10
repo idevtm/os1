@@ -71,7 +71,15 @@ Export requires exclusive admission against syscall entry and deferred descripto
 A conflicting syscall yields before side effects and retries its existing two-byte `INT 0x80` instruction.
 Deferred descriptor operations remain queued until admission is available.
 An active foreground entry causes automatic export to defer without counting a storage failure.
-Explicit export can return `WOULD_BLOCK` when foreground entries are active.
+Native explicit export retains its Operation when foreground entries prevent admission.
+A deferred request has no export effects and does not emit an IPC completion record.
+The worker retries admission after one millisecond of scheduler time.
+It sleeps until eligible work or a deadline, and it can dispatch other ready requests.
+The existing Operation and binding limits bound deferred requests.
+Closing caller descriptors does not cancel an accepted export.
+After admission, the worker executes export once and completes the Operation with its result.
+A storage error, including `WOULD_BLOCK`, is final for that Operation and is not replayed.
+Direct internal export calls retain their nonblocking admission result.
 
 This admission rule prevents background export from causing foreground ext2 guard failures.
 It delays syscall execution during bounded export, including calls that do not access files.

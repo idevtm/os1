@@ -66,6 +66,7 @@ struct Operation : NativeObject
 {
     Connection* connection;
     Operation* kernel_next;
+    uint64_t kernel_retry_ns;
     bool counted, delivered, receiving, complete, claiming;
     bool submitting, retiring, buffer_mode;
     BufferLoanBatch* loans;
@@ -136,12 +137,19 @@ bool ready_locked(NativeObject* object)
             return true;
     return c->client_closed;
 }
+bool kernel_ready_locked()
+{
+    for(auto* op = kernel_head; op; op = op->kernel_next)
+        if(op->kernel_retry_ns <= monotonic_ns)
+            return true;
+    return false;
+}
 long ready_selection_locked(const IpcWaitState& wait)
 {
     // Only the kernel worker registers an empty selection; user WAIT_MANY
     // validates count >= 1. It shares IPC's post-context-save wakeup discipline.
     if(!wait.count)
-        return kernel_head ? 0 : OS1_ERR_WOULD_BLOCK;
+        return kernel_ready_locked() ? 0 : OS1_ERR_WOULD_BLOCK;
     for(unsigned i = 0; i < wait.count; ++i)
         if(ready_locked(wait.instances[i]->object))
             return i;
@@ -1515,24 +1523,50 @@ bool ipc_run_kernel_request()
     Operation* op;
     {
         IrqSpinGuard guard(waiters.lock);
+        Operation* previous = nullptr;
         op = kernel_head;
+        while(op && op->kernel_retry_ns > monotonic_ns)
+        {
+            previous = op;
+            op = op->kernel_next;
+        }
         if(!op)
             return false;
-        kernel_head = op->kernel_next;
-        if(!kernel_head)
-            kernel_tail = nullptr;
+        if(previous)
+            previous->kernel_next = op->kernel_next;
+        else
+            kernel_head = op->kernel_next;
+        if(kernel_tail == op)
+            kernel_tail = previous;
         op->kernel_next = nullptr;
-        op->delivered = true;
     }
     // The pending reference owns this operation through dispatch. Its connection
     // retains the resource even if all client and result descriptors are closed.
     auto* c = op->connection;
     os1_ipc_result response{};
     DescriptorEntry output{};
-    c->kernel->invoke(
-        *c->source, c->service_rights, c->service_ceiling, op->request, response, output);
+    if(c->kernel->try_invoke)
+    {
+        if(!c->kernel->try_invoke(
+               *c->source, c->service_rights, c->service_ceiling, op->request, response, output))
+        {
+            IrqSpinGuard guard(waiters.lock);
+            // Keep the pending reference. Retry on a later tick, not in a busy loop.
+            op->kernel_retry_ns = monotonic_ns + 1'000'000;
+            if(kernel_tail)
+                kernel_tail->kernel_next = op;
+            else
+                kernel_head = op;
+            kernel_tail = op;
+            return false;
+        }
+    }
+    else
+        c->kernel->invoke(
+            *c->source, c->service_rights, c->service_ceiling, op->request, response, output);
     {
         IrqSpinGuard guard(waiters.lock);
+        op->delivered = true;
         detach_locked(op);
         finish_locked(op, 0);
         op->result.application_status = response.application_status;
@@ -1563,12 +1597,15 @@ bool ipc_wait_kernel_work(Thread* thread)
         return false;
     IrqSpinGuard process_guard(g_process_table_lock);
     IrqSpinGuard guard(waiters.lock);
-    if(kernel_head)
+    if(kernel_ready_locked())
         return false;
     thread->wait = {};
     thread->wait.reason = ThreadWaitReason::Ipc;
     thread->wait.ipc = {};
     thread->wait.ipc.deadline_ns = monotonic_ns + 250000000;
+    for(auto* op = kernel_head; op; op = op->kernel_next)
+        if(op->kernel_retry_ns < thread->wait.ipc.deadline_ns)
+            thread->wait.ipc.deadline_ns = op->kernel_retry_ns;
     thread->state = ThreadState::Blocked;
     thread->process->state = ProcessState::Ready;
     wait_queue_enqueue_locked(waiters, thread);

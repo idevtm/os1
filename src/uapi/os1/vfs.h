@@ -115,6 +115,8 @@ struct os1_space
 #define OS1_TREE_CREATE 3u
 #define OS1_TREE_REMOVE 4u
 #define OS1_TREE_CHECK 5u
+// Version 2 guards the input directory, rather than the complete namespace.
+#define OS1_TREE_SCOPED_VERSION 2u
 struct os1_tree_step
 {
     uint32_t version, size, action, kind;

@@ -41,10 +41,6 @@ def main():
         check(tool('e2fsck'), part)
         return snapshot(part)
 
-    # A disk program must not shadow an immutable recovery utility.
-    manifest.write_text(json.dumps({'version': 1, 'programs': [
-        {'source': str(Path(args.version1).resolve()), 'destination': '/disk/bin/cat'}]}))
-    deploy(disk, manifest)
     install(args.version1)
 
     def active_image_is_locked():

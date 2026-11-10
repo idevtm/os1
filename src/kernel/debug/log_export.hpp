@@ -12,6 +12,8 @@ struct ForegroundGuard
 void initialize();
 void poll();
 long run(unsigned target);
+// False means admission deferred before any export effect. Other results are final.
+bool try_run(unsigned target, long& result);
 void final_drain();
 os1_log_export_info info();
 #ifdef OS1_HOST_TEST

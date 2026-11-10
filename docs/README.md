@@ -10,6 +10,7 @@ Completed plans and older reviews are preserved in the archive.
 | [Native API index](native-api/README.md) | Implemented ABI profiles, accepted design, and explicitly marked proposals |
 | [Latest review](latest-review.md) | Latest whole-project review and subsequent implementation evidence |
 | [USB image workflow](hardware/usb-image-workflow.md) | Build, write, verify, and eject a boot image |
+| [Testing](testing.md) | Mandatory full local validation and strategic GitHub checks |
 | [Project goals](../GOALS.md) | Long-term scope, priorities, and dependencies |
 | [Glossary](GLOSSARY.md) and [references](REFERENCES.md) | Domain terminology and external specifications |
 

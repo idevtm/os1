@@ -50,6 +50,39 @@ class Deployment(unittest.TestCase):
         deploy.check(deploy.tool('e2fsck'), part)
         return snapshot(part)
 
+    def test_resource_defaults_are_create_only_and_preserve_metadata(self):
+        resource = self.root / 'motd'
+        resource.write_text('original default\n')
+        data = {'version': 2, 'programs': [], 'resources': [
+            {'source': resource.name, 'destination': '/disk/etc/motd'}]}
+        self.manifest.write_text(json.dumps(data))
+        self.assertTrue(deploy.deploy(self.image, self.manifest))
+        before = self.inspect()
+        self.assertEqual(before['/etc/motd'][0], 0o100644)
+        resource.write_text('new default must not overwrite installed data\n')
+        self.program.write_bytes(elf(b'updated'))
+        data['programs'].append({'source': self.program.name, 'destination': '/disk/diskutil'})
+        self.manifest.write_text(json.dumps(data))
+        self.assertTrue(deploy.deploy(self.image, self.manifest))
+        self.assertEqual(self.inspect()['/etc/motd'], before['/etc/motd'])
+        unchanged = self.image.read_bytes()
+        self.assertFalse(deploy.deploy(self.image, self.manifest))
+        self.assertEqual(self.image.read_bytes(), unchanged)
+
+    def test_resource_conflicts_and_cross_kind_duplicate_are_rejected(self):
+        data = {'version': 2, 'programs': [
+            {'source': self.program.name, 'destination': '/disk/new'}], 'resources': [
+            {'source': self.program.name, 'destination': '/disk/new'}]}
+        self.manifest.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, 'duplicate'):
+            deploy.deploy(self.image, self.manifest)
+        data['programs'] = []
+        data['resources'][0]['destination'] = '/disk/readme/child'
+        self.manifest.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, 'parent is a file'):
+            deploy.deploy(self.image, self.manifest)
+        self.assertEqual(self.image.read_bytes(), self.original)
+
     def test_update_preserves_data_boot_bytes_and_is_idempotent(self):
         before = self.inspect()
         self.program.write_bytes(elf(b'new' * 30000))  # Cross the indirect-block boundary.

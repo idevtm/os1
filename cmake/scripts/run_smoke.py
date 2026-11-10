@@ -10,14 +10,20 @@
 import argparse
 import codecs
 from dataclasses import dataclass
+import json
 import os
 import re
+import select
 import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tests/scripts'))
+from boot_menu import BootMenu
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 MAX_MATCH_BUFFER_CHARS = 1024 * 1024
@@ -48,15 +54,47 @@ class MonitorEvent:
     sent: bool = False
 
 
+class ShellInput:
+    """Require a fresh prompt after the trigger; send one command per prompt."""
+    def __init__(self):
+        self.output = ""
+        self.pending = []
+
+    def feed(self, text):
+        self.output = (self.output + text)[-MAX_MATCH_BUFFER_CHARS:]
+
+    def ready(self, marker=""):
+        clean = ANSI_ESCAPE_RE.sub("", self.output).replace("\r", "")
+        at = clean.find(marker)
+        return at >= 0 and SHELL_PROMPT in clean[at + len(marker):]
+
+    def take(self):
+        self.output = ""
+        return self.pending.pop(0)
+
+
 def read_output_chunks(stream):
     # Firmware menus can wait for input without producing a newline.
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
     while True:
         data = os.read(stream.fileno(), 4096)
-        text = decoder.decode(data, final=not data)
+        ended = not data
+        # QEMU often writes one byte at a time. Batch a partial line for at most
+        # 5 ms; menu and shell prompts still arrive without requiring a newline.
+        deadline = time.monotonic() + 0.005
+        while data and b"\n" not in data and len(data) < 65536:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([stream], [], [], remaining)[0]:
+                break
+            chunk = os.read(stream.fileno(), min(4096, 65536 - len(data)))
+            if not chunk:
+                ended = True
+                break
+            data += chunk
+        text = decoder.decode(data, final=ended)
         if text:
             yield text
-        if not data:
+        if ended:
             return
 
 
@@ -143,6 +181,10 @@ def parse_args():
                         help="Extra time to keep streaming after all required markers are seen.")
     parser.add_argument("--send-delay", type=float, default=0.0,
                         help="Optional delay in seconds before writing a matched --send-after payload.")
+    parser.add_argument("--wait-for-shell-prompt", action="store_true",
+                        help="Send complete shell commands only after their trigger and a fresh prompt.")
+    parser.add_argument("--boot-menu-entry", type=int, choices=(1, 2),
+                        help="Select a packaged Limine entry before kernel startup.")
     parser.add_argument("--marker", action="append", default=[],
                         help="Required marker substring (repeatable, order-independent).")
     parser.add_argument("--reject-marker", action="append", default=[],
@@ -207,6 +249,9 @@ def main():
     deadline = time.monotonic() + args.timeout
     settle_deadline = None
     reader_finished_at = None
+    boot_menu = BootMenu(args.boot_menu_entry)
+    shell_input = ShellInput()
+    profile = {"chunks": 0, "characters": 0, "matching_cpu_seconds": 0.0}
 
     with open(args.log, "w", encoding="utf-8", errors="replace") as log_file:
         proc = subprocess.Popen(
@@ -227,10 +272,17 @@ def main():
             try:
                 assert proc.stdout is not None
                 for line in read_output_chunks(proc.stdout):
+                    profile["chunks"] += 1
+                    profile["characters"] += len(line)
                     output_lines.append(line)
                     log_file.write(line)
                     log_file.flush()
+                    try:
+                        boot_menu.feed(line, proc.stdin)
+                    except BrokenPipeError:
+                        pass  # Preserve output even when a failed guest cannot accept input.
                     match_buffer = (match_buffer + line)[-MAX_MATCH_BUFFER_CHARS:]
+                    matching_started = time.thread_time()
                     sent_serial_texts = [event.text for event in send_events if event.sent]
                     marker_noise = [marker for marker in markers if marker in match_buffer]
                     normalized_rejection_buffer = normalize_for_marker_matching(match_buffer, sent_serial_texts)
@@ -253,7 +305,16 @@ def main():
                                 and compact_for_marker_matching(marker) in compact_normalized_match_buffer)
                         ):
                             seen.add(marker)
+                    profile["matching_cpu_seconds"] += time.thread_time() - matching_started
+                    if args.wait_for_shell_prompt:
+                        shell_input.feed(line)
                     if proc.stdin is not None:
+                        if args.wait_for_shell_prompt and shell_input.pending and shell_input.ready():
+                            try:
+                                proc.stdin.write(shell_input.take())
+                                proc.stdin.flush()
+                            except BrokenPipeError:
+                                pass
                         for event in send_events:
                             if (not event.sent) and (
                                 (event.marker in seen)
@@ -261,10 +322,17 @@ def main():
                                 or (event.marker in match_buffer)
                                 or (event.marker in normalized_match_buffer)
                             ):
+                                if args.wait_for_shell_prompt:
+                                    if shell_input.pending or not shell_input.ready(event.marker):
+                                        continue
+                                    shell_input.pending = event.text.splitlines(keepends=True)
+                                    payload = shell_input.take() if shell_input.pending else ""
+                                else:
+                                    payload = event.text
                                 try:
                                     if args.send_delay > 0.0:
                                         time.sleep(args.send_delay)
-                                    proc.stdin.write(event.text)
+                                    proc.stdin.write(payload)
                                     proc.stdin.flush()
                                 except BrokenPipeError:
                                     pass
@@ -325,6 +393,8 @@ def main():
             pass
 
         reader_thread.join(timeout=2)
+
+    Path(args.log + ".profile.json").write_text(json.dumps(profile, indent=2) + "\n")
 
     rejected = nonlocal_rejected[0]
     monitor_error = nonlocal_monitor_error[0]

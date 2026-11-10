@@ -69,6 +69,8 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/context.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/vfs.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/file_tools.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/basic_files.hpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/system.hpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/line_editor.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/shell/command.hpp"
       "${PROJECT_SOURCE_DIR}/src/common/shell/values.hpp"
@@ -122,6 +124,7 @@ endfunction()
 
 os1_add_user_cxx_program(sh "${CMAKE_CURRENT_SOURCE_DIR}/programs/sh.cpp" OS1_USER_SH_ELF)
 os1_add_user_cxx_program(init "${CMAKE_CURRENT_SOURCE_DIR}/programs/init.cpp" OS1_USER_INIT_ELF)
+os1_add_user_cxx_program(rescue "${CMAKE_CURRENT_SOURCE_DIR}/programs/rescue.cpp" OS1_USER_RESCUE_ELF)
 os1_add_user_cxx_program(yield "${CMAKE_CURRENT_SOURCE_DIR}/programs/yield.cpp" OS1_USER_YIELD_ELF)
 os1_add_user_cxx_program(balanceworker "${CMAKE_CURRENT_SOURCE_DIR}/programs/balanceworker.cpp" OS1_USER_BALANCEWORKER_ELF)
 os1_add_user_cxx_program(busyyield "${CMAKE_CURRENT_SOURCE_DIR}/programs/busyyield.cpp" OS1_USER_BUSYYIELD_ELF)
@@ -163,10 +166,10 @@ add_custom_target(os1_diskutil ALL DEPENDS "${OS1_USER_DISKUTIL_ELF}")
 set(OS1_USER_DISKUTIL_ELF "${OS1_USER_DISKUTIL_ELF}" PARENT_SCOPE)
 
 # Keep the recovery set explicit. All other programs are deployed onto ext2.
-set(recovery_programs init sh ls cat)
+set(recovery_programs init rescue)
 set(recovery_commands)
 set(recovery_files)
-set(program_manifest "{\"version\":1,\"programs\":[")
+set(program_manifest "{\"version\":2,\"programs\":[")
 set(separator "")
 foreach(program IN LISTS OS1_USER_PROGRAM_FILES)
   get_filename_component(name "${program}" NAME_WE)
@@ -179,15 +182,14 @@ foreach(program IN LISTS OS1_USER_PROGRAM_FILES)
   endif()
 endforeach()
 # Retain the published path used by older images and deployment workflows.
-string(APPEND program_manifest ",{\"source\":\"${OS1_USER_DISKUTIL_ELF}\",\"destination\":\"/disk/diskutil\"}]}\n")
+string(APPEND program_manifest ",{\"source\":\"${OS1_USER_DISKUTIL_ELF}\",\"destination\":\"/disk/diskutil\"}],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/disk/etc/motd\"}]}\n")
 file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json" CONTENT "${program_manifest}")
 set(OS1_USER_PROGRAM_FILES "${OS1_USER_PROGRAM_FILES}" PARENT_SCOPE)
 
 add_custom_command(
   OUTPUT "${OS1_INITRD_CPIO}"
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${USER_STAGE_DIR}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_STAGE_DIR}/bin" "${USER_STAGE_DIR}/etc"
-  COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/data/motd" "${USER_STAGE_DIR}/etc/motd"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_STAGE_DIR}/bin"
   ${recovery_commands}
   COMMAND "${CMAKE_COMMAND}"
     "-DSTAGE_DIR=${USER_STAGE_DIR}" "-DOUTPUT_FILE=${OS1_INITRD_CPIO}"

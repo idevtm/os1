@@ -30,9 +30,9 @@ def main():
     staged = log.with_suffix('.updated.img')
     new_boot = log.with_suffix('.boot.img')
     def program(path):
-        programs = json.loads(Path(args.programs_manifest).read_text())['programs']
-        programs += [{'source': str(Path(path).resolve()), 'destination': '/disk/bin/probe'}]
-        manifest.write_text(json.dumps({'version': 1, 'programs': programs}))
+        data = json.loads(Path(args.programs_manifest).read_text())
+        data['programs'] += [{'source': str(Path(path).resolve()), 'destination': '/disk/bin/probe'}]
+        manifest.write_text(json.dumps(data))
     program(args.version1)
     create(args.image, args.utility, manifest, disk)
     boot(args, disk, 'initial', [

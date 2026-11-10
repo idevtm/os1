@@ -242,8 +242,8 @@ and payload-free `stdin`:
 
 ```text
 process source.text:"Hello world"
-process source.file:{path:"/etc/motd", offset:0}
-process source.file.path:"/etc/motd" source.file.offset:0
+process source.file:{path:"/disk/etc/motd", offset:0}
+process source.file.path:"/disk/etc/motd" source.file.offset:0
 process source.stdin
 ```
 
@@ -256,8 +256,8 @@ This keeps unit cases pleasant without introducing generic presence flags.
 Structs and variants compose, including within brace notation:
 
 ```text
-process job:{source.file:{path:"/etc/motd"}, options:{limit:10}}
-process job.source.file.path:"/etc/motd" job.options.limit:10
+process job:{source.file:{path:"/disk/etc/motd"}, options:{limit:10}}
+process job.source.file.path:"/disk/etc/motd" job.options.limit:10
 process output.file:{path:"/tmp/result", encoding.utf8}
 ```
 

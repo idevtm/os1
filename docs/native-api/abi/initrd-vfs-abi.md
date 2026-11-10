@@ -9,6 +9,14 @@ records scope, verification, and remaining limits.
 [Scoped activation](shared-activation-abi.md) implements class-controlled Counter construction.
 General generated bindings and runtime reflection remain proposals.
 
+## Boot program placement
+
+The kernel loads `/bin/init` from immutable initrd.
+Init supervises `/disk/bin/sh` and starts `/bin/rescue` if shell launch fails.
+Normal programs and resources reside on ext2.
+This placement changes executable paths, not startup records or inherited authority.
+See [boot and recovery](../../filesystems/program-deployment.md#boot-and-recovery) for deployment and failure behavior.
+
 ## Namespace and authority
 
 The boot initrd is imported once into an immutable tree before starting userland.

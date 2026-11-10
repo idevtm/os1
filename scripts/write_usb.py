@@ -323,6 +323,7 @@ def choose_boot_only_layout(base):
     detail = "Replacement keeps the base boot layout; both choices write a full image."
     if not base.is_file():
         detail = "To preserve a layout, set OS1_USB_BASE_IMAGE to the verified base image."
+    detail += " Boot-only images provide rescue; the full shell requires ext2."
     choice = choose_menu("Build a USB image", options, detail)
     return choice, base if choice == "preserved" else None
 
@@ -335,8 +336,8 @@ def choose_layout(base):
         ("programs", "Deploy programs (preserve other files)"),
         ("all", "Update boot and programs (preserve data)"),
         ("diagnostic", "Create keyboard diagnostic image (erase USB)"),
-        ("legacy", "Boot-only image options >")],
-        "Initial creation defaults to a 128 MiB data partition. Updates require the os1 boot/data layout.")
+        ("legacy", "Boot-only image options (rescue console) >")],
+        "The full shell requires ext2. Initial creation uses 128 MiB. Updates require the os1 boot/data layout.")
     if choice == "legacy":
         return choose_boot_only_layout(base)
     return choice, None

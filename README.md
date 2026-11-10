@@ -10,7 +10,17 @@ For computer architecture and OS terminology, see the categorized
 [Glossary](docs/GLOSSARY.md), including TLB, IST, FADT, PCI, and the other terms
 used throughout the project documents.
 
-Today `os1` uses a shared-kernel, dual-entry boot architecture. The default path is a Limine-based UEFI ISO that enters a thin higher-half shim, normalizes bootloader state into `BootInfo`, then transfers control to the shared higher-half kernel core. The legacy BIOS raw image is still built and tested as a compatibility path, loading the same kernel physically before entering it at its higher-half virtual address. The kernel itself is freestanding `C++20`, runs protected user programs loaded from an initrd `cpio` archive or ext2 executable files, starts a small `/bin/init` that `exec`s `/bin/sh`, exposes `write`/`read`/`observe`/`spawn`/`waitpid`/`exec` through the x86_64 `SYSCALL`/`SYSRET` path, and can present the terminal either through VGA text mode or a minimal framebuffer text renderer. Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives.
+`os1` uses one shared kernel with UEFI and BIOS entry paths.
+The default UEFI path uses Limine and a thin shim to normalize bootloader state into `BootInfo`.
+The BIOS compatibility image loads the same kernel before entering its higher-half virtual address.
+The freestanding C++20 kernel loads protected user programs from initrd or ext2.
+It provides syscall entry through `SYSCALL` and return through `SYSRET`.
+
+The kernel starts `/bin/init`, which supervises `/disk/bin/sh` and the initrd rescue console.
+Console output uses VGA text mode or a framebuffer text renderer.
+The [deployment guide](docs/filesystems/program-deployment.md#boot-and-recovery) describes disk startup and recovery.
+
+Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed on top of it: PCI devices bind through a static driver registry with BAR/IRQ/DMA resource ownership; PCI interrupts route through MSI-X first, MSI second, and IOAPIC INTx as a fallback; `virtio-blk` is request-shaped, interrupt-driven, and supports both reads and writes; `virtio-net` runs through the same shared virtio transport with an ARP probe smoke; xHCI binds by PCI class, enumerates root ports, and feeds USB HID boot-keyboard reports into the same console-input path as PS/2; and the scheduler timer uses an HPET-calibrated LAPIC periodic timer with the PIT retained as a fallback. The 2026-05-05 SMP enablement round then made the runtime genuinely multi-CPU: APs install the shared IDT, enter per-CPU idle threads, take per-CPU LAPIC timer ticks, consume reschedule IPIs, run per-CPU queues with load-balanced user-thread placement, and route block-I/O, child-exit, and console-read blocking through shared `WaitQueue` / `Completion` primitives.
 
 The 2026-05-10 integration replaced the previous AML interpreter with upstream ACPICA.
 ACPICA supports table discovery, namespace loading, device enumeration, `_PRT` routing, resource parsing, and device power transitions.
@@ -49,7 +59,9 @@ adds directory/file descriptors, `ls`, `cat`, bounded argv/environment handoff,
 explicit child grants, and executable-reference launch. The
 [copied IPC prototype](docs/native-api/abi/copied-ipc-abi.md) adds retained Operations and a private
 `textprocessor` with methods/properties, exercised by `ipccheck`.
-The initrd contains `init`, `sh`, `ls`, `cat`, and `/etc/motd` for recovery without storage.
+Initrd contains `init` and `rescue` for recovery without storage.
+The normal shell, utilities, and resources require ext2.
+See [disk shell startup](docs/filesystems/program-deployment.md#boot-and-recovery) before upgrading an existing image.
 Other bundled programs are installed under `/disk/bin`; the shell initially searches `/bin`, then `/disk/bin`; typed path operations can change that list.
 For an existing QEMU disk, run `./os1.sh storage_deploy` after this upgrade.
 For an existing managed USB stick, select **Update boot and programs (preserve data)**.
@@ -281,7 +293,36 @@ Legacy BIOS exec smoke:
 cmake --build build --target smoke_exec_bios
 ```
 
-Run the QEMU smoke matrix:
+### Full local validation and strategic CI
+
+Local validation runs the complete suite. GitHub CI runs host unit tests and six strategic QEMU checks.
+
+```text
+./scripts/check-local.sh -> host tests -> full normal-image suite -> diagnostic capture suite
+GitHub CI -> host tests -> six QEMU checks labeled ci
+```
+
+Before pushing code or build changes, run:
+
+```sh
+./scripts/check-local.sh
+```
+
+The script builds both profiles and requires UEFI firmware.
+It continues to later test profiles after a test failure and returns a nonzero status.
+A build failure stops the script because its test artifacts are unavailable.
+Logs are written under `build/local-validation/`; each run replaces these logs.
+Preserve failure logs before another run.
+See the [testing guide](docs/testing.md) for coverage and the [mandatory policy](AGENTS.md#mandatory-local-test-policy) for exceptions.
+
+Run only the hosted QEMU selection locally:
+
+```sh
+ctest --test-dir build --output-on-failure --no-tests=error -L '^ci$'
+```
+
+This subset does not replace full local validation.
+Run the QEMU smoke matrix alone:
 
 ```sh
 cmake --build build --target smoke_all
@@ -293,12 +334,26 @@ Or run the full registered CTest suite, including script contracts:
 ctest --test-dir build --output-on-failure --no-tests=error
 ```
 
-With `BUILD_TESTING=ON`, QEMU, and OVMF available, CTest registers eleven QEMU
-smokes and four script contracts.
-The contracts cover HMP acknowledgement, smoke settling, USB kernel updates, and USB menus. `OS1_QEMU_DEBUGCON=ON` adds the no-UART smoke, giving the CI
-configuration 12 QEMU smokes and 16 CTest cases. `smoke_all` runs only the QEMU
-smokes. Missing QEMU/OVMF reduces registration; CI sets
-`OS1_REQUIRE_UEFI_SMOKE=ON` to reject a missing UEFI smoke environment.
+CTest registers checks according to the available build tools and firmware.
+Use `ctest --test-dir build -N` to inspect the current list.
+The suite includes boot, storage, lifecycle, shell, discovery, and script contract checks.
+`OS1_QEMU_DEBUGCON=ON` adds the no-UART check.
+CI requires UEFI coverage through `OS1_REQUIRE_UEFI_SMOKE=ON`.
+
+```text
+ordinary UEFI checks -> select os1 immediately -> existing guest assertions
+dedicated menu check -> automatic countdown and both explicit entries
+BIOS / no-UART / boot measurements -> existing boot behavior
+```
+
+Ordinary serial tests select the packaged `os1` entry when its menu appears.
+The dedicated menu check verifies automatic boot and both logging profiles.
+The packaged ten-second countdown remains unchanged.
+
+The local validation script runs two QEMU tests concurrently.
+Each invocation owns its mutable images, firmware variables, logs, and sockets.
+See the [test ownership rules](docs/testing.md#test-isolation-and-concurrency) before changing concurrency.
+See the [CI duration record](docs/archive/tooling/2026-11-09-ci-duration.md) for measurements and validation limits.
 
 After `cmake --build build`, the registered smokes have their required images.
 They check boot, shell, passive ACPI observation, SMP balance, child-launch, and exec markers through serial logs.
@@ -341,7 +396,7 @@ Run the UEFI and BIOS interactive checks with `ctest --test-dir build -R '^os1_s
 
 ## Local CI With `act`
 
-The main CI job is still:
+This command reproduces the strategic GitHub job, not the full local suite:
 
 ```sh
 act -j build-and-smoke
@@ -371,7 +426,7 @@ The build writes outputs under `build/artifacts/`:
 - `kernel.elf` — shared higher-half kernel core used by the BIOS path and loaded as a module by the Limine path
 - `kernel_limine.elf` — higher-half Limine frontend that normalizes boot state, loads the shared kernel by physical `PT_LOAD` ranges, and enters it through temporary transition mappings
 - `cpu_start.bin` — AP trampoline blob used for debugging / disassembly
-- `initrd.cpio` — recovery archive containing `/bin/init`, `/bin/sh`, `/bin/ls`, `/bin/cat`, and `/etc/motd`
+- `initrd.cpio` — recovery archive containing `/bin/init` and `/bin/rescue`
 - `virtio-test-disk.raw` — generated raw disk image used to validate the `virtio-blk` path during boot and smoke tests
 - `user/*.elf` — statically linked programs for recovery packaging or ext2 deployment
 - `program-test-disk.raw` — disposable ext2 program fixture; QEMU tests use private overlays
@@ -379,13 +434,9 @@ The build writes outputs under `build/artifacts/`:
 - `os1.raw` — legacy BIOS raw disk image
 - `os1.log` — serial log from the last display-first UEFI `run`
 - `os1-bios.log` — serial log from the last display-first BIOS `run_bios`
-- `smoke.log` / `smoke-bios.log` — captured baseline shell smoke serial logs
-- `smoke-observe.log` / `smoke-observe-bios.log` — captured observability smoke serial logs
-- `smoke-balance.log` / `smoke-balance-bios.log` — captured SMP balance smoke serial logs
-- `smoke-spawn.log` / `smoke-spawn-bios.log` — captured child-launch smoke serial logs
-- `smoke-exec.log` / `smoke-exec-bios.log` — captured exec smoke serial logs
-- `smoke-xhci.log` — captured xHCI + USB-keyboard smoke serial log (UEFI only)
-- `smoke-no-uart.log` — captured no-UART debugcon log (when enabled)
+- `test-runs/<test>-<unique>/guest*.log` — serial evidence for each QEMU test invocation
+- `test-runs/<test>-<unique>/runner.log` — test output and assertion failures
+- `test-runs/<test>-<unique>/result.json` — invocation status, arguments, preparation time, and child CPU time
 
 For BIOS compatibility, `os1.raw` reserves fixed slots for `kernel16.bin`, `kernel.elf`, and `initrd.cpio`. Those slot sizes are defined by `OS1_LOADER16_IMAGE_SECTOR_COUNT`, `OS1_KERNEL_IMAGE_SECTOR_COUNT`, and `OS1_INITRD_IMAGE_SECTOR_COUNT` in [CMakeLists.txt](CMakeLists.txt). The kernel BIOS slot now matches the reserved low-physical kernel window, and the build fails before writing `os1.raw` if `kernel.elf` no longer fits its disk slot, its low-memory staging buffer, or its reserved execution window. `initrd.cpio` is still checked against its configured slot. To expand BIOS storage space, raise the corresponding sector-count or reserved-window value and rebuild; the generated BIOS layout follows those values automatically while the raw image stays padded to 1 MiB.
 

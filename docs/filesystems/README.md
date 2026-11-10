@@ -5,6 +5,7 @@ Temporary contents disappear on reboot. A bounded ext2 profile provides persiste
 
 | Document | Status |
 | --- | --- |
+| [Ext2 shell startup record](../archive/filesystems/2026-11-09-ext2-shell-bootstrap.md) | Implementation, impact, recovery checks, and measurements |
 | [Timestamp implementation record](../archive/filesystems/2026-11-08-filesystem-timestamps.md) | Plan, impact, checks, resource comparison, and review |
 | Filesystem timestamps | [Timestamp ABI](../native-api/abi/filesystem-times-abi.md) |
 | [Metadata and traversal ABI](../native-api/abi/filesystem-metadata-abi.md) | Common metadata, space accounting, and guarded namespace steps |

@@ -500,9 +500,18 @@ uint64_t vfs_generation()
 {
     return namespace_generation;
 }
-void vfs_changed()
+void vfs_changed(VfsNode* a, VfsNode* b, VfsNode* c, VfsNode* d)
 {
     ++namespace_generation;
+    VfsNode* nodes[] = {a, b, c, d};
+    for(auto* node : nodes)
+        if(node)
+            node->namespace_generation = namespace_generation;
+}
+static uint64_t tree_generation(VfsNode* node, bool scoped)
+{
+    return scoped ? (node->namespace_generation ? node->namespace_generation : 1)
+                  : vfs_generation();
 }
 long vfs_metadata(VfsNode* node, os1_metadata& result)
 {
@@ -534,7 +543,8 @@ long vfs_space(VfsNode* node, os1_space& result)
 
 long vfs_tree_step(DescriptorTable& table, int fd, os1_tree_step& request)
 {
-    if(request.version != OS1_VFS_ABI_VERSION || request.size != sizeof(request) ||
+    const bool scoped = request.version == OS1_TREE_SCOPED_VERSION;
+    if((request.version != OS1_VFS_ABI_VERSION && !scoped) || request.size != sizeof(request) ||
        request.action < OS1_TREE_NEXT || request.action > OS1_TREE_CHECK ||
        request.name_bytes > OS1_NAME_MAX || request.excluded_fd < -1 ||
        ((request.rights | request.descendant_rights) & ~OS1_RIGHT_ALL))
@@ -583,7 +593,7 @@ long vfs_tree_step(DescriptorTable& table, int fd, os1_tree_step& request)
     NamespaceGuard guard;
     if(!guard.held)
         return OS1_ERR_WOULD_BLOCK;
-    if(request.generation != vfs_generation() &&
+    if(request.generation != tree_generation(node, scoped) &&
        !(request.action == OS1_TREE_CHECK && !request.generation))
         return OS1_ERR_CHANGED;
     if(!node->linked)
@@ -595,7 +605,9 @@ long vfs_tree_step(DescriptorTable& table, int fd, os1_tree_step& request)
     if(request.action == OS1_TREE_CHECK)
     {
         status = vfs_metadata(node, request.metadata);
-        request.generation = vfs_generation();
+        if(scoped)
+            request.metadata.generation = tree_generation(node, true);
+        request.generation = tree_generation(node, scoped);
         return status;
     }
     VfsNode* child = nullptr;
@@ -610,6 +622,8 @@ long vfs_tree_step(DescriptorTable& table, int fd, os1_tree_step& request)
         if(!child)
             return 0;
         status = vfs_metadata(child, request.metadata);
+        if(scoped)
+            request.metadata.generation = tree_generation(child, true);
         if(status < 0)
             return status;
         memset(request.name, 0, sizeof(request.name));
@@ -634,7 +648,7 @@ long vfs_tree_step(DescriptorTable& table, int fd, os1_tree_step& request)
             return OS1_ERR_ACCESS;
         status =
             node->operations->remove_locked(node, request.name, request.name_bytes, request.kind);
-        request.generation = vfs_generation();
+        request.generation = tree_generation(node, scoped);
         return status;
     }
     const uint32_t permitted =
@@ -658,7 +672,7 @@ long vfs_tree_step(DescriptorTable& table, int fd, os1_tree_step& request)
             return OS1_ERR_INVALID;
         status = node->operations->create_locked(
             node, request.name, request.name_bytes, request.kind, opened);
-        request.generation = vfs_generation();
+        request.generation = tree_generation(node, scoped);
         if(status < 0)
             return status;
         child = static_cast<VfsNode*>(opened->object);
@@ -679,6 +693,8 @@ long vfs_tree_step(DescriptorTable& table, int fd, os1_tree_step& request)
     }
     InstanceRef result(opened);
     status = vfs_metadata(child, request.metadata);
+    if(scoped)
+        request.metadata.generation = tree_generation(child, true);
     if(status < 0)
         return status;
     return descriptor_install(

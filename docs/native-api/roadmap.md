@@ -25,6 +25,10 @@ flowchart TD
     F --> D[Persistent data mount]
 ```
 
+The [ext2 shell startup record](../archive/filesystems/2026-11-09-ext2-shell-bootstrap.md) moves normal userland out of initrd.
+This packaging change retains the current object protocols and `/disk` namespace.
+Physical startup and preserving updates need separate hardware acceptance.
+
 ## Current foundation and gaps
 
 | Area | Implemented | Work still needed |

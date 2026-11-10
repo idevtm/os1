@@ -366,6 +366,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
       --physical-base "${OS1_KERNEL_RESERVED_PHYSICAL_START}"
       --virtual-offset "${OS1_KERNEL_VIRTUAL_OFFSET}"
       --image "${OS1_RAW_IMAGE}" --qemu "${OS1_QEMU_EXECUTABLE}"
+      --program-disk "${OS1_ARTIFACT_DIR}/program-test-disk.raw"
       --kernel-lba "${OS1_KERNEL_IMAGE_START_LBA}" --kernel-sectors "${OS1_KERNEL_IMAGE_SECTOR_COUNT}"
       --log "${OS1_ARTIFACT_DIR}/interrupt-handoff.log")
   set_tests_properties(os1_interrupt_handoff_contract PROPERTIES TIMEOUT 90)
