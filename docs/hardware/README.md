@@ -5,6 +5,9 @@ Keep physical observations separate from emulator validation.
 
 | Document | Use |
 | --- | --- |
+| [Driver module profile](driver-module-abi.md) | Implemented internal ELF boundary and lifetime limits |
+| [Driver lifecycle plan](driver-lifecycle-plan.md) | Scope, impact assessment, validation, and resource comparison |
+| [Driver architecture](driver-architecture.md) | Accepted disk-module, lifecycle, hotplug, and functional-object direction |
 | [USB mass storage](usb-storage.md) | Current transport, QEMU checks, failure behavior, and physical limitations |
 | [USB image workflow](usb-image-workflow.md) | Build and write fresh or preserved-layout images through `os1.sh` |
 | [Boot log capture](boot-log.md) | Diagnostic image layouts, capture formats, and extraction procedures |

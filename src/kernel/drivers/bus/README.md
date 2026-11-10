@@ -1,22 +1,23 @@
-# Kernel Bus Drivers
+# Kernel bus drivers
 
-This directory owns the small static bus/device model used after platform
-discovery. ACPI and PCI enumeration still live under `platform/`; this layer
-binds drivers to the enumerated records and owns driver-visible resources.
+This directory binds PCI devices and owns published binding records.
+Built-in and disk-loaded drivers use the same lifecycle admission path.
 
-Live pieces:
+```text
+discovered -> starting -> ready -> quiescing -> removed
+                   \-> failed             \-> failed
+```
 
-- `driver_registry.*`: fixed-size PCI driver registry.
-- `pci_bus.*`: walks enumerated PCI functions, probes registered drivers, and
-  exposes a remove hook. A failed matching probe marks that device failed and
-  continues enumeration without it.
-- `device.*`: publishes bound device records and lifecycle state.
-- `resource.*`: claims and releases PCI BAR ownership by `DeviceId`.
+`driver_registry` retains at most 16 drivers and rejects duplicate names.
+`pci_bus` matches devices, admits one probe per binding, and records terminal failure.
+Driver callbacks run outside the binding-registry lock.
+Late module probing does not reset earlier hardware observations.
 
-Current limits:
+Removal requires an explicit quiescence callback before resource release.
+A missing callback leaves the binding intact; failed quiescence marks it failed.
+Built-in USB and block callbacks do not yet provide general runtime-removal qualification.
+The module transport retains its bounded DMA and callback storage until reboot.
 
-- Matching is minimal and static. There is no dynamic module loading.
-- Hot-remove is a resource-release skeleton, not a hardware hotplug event path.
-- The `devices`, `resources`, and `irqs` observe views expose binding state,
-  BAR/DMA ownership, and interrupt routes. These snapshots do not constitute
-  hotplug, driver quiescence, or coordinated device-power policy.
+The catalog still captures boot state only.
+USB event sources, deferred enumeration, generations, notifications, and generic resource reclamation remain planned.
+See the [driver architecture](../../../../docs/hardware/driver-architecture.md).

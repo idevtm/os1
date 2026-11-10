@@ -1,22 +1,23 @@
+#include <gtest/gtest.h>
+
+#include <array>
+#include <cstring>
+#include <vector>
+
 #include "arch/x86_64/interrupt/vector_allocator.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "drivers/bus/pci_bus.hpp"
 #include "drivers/bus/resource.hpp"
 #include "handoff/memory_layout.h"
-#include "mm/kmem.hpp"
+#include "hardware/tree.hpp"
 #include "mm/dma.hpp"
+#include "mm/kmem.hpp"
 #include "mm/virtual_memory.hpp"
+#include "platform/hardware.hpp"
 #include "platform/irq_registry.hpp"
 #include "platform/state.hpp"
-#include "platform/hardware.hpp"
-#include "hardware/tree.hpp"
 #include "support/physical_memory.hpp"
-
-#include <gtest/gtest.h>
-
-#include <array>
-#include <cstring>
 
 namespace
 {
@@ -73,11 +74,13 @@ bool first_probe(VirtualMemory&, PageFrameContainer&, const PciDevice&, size_t, 
     return true;
 }
 
-bool second_probe(VirtualMemory&, PageFrameContainer&, const PciDevice&, size_t device_index, DeviceId id)
+bool second_probe(
+    VirtualMemory&, PageFrameContainer&, const PciDevice&, size_t device_index, DeviceId id)
 {
     ++g_probe_harness.second_probe_calls;
     g_probe_harness.last_probe_id = id;
-    return device_binding_publish(id, static_cast<uint16_t>(device_index), "second-driver", nullptr);
+    return device_binding_publish(
+        id, static_cast<uint16_t>(device_index), "second-driver", nullptr);
 }
 
 bool failing_probe(VirtualMemory&, PageFrameContainer&, const PciDevice&, size_t, DeviceId)
@@ -114,7 +117,8 @@ TEST(PciDriverRegistry, MatchesClassSubclassAndProgIf)
         .class_code = 0x0c,
         .subclass = 0x03,
         .prog_if = 0x30,
-        .match_flags = static_cast<uint8_t>(kPciMatchClassCode | kPciMatchSubclass | kPciMatchProgIf),
+        .match_flags =
+            static_cast<uint8_t>(kPciMatchClassCode | kPciMatchSubclass | kPciMatchProgIf),
     };
     const PciDriver driver{
         .name = "xhci",
@@ -179,7 +183,7 @@ TEST(PciBus, OnlyProbesMatchingDriver)
 
     const DeviceBinding* binding = device_binding_find(DeviceId{DeviceBus::Pci, 0});
     ASSERT_NE(nullptr, binding);
-    EXPECT_EQ(DeviceState::Bound, binding->state);
+    EXPECT_EQ(DeviceState::Started, binding->state);
     EXPECT_STREQ("second-driver", binding->driver_name);
 
     platform_reset_state();
@@ -227,7 +231,8 @@ TEST(PciBus, MatchingProbeFailureDoesNotStopLaterDevices)
     ASSERT_TRUE(driver_registry_add_pci_driver(second_driver));
     EXPECT_TRUE(pci_bus_probe_all(kernel_vm, frames));
     EXPECT_EQ(1u, g_probe_harness.failing_probe_calls);
-    EXPECT_EQ(nullptr, device_binding_find(DeviceId{DeviceBus::Pci, 0}));
+    ASSERT_NE(nullptr, device_binding_find(DeviceId{DeviceBus::Pci, 0}));
+    EXPECT_EQ(DeviceState::Failed, device_binding_find(DeviceId{DeviceBus::Pci, 0})->state);
     hardware_freeze_bindings();
     Os1HardwareQuery description{};
     description.version = 1;
@@ -245,7 +250,7 @@ TEST(PciBus, MatchingProbeFailureDoesNotStopLaterDevices)
     EXPECT_EQ(1u, g_probe_harness.last_probe_id.index);
     const DeviceBinding* binding = device_binding_find(DeviceId{DeviceBus::Pci, 1});
     ASSERT_NE(nullptr, binding);
-    EXPECT_EQ(DeviceState::Bound, binding->state);
+    EXPECT_EQ(DeviceState::Started, binding->state);
 
     platform_reset_state();
 }
@@ -270,7 +275,8 @@ TEST(PciBus, RemoveMatchesDriverNameByContentAndReleasesResources)
     ASSERT_TRUE(irq_allocate_vector(vector));
     ASSERT_TRUE(platform_register_msix_irq_route(owner, 0, vector));
 
-    ASSERT_TRUE(dma_allocate_buffer(frames, owner, 4096, DmaDirection::Bidirectional, g_remove_harness.dma_buffer));
+    ASSERT_TRUE(dma_allocate_buffer(
+        frames, owner, 4096, DmaDirection::Bidirectional, g_remove_harness.dma_buffer));
     g_remove_harness.frames = &frames;
 
     char binding_name[] = "remove-driver";
@@ -278,6 +284,7 @@ TEST(PciBus, RemoveMatchesDriverNameByContentAndReleasesResources)
         .name = "remove-driver",
         .probe = stub_probe,
         .remove = remove_driver,
+        .quiesce = [](DeviceId) { return true; },
     };
     ASSERT_NE(binding_name, driver.name);
     ASSERT_TRUE(driver_registry_add_pci_driver(driver));
@@ -317,8 +324,9 @@ TEST(PciBus, DeviceBindingsGrowPastLegacyLimit)
     }
 
     EXPECT_EQ(kBindingTarget, device_binding_count());
-    ASSERT_NE(nullptr,
-              device_binding_find(DeviceId{DeviceBus::Pci, static_cast<uint16_t>(kBindingTarget - 1u)}));
+    ASSERT_NE(
+        nullptr,
+        device_binding_find(DeviceId{DeviceBus::Pci, static_cast<uint16_t>(kBindingTarget - 1u)}));
 
     platform_reset_state();
 }
@@ -368,5 +376,89 @@ TEST(PciBus, EarlyDriverRunsBeforeLowerBdfOrdinaryDeviceAndDoesNotRetryFailure)
         EXPECT_EQ(g_probe_harness.failing_probe_calls, enable_early ? 1u : 0u);
         EXPECT_EQ(g_probe_harness.second_probe_calls, enable_early ? 0u : 1u);
     }
+    platform_reset_state();
+}
+
+TEST(PciBus, LateDriverUsesSameAdmissionAndRejectsDuplicateProbe)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    reset_state();
+    VirtualMemory vm(frames);
+    g_platform.device_count = 1;
+    const PciDriver driver{.name = "late", .probe = first_probe};
+    ASSERT_TRUE(driver_registry_add_pci_driver(driver));
+    EXPECT_TRUE(pci_bus_probe_driver(vm, frames, driver));
+    EXPECT_FALSE(pci_bus_probe_driver(vm, frames, driver));
+    EXPECT_EQ(g_probe_harness.first_probe_calls, 1u);
+    ASSERT_NE(device_binding_find({DeviceBus::Pci, 0}), nullptr);
+    EXPECT_EQ(device_binding_find({DeviceBus::Pci, 0})->state, DeviceState::Started);
+    platform_reset_state();
+}
+TEST(PciBus, UnprovenQuiescenceKeepsBindingAndDoesNotRelease)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    reset_state();
+    VirtualMemory vm(frames);
+    g_platform.device_count = 1;
+    const PciDriver driver{.name = "uncertain",
+                           .probe = first_probe,
+                           .remove = remove_driver,
+                           .quiesce = [](DeviceId) { return false; }};
+    ASSERT_TRUE(driver_registry_add_pci_driver(driver));
+    ASSERT_TRUE(pci_bus_probe_driver(vm, frames, driver));
+    EXPECT_FALSE(pci_bus_remove_device({DeviceBus::Pci, 0}));
+    EXPECT_FALSE(g_remove_harness.remove_called);
+    ASSERT_NE(device_binding_find({DeviceBus::Pci, 0}), nullptr);
+    EXPECT_EQ(device_binding_find({DeviceBus::Pci, 0})->state, DeviceState::Failed);
+    EXPECT_FALSE(pci_bus_probe_driver(vm, frames, driver));
+    platform_reset_state();
+}
+TEST(PciBus, MissingQuiesceCallbackCannotReleaseResources)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    reset_state();
+    VirtualMemory vm(frames);
+    g_platform.device_count = 1;
+    const PciDriver driver{.name = "legacy", .probe = first_probe, .remove = remove_driver};
+    ASSERT_TRUE(driver_registry_add_pci_driver(driver));
+    ASSERT_TRUE(pci_bus_probe_driver(vm, frames, driver));
+    EXPECT_FALSE(pci_bus_remove_device({DeviceBus::Pci, 0}));
+    EXPECT_FALSE(g_remove_harness.remove_called);
+    EXPECT_EQ(device_binding_find({DeviceBus::Pci, 0})->state, DeviceState::Started);
+    platform_reset_state();
+}
+
+TEST(PciBus, AdmissionAllocationFailureRecordsFailedHardwareWithoutCallingDriver)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    reset_state();
+    VirtualMemory vm(frames);
+    g_platform.device_count = 1;
+    const PciDriver driver{.name = "no-memory", .probe = first_probe};
+    ASSERT_TRUE(driver_registry_add_pci_driver(driver));
+    std::vector<uint64_t> held;
+    uint64_t page;
+    while(frames.allocate(page))
+        held.push_back(page);
+    EXPECT_FALSE(pci_bus_probe_driver(vm, frames, driver));
+    EXPECT_EQ(0u, g_probe_harness.first_probe_calls);
+    EXPECT_EQ(nullptr, device_binding_find({DeviceBus::Pci, 0}));
+    hardware_freeze_bindings();
+    Os1HardwareQuery description{};
+    description.version = 1;
+    description.operation = OS1_HARDWARE_DESCRIBE;
+    description.id = os1::hardware::object_id(os1::hardware::Pci, 0) + 3;
+    ASSERT_EQ(0, hardware_query(description));
+    EXPECT_STREQ("failed", description.nodes[0].text);
+    for(auto physical : held)
+        EXPECT_TRUE(frames.free(physical));
     platform_reset_state();
 }

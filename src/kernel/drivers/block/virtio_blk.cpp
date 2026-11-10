@@ -571,8 +571,8 @@ bool probe_virtio_blk_device(VirtualMemory& kernel_vm,
     }
     if(g_virtio_blk.present)
     {
-        debug("virtio-blk: additional device ignored")();
-        return true;
+        debug("virtio-blk: additional device unsupported")();
+        return false;
     }
 
     auto& state = g_virtio_blk;

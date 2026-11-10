@@ -287,7 +287,9 @@ Reasoning:
 - better fit for a one-person hobby OS
 - avoids premature complexity around module loading and ABI stability
 
-Later modularization is acceptable where it clearly improves structure, but early design should not pretend that a microkernel or plugin-heavy model is free.
+The accepted next stage loads optional kernel drivers from disk through a bounded internal ABI.
+Boot-critical drivers remain built in initially; driver execution remains privileged.
+The [driver architecture](docs/hardware/driver-architecture.md) defines bootstrap dependencies, removal rules, and hardware priorities.
 
 ### Kernel and userland separation
 
@@ -499,7 +501,7 @@ The [Native API service roadmap](docs/native-api/roadmap.md#remaining-priorities
 1. Verify physical boot and program updates preserve an existing user file; retest the scheduler correction on hardware.
 2. Qualify disk-shell startup, rescue fallback, and preserving updates on physical hardware.
    See the [ext2 shell startup record](docs/archive/filesystems/2026-11-09-ext2-shell-bootstrap.md).
-3. Expose native keyboard and mouse services with volatile events, unsubscribe, state recovery, and removal handling.
+3. Establish shared driver lifetime and disk loading; then expose native keyboard and mouse services with volatile events, unsubscribe, state recovery, and removal handling.
 4. Add scoped service discovery and lifecycle rules. Add kernel Buffer borrowing and BlockDevice methods when required by a concrete client.
 5. Expand storage capacity and filesystem operations beyond the bounded ext2 profile; qualify device failure and update recovery separately.
 6. Add pipe endpoints, readiness, and shell pipelines.
@@ -585,7 +587,7 @@ EHCI high-speed hub discovery extends the original root-port storage profile for
 
 ### Milestone E: Networking foundation *(driver and ARP probe implemented; IP/UDP/TCP and sockets remain)*
 
-- NIC support — `virtio-net` is implemented through the shared virtio transport with MSI-X-driven RX/TX completion and an ARP probe smoke; see [src/kernel/drivers/net/virtio_net.cpp](src/kernel/drivers/net/virtio_net.cpp)
+- NIC support — `virtio-net` is implemented through the shared virtio transport with MSI-X-driven RX/TX completion and an ARP probe smoke; see [virtio-net module](src/drivers/virtio-net/driver.cpp)
 - define packet ownership, receive buffering, and operation-specific cancellation before expanding the protocol stack; reuse the implemented IPC deadline clock and keep the measurement clock separate
 - IP networking
 - TCP basics
@@ -618,7 +620,7 @@ Some earlier open questions have since been resolved in source or in the milesto
   See [boot and recovery](docs/filesystems/program-deployment.md#boot-and-recovery).
 - **Resolved:** PCI device interrupts use MSI-X first, then MSI, then IOAPIC INTx as a best-effort fallback. ACPICA-backed `_PRT` data feeds the INTx fallback when present; firmware-populated `interrupt_line` is the secondary fallback ([src/kernel/platform/pci_msi.cpp](src/kernel/platform/pci_msi.cpp), [src/kernel/platform/acpica_integration.cpp](src/kernel/platform/acpica_integration.cpp), [src/kernel/platform/acpica_osl.cpp](src/kernel/platform/acpica_osl.cpp)).
 - **Resolved:** the BSP scheduler tick uses an HPET-calibrated LAPIC periodic timer when available, with the PIT retained as a fallback when HPET or LAPIC calibration is unavailable ([src/kernel/core/kernel_main.cpp](src/kernel/core/kernel_main.cpp)).
-- **Resolved:** the first NIC target in QEMU/virtio-first environments is `virtio-net` over the shared virtio PCI transport, with MSI-X-driven RX/TX completion and an ARP probe smoke ([src/kernel/drivers/net/virtio_net.cpp](src/kernel/drivers/net/virtio_net.cpp)). The protocol stack on top remains future work.
+- **Resolved:** the first NIC target in QEMU/virtio-first environments is `virtio-net` over the shared virtio PCI transport, with MSI-X-driven RX/TX completion and an ARP probe smoke ([virtio-net module](src/drivers/virtio-net/driver.cpp)). The protocol stack on top remains future work.
 - **Resolved:** the first USB transport is xHCI bound by PCI class `0x0c/0x03/0x30`, with HID boot-keyboard input feeding the canonical console-input path used by PS/2 ([src/kernel/drivers/usb/xhci.cpp](src/kernel/drivers/usb/xhci.cpp), [src/kernel/drivers/usb/hid_keyboard.cpp](src/kernel/drivers/usb/hid_keyboard.cpp)).
 
 The following are not fully decided yet and should be revisited explicitly:

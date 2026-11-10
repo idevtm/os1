@@ -1887,6 +1887,13 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         ${file_test_firmware})
     set_tests_properties(os1_smoke_guided_shell_${boot} PROPERTIES TIMEOUT 180)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_guided_shell_${boot})
+    os1_add_qemu_test(NAME os1_smoke_driver_module_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_driver_module.py"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+        --program-disk "${OS1_PROGRAM_TEST_DISK}" --metadata "${OS1_DRIVER_METADATA}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-driver-module-${boot}.log" ${file_test_firmware})
+    set_tests_properties(os1_smoke_driver_module_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_driver_module_${boot})
     foreach(transport IN ITEMS virtio usb ehci)
       os1_add_qemu_test(NAME os1_smoke_catalog_${transport}_${boot}
         COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_hardware_catalog.py"

@@ -1,6 +1,7 @@
 // Fixed-size early driver registry.
 #include "drivers/bus/driver_registry.hpp"
 
+#include "freestanding/string.hpp"
 #include "util/memory.h"
 
 namespace
@@ -47,10 +48,19 @@ void driver_registry_reset()
 bool driver_registry_add_pci_driver(const PciDriver& driver)
 {
     if((nullptr == driver.name) || (nullptr == driver.probe) ||
-       ((driver.match_count > 0) && (nullptr == driver.matches)) || (g_pci_driver_count >= kMaxPciDrivers))
+       ((driver.match_count > 0) && (nullptr == driver.matches)) ||
+       (g_pci_driver_count >= kMaxPciDrivers))
     {
         return false;
     }
+    size_t length = 0;
+    while(length < 32 && driver.name[length])
+        ++length;
+    if(length == 0 || length == 32)
+        return false;
+    for(size_t i = 0; i < g_pci_driver_count; ++i)
+        if(freestanding::strings_equal(driver.name, g_pci_drivers[i].name))
+            return false;
     g_pci_drivers[g_pci_driver_count++] = driver;
     return true;
 }
