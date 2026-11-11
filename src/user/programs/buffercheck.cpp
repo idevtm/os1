@@ -255,7 +255,7 @@ int held_provider()
     close(3);
     return 0;
 }
-int main()
+int main(int, char**)
 {
     if(root() == -1)
         return held_provider();

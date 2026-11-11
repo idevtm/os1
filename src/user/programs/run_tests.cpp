@@ -769,7 +769,12 @@ int main(int argc, char** argv)
     text(manifest.fd, "machine_label=");
     text(manifest.fd, label ? label : "auto");
     text(manifest.fd, "\nkernel_revision=");
-    if(!f::put(manifest.fd, identity.revision, sizeof(identity.revision)))
+    size_t revision_length = 0;
+    while(revision_length < sizeof(identity.revision) && identity.revision[revision_length])
+    {
+        ++revision_length;
+    }
+    if(!f::put(manifest.fd, identity.revision, revision_length))
         io_failed = true;
     text(manifest.fd, "\nkernel_build=");
     if(!f::put(manifest.fd, identity.image, sizeof(identity.image)))

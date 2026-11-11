@@ -26,16 +26,7 @@ set(OS1_HOST_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 
 include("${OS1_REPO_ROOT}/cmake/acpica_sources.cmake")
 
-set(OS1_KERNEL_IMAGE_LOAD_ADDRESS 0xE000)
-set(OS1_INITRD_LOAD_ADDRESS 0x76000)
-set(OS1_KERNEL_RESERVED_PHYSICAL_START 0x100000)
-set(OS1_KERNEL_RESERVED_PHYSICAL_END 0x198000)
-set(OS1_KERNEL_VIRTUAL_OFFSET 0xFFFFFFFF80000000)
-set(OS1_KERNEL_SHIM_VIRTUAL_BASE 0xFFFFFFFF90000000)
-set(OS1_DIRECT_MAP_BASE 0xFFFF800000000000)
-math(EXPR OS1_KERNEL_RESERVED_PHYSICAL_BYTES
-  "${OS1_KERNEL_RESERVED_PHYSICAL_END} - ${OS1_KERNEL_RESERVED_PHYSICAL_START}")
-set(OS1_KERNEL_POST_IMAGE_RESERVE_BYTES 0x4000)
+include("${OS1_REPO_ROOT}/cmake/kernel_layout.cmake")
 
 file(MAKE_DIRECTORY "${OS1_HOST_GENERATED_DIR}")
 configure_file(
@@ -256,5 +247,10 @@ gtest_add_tests(TARGET os1_host_tests TEST_LIST os1_host_tests_TESTS)
 set_tests_properties(${os1_host_tests_TESTS} PROPERTIES LABELS "host;unit")
 
 add_test(NAME HardwareReferenceComparison
-  COMMAND "${Python3_EXECUTABLE}" -B "${OS1_REPO_ROOT}/tests/scripts/test_hardware_compare.py")
+  COMMAND "${Python3_EXECUTABLE}" -E -B "${OS1_REPO_ROOT}/tests/scripts/test_hardware_compare.py")
 set_tests_properties(HardwareReferenceComparison PROPERTIES LABELS "host;unit")
+
+add_test(NAME UapiHeaderCompatibility
+  COMMAND "${Python3_EXECUTABLE}" -E -B "${OS1_REPO_ROOT}/tests/scripts/test_uapi_headers.py"
+    --cc "${CMAKE_C_COMPILER}" --cxx "${CMAKE_CXX_COMPILER}")
+set_tests_properties(UapiHeaderCompatibility PROPERTIES LABELS "host;unit")

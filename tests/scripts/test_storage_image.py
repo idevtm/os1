@@ -71,7 +71,7 @@ class StorageImage(unittest.TestCase):
             utility.write_bytes(b'x')
             builder.create(image, utility, 4)
             code = 'import fcntl,sys; f=open(sys.argv[1],"r+b"); fcntl.lockf(f,fcntl.LOCK_EX); print("locked",flush=True); sys.stdin.read()'
-            child = subprocess.Popen([sys.executable, '-c', code, str(image)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            child = subprocess.Popen([sys.executable, "-E", '-c', code, str(image)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
             try:
                 self.assertEqual(child.stdout.readline(), b'locked\n')
                 with self.assertRaisesRegex(RuntimeError, 'in use'):

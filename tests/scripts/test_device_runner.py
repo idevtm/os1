@@ -20,11 +20,15 @@ from test_usb_storage_failures import Qmp
 
 def main():
     parser = argparse.ArgumentParser()
-    for name in ('qemu', 'image', 'program-disk', 'log', 'debugfs', 'e2fsck'):
+    for name in ('qemu', 'image', 'program-disk', 'log', 'debugfs', 'e2fsck', 'identity'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--code')
     parser.add_argument('--vars')
     args = parser.parse_args()
+    identity = Path(args.identity).read_bytes()
+    revision = re.search(rb'(?m)^#define OS1_LOG_REVISION "([A-Za-z0-9._+\-]{1,40})"$', identity)
+    fingerprint = re.search(rb'(?m)^#define OS1_LOG_IMAGE "([a-f0-9]{64})"$', identity)
+    assert revision and fingerprint, identity
     args.poweroff = True
     disk = Path(args.log).with_suffix('.raw')
     shutil.copyfile(args.program_disk, disk)
@@ -77,8 +81,8 @@ def main():
         key = path.removeprefix('/disk/')
         manifest = before[key + '/manifest.txt']
         summary = before[key + '/summary.txt']
-        assert re.search(rb'kernel_revision=[a-f0-9]{40}\n', manifest), manifest
-        assert re.search(rb'kernel_build=[a-f0-9]{64}\n', manifest), manifest
+        assert b'kernel_revision=' + revision[1] in manifest.splitlines(), manifest
+        assert b'kernel_build=' + fingerprint[1] in manifest.splitlines(), manifest
         assert b'machine_label=qemu\n' in manifest
         assert b'runner_version=3\n' in manifest
         assert b'input_observation=0\n' in manifest

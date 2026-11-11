@@ -1,9 +1,11 @@
 """Check observable process lifetime and failures during smoke settling."""
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 RUNNER = Path(__file__).resolve().parents[2] / "cmake/scripts/run_smoke.py"
 
@@ -17,10 +19,10 @@ class SettleTests(unittest.TestCase):
             if boot_menu is not None:
                 event_args += ['--boot-menu-entry', str(boot_menu)]
             result = subprocess.run(
-                [sys.executable, str(RUNNER), "--log", str(Path(directory) / "log"),
+                [sys.executable, "-E", str(RUNNER), "--log", str(Path(directory) / "log"),
                  "--timeout", timeout, "--settle-after-markers", settle,
                  "--marker", marker, "--reject-marker", rejected, *event_args, "--",
-                 sys.executable, "-u", "-c", program],
+                 sys.executable, "-E", "-u", "-c", program],
                 capture_output=True, text=True, timeout=6,
             )
             result.log = (Path(directory) / 'log').read_text()
@@ -153,6 +155,14 @@ class SettleTests(unittest.TestCase):
             "os.write(1,b'DY\\r\\n'); time.sleep(1)", marker="\nREADY\n",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_child_assertions_survive_pythonoptimize(self):
+        with patch.dict(os.environ, {"PYTHONOPTIMIZE": "1"}):
+            result = self.run_smoke(
+                "import time; assert False, 'R42 assertion probe'; "
+                "print('READY', flush=True); time.sleep(1)")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AssertionError: R42 assertion probe", result.log)
 
     def test_zero_settle_allows_marker_only(self):
         self.assertEqual(self.run_smoke("print('READY')", settle="0").returncode, 0)

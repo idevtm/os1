@@ -228,9 +228,11 @@ target_compile_options(
     -w
 )
 
+set(OS1_SOURCE_REVISION "" CACHE STRING "Revision label for source archives without Git metadata")
 add_custom_target(os1_log_build_identity
-  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/log_build_identity.py"
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" -E "${PROJECT_SOURCE_DIR}/cmake/scripts/log_build_identity.py"
           --root "${PROJECT_SOURCE_DIR}" --output "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+          "--archive-revision=${OS1_SOURCE_REVISION}"
           --profile "${CMAKE_BUILD_TYPE}:${CMAKE_CXX_COMPILER_ID}:${CMAKE_CXX_COMPILER_VERSION}:${CMAKE_CXX_FLAGS}:${OS1_KMEM_DEBUG}:${OS1_QEMU_DEBUGCON}:${OS1_BOOT_DIAGNOSTICS}:${OS1_USB_KEYBOARD_DIAGNOSTICS}"
   BYPRODUCTS "${OS1_GENERATED_DIR}/log_build_identity.hpp"
   VERBATIM)
@@ -420,7 +422,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
   file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/handoff-test-objects.txt"
     CONTENT "$<JOIN:$<TARGET_OBJECTS:kernel_core_objects>,\n>\n$<JOIN:${OS1_HANDOFF_LINK_OBJECTS},\n>\n$<TARGET_FILE:os1_acpica>\n")
   add_test(NAME os1_interrupt_handoff_contract
-    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_interrupt_handoff.py"
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_interrupt_handoff.py"
       --root "${PROJECT_SOURCE_DIR}"
       --objects "${OS1_GENERATED_DIR}/handoff-test-objects.txt"
       --linker "${CMAKE_LINKER}" --link-script "${KERNEL_CORE_LINKER_SCRIPT}"

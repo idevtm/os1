@@ -9,41 +9,60 @@ set(USER_COMMON_CXX_SOURCES
 
 function(os1_add_user_cxx_program program_name source_file output_var)
   set(output_path "${USER_BIN_DIR}/${program_name}.elf")
+  set(compile_options
+    -std=gnu++20
+    ${ARGN}
+    -ffreestanding
+    -fno-stack-protector
+    -fno-asynchronous-unwind-tables
+    -fno-unwind-tables
+    -fno-exceptions
+    -fno-rtti
+    -fno-threadsafe-statics
+    -fno-use-cxa-atexit
+    # Fixed high-address executables use RIP-relative code and a static GOT.
+    # Disable relaxation: absolute 32-bit addresses cannot encode this window.
+    -fpie
+    -fno-plt
+    -no-pie
+    -nostdinc++
+    -march=x86-64
+    -mtune=generic
+    -mgeneral-regs-only
+    -mcmodel=small
+    # Keep bundled programs within the bounded BIOS initrd load window.
+    -Os
+    -flto
+    -ffunction-sections
+    -fdata-sections
+    -Wall
+    -Wextra
+    "-I${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "-I${PROJECT_SOURCE_DIR}/src/uapi"
+    "-I${PROJECT_SOURCE_DIR}/src/common"
+  )
+  set(object_dir "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/os1_user_${program_name}.dir")
+  set(objects)
+  foreach(source IN ITEMS ${USER_COMMON_CXX_SOURCES} "${source_file}")
+    get_filename_component(source_name "${source}" NAME)
+    set(object "${object_dir}/${source_name}.o")
+    add_custom_command(
+      OUTPUT "${object}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${object_dir}"
+      COMMAND "${CMAKE_CXX_COMPILER}" ${compile_options}
+        -MD -MF "${object}.d" -MQ "${object}" -c "${source}" -o "${object}"
+      DEPENDS "${source}"
+      DEPFILE "${object}.d"
+      VERBATIM
+    )
+    list(APPEND objects "${object}")
+  endforeach()
+
   add_custom_command(
     OUTPUT "${output_path}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_BIN_DIR}"
-    COMMAND
-      "${CMAKE_CXX_COMPILER}"
-      -std=gnu++20
-      ${ARGN}
-      -ffreestanding
-      -fno-stack-protector
-      -fno-asynchronous-unwind-tables
-      -fno-unwind-tables
-      -fno-exceptions
-      -fno-rtti
-      -fno-threadsafe-statics
-      -fno-use-cxa-atexit
-      # Fixed high-address executables use RIP-relative code and a static GOT.
-      # Disable relaxation: absolute 32-bit addresses cannot encode this window.
-      -fpie
-      -fno-plt
-      -no-pie
-      -nostdinc++
-      -march=x86-64
-      -mtune=generic
-      -mgeneral-regs-only
-      -mcmodel=small
-      # Keep bundled programs within the bounded BIOS initrd load window.
-      -Os
-      -flto
-      -ffunction-sections
-      -fdata-sections
-      -Wall
-      -Wextra
-      "-I${CMAKE_CURRENT_SOURCE_DIR}/include"
-      "-I${PROJECT_SOURCE_DIR}/src/uapi"
-      "-I${PROJECT_SOURCE_DIR}/src/common"
+    COMMAND "${CMAKE_CXX_COMPILER}" ${compile_options}
+      -Werror=lto-type-mismatch
       -nostdlib
       -nostartfiles
       -nodefaultlibs
@@ -54,73 +73,8 @@ function(os1_add_user_cxx_program program_name source_file output_var)
       -Wl,--gc-sections
       -Wl,--build-id=none
       -o "${output_path}"
-      ${USER_COMMON_CXX_SOURCES}
-      "${source_file}"
-    DEPENDS
-      ${USER_COMMON_CXX_SOURCES}
-      "${source_file}"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/syscall.h"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/syscall.hpp"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/resource.h"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/vfs.h"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/startup.h"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/context.h"
-      "${PROJECT_SOURCE_DIR}/src/common/context/data.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/context.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/vfs.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/file_tools.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/basic_files.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/system.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/line_editor.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/shell/command.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/shell/values.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/shell_runtime.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/text_tools.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/text/tools.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/pager/render.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/pager.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/shell/program_path.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/shell/text_buffer.hpp"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/syscall_numbers.h"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/ipc.h"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/console.h"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/console.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/prompt.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/command_engine.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/discovery/schema.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/shell/expression.hpp"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/log.h"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/log.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/discovery.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/discovery/view.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/discovery/completion.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/discovery/presentation.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/programs/kernel_console_check.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/programs/tmpfs_check.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/tmpfs.hpp"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/tmpfs.h"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/buffer.h"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/buffer.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/interface/buffer_metadata.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/interface/metadata.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/interface/constructor.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/interface/counter.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/startup.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/activation.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/interface/textprocessor.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/interface/parameters.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/interface/parameter_fixture.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/interface/parameter_binding.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/interface/parameter_demo.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/parameter_client.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/elf/elf64.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/ipc.hpp"
-      "${PROJECT_SOURCE_DIR}/src/uapi/os1/hardware.h"
-      "${PROJECT_SOURCE_DIR}/src/common/hardware/tree.hpp"
-      "${PROJECT_SOURCE_DIR}/src/common/hardware/presentation.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/hardware.hpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/hardware_tools.hpp"
-      "${USER_LINKER_SCRIPT}"
+      ${objects}
+    DEPENDS ${objects} "${USER_LINKER_SCRIPT}"
     VERBATIM
   )
   set("${output_var}" "${output_path}" PARENT_SCOPE)
@@ -129,22 +83,7 @@ endfunction()
 
 os1_add_user_cxx_program(sh "${CMAKE_CURRENT_SOURCE_DIR}/programs/sh.cpp" OS1_USER_SH_ELF)
 os1_add_user_cxx_program(gfxdemo "${CMAKE_CURRENT_SOURCE_DIR}/programs/gfxdemo.cpp" OS1_USER_GFXDEMO_ELF)
-add_custom_command(OUTPUT "${OS1_USER_GFXDEMO_ELF}" APPEND DEPENDS
-  "${PROJECT_SOURCE_DIR}/src/uapi/os1/display.h"
-  "${PROJECT_SOURCE_DIR}/src/uapi/os1/system.h"
-  "${PROJECT_SOURCE_DIR}/src/uapi/os1/input.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/console.hpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/input.hpp")
 os1_add_user_cxx_program(run-tests "${CMAKE_CURRENT_SOURCE_DIR}/programs/run_tests.cpp" OS1_USER_RUN_TESTS_ELF)
-add_custom_command(OUTPUT "${OS1_USER_RUN_TESTS_ELF}" APPEND DEPENDS
-  "${PROJECT_SOURCE_DIR}/src/common/hardware/test_run.hpp"
-  "${PROJECT_SOURCE_DIR}/src/common/hardware/archive_stream.hpp"
-  "${PROJECT_SOURCE_DIR}/src/common/hardware/capture.hpp"
-  "${PROJECT_SOURCE_DIR}/src/uapi/os1/input.h"
-  "${PROJECT_SOURCE_DIR}/src/uapi/os1/observe.h"
-  "${PROJECT_SOURCE_DIR}/src/uapi/os1/system.h"
-  "${PROJECT_SOURCE_DIR}/src/common/log/frame.hpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/include/os1/input.hpp")
 os1_add_user_cxx_program(init "${CMAKE_CURRENT_SOURCE_DIR}/programs/init.cpp" OS1_USER_INIT_ELF)
 os1_add_user_cxx_program(rescue "${CMAKE_CURRENT_SOURCE_DIR}/programs/rescue.cpp" OS1_USER_RESCUE_ELF)
 os1_add_user_cxx_program(yield "${CMAKE_CURRENT_SOURCE_DIR}/programs/yield.cpp" OS1_USER_YIELD_ELF)
@@ -248,9 +187,6 @@ add_custom_target(initrd_cpio DEPENDS "${OS1_INITRD_CPIO}")
 if(BUILD_TESTING)
   os1_add_user_cxx_program(entry_probe
     "${PROJECT_SOURCE_DIR}/tests/fixtures/entry_probe.cpp" entry_probe_elf)
-  add_custom_command(OUTPUT "${entry_probe_elf}" APPEND DEPENDS
-    "${PROJECT_SOURCE_DIR}/src/uapi/os1/observe.h"
-    "${PROJECT_SOURCE_DIR}/src/common/hardware/presentation.hpp")
   add_custom_target(os1_entry_probe DEPENDS "${entry_probe_elf}")
   set(OS1_ENTRY_PROBE_ELF "${entry_probe_elf}" PARENT_SCOPE)
   foreach(version IN ITEMS 1 2)

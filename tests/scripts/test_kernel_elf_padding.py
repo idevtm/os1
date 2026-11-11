@@ -70,7 +70,7 @@ resb 0x30000
         assert memory[0x8000:] == bytes(0x30000)
         assert physical + memsz == 0x19a000
         assert len(data) == 433920, f'fixture size changed: {len(data)}'
-        subprocess.run([sys.executable, str(ROOT / 'cmake/scripts/assert_kernel_boot_contract.py'),
+        subprocess.run([sys.executable, "-E", str(ROOT / 'cmake/scripts/assert_kernel_boot_contract.py'),
                         '--elf', str(image), '--disk-slot-bytes', '434176',
                         '--staging-buffer-bytes', '434176', '--reserved-start', '0x100000',
                         '--reserved-end', '0x1c0000', '--post-image-reserve-bytes', '0x4000',
