@@ -1819,6 +1819,7 @@ The kernel allocates capture storage after allocator initialization and before p
 Capture uses a nonblocking lock attempt; contention increments a loss counter.
 The clock advances once per BSP scheduler tick, independent of CPU count.
 A retained Operation owns its origin record until completion or failure.
+The process root descriptor must grant `OS1_RIGHT_LOG_READ` to admit a new history.
 History allocation counts against a system-wide ceiling.
 Process reaping transfers a closing history to the bounded exporter.
 No log capture performs filesystem I/O. General provider reflection remains a later slice.

@@ -20,6 +20,7 @@
 #include "log/frame.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
+#include "proc/startup.hpp"
 #include "proc/user_program.hpp"
 #include "storage/block_device.hpp"
 #include "support/initrd_builder.hpp"
@@ -136,7 +137,10 @@ protected:
     void TearDown() override
     {
         if(thread)
+        {
             diagnostic_log::cleanup(thread->process);
+            descriptor_close_all(thread->process->descriptors);
+        }
         for(unsigned slot = 0; slot < 4; ++slot)
         {
             diagnostic_log::HistoryState h{};
@@ -166,6 +170,7 @@ protected:
         ASSERT_TRUE(vm.allocate_and_map(kUserImageBase, 1, PageFlags::User | PageFlags::Write));
         auto* process = create_user_process("log-export", vm.root());
         ASSERT_NE(nullptr, process);
+        ASSERT_EQ(0, inherit_process_namespace(nullptr, process));
         thread = create_user_thread(process, kUserImageBase, kUserImageBase + 4096, frames, false);
         ASSERT_NE(nullptr, thread);
         ASSERT_EQ(0, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));

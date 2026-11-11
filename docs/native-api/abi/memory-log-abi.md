@@ -92,7 +92,7 @@ Syscall 13 implements own-process context operations; it accepts an operation an
 
 | Operation | Behavior |
 | --- | --- |
-| `CONTEXT_OPEN` | Allocate this process history once, or return a quota/allocation error |
+| `CONTEXT_OPEN` | Admit one history for this process if its root descriptor grants `OS1_RIGHT_LOG_READ` |
 | `COMMAND_BEGIN` | Assign a command ID and preserve the inherited context |
 | `COMMAND_END` | Record completion and restore the inherited context |
 | `HISTORY_READ` | Return one matching history record from this process |
@@ -100,9 +100,19 @@ Syscall 13 implements own-process context operations; it accepts an operation an
 
 User input cannot choose a command identity or complete another active command.
 A process supports one active command scope; nested shells have separate process contexts.
-Launch copies correlation identifiers, not history storage or log-read authority.
+Launch copies correlation identifiers.
+History storage stays with its process.
+The launch grant rules control which descriptors and rights the child receives.
 Each admitted IPC Operation retains origin identifiers until reply or peer failure, independent of later caller commands.
 Provider-internal calls do not automatically inherit the currently received request; explicit delegated correlation is later work.
+
+If the root descriptor is absent or lacks `OS1_RIGHT_LOG_READ`, a new `CONTEXT_OPEN` returns `OS1_ERR_ACCESS`.
+The check runs before slot reservation.
+At the system limit, admission returns `OS1_ERR_LIMIT`.
+If allocation fails, admission returns `OS1_ERR_NO_MEMORY`.
+An existing history makes `CONTEXT_OPEN` succeed without a new admission check.
+Removing the grant does not release the history.
+Command identity assignment and own-process queries require no log-read grant.
 
 History uses 32 fixed 2 KiB slots per shell, allocated on demand.
 At most four histories coexist, enforcing the 256 KiB payload ceiling; bookkeeping is additional.
