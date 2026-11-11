@@ -124,6 +124,9 @@ Successful `sync` flushes completed writes, sets `EXT2_VALID_FS`, and flushes ag
 An I/O error makes the mounted volume fail further disk operations.
 No success result hides a failed read, write, or flush.
 
+A cross-directory move writes and flushes the destination directory block before it writes the source directory block.
+An interruption between those writes can leave both names for the moved object.
+
 Ext2 has no journal. Failed or interrupted updates can need offline repair.
 This milestone establishes persistence after successful synchronization, not power-loss atomicity for metadata updates.
 Use `e2fsck` on an extracted partition while QEMU is stopped.

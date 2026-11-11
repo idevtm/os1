@@ -798,7 +798,13 @@ long Volume::move(uint32_t source_parent,
     r = begin_write();
     if(r < 0)
         return r;
-    if(!write_block(from_block, from) || (to != from && !write_block(to_block, to)))
+    // Flush the destination before removing the source entry.
+    if(to != from && (!write_block(to_block, to) || !io.flush(io.context)))
+    {
+        failed = true;
+        return OS1_ERR_IO;
+    }
+    if(!write_block(from_block, from))
         return OS1_ERR_IO;
     if(directory(inode) && source_parent != destination_parent)
     {

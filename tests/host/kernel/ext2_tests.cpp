@@ -492,6 +492,71 @@ TEST_F(Ext2, MoveIoFailurePoisonsVolumeInsteadOfReportingSuccess)
     EXPECT_LT(fs->sync(), 0);
 }
 
+TEST_F(Ext2, CrossDirectoryMoveKeepsSourceUntilDestinationFlush)
+{
+    for(bool fail_flush : {false, true})
+    {
+        SCOPED_TRACE(fail_flush ? "destination flush fails" : "second directory write fails");
+        Disk fixture;
+        auto volume = std::make_unique<ext2::Volume>();
+        ASSERT_EQ(volume->mount(fixture.io()), 0);
+        ext2::Inode parent{}, left{}, right{}, source{};
+        uint32_t left_id, right_id, source_id;
+        ASSERT_EQ(volume->inode_read(2, parent), 0);
+        ASSERT_EQ(volume->create(2, parent, "left", 4, true, left_id, left), 0);
+        ASSERT_EQ(volume->create(2, parent, "right", 5, true, right_id, right), 0);
+        ASSERT_EQ(volume->create(left_id, left, "source", 6, false, source_id, source), 0);
+        ASSERT_EQ(volume->write(source_id, source, 0, "kept", 4), 4);
+        ASSERT_TRUE(volume->dirty);
+
+        const auto writes_before = fixture.total_writes;
+        const auto flushes_before = fixture.flushes;
+        fixture.fail_flush = fail_flush;
+        fixture.writes = fail_flush ? -1 : 1;
+        std::array<uint8_t, 2 * ext2::block_bytes> scratch{};
+        EXPECT_EQ(volume->move(left_id,
+                               left,
+                               "source",
+                               6,
+                               right_id,
+                               right,
+                               "target",
+                               6,
+                               source_id,
+                               source,
+                               0,
+                               nullptr,
+                               scratch.data()),
+                  OS1_ERR_IO);
+        EXPECT_TRUE(volume->failed);
+        EXPECT_EQ(fixture.total_writes - writes_before, 1u);
+        EXPECT_EQ(fixture.flushes - flushes_before, 1u);
+        EXPECT_EQ(volume->sync(), OS1_ERR_IO);
+
+        // Inspect the two directory blocks without mounting the dirty image.
+        auto inspector = std::make_unique<ext2::Volume>(*volume);
+        inspector->failed = false;
+        const auto entry_inode = [&](ext2::Inode& directory, const char* name) -> uint32_t {
+            uint64_t offset = 0;
+            for(;;)
+            {
+                ext2::Entry entry{};
+                long result = inspector->next(directory, offset, entry, offset);
+                EXPECT_GE(result, 0);
+                if(result <= 0)
+                    return 0;
+                if(std::string(entry.name, entry.length) == name)
+                    return entry.inode;
+            }
+        };
+        EXPECT_EQ(entry_inode(left, "source"), source_id);
+        EXPECT_EQ(entry_inode(right, "target"), source_id);
+        char bytes[4]{};
+        ASSERT_EQ(inspector->read(source, 0, bytes, sizeof(bytes)), 4);
+        EXPECT_EQ(std::string(bytes, sizeof(bytes)), "kept");
+    }
+}
+
 TEST_F(Ext2, EmptyDirectoryReplacementUpdatesParentLinksInBothMoveForms)
 {
     for(bool same_parent : {true, false})
@@ -509,6 +574,7 @@ TEST_F(Ext2, EmptyDirectoryReplacementUpdatesParentLinksInBothMoveForms)
         ASSERT_EQ(volume->create(l, left, "source", 6, true, s, source), 0);
         ASSERT_EQ(volume->create(dest_id, destination, "target", 6, true, t, target), 0);
         auto before_left = ext2::u16(left.bytes + 26), before_right = ext2::u16(right.bytes + 26);
+        const auto flushes_before = fixture.flushes;
         std::array<uint8_t, 8192> scratch{};
         ASSERT_EQ(volume->move(l,
                                left,
@@ -524,6 +590,7 @@ TEST_F(Ext2, EmptyDirectoryReplacementUpdatesParentLinksInBothMoveForms)
                                &target,
                                scratch.data()),
                   0);
+        EXPECT_EQ(fixture.flushes - flushes_before, same_parent ? 0u : 1u);
         EXPECT_EQ(ext2::u16(left.bytes + 26), before_left - 1);
         EXPECT_EQ(ext2::u16(right.bytes + 26), before_right);
         ASSERT_EQ(volume->sync(), 0);
