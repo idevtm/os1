@@ -424,16 +424,30 @@ The Limine frontend is now split by responsibility: `entry.cpp` sequences the ha
 
 Both paths finish this phase holding (or able to reach) every piece of bootloader-native data they need for the next step.
 
-### Phase 2 — `BootInfo` build (one-shot, mirrored layout)
+### Phase 2 — `BootInfo` build (one-shot)
 
-On UEFI, `build_boot_info()` in `src/boot/limine/handoff_builder.cpp` walks Limine's HHDM to read memmap entries, translates every Limine-virtual pointer (framebuffer, RSDP, SMBIOS, initrd) into physical addresses with `translate_limine_virtual()`, and writes the result into a `LowHandoffBootInfoStorage` block placed immediately after the loaded kernel image. On BIOS the 64-bit loader writes the same layout from E820 + EDD + CMOS + the earlier RSDP scan.
+On UEFI, the shim reads the Limine memory map into its own stack before it writes to fixed physical destinations.
 
-Both paths finalize identical low-memory arenas:
+| UEFI destination | Check before writing |
+| --- | --- |
+| Each kernel `PT_LOAD` segment | The range fits the kernel reservation and lies entirely in usable RAM. |
+| Boot CPU page, `BootInfo` storage, and stack | The combined range fits the reservation and lies entirely in usable RAM. |
+| Page-frame bitmap | The full 512 KiB range lies in usable RAM. |
 
-- `0x0500` — `BootInfo` header
-- `0x6000` — `BootMemoryRegion[]` memory map
-- `0x7000` — `BootModuleInfo[]` module descriptors
-- `0x7200` — string pool (bootloader name, command line, module names)
+The shim stops with a serial message if a check fails.
+Limine marks its executable, modules, and page tables as occupied memory.
+See the [Limine protocol memory map](https://github.com/limine-bootloader/limine-protocol/blob/trunk/PROTOCOL.md#memory-map-feature).
+
+The shim translates the framebuffer, RSDP, SMBIOS, and initrd pointers into physical addresses.
+It copies the normalized map and builds `LowHandoffBootInfoStorage` after the loaded kernel image.
+The BIOS loader builds the same `BootInfo` ABI from E820, EDD, CMOS, and the RSDP scan.
+
+| BIOS address | Handoff data |
+| --- | --- |
+| `0x0500` | `BootInfo` header |
+| `0x6000` | `BootMemoryRegion[]` |
+| `0x7000` | `BootModuleInfo[]` |
+| `0x7200` | Bootloader name, command line, and module names |
 
 The shim then installs the minimum transition mappings required for handoff: a low identity window for the boot-critical low region and the higher-half alias needed for the shared kernel entry. It then calls `limine_enter_kernel`, which switches to the per-CPU boot stack and jumps to `kernel_main(BootInfo*, cpu*)`.
 
@@ -698,27 +712,26 @@ into kernel-owned BSS storage. That matters because bootloader staging memory is
 
 ## Early Physical Layout Shared By Boot Paths
 
-[../src/kernel/handoff/memory_layout.h](../src/kernel/handoff/memory_layout.h) and [../src/kernel/handoff/memory_layout.inc](../src/kernel/handoff/memory_layout.inc) hold the fixed early-boot addresses used by the BIOS loader and mirrored by the Limine shim.
+[../src/kernel/handoff/memory_layout.h](../src/kernel/handoff/memory_layout.h) and [../src/kernel/handoff/memory_layout.inc](../src/kernel/handoff/memory_layout.inc) define the fixed early physical layout. Both paths use the kernel load base and frame bitmap.
 
 The [shared CMake layout](../cmake/kernel_layout.cmake) supplies the kernel boot envelope.
 Production and host tests generate the same C++ header from these values.
 The production build also generates the NASM constants for the BIOS loader.
 
-Key addresses:
+| Address | Boot path | Purpose |
+| --- | --- | --- |
+| `0x0500` | BIOS | `BootInfo` header |
+| `0x6000` | BIOS | `BootMemoryRegion[]` buffer |
+| `0x7000` | BIOS | `BootModuleInfo[]` buffer |
+| `0x7200` | BIOS | String pool for bootloader name, command line, and module names |
+| `0x09000` | BIOS | Disk scratch and then temporary page tables |
+| `0xE000` | BIOS | Kernel image load buffer after the five temporary page tables |
+| `0x8C000` | BIOS | 64 KiB initrd load buffer, ending at `0x9C000` |
+| `0x100000` | Both | Kernel physical load base |
+| `0x1C0000-0x23FFFF` | Both | Page-frame bitmap |
 
-| Address | Purpose |
-| --- | --- |
-| `0x0500` | `BootInfo` header |
-| `0x6000` | `BootMemoryRegion[]` buffer |
-| `0x7000` | `BootModuleInfo[]` buffer |
-| `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
-| `0x09000` | BIOS disk scratch, then temporary page tables after firmware disk I/O completes |
-| `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
-| `0x8C000` | BIOS initrd load buffer (64 KiB slot, ending at `0x9C000`) |
-| `0x100000` | shared kernel physical load base |
-| `0x1C0000-0x23FFFF` | page-frame bitmap |
-
-The modern path deliberately mirrors this layout before entering `kernel_main`. That is not nostalgia. It is a compatibility technique that keeps the shared kernel bootloader-agnostic while the frontends converge on the same higher-half kernel ABI.
+The Limine shim places its `BootInfo` storage after the kernel image and boot CPU page.
+Both paths use the same higher-half kernel entry and `BootInfo` ABI.
 
 ## Modern Default Boot Path: Limine + UEFI
 
@@ -809,14 +822,10 @@ The goal is not to keep Limine's page tables forever. The goal is to make the fi
 
 ### Building The Final `BootInfo`
 
-The shim then mirrors the BIOS handoff layout into low memory:
+The shim places the boot CPU page, `LowHandoffBootInfoStorage`, and boot stack after the loaded image.
+It checks these destinations before it writes to them.
 
-- `BootInfo` at `0x0500`
-- memory map at `0x6000`
-- module descriptors at `0x7000`
-- strings at `0x7200`
-
-That low-memory block is populated with:
+The kernel reads these values from the handoff block.
 
 - `source = Limine`
 - bootloader name and version
@@ -829,7 +838,7 @@ That low-memory block is populated with:
 
 The final transfer happens through `limine_enter_kernel()`, which:
 
-- switches to the low boot CPU page as the stack
+- switches to the validated boot stack
 - passes `RDI = BootInfo*`
 - passes `RSI = cpu*`
 - calls the shared higher-half `kernel_main`
