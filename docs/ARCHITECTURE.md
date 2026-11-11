@@ -953,6 +953,19 @@ The allocator:
 
 That last capability matters on the modern path because initrd modules and framebuffers may live in memory-map regions that are not simple "usable RAM" entries.
 
+#### Contiguous page runs
+
+The page-frame allocator finds the first uninterrupted run of free pages.
+It searches and reserves the run under one IRQ-safe lock.
+
+```text
+Requested page count -> Scan bitmap words -> Reserve first matching run
+```
+
+The search skips fully occupied words and joins free runs across word boundaries.
+It marks the selected pages busy with word masks.
+A request can fail when the total number of free pages is sufficient but no run is long enough.
+
 ### Virtual Memory
 
 `VirtualMemory` in [../src/kernel/mm/virtual_memory.cpp](../src/kernel/mm/virtual_memory.cpp) manages kernel and user mappings. The steady-state layout is now split into three intentional regions:
