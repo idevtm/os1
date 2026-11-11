@@ -36,7 +36,7 @@ T read_value(const uint8_t* source)
         d[i] = source[i];
     return value;
 }
-int main()
+int main(int, char**)
 {
     // Private construction bootstrap: only the provider endpoint at fd 3.
     if(root() != -1 || cwd() != -1)

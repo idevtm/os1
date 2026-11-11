@@ -60,7 +60,7 @@ bool rejected(const os1_constructor_args& args)
            !result.transport_status && result.application_status == OS1_ERR_INVALID &&
            result.payload_bytes == 0;
 }
-int main()
+int main(int, char**)
 {
     long image = open("/disk/bin/paramdemo",
                       OS1_RIGHT_EXECUTE | OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT);
