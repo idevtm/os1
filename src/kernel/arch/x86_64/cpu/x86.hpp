@@ -198,6 +198,10 @@ static inline uint64_t rdtsc(void)
     return (static_cast<uint64_t>(high) << 32) | low;
 }
 
+inline constexpr uint32_t kIa32FsBase = 0xC0000100;
+inline constexpr uint32_t kIa32GsBase = 0xC0000101;
+inline constexpr uint32_t kIa32KernelGsBase = 0xC0000102;
+
 static inline void wrmsr(uint32_t msr, uint64_t value)
 {
     uint32_t lo = value & 0xffffffffu;

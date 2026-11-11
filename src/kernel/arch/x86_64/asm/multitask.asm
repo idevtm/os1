@@ -55,16 +55,13 @@ restore_thread:
 ; Restore a TrapFrame already addressed by RDI. Used both for direct resume and
 ; after trap_dispatch decides to keep the current thread.
 restore_frame_ptr:
-	sub rsp, 16
 	mov r11, rdi
 	mov rax, [r11 + TF_CS]
 	test al, 3
-	jz .kernel_return
-	lea rax, [r11 + TF_RIP]
-	mov [rsp], rax
-	jmp .resume_user
+	jnz .resume_user
 
 .kernel_return:
+	sub rsp, 16
 	cmp qword [r11 + TF_SS], 0
 	je .kernel_same_cpl_return
 
@@ -98,8 +95,12 @@ restore_frame_ptr:
 	jmp .resume_kernel
 
 .resume_user:
-	mov rax, [r11 + TF_R11]
-	mov [rsp + 8], rax
+	; IRETQ can fault before it switches stacks. Keep RSP on a kernel stack.
+	push qword [r11 + TF_SS]
+	push qword [r11 + TF_RSP]
+	push qword [r11 + TF_RFLAGS]
+	push qword [r11 + TF_CS]
+	push qword [r11 + TF_RIP]
 
 	mov r15, [r11 + TF_R15]
 	mov r14, [r11 + TF_R14]
@@ -115,8 +116,8 @@ restore_frame_ptr:
 	mov rcx, [r11 + TF_RCX]
 	mov rbx, [r11 + TF_RBX]
 	mov rax, [r11 + TF_RAX]
-	mov r11, [rsp + 8]
-	mov rsp, [rsp]
+	mov r11, [r11 + TF_R11]
+	swapgs
 	iretq
 
 .resume_kernel:

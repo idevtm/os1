@@ -21,7 +21,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     timings = {'phase': phase, 'commands': [], 'completed': False}
     startup_finished = operation = None
     log = Path(args.log).with_suffix(f'.{phase}.log')
-    command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
+    command = [args.qemu, '-machine', 'q35', '-smp', str(getattr(args, 'cpus', 4)),
+               '-m', '128M', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
                '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
     if getattr(args, 'vga', None):

@@ -13,12 +13,34 @@ extern restore_frame_ptr
 %define USER_DATA_SEGMENT 0x1b
 %define USER_CODE_SEGMENT 0x23
 %define THREAD_STATE_RUNNING 2
+%define IA32_GS_BASE 0xC0000101
+%define FIRST_IRQ_VECTOR 32
 
 global trap_entry_common
 trap_entry_common:
 	push rax
 	push rdx
 
+	test byte [rsp + 40], 3
+	jnz .swap_user_gs
+	cmp dword [rsp + 16], FIRST_IRQ_VECTOR
+	jae .kernel_gs
+
+	; A kernel exception can interrupt a GS transition. This includes the
+	; IST entries for NMI, double fault, and machine check. The active GS
+	; base is high for the CPU record and low for user mode.
+	push rcx
+	mov ecx, IA32_GS_BASE
+	rdmsr
+	pop rcx
+	test edx, edx
+	js .kernel_gs
+	; A kernel exception is fatal. It does not resume the interrupted code.
+
+.swap_user_gs:
+	swapgs
+.kernel_gs:
+	lfence
 	mov rax, [gs:CPU_CURRENT_THREAD]
 	test rax, rax
 	jz .cpu_frame
@@ -108,6 +130,9 @@ trap_entry_common:
 
 global syscall_entry
 syscall_entry:
+	; SYSCALL changes privilege without changing RSP or the GS base.
+	swapgs
+	lfence
 	cld
 	mov [gs:CPU_INTERRUPT_FRAME + TF_R10], r10
 	mov r10, [gs:CPU_CURRENT_THREAD]
@@ -155,6 +180,12 @@ syscall_entry:
 	cmp dword [rax + THREAD_STATE], THREAD_STATE_RUNNING
 	jne .switch_thread
 
+	; Keep the kernel stack for any return outside the lower canonical half.
+	; SYSRET can fault in ring 0 after RSP contains the user stack pointer.
+	mov rcx, [r12 + TF_RIP]
+	shr rcx, 47
+	jnz .resume_frame
+
 	sub rsp, 8
 	mov rbx, [r12 + TF_RSP]
 	mov [rsp], rbx
@@ -174,6 +205,7 @@ syscall_entry:
 	mov rcx, [r12 + TF_RIP]
 	mov r11, [r12 + TF_RFLAGS]
 	mov r12, [r12 + TF_R12]
+	swapgs
 	mov rsp, [rsp]
 	o64 sysret
 

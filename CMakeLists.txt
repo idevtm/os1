@@ -1823,6 +1823,11 @@ find_program(OS1_E2FSCK_EXECUTABLE NAMES e2fsck HINTS /opt/homebrew/opt/e2fsprog
 if(OS1_E2FSCK_EXECUTABLE)
   set(OS1_EXT2_CHECK_ARGS --e2fsck "${OS1_E2FSCK_EXECUTABLE}")
 endif()
+if(BUILD_TESTING AND OS1_OBJDUMP_EXECUTABLE)
+  add_test(NAME os1_kernel_entry_assembly_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_kernel_entry_assembly.py"
+      --objdump "${OS1_OBJDUMP_EXECUTABLE}" --kernel "${OS1_KERNEL_ELF}")
+endif()
 if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
   add_test(NAME os1_kernel_elf_padding_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_kernel_elf_padding.py"
@@ -1857,6 +1862,17 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
       set(file_test_firmware)
     endif()
     if(OS1_DEBUGFS_EXECUTABLE AND OS1_E2FSCK_EXECUTABLE)
+      foreach(cpus IN ITEMS 1 4)
+        os1_add_qemu_test(NAME os1_smoke_kernel_entry_${boot}_${cpus}cpu
+          COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_kernel_entry.py"
+            --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
+            --program-disk "${OS1_PROGRAM_TEST_DISK}" --probe "${OS1_ENTRY_PROBE_ELF}"
+            --log "${OS1_ARTIFACT_DIR}/smoke-kernel-entry-${boot}-${cpus}cpu.log"
+            --cpus "${cpus}" --debugfs "${OS1_DEBUGFS_EXECUTABLE}"
+            --e2fsck "${OS1_E2FSCK_EXECUTABLE}" ${file_test_firmware})
+        set_tests_properties(os1_smoke_kernel_entry_${boot}_${cpus}cpu PROPERTIES TIMEOUT 120)
+        list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_kernel_entry_${boot}_${cpus}cpu)
+      endforeach()
       if(boot STREQUAL "uefi")
         os1_add_qemu_test(NAME os1_smoke_boot_menu_uefi
           COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_boot_menu.py"
@@ -2107,8 +2123,8 @@ if(OS1_QEMU_EXECUTABLE)
 endif()
 
 if(BUILD_TESTING)
-  add_dependencies(os1_image os1_deploy_probe_1 os1_deploy_probe_2)
-  add_dependencies(os1_bios_image os1_deploy_probe_1 os1_deploy_probe_2)
+  add_dependencies(os1_image os1_deploy_probe_1 os1_deploy_probe_2 os1_entry_probe)
+  add_dependencies(os1_bios_image os1_deploy_probe_1 os1_deploy_probe_2 os1_entry_probe)
 endif()
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(smoke_storage

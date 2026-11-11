@@ -246,6 +246,13 @@ add_custom_target(initrd_cpio DEPENDS "${OS1_INITRD_CPIO}")
 
 # Disk-only deployment fixtures. Never stage these programs into the initrd.
 if(BUILD_TESTING)
+  os1_add_user_cxx_program(entry_probe
+    "${PROJECT_SOURCE_DIR}/tests/fixtures/entry_probe.cpp" entry_probe_elf)
+  add_custom_command(OUTPUT "${entry_probe_elf}" APPEND DEPENDS
+    "${PROJECT_SOURCE_DIR}/src/uapi/os1/observe.h"
+    "${PROJECT_SOURCE_DIR}/src/common/hardware/presentation.hpp")
+  add_custom_target(os1_entry_probe DEPENDS "${entry_probe_elf}")
+  set(OS1_ENTRY_PROBE_ELF "${entry_probe_elf}" PARENT_SCOPE)
   foreach(version IN ITEMS 1 2)
     os1_add_user_cxx_program(deploy_probe_${version}
       "${PROJECT_SOURCE_DIR}/tests/fixtures/deploy_probe.cpp" probe_elf "-DDEPLOY_VERSION=\"${version}\"")

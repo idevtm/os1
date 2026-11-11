@@ -164,21 +164,33 @@ void cpu_init()
     asm volatile("lgdt %0" : : "m"(gdtr));
 
     asm volatile("movw %%ax,%%gs" ::"a"(CPU_GDT_KDATA));
-	asm volatile("movw %%ax,%%fs" ::"a"(CPU_GDT_KDATA));
-	asm volatile("movw %%ax,%%es" ::"a"(CPU_GDT_KDATA));
-	asm volatile("movw %%ax,%%ds" ::"a"(CPU_GDT_KDATA));
-	asm volatile("movw %%ax,%%ss" ::"a"(CPU_GDT_KDATA));
-	asm volatile(
-	    "pushq %[code]\n"
-	    "leaq 1f(%%rip), %%rax\n"
-	    "pushq %%rax\n"
-	    "lretq\n"
-	    "1:\n"
-	    :
-	    : [code] "i"(CPU_GDT_KCODE)
-	    : "rax", "memory");
-	wrmsr(0xC0000100, (uint64_t)c);
-	wrmsr(0xC0000101, (uint64_t)c);
+    asm volatile("movw %%ax,%%fs" ::"a"(CPU_GDT_KDATA));
+    asm volatile("movw %%ax,%%es" ::"a"(CPU_GDT_KDATA));
+    asm volatile("movw %%ax,%%ds" ::"a"(CPU_GDT_KDATA));
+    asm volatile("movw %%ax,%%ss" ::"a"(CPU_GDT_KDATA));
+    asm volatile(
+        "pushq %[code]\n"
+        "leaq 1f(%%rip), %%rax\n"
+        "pushq %%rax\n"
+        "lretq\n"
+        "1:\n"
+        :
+        : [code] "i"(CPU_GDT_KCODE)
+        : "rax", "memory");
+
+    // User GS can only come from the flat GDT while FSGSBASE is disabled.
+    constexpr uint64_t kCr4Fsgsbase = 1ull << 16;
+    uint64_t cr4;
+    asm volatile("mov %%cr4, %0" : "=r"(cr4));
+    if(cr4 & kCr4Fsgsbase)
+    {
+        cr4 &= ~kCr4Fsgsbase;
+        asm volatile("mov %0, %%cr4" : : "r"(cr4) : "memory");
+    }
+
+    wrmsr(kIa32FsBase, 0);
+    wrmsr(kIa32GsBase, reinterpret_cast<uint64_t>(c));
+    wrmsr(kIa32KernelGsBase, 0);
 
     asm volatile("lldt %%ax" ::"a"(0));
     ltr(CPU_GDT_TSS);
