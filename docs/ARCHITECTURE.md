@@ -579,8 +579,8 @@ The runner rejects early exit before its settling interval completes.
 ## Build Outputs And Boot Artifacts
 
 The [USB workflow](hardware/usb-image-workflow.md) builds current payloads through `os1.sh usb` without administrator privileges.
+The writer requires explicit disk selection and typed confirmation before it starts a write.
 A separate macOS helper provides arrow-key menus for image layout and the external physical USB write destination.
-Selecting a write destination starts the writer without a typed confirmation.
 Menus use the alternate terminal screen; the helper restores the normal screen before displaying the sudo password guidance.
 Only raw-device snapshot, write, readback, and eject steps use sudo.
 The [keyboard diagnostic profile](hardware/usb-image-workflow.md#keyboard-independent-diagnostics) uses a separate build and an automatic capture boot.

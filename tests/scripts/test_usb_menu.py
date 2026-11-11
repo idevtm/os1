@@ -1,9 +1,11 @@
 """Exercise USB policy, real file copying, and pinned-layout payload updates."""
+from contextlib import nullcontext
 import hashlib
 import importlib.util
 import io
 import json
 import os
+import plistlib
 import select
 import signal
 import subprocess
@@ -35,7 +37,7 @@ updater = load("usb_payloads", "cmake/scripts/update_usb_payloads.py")
 def disk():
     return dict(DeviceIdentifier="disk13", DeviceNode="/dev/disk13", Internal=False,
                 WholeDisk=True, VirtualOrPhysical="Physical", BusProtocol="USB", DeviceBlockSize=512,
-                Writable=True, TotalSize=200000000, MediaName="Test USB")
+                Writable=True, TotalSize=200000000, MediaName="Test USB", IORegistryEntryID=1234)
 
 
 class WriterTests(unittest.TestCase):
@@ -44,11 +46,43 @@ class WriterTests(unittest.TestCase):
         for field, value in [("Internal", True), ("WholeDisk", False), ("Writable", False),
                              ("VirtualOrPhysical", "Virtual"), ("BusProtocol", "SATA"),
                              ("DeviceIdentifier", "disk13s1"), ("DeviceNode", "/dev/disk0"),
-                             ("TotalSize", 99), ("DeviceBlockSize", 4096), ("DeviceBlockSize", None)]:
+                             ("TotalSize", 99), ("DeviceBlockSize", 4096), ("DeviceBlockSize", None),
+                             ("IORegistryEntryID", None), ("IORegistryEntryID", 0)]:
             info = disk(); info[field] = value
             with self.subTest(field=field):
                 self.assertFalse(writer.eligible(info, 100))
         self.assertFalse(writer.eligible({}, 100))
+
+    def test_disk_info_binds_diskutil_metadata_to_the_whole_media_entry(self):
+        whole = {"BSD Name": "disk13", "Whole": True, "IORegistryEntryID": 1234}
+        partition = {"BSD Name": "disk13s1", "Whole": False, "IORegistryEntryID": 1235}
+        metadata = {key: value for key, value in disk().items() if key != "IORegistryEntryID"}
+
+        def result(value):
+            return types.SimpleNamespace(stdout=plistlib.dumps(value))
+
+        for entries, expected_error in [
+            ([whole, partition], None),
+            ([partition], "cannot identify USB attachment"),
+            ([whole, dict(whole, IORegistryEntryID=1236)], "cannot identify USB attachment"),
+            ([dict(whole, IORegistryEntryID=0)], "cannot identify USB attachment"),
+        ]:
+            with self.subTest(entries=entries), patch.object(
+                    writer.subprocess, "run",
+                    side_effect=[result(entries), result(metadata), result(entries)]) as command:
+                if expected_error:
+                    with self.assertRaisesRegex(ValueError, expected_error):
+                        writer.disk_info("disk13")
+                    self.assertEqual(command.call_count, 1)
+                else:
+                    self.assertEqual(writer.disk_info("disk13"), disk())
+                    self.assertEqual([call.args[0][0] for call in command.call_args_list],
+                                     [writer.IOREG, writer.DISKUTIL, writer.IOREG])
+
+        with patch.object(writer.subprocess, "run", side_effect=[
+                result([whole]), result(metadata), result([dict(whole, IORegistryEntryID=5678)])]):
+            with self.assertRaisesRegex(ValueError, "USB attachment changed"):
+                writer.disk_info("disk13")
 
     def test_actual_copy_readback_and_tail_preservation(self):
         data = bytes(range(256)) * 8193
@@ -124,7 +158,7 @@ class WriterTests(unittest.TestCase):
                 command.assert_not_called()
 
     def test_identity_change_after_unmount_never_opens_device(self):
-        changed = disk(); changed["TotalSize"] += 1
+        changed = dict(disk(), IORegistryEntryID=5678)
         with tempfile.NamedTemporaryFile() as image:
             image.write(b"image"); image.flush()
             with patch.object(writer.os, "geteuid", return_value=0), \
@@ -137,7 +171,7 @@ class WriterTests(unittest.TestCase):
                 self.assertEqual(command.call_count, 1)
 
     def test_update_identity_change_after_unmount_never_opens_device(self):
-        changed = disk(); changed['TotalSize'] += 512
+        changed = dict(disk(), IORegistryEntryID=5678)
         with patch.object(writer.os, 'geteuid', return_value=0), \
              patch.object(writer, 'disk_info', side_effect=[disk(), changed]), \
              patch.object(writer.subprocess, 'run') as command, \
@@ -172,6 +206,7 @@ class WriterTests(unittest.TestCase):
                  patch.object(writer, "build_image", return_value=Path(image.name)) as build, \
                  patch.object(writer, "list_disks", return_value=[disk()]), \
                  patch.object(writer, "choose_menu", return_value=0), \
+                 patch.object(writer, "confirm_device", return_value=True), \
                  patch.object(writer.subprocess, "run") as command:
                 writer.interactive(args)
                 build.assert_called_once()
@@ -209,10 +244,53 @@ class WriterTests(unittest.TestCase):
                  patch.object(writer, "build_image", return_value=Path(image.name)), \
                  patch.object(writer, "list_disks", return_value=[disk()]), \
                  patch.object(writer, "choose_menu", return_value=0), \
+                 patch.object(writer, "confirm_device", return_value=True), \
                  patch.object(writer.sys, "stderr", output), \
                  patch.object(writer.subprocess, "run", side_effect=sudo) as command:
                 writer.interactive(args)
                 command.assert_called_once()
+
+    def test_write_confirmation_matches_the_selected_disk_and_its_identity(self):
+        selected = dict(disk(), DeviceIdentifier="disk14", DeviceNode="/dev/disk14")
+        changed = dict(selected, IORegistryEntryID=5678)
+        cases = [("\n", selected), ("disk13\n", selected), ("disk14", selected),
+                 ("disk14\n", changed), ("disk14\n", selected)]
+        with tempfile.NamedTemporaryFile() as image:
+            image.write(b"image")
+            image.flush()
+            args = types.SimpleNamespace(build_dir=Path("build/test"), toolchain=Path("toolchain"))
+            for typed, current in cases:
+                with self.subTest(typed=typed, current=current), \
+                     patch.object(writer.os, "geteuid", return_value=501), \
+                     patch.object(writer.sys.stdin, "isatty", return_value=True), \
+                     patch.object(writer.sys.stdin, "readline", return_value=typed), \
+                     patch.object(writer, "sudo_terminal", side_effect=nullcontext), \
+                     patch.object(writer.termios, "tcflush") as flush, \
+                     patch.object(writer, "choose_layout", return_value=("fresh", None)), \
+                     patch.object(writer, "build_image", return_value=Path(image.name)), \
+                     patch.object(writer, "list_disks", return_value=[disk(), selected]), \
+                     patch.object(writer, "choose_menu", return_value=1) as menu, \
+                     patch.object(writer, "disk_info", return_value=current) as refresh, \
+                     patch.object(writer.subprocess, "run") as command:
+                    if current is changed:
+                        with self.assertRaisesRegex(ValueError, "USB identity changed"):
+                            writer.interactive(args)
+                    else:
+                        writer.interactive(args)
+                    self.assertTrue(menu.call_args.kwargs["require_selection"])
+                    flush.assert_called_once_with(writer.sys.stdin.fileno(), termios.TCIFLUSH)
+                    if typed == "disk14\n":
+                        refresh.assert_called_once_with("disk14")
+                    else:
+                        refresh.assert_not_called()
+                    if typed == "disk14\n" and current is selected:
+                        command.assert_called_once()
+                        args_used = command.call_args.args[0]
+                        self.assertEqual(args_used[args_used.index("--disk") + 1], "disk14")
+                        self.assertEqual(json.loads(args_used[args_used.index("--identity") + 1]),
+                                         writer.identity(selected))
+                    else:
+                        command.assert_not_called()
 
     def test_root_cannot_build(self):
         with patch.object(writer.os, "geteuid", return_value=0), \
@@ -266,6 +344,65 @@ class MenuTests(unittest.TestCase):
              patch.object(writer, "build_image") as build:
             writer.interactive(None)
             build.assert_not_called()
+
+    def test_queued_input_cannot_select_or_confirm_a_usb_write(self):
+        script = f"""
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+sys.path.insert(0, {str(ROOT / 'tests/scripts')!r})
+from test_usb_menu import writer, disk
+def build(*args):
+    print("BUILDING", flush=True)
+    os.read(sys.stdin.fileno(), 1)
+    return Path(writer.__file__)
+def run(*args, **kwargs):
+    print("WOULD WRITE", flush=True)
+with patch.object(writer.os, "geteuid", return_value=501), \
+     patch.object(writer, "choose_layout", return_value=("fresh", None)), \
+     patch.object(writer, "build_image", side_effect=build), \
+     patch.object(writer, "list_disks", return_value=[disk()]), \
+     patch.object(writer, "disk_info", return_value=disk()), \
+     patch.object(writer.subprocess, "run", side_effect=run):
+    writer.interactive(SimpleNamespace(build_dir=Path("."), toolchain=Path(".")))
+print("DONE", flush=True)
+"""
+        master, slave = os.openpty()
+        process = None
+        output = b""
+
+        def wait_for(marker):
+            nonlocal output
+            deadline = time.monotonic() + 5
+            while marker not in output and time.monotonic() < deadline:
+                if select.select([master], [], [], 0.1)[0]:
+                    output += os.read(master, 65536)
+                elif process.poll() is not None:
+                    break
+            self.assertIn(marker, output)
+
+        try:
+            process = subprocess.Popen([sys.executable, "-I", "-B", "-c", script],
+                                       stdin=slave, stdout=slave, stderr=slave)
+            wait_for(b"BUILDING")
+            os.write(master, b"\r\r")
+            wait_for(b"q/Esc: cancel")
+            self.assertIsNone(process.poll(), output)
+            os.write(master, b"\x1b[B\rdisk13\r")
+            wait_for(b"Type disk13")
+            self.assertIsNone(process.poll(), output)
+            os.write(master, b"\r")
+            wait_for(b"DONE")
+            self.assertNotIn(b"WOULD WRITE", output)
+            self.assertEqual(process.wait(timeout=5), 0)
+        finally:
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+            os.close(slave)
 
     def test_real_terminal_navigation_cancellation_and_restoration(self):
         script = (
