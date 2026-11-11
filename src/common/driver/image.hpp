@@ -10,7 +10,10 @@ struct Image
     unsigned count = 0;
 };
 // One bounded, fixed-address ET_EXEC slot. Dynamic linking and relocations are forbidden.
-inline bool validate_image(const uint8_t* bytes, uint64_t size, Image& result)
+inline bool validate_image(const uint8_t* bytes,
+                           uint64_t size,
+                           Image& result,
+                           uint64_t base = OS1_DRIVER_MODULE_BASE)
 {
     result = {};
     if(size > OS1_DRIVER_FILE_LIMIT)
@@ -40,10 +43,10 @@ inline bool validate_image(const uint8_t* bytes, uint64_t size, Image& result)
     {
         const auto* p = elf::program_header_from_image(*h, bytes, size, i);
         if(!p || p->type != elf::kProgramTypeLoad || !p->memsz ||
-           !elf::loadable_segment_bounds_valid(*p, size) || p->vaddr < OS1_DRIVER_MODULE_BASE ||
+           !elf::loadable_segment_bounds_valid(*p, size) || p->vaddr < base ||
            p->memsz > OS1_DRIVER_MODULE_BYTES ||
-           p->vaddr - OS1_DRIVER_MODULE_BASE > OS1_DRIVER_MODULE_BYTES - p->memsz ||
-           (p->vaddr & 4095) || (p->offset & 4095) || p->align != 4096 ||
+           p->vaddr - base > OS1_DRIVER_MODULE_BYTES - p->memsz || (p->vaddr & 4095) ||
+           (p->offset & 4095) || p->align != 4096 ||
            (p->flags != 4 && p->flags != 5 && p->flags != 6))
             return false;
         uint64_t end = (p->vaddr + p->memsz + 4095) & ~UINT64_C(4095);

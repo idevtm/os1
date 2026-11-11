@@ -9,6 +9,7 @@
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/resource.hpp"
 #include "drivers/usb/diagnostics.hpp"
+#include "drivers/usb/stall_trace.hpp"
 #include "fs/initrd.hpp"
 #include "mm/dma.hpp"
 #include "mm/kmem.hpp"
@@ -802,6 +803,30 @@ long sys_observe_usb_input_failures(const ObserveContext& context,
     return result;
 }
 
+long sys_observe_ehci_trace(const ObserveContext& context,
+                            Thread* thread,
+                            uint64_t user_buffer,
+                            size_t length)
+{
+    Os1ObserveEhciStallTrace trace{};
+    if(!usb::stall_trace::snapshot(trace))
+        return OS1_ERR_NOT_FOUND;
+    size_t offset = 0;
+    long result = -1;
+    if(!begin_observe_transfer(context,
+                               thread,
+                               user_buffer,
+                               length,
+                               OS1_OBSERVE_EHCI_STALL_TRACE,
+                               sizeof(trace),
+                               1,
+                               offset,
+                               result) ||
+       !write_observe_record(context, thread, user_buffer, offset, &trace, sizeof(trace)))
+        return -1;
+    return result;
+}
+
 long sys_observe_kmem(const ObserveContext& context,
                       Thread* thread,
                       uint64_t user_buffer,
@@ -964,6 +989,8 @@ long sys_observe(const ObserveContext& context, uint64_t kind, uint64_t user_buf
             return sys_observe_kmem(context, thread, user_buffer, length);
         case OS1_OBSERVE_USB:
             return sys_observe_usb(context, thread, user_buffer, length);
+        case OS1_OBSERVE_EHCI_STALL_TRACE:
+            return sys_observe_ehci_trace(context, thread, user_buffer, length);
         case OS1_OBSERVE_USB_INPUT_FAILURES:
             return sys_observe_usb_input_failures(context, thread, user_buffer, length);
         case OS1_OBSERVE_ACPI:

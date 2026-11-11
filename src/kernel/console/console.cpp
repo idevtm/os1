@@ -2,10 +2,13 @@
 // write plumbing.
 #include "console/console.hpp"
 
+#include <os1/display.h>
 #include <os1/resource.h>
 
 #include "core/kernel_state.hpp"
 #include "debug/debug.hpp"
+#include "driver/display.h"
+#include "drivers/display/text_display.hpp"
 #include "sync/smp.hpp"
 #include "terminal/line.hpp"
 
@@ -100,6 +103,16 @@ void write_console_line(const char* text)
     }
 }
 
+void console_echo_backspace()
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    debug.write_unmirrored('\b');
+    debug.write_unmirrored(' ');
+    debug.write_unmirrored('\b');
+    if(active_terminal)
+        active_terminal->write('\b');
+}
+
 void console_mirror_debug_byte(char c)
 {
     IrqGuard irq;
@@ -113,3 +126,65 @@ void console_mirror_debug_byte(char c)
     }
     g_console_output_lock.unlock();
 }
+
+#ifndef OS1_HOST_TEST
+namespace
+{
+NativeObject* graphics_owner;
+}
+
+long console_display_acquire(NativeObject* owner)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    if(graphics_owner)
+        return OS1_ERR_WOULD_BLOCK;
+    auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
+    if(!display.available)
+        return OS1_ERR_UNSUPPORTED;
+    graphics_owner = owner;
+    display.graphics_owned = true;
+    return 0;
+}
+
+void console_display_release(NativeObject* owner, bool restored)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    if(graphics_owner != owner)
+        return;
+    graphics_owner = nullptr;
+    auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
+    display.graphics_owned = false;
+    if(!restored)
+    {
+        display.available = false;
+        return;
+    }
+    reset_framebuffer_text_display(display);
+    if(active_terminal)
+        active_terminal->link(g_text_display);
+}
+
+long console_display_fill(NativeObject* owner,
+                          const os1_display_driver& driver,
+                          const os1_framebuffer_surface& surface,
+                          const os1_display_fill& fill)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    if(graphics_owner != owner)
+        return OS1_ERR_CLOSED;
+    driver.fill(&surface, fill.x, fill.y, fill.width, fill.height, fill.rgb);
+    return 0;
+}
+
+void console_switch_terminal(unsigned index)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    if(active_terminal == &terminal[index])
+        return;
+    if(active_terminal)
+        active_terminal->unlink();
+    active_terminal = &terminal[index];
+    active_terminal->link(g_text_display);
+    keyboard.set_active_terminal(active_terminal);
+}
+#endif

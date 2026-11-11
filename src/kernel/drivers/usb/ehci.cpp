@@ -12,6 +12,7 @@
 #include "drivers/usb/hid_keyboard.hpp"
 #include "drivers/usb/hub.hpp"
 #include "drivers/usb/mass_storage.hpp"
+#include "drivers/usb/stall_trace.hpp"
 #include "drivers/usb/worker.hpp"
 #include "handoff/memory_layout.h"
 #include "input/hid_boot.hpp"
@@ -33,7 +34,7 @@ inline void* operator new(size_t, void* location) noexcept
 namespace
 {
 constexpr unsigned max_controllers = 4, max_devices = 16, max_depth = 5;
-constexpr uint32_t run_bit = 1, async_bit = 1u << 5, async_status = 1u << 15;
+constexpr uint32_t run_bit = 1, async_bit = 1u << 5;
 constexpr uint32_t port_changes = 0x2a;
 struct Controller;
 struct Device
@@ -68,8 +69,13 @@ struct Controller
     volatile uint32_t* op{};
     DmaBuffer schedule{}, data{}, periodic{};
     PageFrameContainer* frames{};
-    bool failed{}, exposed{};
-    uint8_t busy{}, ports{}, count{};
+    Spinlock command_lock{"ehci-command"};
+    bool failed{}, retired_devices{}, exposed{}, input_active{};
+    uint8_t async_busy{}, periodic_busy{}, ports{}, count{};
+    bool is_failed() const
+    {
+        return __atomic_load_n(&failed, __ATOMIC_ACQUIRE);
+    }
     Device devices[max_devices]{};
     uint8_t configuration[4096]{};
     uint32_t root_before[15]{}, root_after[15]{};
@@ -132,9 +138,12 @@ bool wait_register(volatile uint32_t& reg, uint32_t mask, uint32_t value)
     }
     return false;
 }
-void retire(Controller& c)
+void retire_devices(Controller& c)
 {
-    c.failed = true;
+    // Runtime callers hold both schedule gates. Boot calls this before userspace.
+    if(c.retired_devices)
+        return;
+    c.retired_devices = true;
     for(auto& d : c.devices)
     {
         d.failed = true;
@@ -143,25 +152,66 @@ void retire(Controller& c)
         native_input::remove(d.input_identity);
         hardware_catalog::unavailable(d.catalog_id);
     }
-    if(c.pci)
-        pci_set_command_bits(*c.pci, 0, 4);
-    if(c.op)
+}
+
+void retire(Controller& c)
+{
     {
-        c.op[2] = 0;
-        c.op[0] = c.op[0] & ~run_bit;
+        IrqSpinGuard guard(c.command_lock);
+        if(c.is_failed())
+            return;
+        __atomic_store_n(&c.failed, true, __ATOMIC_RELEASE);
+        if(c.op)
+        {
+            c.op[2] = 0;
+            c.op[0] = c.op[0] & ~run_bit;
+        }
+        if(c.pci)
+            pci_set_command_bits(*c.pci, 0, 4);
     }
     debug("ehci: controller retired; DMA quarantined")();
 }
+
+void poll_input_while_waiting(Controller& c);
+struct ScheduleWait
+{
+    Controller& controller;
+    unsigned polls{};
+};
+void async_schedule_poll(void* context)
+{
+    auto& wait = *static_cast<ScheduleWait*>(context);
+    if(++wait.polls % 10 == 0)
+        poll_input_while_waiting(wait.controller);
+    delay_us(100);
+}
+
 void schedule_poll(void*)
 {
     delay_us(100);
 }
-bool schedule(Controller& c, bool enabled)
+
+bool change_schedule(Controller& c, ehci::Schedule which, bool enabled)
 {
-    if(ehci::set_async(c.op[0], c.op[1], enabled, schedule_poll, nullptr, 10000))
+    ScheduleWait wait{c};
+    auto poll = which == ehci::Schedule::Asynchronous ? async_schedule_poll : schedule_poll;
+    if(ehci::set_schedule(c.op[0],
+                          c.op[1],
+                          c.command_lock,
+                          c.failed,
+                          which,
+                          enabled,
+                          poll,
+                          &wait,
+                          10000,
+                          tsc_clock_now_100ns))
         return true;
     retire(c);
     return false;
+}
+bool schedule(Controller& c, bool enabled)
+{
+    return change_schedule(c, ehci::Schedule::Asynchronous, enabled);
 }
 bool stop_schedule(Controller& c)
 {
@@ -185,6 +235,15 @@ uint32_t td_address(const Controller& c, unsigned index)
 }
 using Status = usb::storage::TransferStatus;
 using Transfer = usb::storage::Transfer;
+void poll_input(Controller& c, bool can_check_hub);
+void poll_input_while_waiting(Controller& c)
+{
+    if(c.probing || !__atomic_load_n(&c.input_active, __ATOMIC_ACQUIRE))
+        return;
+    const ehci::ScheduleLease periodic(c.periodic_busy);
+    if(periodic)
+        poll_input(c, false);
+}
 Transfer transfer(Device& d,
                   uint8_t endpoint,
                   uint16_t packet,
@@ -195,7 +254,7 @@ Transfer transfer(Device& d,
                   const uint8_t* setup = nullptr)
 {
     Controller& c = *d.controller;
-    if(c.failed || d.failed || bytes > 4096 || (bytes && !data) || !root_connected(d))
+    if(c.is_failed() || d.failed || bytes > 4096 || (bytes && !data) || !root_connected(d))
         return {Status::Failed, 0};
     if(!stop_schedule(c))
         return {Status::Failed, 0};
@@ -237,13 +296,23 @@ Transfer transfer(Device& d,
     dma_sync_for_device(c.data);
     dma_sync_for_device(c.schedule);
     c.op[6] = uint32_t(c.schedule.physical_address);
-    c.exposed = true;
+    if(c.probing)
+        c.exposed = true;
     if(!schedule(c, true))
         return {Status::Failed, 0};
     bool completed = false;
     uint32_t fault = 0;
+    const auto start = tsc_clock_now_100ns();
     for(unsigned attempt = 0; attempt < 100000; ++attempt)
     {
+        if(c.is_failed())
+            return {Status::Failed, 0};
+        if(attempt % 100 == 99)
+            poll_input_while_waiting(c);
+        if(c.is_failed())
+            return {Status::Failed, 0};
+        if(tsc_clock_now_100ns() - start >= 10'000'000)
+            break;
         dma_sync_for_cpu(c.schedule);
         for(unsigned i = 0; i <= last; ++i)
             fault |= td[i].token & ehci::errors;
@@ -347,7 +416,7 @@ bool hub_child(void* p, uint8_t port)
         return true;
     // Do not leave a failed address-zero child enabled while enumerating siblings.
     uint8_t status[4]{};
-    return !hub.controller->failed && control(hub, 0x23, 1, 1, port, nullptr, 0) &&
+    return !hub.controller->is_failed() && control(hub, 0x23, 1, 1, port, nullptr, 0) &&
            control(hub, 0xa3, 0, 0, port, status, sizeof(status)) && !(status[0] & 0x12);
 }
 void hub_unsupported(void* p, uint8_t port, unsigned speed)
@@ -413,27 +482,30 @@ bool submit(BlockDevice& block, BlockRequest& request)
         return false;
     }
     SchedulingGuard scheduling;
-    if(__atomic_exchange_n(&c.busy, 1, __ATOMIC_ACQUIRE))
+    bool ok;
     {
-        request.status = BlockRequestStatus::Busy;
-        return false;
+        const ehci::ScheduleLease asynchronous(c.async_busy);
+        if(!asynchronous)
+        {
+            request.status = BlockRequestStatus::Busy;
+            return false;
+        }
+        ok = !c.is_failed() && !d.failed && path_connected(d);
+        if(ok)
+            ok = flush ? d.storage.flush()
+                       : d.storage.read_write(request.operation == BlockOperation::Write,
+                                              request.sector,
+                                              request.buffer,
+                                              request.sector_count);
+        if(!ok)
+        {
+            d.failed = true;
+            d.storage.invalidate();
+            input_failure(d, OS1_USB_INPUT_STOP);
+            native_input::remove(d.input_identity);
+            hardware_catalog::unavailable(d.catalog_id);
+        }
     }
-    bool ok = !c.failed && !d.failed && path_connected(d);
-    if(ok)
-        ok = flush ? d.storage.flush()
-                   : d.storage.read_write(request.operation == BlockOperation::Write,
-                                          request.sector,
-                                          request.buffer,
-                                          request.sector_count);
-    if(!ok)
-    {
-        d.failed = true;
-        d.storage.invalidate();
-        input_failure(d, OS1_USB_INPUT_STOP);
-        native_input::remove(d.input_identity);
-        hardware_catalog::unavailable(d.catalog_id);
-    }
-    __atomic_store_n(&c.busy, 0, __ATOMIC_RELEASE);
     block_request_complete(request,
                            ok ? BlockRequestStatus::Success : BlockRequestStatus::DeviceError,
                            ok && !flush ? request.sector_count * 512 : 0);
@@ -441,19 +513,7 @@ bool submit(BlockDevice& block, BlockRequest& request)
 }
 bool periodic_schedule(Controller& c, bool enabled)
 {
-    constexpr uint32_t command_bit = 1u << 4, status_bit = 1u << 14;
-    if(!wait_register(c.op[1], status_bit, (c.op[0] & command_bit) ? status_bit : 0))
-    {
-        retire(c);
-        return false;
-    }
-    c.op[0] = enabled ? c.op[0] | command_bit : c.op[0] & ~command_bit;
-    if(!wait_register(c.op[1], status_bit, enabled ? status_bit : 0))
-    {
-        retire(c);
-        return false;
-    }
-    return true;
+    return change_schedule(c, ehci::Schedule::Periodic, enabled);
 }
 bool arm_input(Device& d)
 {
@@ -530,15 +590,17 @@ bool start_input(Device& d)
         return false;
     }
     hardware_catalog::usb_input(d.catalog_id, d.input_identity);
+    __atomic_store_n(&c.input_active, true, __ATOMIC_RELEASE);
     c.op[5] = uint32_t(c.periodic.physical_address);
-    c.exposed = true;
+    if(c.probing)
+        c.exposed = true;
     return periodic_schedule(c, true);
 }
 void stop_input(Device& d)
 {
     input_failure(d, OS1_USB_INPUT_STOP);
     native_input::remove(d.input_identity);
-    if(!d.input_armed || d.controller->failed)
+    if(!d.input_armed || d.controller->is_failed())
         return;
     auto& c = *d.controller;
     if(!periodic_schedule(c, false))
@@ -560,15 +622,20 @@ void retire_root(Controller& c, unsigned root)
         hardware_catalog::unavailable(d.catalog_id);
     });
 }
-void poll_input(Controller& c)
+void poll_input(Controller& c, bool can_check_hub)
 {
     for(auto& d : c.devices)
     {
+        if(c.is_failed())
+            return;
         if(!d.input_armed || d.failed)
             continue;
+        const bool pointer = d.hid.protocol == 2;
+        if(pointer)
+            usb::stall_trace::sample(OS1_EHCI_TRACE_POLL, c.owner.index, d.input_identity);
         if(d.recovery.pending)
         {
-            if(diagnostic_log::monotonic() < d.recovery.due_ns)
+            if(!can_check_hub || diagnostic_log::monotonic() < d.recovery.due_ns)
                 continue;
             if(!path_connected(d))
             {
@@ -595,14 +662,22 @@ void poll_input(Controller& c)
             reinterpret_cast<ehci::Qtd*>(static_cast<uint8_t*>(d.input_dma.virtual_address) + 128);
         if(td->token & ehci::active)
             continue;
+        const uint64_t completed =
+            pointer && usb::stall_trace::enabled() ? usb::stall_trace::now() : 0;
         if(!periodic_schedule(c, false))
             return;
         dma_sync_for_cpu(d.input_dma);
         unsigned bytes = d.hid.packet;
         if((td->token & ehci::errors) || ehci::remaining(td->token) > bytes)
         {
+            if(pointer)
+                usb::stall_trace::sample(
+                    OS1_EHCI_TRACE_ERROR, c.owner.index, d.input_identity, 0, td->token);
             if(d.recovery.schedule(td->token, bytes, d.speed, diagnostic_log::monotonic()))
             {
+                if(pointer)
+                    usb::stall_trace::sample(
+                        OS1_EHCI_TRACE_RETRY, c.owner.index, d.input_identity, 0, td->token);
                 // The halted QH keeps its frame slots reserved during backoff.
                 // Other endpoints continue; descriptor reuse waits for PSS to clear.
                 if(!periodic_schedule(c, true))
@@ -628,7 +703,14 @@ void poll_input(Controller& c)
                     usb_queue_console_char(chars[i]);
         }
         else
-            native_input::boot_pointer(d.input_identity, report, actual);
+        {
+            if(completed && actual >= 3)
+                usb::stall_trace::sample(
+                    OS1_EHCI_TRACE_REPORT, c.owner.index, d.input_identity, completed);
+            if(native_input::boot_pointer(d.input_identity, report, actual) && completed)
+                usb::stall_trace::sample(
+                    OS1_EHCI_TRACE_PUBLISH, c.owner.index, d.input_identity, completed);
+        }
         if(!arm_input(d))
         {
             retire(c);
@@ -640,7 +722,7 @@ void poll_input(Controller& c)
 }
 bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)
 {
-    if(c.failed || c.count == max_devices || (parent && parent->depth >= max_depth))
+    if(c.is_failed() || c.count == max_devices || (parent && parent->depth >= max_depth))
         return false;
     auto& d = c.devices[c.count++];
     d.controller = &c;
@@ -806,7 +888,7 @@ void capture(Controller& c, uint32_t pci_index)
     record.pci_index = pci_index;
     record.status = c.op ? c.op[1] : 0;
     record.detail = c.count;
-    copy_fixed_string(record.stage, sizeof(record.stage), c.failed ? "retired" : "started");
+    copy_fixed_string(record.stage, sizeof(record.stage), c.is_failed() ? "retired" : "started");
     usb::diagnostics::append(record);
     for(unsigned port = 1; port <= c.ports; ++port)
     {
@@ -865,6 +947,7 @@ bool probe(VirtualMemory& vm,
         {
             controllers[slot] = &c;
             retire(c);
+            retire_devices(c);
         }
         else
         {
@@ -919,7 +1002,7 @@ bool probe(VirtualMemory& vm,
     for(uint8_t port = 1; port <= c.ports; ++port)
         root_write(c, port, 1u << 12);
     delay_ms(nullptr, 100);
-    for(uint8_t port = 1; port <= c.ports && !c.failed; ++port)
+    for(uint8_t port = 1; port <= c.ports && !c.is_failed(); ++port)
     {
         c.root_before[port - 1] = c.op[17 + port - 1];
         c.root_after[port - 1] = c.root_before[port - 1];
@@ -953,7 +1036,7 @@ bool probe(VirtualMemory& vm,
         {
             c.root_stage[port - 1] = "enumeration-failed";
             debug("ehci: enumeration failed root=")(port)();
-            if(!c.failed)
+            if(!c.is_failed())
             {
                 retire_root(c, port);
                 if(!ehci::isolate_root(c.op[17 + port - 1], schedule_poll, nullptr, 10000))
@@ -962,8 +1045,11 @@ bool probe(VirtualMemory& vm,
         }
     }
     capture(c, uint32_t(pci_index));
-    if(c.failed)
+    if(c.is_failed())
+    {
+        retire_devices(c);
         return false;
+    }
     device_binding_publish(id, uint16_t(pci_index), "ehci", &c);
     device_binding_set_state(id, DeviceState::Started);
     debug("ehci: ready ports=")(c.ports)(" addresses=")(c.count)();
@@ -1010,13 +1096,18 @@ void ehci_poll_devices(PageFrameContainer&, bool topology)
 {
     for(auto* c : controllers)
     {
-        SchedulingGuard scheduling;
-        if(!c || c->failed || __atomic_exchange_n(&c->busy, 1, __ATOMIC_ACQUIRE))
+        if(!c || (c->is_failed() && c->retired_devices))
             continue;
-        poll_input(*c);
-        if(topology && !c->failed)
+        SchedulingGuard scheduling;
+        const ehci::ScheduleLease async_owned(c->async_busy);
+        if(!async_owned)
+            usb::stall_trace::sample(OS1_EHCI_TRACE_BUSY, c->owner.index);
+        const ehci::ScheduleLease periodic_owned(c->periodic_busy);
+        if(periodic_owned && !c->is_failed())
+            poll_input(*c, bool(async_owned));
+        if(async_owned && periodic_owned && topology && !c->is_failed())
         {
-            for(unsigned port = 1; port <= c->ports && !c->failed; ++port)
+            for(unsigned port = 1; port <= c->ports && !c->is_failed(); ++port)
             {
                 uint32_t status = c->op[17 + port - 1];
                 if(!(status & 2))
@@ -1040,7 +1131,7 @@ void ehci_poll_devices(PageFrameContainer&, bool topology)
                 delay_ms(nullptr, 10);
                 root_write(*c, port, port_changes);
                 if(ehci::root_usable(c->op[17 + port - 1]) && !enumerate(*c, port, nullptr, port) &&
-                   !c->failed)
+                   !c->is_failed())
                 {
                     // A failed address-zero child must not remain visible to a sibling reset.
                     retire_root(*c, port);
@@ -1048,12 +1139,12 @@ void ehci_poll_devices(PageFrameContainer&, bool topology)
                         retire(*c);
                 }
             }
-            for(unsigned i = 0; i < c->count && !c->failed; ++i)
+            for(unsigned i = 0; i < c->count && !c->is_failed(); ++i)
             {
                 auto& d = c->devices[i];
                 if(d.failed || !d.hub)
                     continue;
-                for(unsigned port = 1; port <= d.hub_descriptor.ports && !c->failed; ++port)
+                for(unsigned port = 1; port <= d.hub_descriptor.ports && !c->is_failed(); ++port)
                 {
                     uint32_t status = 0;
                     if(!usb::hub::port_status(hub_transport(d), port, status))
@@ -1098,6 +1189,7 @@ void ehci_poll_devices(PageFrameContainer&, bool topology)
                 }
             }
         }
-        __atomic_store_n(&c->busy, 0, __ATOMIC_RELEASE);
+        if(async_owned && periodic_owned && c->is_failed())
+            retire_devices(*c);
     }
 }

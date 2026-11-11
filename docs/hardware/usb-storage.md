@@ -76,8 +76,11 @@ Runtime command failure also retires the device.
 
 IRQ and polling paths share an event lock.
 Polling releases that lock between iterations and services TLB shootdown work.
-A controller admission guard serializes storage commands without holding a spinlock across waits.
-Wait limits count iterations; monotonic deadlines and a sleeping storage worker remain follow-ups.
+The EHCI asynchronous gate serializes storage commands and protects their shared DMA buffers.
+Periodic HID polling uses a separate gate. It can consume and rearm input while a storage command waits.
+The storage wait can also service periodic input when it owns that gate.
+Topology and controller-wide retirement require both gates. Register changes use a short lock.
+EHCI schedule and transfer waits check elapsed time and iteration limits.
 
 A disconnect fails subsequent disk operations. The shell remains available through initrd and `/tmp`.
 The driver does not enumerate replacement devices after boot.

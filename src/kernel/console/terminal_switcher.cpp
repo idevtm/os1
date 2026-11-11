@@ -1,6 +1,7 @@
 // Fixed F1-F12 terminal switching policy extracted from the kernel entry file.
 #include "console/terminal_switcher.hpp"
 
+#include "console/console.hpp"
 #include "core/kernel_state.hpp"
 #include "sync/smp.hpp"
 
@@ -20,17 +21,6 @@ bool kernel_keyboard_hook(uint16_t scancode)
     }
 
     if(index >= 0)
-    {
-        if(active_terminal != &terminal[index])
-        {
-            if(active_terminal)
-            {
-                active_terminal->unlink();
-            }
-            active_terminal = &terminal[index];
-            active_terminal->link(g_text_display);
-            keyboard.set_active_terminal(active_terminal);
-        }
-    }
+        console_switch_terminal(index);
     return true;
 }

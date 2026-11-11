@@ -10,6 +10,7 @@
 #include "console/console_input.hpp"
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
+#include "drivers/input/service.hpp"
 #include "ipc/kernel_provider.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
@@ -123,6 +124,8 @@ bool ready_locked(NativeObject* object)
 {
     if(object->kind == OS1_OBJECT_CONSOLE_INPUT_SESSION)
         return console_input_ready(object);
+    if(object->kind == OS1_OBJECT_INPUT_SUBSCRIPTION)
+        return native_input::ready(object);
     if(object->kind == OS1_OBJECT_OPERATION)
         return static_cast<Operation*>(object)->complete;
     if(object->kind == OS1_OBJECT_SUBSCRIPTION)
@@ -764,6 +767,7 @@ long wait_many(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
             return status;
         pins.value.instances[pins.value.count++] = raw;
         if(raw->object->kind != OS1_OBJECT_CONSOLE_INPUT_SESSION &&
+           raw->object->kind != OS1_OBJECT_INPUT_SUBSCRIPTION &&
            (raw->object->kind < OS1_OBJECT_IPC_CLIENT ||
             raw->object->kind > OS1_OBJECT_SUBSCRIPTION))
             return OS1_ERR_UNSUPPORTED;
@@ -1269,7 +1273,7 @@ long sys_ipc(
         return kind == OS1_OBJECT_IPC_ACCOUNT
                    ? create_pair(frames, thread, argument, static_cast<Account*>(object))
                    : OS1_ERR_UNSUPPORTED;
-    if(kind != OS1_OBJECT_CONSOLE_INPUT_SESSION &&
+    if(kind != OS1_OBJECT_CONSOLE_INPUT_SESSION && kind != OS1_OBJECT_INPUT_SUBSCRIPTION &&
        (kind < OS1_OBJECT_IPC_CLIENT || kind > OS1_OBJECT_SUBSCRIPTION))
         return OS1_ERR_UNSUPPORTED;
     if(operation == OS1_IPC_WAIT || operation == OS1_IPC_WAIT_UNTIL)
@@ -1306,7 +1310,7 @@ long sys_ipc(
         wait_queue_enqueue_locked(waiters, thread);
         return kIpcBlocked;
     }
-    if(kind == OS1_OBJECT_CONSOLE_INPUT_SESSION)
+    if(kind == OS1_OBJECT_CONSOLE_INPUT_SESSION || kind == OS1_OBJECT_INPUT_SUBSCRIPTION)
         return OS1_ERR_UNSUPPORTED;
     if(kind == OS1_OBJECT_SUBSCRIPTION)
     {
@@ -1451,6 +1455,17 @@ void cancel_ipc_wait(Thread* thread)
     }
     release_wait(released);
 }
+void ipc_refresh_input_waiters()
+{
+    if(!native_input::take_readiness_change())
+        return;
+    {
+        IrqSpinGuard guard(waiters.lock);
+        signal_locked();
+    }
+    ipc_drain_wakeups();
+}
+
 void ipc_drain_wakeups()
 {
     for(;;)

@@ -6,6 +6,7 @@
 #include "drivers/usb/diagnostics.hpp"
 #include "drivers/usb/ehci_controller.hpp"
 #include "drivers/usb/hub.hpp"
+#include "sync/smp.hpp"
 
 TEST(Ehci, TransferDescriptorsRespectDmaBoundsAndWireLayout)
 {
@@ -286,7 +287,17 @@ TEST(Ehci, ScheduleTransitionWaitsBeforeChangingEnableAndBeforeReuse)
             s.status = 0;
         }
     };
-    EXPECT_TRUE(ehci::set_async(state.command, state.status, false, advance, &state, 4));
+    Spinlock lock{"ehci-test"};
+    const bool failed = false;
+    EXPECT_TRUE(ehci::set_schedule(state.command,
+                                   state.status,
+                                   lock,
+                                   failed,
+                                   ehci::Schedule::Asynchronous,
+                                   false,
+                                   advance,
+                                   &state,
+                                   4));
     EXPECT_EQ(state.polls, 2u);
     EXPECT_EQ(state.status, 0u);
 }
@@ -294,18 +305,78 @@ TEST(Ehci, StuckScheduleTransitionFailsWithoutUnsafeToggle)
 {
     volatile uint32_t command = 1u << 5, status = 0;
     unsigned polls = 0;
+    Spinlock lock{"ehci-test"};
+    const bool failed = false;
     auto poll = [](void* p) { ++*static_cast<unsigned*>(p); };
-    EXPECT_FALSE(ehci::set_async(command, status, false, poll, &polls, 5));
+    EXPECT_FALSE(ehci::set_schedule(
+        command, status, lock, failed, ehci::Schedule::Asynchronous, false, poll, &polls, 5));
     EXPECT_EQ(polls, 5u);
     EXPECT_EQ(command, 1u << 5);
     status = 1u << 15;
     polls = 0;
-    EXPECT_FALSE(ehci::set_async(command, status, false, poll, &polls, 5));
+    EXPECT_FALSE(ehci::set_schedule(
+        command, status, lock, failed, ehci::Schedule::Asynchronous, false, poll, &polls, 5));
     EXPECT_EQ(polls, 5u);
     EXPECT_EQ(command, 0u);
     status = 1u << 4;
-    EXPECT_FALSE(ehci::set_async(command, status, true, poll, &polls, 5));
+    EXPECT_FALSE(ehci::set_schedule(
+        command, status, lock, failed, ehci::Schedule::Asynchronous, true, poll, &polls, 5));
     EXPECT_EQ(command, 0u);
+}
+
+TEST(Ehci, PeriodicScheduleCanRearmWhileStorageOwnsAsyncSchedule)
+{
+    uint8_t async_gate = 0, periodic_gate = 0;
+    const ehci::ScheduleLease storage(async_gate);
+    ASSERT_TRUE(storage);
+    ASSERT_FALSE(ehci::ScheduleLease(async_gate));
+    const ehci::ScheduleLease input(periodic_gate);
+    ASSERT_TRUE(input);
+    ASSERT_FALSE(ehci::ScheduleLease(periodic_gate));
+
+    struct State
+    {
+        volatile uint32_t command = 1 | (1u << 4) | (1u << 5);
+        volatile uint32_t status = (1u << 14) | (1u << 15);
+    } state;
+    Spinlock lock{"ehci-test"};
+    bool failed = false;
+    auto advance = [](void* p) {
+        auto& s = *static_cast<State*>(p);
+        EXPECT_NE(s.command & (1u << 5), 0u);
+        s.status = (1u << 15) | ((s.command & (1u << 4)) ? 1u << 14 : 0u);
+    };
+    ASSERT_TRUE(ehci::set_schedule(state.command,
+                                   state.status,
+                                   lock,
+                                   failed,
+                                   ehci::Schedule::Periodic,
+                                   false,
+                                   advance,
+                                   &state,
+                                   4));
+    EXPECT_EQ(1u | (1u << 5), state.command);
+    ASSERT_TRUE(ehci::set_schedule(state.command,
+                                   state.status,
+                                   lock,
+                                   failed,
+                                   ehci::Schedule::Periodic,
+                                   true,
+                                   advance,
+                                   &state,
+                                   4));
+    EXPECT_EQ(1u | (1u << 4) | (1u << 5), state.command);
+    failed = true;
+    EXPECT_FALSE(ehci::set_schedule(state.command,
+                                    state.status,
+                                    lock,
+                                    failed,
+                                    ehci::Schedule::Periodic,
+                                    false,
+                                    advance,
+                                    &state,
+                                    4));
+    EXPECT_EQ(1u | (1u << 4) | (1u << 5), state.command);
 }
 
 TEST(UsbDiagnostics, BoundedCopiesDoNotExposeCallerMutation)

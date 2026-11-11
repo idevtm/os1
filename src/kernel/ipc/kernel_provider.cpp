@@ -7,6 +7,7 @@
 #include "console/console_input.hpp"
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
+#include "drivers/display/service.hpp"
 #include "drivers/input/service.hpp"
 #include "fs/initrd.hpp"
 #include "mm/kmem.hpp"
@@ -628,9 +629,22 @@ void invoke_system(OpenInstance&,
                    os1_ipc_result& result,
                    DescriptorEntry&)
 {
-    result.application_status = !(rights & OS1_RIGHT_SYSTEM_CONTROL) ? OS1_ERR_ACCESS
-                                : request.payload_bytes ? OS1_ERR_INVALID
-                                                        : system_control(request.member);
+    if(!(rights & OS1_RIGHT_SYSTEM_CONTROL))
+    {
+        result.application_status = OS1_ERR_ACCESS;
+        return;
+    }
+    const bool trace = request.member == OS1_SYSTEM_EHCI_TRACE_START ||
+                       request.member == OS1_SYSTEM_EHCI_TRACE_STOP;
+    unsigned argument = 0;
+    if(request.payload_bytes != (trace ? sizeof(argument) : 0))
+    {
+        result.application_status = OS1_ERR_INVALID;
+        return;
+    }
+    if(trace)
+        memcpy(&argument, request.payload, sizeof(argument));
+    result.application_status = system_control(request.member, argument);
 }
 bool try_invoke_log(OpenInstance&,
                     uint32_t rights,
@@ -744,5 +758,9 @@ const KernelProvider* kernel_provider(uint64_t id, uint32_t version)
     for(auto* provider : providers)
         if(id == provider->interface_id && version == provider->interface_version)
             return provider;
+#ifndef OS1_HOST_TEST
+    if(auto* display = native_display::provider(id, version))
+        return display;
+#endif
     return native_input::provider(id, version);
 }

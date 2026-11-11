@@ -24,6 +24,10 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     command = [args.qemu, '-machine', 'q35', '-smp', '4', '-m', '128M', '-display', 'none',
                '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
                '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
+    if getattr(args, 'vga', None):
+        command += ['-vga', args.vga]
+    if getattr(args, 'vga_mmio_off', False):
+        command += ['-global', 'VGA.mmio=off']
     if getattr(args, 'poweroff', False):
         command.remove('-no-shutdown')
     if getattr(args, 'allow_reboot', False):
@@ -102,7 +106,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             assert forbidden not in result, result[-2000:]
         return result
 
-    def run(text, marker=None, allow_errors=False, timeout=60):
+    def run(text, marker=None, allow_errors=False, timeout=60, action=None):
         command_started = time.monotonic()
         completed = False
         try:
@@ -110,6 +114,8 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 menu.reset()
             child.stdin.write((text + '\n').encode())
             child.stdin.flush()
+            if action:
+                action()
             out = expect(allow_errors=allow_errors, timeout=timeout)
             if marker:
                 assert marker in out, out

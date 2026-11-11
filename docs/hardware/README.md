@@ -5,6 +5,7 @@ Keep physical observations separate from emulator validation.
 
 | Document | Use |
 | --- | --- |
+| [Fixed framebuffer plan](fixed-framebuffer-plan.md) | Firmware match, graphics session, pointer demo, and validation |
 | [Driver module profile](driver-module-abi.md) | Implemented internal ELF boundary and lifetime limits |
 | [Driver lifecycle plan](driver-lifecycle-plan.md) | Scope, impact assessment, validation, and resource comparison |
 | [Returned hardware corrections](input-hardware-fixes-plan.md) | Laptop and desktop evidence, USB fixes, and retest procedure |

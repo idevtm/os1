@@ -3,7 +3,7 @@
 
 #include "arch/x86_64/cpu/control_regs.hpp"
 #include "arch/x86_64/interrupt/interrupt.hpp"
-#include "console/terminal.hpp"
+#include "console/console.hpp"
 #include "core/kernel_state.hpp"
 #include "core/panic.hpp"
 #include "debug/debug.hpp"
@@ -75,10 +75,9 @@ void dump_trap_frame(const TrapFrame& frame)
 void on_kernel_exception(TrapFrame* frame)
 {
     const char* name = kernel_fault_name(frame->vector);
-    if(active_terminal)
-    {
-        active_terminal->write_line(name);
-    }
+    for(const char* c = name; *c; ++c)
+        console_mirror_debug_byte(*c);
+    console_mirror_debug_byte('\n');
     debug(name)(" cr2=0x")(read_cr2(), 16)(" cr3=0x")(read_cr3(), 16)();
     dump_trap_frame(*frame);
     halt_forever();
@@ -88,19 +87,15 @@ Thread* handle_exception(TrapFrame* frame)
 {
     const uint32_t flags =
         trap_frame_is_user(*frame) ? static_cast<uint32_t>(OS1_KERNEL_EVENT_FLAG_USER) : 0u;
-    kernel_event::record(OS1_KERNEL_EVENT_TRAP,
-                         flags,
-                         frame->vector,
-                         frame->error_code,
-                         frame->rip,
-                         read_cr2());
+    kernel_event::record(
+        OS1_KERNEL_EVENT_TRAP, flags, frame->vector, frame->error_code, frame->rip, read_cr2());
 
     if(trap_frame_is_user(*frame))
     {
         const uint64_t pid =
             current_thread() && current_thread()->process ? current_thread()->process->pid : 0;
-        debug("user trap vector ")(frame->vector)(" pid ")(pid)(" rip 0x")(frame->rip, 16)(
-            " rsp 0x")(frame->rsp, 16)(" cr2 0x")(read_cr2(), 16)(" error 0x")(
+        debug("user trap vector ")(frame->vector)(" pid ")(pid)(" rip 0x")(
+            frame->rip, 16)(" rsp 0x")(frame->rsp, 16)(" cr2 0x")(read_cr2(), 16)(" error 0x")(
             frame->error_code, 16)(" cr3 0x")(read_cr3(), 16)();
         if(frame->vector == T_PGFLT)
         {

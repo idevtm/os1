@@ -4,9 +4,9 @@
 
 #include "arch/x86_64/cpu/io_port.hpp"
 #include "debug/debug.hpp"
+#include "font8x16.h"
 #include "handoff/memory_layout.h"
 #include "util/memory.h"
-#include "font8x16.h"
 
 namespace
 {
@@ -194,7 +194,7 @@ void present_framebuffer_text(FramebufferTextDisplay& display,
                               uint16_t cursor_x,
                               uint16_t cursor_y)
 {
-    if(!display.available || (nullptr == buffer))
+    if(!display.available || display.graphics_owned || (nullptr == buffer))
     {
         return;
     }
@@ -209,8 +209,8 @@ void present_framebuffer_text(FramebufferTextDisplay& display,
         const bool redraw_old_cursor_row = display.cursor_valid && (display.last_cursor_y == row);
         const bool redraw_new_cursor_row = (cursor_y == row) && (cursor_x < visible_columns);
 
-        if(geometry_match && !redraw_old_cursor_row && !redraw_new_cursor_row &&
-           (nullptr != display.shadow_buffer) &&
+        if(display.shadow_valid && geometry_match && !redraw_old_cursor_row &&
+           !redraw_new_cursor_row && (nullptr != display.shadow_buffer) &&
            cells_match(display.shadow_buffer + row * display.columns,
                        buffer + row * columns,
                        visible_columns))
@@ -228,8 +228,9 @@ void present_framebuffer_text(FramebufferTextDisplay& display,
             const bool is_cursor = (cursor_x == col) && (cursor_y == row) &&
                                    (col < visible_columns) && (row < visible_rows);
             const uint32_t shadow_index = row * display.columns + col;
-            const bool shadow_changed =
-                (nullptr == display.shadow_buffer) || (display.shadow_buffer[shadow_index] != cell);
+            const bool shadow_changed = !display.shadow_valid ||
+                                        (nullptr == display.shadow_buffer) ||
+                                        (display.shadow_buffer[shadow_index] != cell);
 
             if(!shadow_changed && !was_cursor && !is_cursor)
             {
@@ -248,6 +249,7 @@ void present_framebuffer_text(FramebufferTextDisplay& display,
         }
     }
 
+    display.shadow_valid = display.shadow_buffer != nullptr;
     display.last_cursor_x = cursor_x;
     display.last_cursor_y = cursor_y;
     display.cursor_valid = (cursor_x < visible_columns) && (cursor_y < visible_rows);
@@ -297,6 +299,7 @@ bool initialize_framebuffer_text_display(FramebufferTextDisplay& display,
     display.rows = 0;
     display.shadow_buffer = nullptr;
     display.shadow_cell_count = 0;
+    display.shadow_valid = false;
     display.cursor_valid = false;
     display.pixel_format = framebuffer.pixel_format;
 
@@ -378,4 +381,16 @@ void detach_text_display(const TextDisplayBackend* backend)
         default:
             break;
     }
+}
+
+void reset_framebuffer_text_display(FramebufferTextDisplay& display)
+{
+    display.shadow_valid = false;
+    display.cursor_valid = false;
+    // Text presentation redraws every cell. Clear only pixels outside the grid.
+    const uint32_t right = display.columns * kFramebufferCellWidth;
+    const uint32_t bottom = display.rows * kFramebufferCellHeight;
+    for(uint32_t y = 0; y < display.height; ++y)
+        for(uint32_t x = y < bottom ? right : 0; x < display.width; ++x)
+            framebuffer_set_pixel(display, x, y, kFramebufferBackground);
 }
