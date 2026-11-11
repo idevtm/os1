@@ -110,6 +110,27 @@ may append other lines while a reservation exists. Registration rechecks input
 under the wait lock; BSP timer/IRQ service retries ready input, including a waiter
 that had not yet switched away. No scheduler lock is taken under the wait lock.
 
+## Child exit and collection
+
+The BSP reaper publishes a child for collection after it removes the last thread and releases Buffer mappings and descriptors.
+The process table lock protects publication, parent links, and collection claims.
+The address space stays allocated until collection or orphan reaping.
+
+```text
+Thread handoff -> resource cleanup -> publish exit -> collect or reap orphan
+```
+
+A waiter claims the exit record before it copies the status.
+A failed copy releases the claim so a later wait can collect the same child.
+Wait registration takes the process table lock before the queue lock.
+Completion releases the queue lock before it takes the process table lock.
+The BSP checks its child wait queue on each reaper pass.
+It defers a waiter that still runs on another CPU.
+It can complete a wait for its own current thread before scheduler handoff.
+The BSP reaps published exit records that have no parent.
+User processes have one thread. A private provider cannot call `waitpid`.
+Its parent can collect the provider through `waitpid`.
+
 ## Publication And Reclamation Follow-Ups
 
 The original migration to scheduled AP execution landed in May; it is recorded

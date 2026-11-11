@@ -2,14 +2,13 @@
 // Kmem-backed process-registry implementation. This file owns process IDs,
 // parent/child metadata, address-space ownership, and process reaping once
 // threads are gone.
-#include "proc/process.hpp"
-
 #include "buffer/buffer.hpp"
 #include "debug/debug.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "mm/page_frame.hpp"
 #include "mm/virtual_memory.hpp"
+#include "proc/process.hpp"
 #include "proc/thread.hpp"
 #include "sync/smp.hpp"
 #include "util/memory.h"
@@ -44,9 +43,6 @@ Process* allocate_process_record()
     {
         descriptor_table_initialize(process->descriptors);
         process->root_fd = process->cwd_fd = -1;
-        process->child_exit_waiters.lock.reset("process-child-exit");
-        process->child_exit_waiters.head = nullptr;
-        process->child_exit_waiters.name = "process-child-exit";
     }
     return process;
 }
@@ -124,7 +120,8 @@ void orphan_children(Process* process)
         return;
     }
 
-    for(Process* candidate = g_process_head; nullptr != candidate; candidate = candidate->registry_next)
+    for(Process* candidate = g_process_head; nullptr != candidate;
+        candidate = candidate->registry_next)
     {
         if(candidate->parent == process)
         {
@@ -201,7 +198,7 @@ Process* create_kernel_process(uint64_t kernel_cr3)
     return process;
 }
 
-Process* create_user_process(const char* name, uint64_t cr3)
+Process* create_user_process(const char* name, uint64_t cr3, Process* parent)
 {
     Process* process = allocate_process_record();
     if(nullptr == process)
@@ -214,6 +211,7 @@ Process* create_user_process(const char* name, uint64_t cr3)
     process->state = ProcessState::Ready;
     process->address_space.cr3 = cr3;
     process->exit_status = 0;
+    process->parent = parent;
     fill_process_name(process, name);
     link_process(process);
     return process;

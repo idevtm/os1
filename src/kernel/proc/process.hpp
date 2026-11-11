@@ -6,9 +6,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "sync/wait_queue.hpp"
-#include "sync/smp.hpp"
 #include "resource/descriptor.hpp"
+#include "sync/smp.hpp"
+#include "sync/wait_queue.hpp"
 
 class PageFrameContainer;
 
@@ -40,7 +40,9 @@ struct Process
     int exit_status = 0;
     Process* parent = nullptr;
     char name[32]{};
-    WaitQueue child_exit_waiters;
+    // The process table lock protects exit publication and collection.
+    bool exit_cleanup_complete = false;
+    bool wait_claimed = false;
     Process* registry_next = nullptr;
     DescriptorTable descriptors;
     int root_fd = -1, cwd_fd = -1;
@@ -58,7 +60,7 @@ bool initialize_process_table(PageFrameContainer& frames);
 Process* create_kernel_process(uint64_t kernel_cr3);
 
 // Create a user process record bound to an already-built address space.
-Process* create_user_process(const char* name, uint64_t cr3);
+Process* create_user_process(const char* name, uint64_t cr3, Process* parent = nullptr);
 
 // Return true if any non-free thread still belongs to `process`.
 bool process_has_threads(Process* process);

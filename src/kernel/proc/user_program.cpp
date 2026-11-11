@@ -187,13 +187,12 @@ Thread* load_user_program(PageFrameContainer& frames,
         return nullptr;
     }
 
-    Process* process = create_user_process(path, user_cr3);
+    Process* process = create_user_process(path, user_cr3, parent);
     if(nullptr == process)
     {
         destroy_user_address_space(frames, user_cr3);
         return nullptr;
     }
-    process->parent = parent;
     diagnostic_log::inherit(process, parent);
 
     long grants = parent ? descriptor_inherit_standard(parent->descriptors, process->descriptors)
