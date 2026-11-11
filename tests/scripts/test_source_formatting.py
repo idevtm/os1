@@ -38,7 +38,7 @@ class SourceFormatting(unittest.TestCase):
 
             record = root / "formatted.json"
             formatter = root / "clang-format"
-            formatter.write_text("#!/bin/sh\nexec \"$FORMAT_TEST_PYTHON\" -c "
+            formatter.write_text("#!/bin/sh\nexec \"$FORMAT_TEST_PYTHON\" -E -c "
                                  "'import json, os, sys; json.dump(sys.argv[1:], "
                                  "open(os.environ[\"FORMAT_TEST_RECORD\"], \"w\"))' \"$@\"\n")
             formatter.chmod(0o755)

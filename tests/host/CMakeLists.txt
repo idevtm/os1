@@ -247,5 +247,5 @@ gtest_add_tests(TARGET os1_host_tests TEST_LIST os1_host_tests_TESTS)
 set_tests_properties(${os1_host_tests_TESTS} PROPERTIES LABELS "host;unit")
 
 add_test(NAME HardwareReferenceComparison
-  COMMAND "${Python3_EXECUTABLE}" -B "${OS1_REPO_ROOT}/tests/scripts/test_hardware_compare.py")
+  COMMAND "${Python3_EXECUTABLE}" -E -B "${OS1_REPO_ROOT}/tests/scripts/test_hardware_compare.py")
 set_tests_properties(HardwareReferenceComparison PROPERTIES LABELS "host;unit")

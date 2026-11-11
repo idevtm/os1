@@ -35,6 +35,10 @@ Documentation-only changes require document checks instead of image builds.
 
 ## Test isolation and concurrency
 
+Registered Python tests ignore Python environment settings that can disable assertions.
+Test commands use `-E` or `-I` before the script or module name.
+Use `python3 -E` for direct test runs that import sibling scripts.
+
 Each QEMU invocation owns its mutable files. The local runner schedules at most two tests concurrently.
 
 ```text
