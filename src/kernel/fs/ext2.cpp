@@ -196,6 +196,8 @@ long Volume::validate_inode(uint32_t n, const Inode& inode)
 }
 long Volume::begin_write()
 {
+    if(io.read_only)
+        return OS1_ERR_ACCESS;
     if(failed)
         return OS1_ERR_IO;
     if(dirty)
@@ -356,6 +358,8 @@ bool Volume::stamp(Inode& inode, uint32_t fields)
 }
 long Volume::set_times(uint32_t number, Inode& inode, uint32_t fields)
 {
+    if(io.read_only)
+        return OS1_ERR_ACCESS;
     if(!fields || fields & ~(OS1_TIME_ACCESS | OS1_TIME_MODIFY))
         return OS1_ERR_INVALID;
     Inode changed = inode;
@@ -854,6 +858,8 @@ long Volume::move(uint32_t source_parent,
 }
 long Volume::sync()
 {
+    if(io.read_only)
+        return failed ? OS1_ERR_IO : 0;
     if(failed || !io.flush(io.context))
     {
         failed = true;

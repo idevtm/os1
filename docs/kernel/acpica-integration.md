@@ -26,6 +26,31 @@ Both observability smokes now require cached-route and passive-snapshot output.
 General device-power diagnostics remain deferred. The later SystemControl contract authorizes explicit shutdown and defines storage synchronization and failure recovery.
 The [historical review](../archive/reviews/2026-11-03-review.md) retains the original findings and hardware-evidence limits.
 
+## Definition-block inventory
+
+The platform inventory stores metadata for the DSDT and up to 15 SSDTs.
+
+| Path | Table handling |
+| --- | --- |
+| Platform inventory | Keep the DSDT and the first 15 SSDTs. Report the number of omitted SSDTs. |
+| ACPICA namespace | Load all tables that ACPICA accepts. |
+
+Table discovery continues after the inventory fills. It still checks for required tables.
+
+## PCI INTx routing
+
+ACPICA selects the APIC interrupt model before it evaluates `_PRT`.
+
+| Firmware object | Route handling |
+| --- | --- |
+| `\_PIC` | Pass the integer 1. Continue if the method is absent. |
+| Direct `_PRT` GSI | Use active-low, level-triggered flags. |
+| `_PRT` link device | Use the GSI and flags from the current interrupt resource. |
+| PCI configuration interrupt line | Use the ISA route when ACPI supplies no route. |
+
+A failure in the present `\_PIC` method stops platform discovery.
+The [ACPI specification](https://uefi.org/specs/ACPI/6.6/06_Device_Configuration.html#prt-pci-routing-table) defines the PCI routing table.
+
 ## Shutdown EC support — 2026-11-08
 
 The [EC adapter](acpi-embedded-controller.md) adds shutdown-time access to firmware-declared Embedded Controller regions.

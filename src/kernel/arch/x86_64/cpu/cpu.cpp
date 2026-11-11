@@ -8,6 +8,7 @@
 #include "core/kernel_state.hpp"
 #include "core/timer_source.hpp"
 #include "debug/event_ring.hpp"
+#include "drivers/timer/tsc_clock.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/page_frame.hpp"
 #include "util/memory.h"  // IWYU pragma: keep
@@ -15,6 +16,7 @@
 namespace
 {
 constexpr size_t k_cpu_record_prefix_bytes = offsetof(cpu, kstacklo);
+constexpr uint64_t kApBootTimeout100ns = 5000000;  // 500 ms.
 constexpr uint64_t kApBootWaitSpinLimit = 100000000;
 
 [[noreturn]] void cpu_idle_loop()
@@ -29,17 +31,19 @@ constexpr uint64_t kApBootWaitSpinLimit = 100000000;
 
 bool wait_for_ap_boot(cpu* c)
 {
+    const bool calibrated = tsc_clock_calibrate();
+    const uint64_t start = calibrated ? tsc_clock_now_100ns() : 0;
     for(uint64_t spins = 0; spins < kApBootWaitSpinLimit; ++spins)
     {
-        if(c->booted != 0)
-        {
+        if(ApStartupState::Online == cpu_ap_startup_state(c))
             return true;
-        }
-
-        asm volatile("pause");
+        if(calibrated && tsc_clock_now_100ns() - start >= kApBootTimeout100ns)
+            break;
+        pause();
     }
 
-    return c->booted != 0;
+    (void)cpu_ap_finish_startup(c, ApStartupState::TimedOut);
+    return ApStartupState::Online == cpu_ap_startup_state(c);
 }
 
 void clear_ap_startup_idt()
@@ -53,34 +57,34 @@ void clear_ap_startup_idt()
 
 [[noreturn]] void enter_ap_idle_thread()
 {
-    Thread* idle = cpu_cur()->idle_thread;
+    cpu* current = cpu_cur();
+    Thread* idle = current->idle_thread;
     if(nullptr == idle)
+        cpu_idle_loop();
+
+    const bool timer_failed = timer_source_ap_timer_enabled() && !cpu_start_local_apic_timer();
+
+    idle->state = ThreadState::Running;
+    if(!cpu_ap_finish_startup(current, ApStartupState::Online))
     {
-        debug("cpu ")(cpu_cur()->id)(" missing idle thread")();
+        idle->state = ThreadState::Blocked;
+        lapic_timer_mask();
         cpu_idle_loop();
     }
 
-    idle->state = ThreadState::Running;
+    debug("CPU ")(current->id)(" is alive at 0x")(reinterpret_cast<uint64_t>(current), 16)();
+    debug("cpu init worked!")();
+    if(timer_failed)
+        debug("cpu ")(current->id)(" lapic timer start failed")();
+
     if((nullptr != idle->process) && (ProcessState::Dying != idle->process->state))
-    {
         idle->process->state = ProcessState::Running;
-    }
     kernel_event::record(OS1_KERNEL_EVENT_AP_ONLINE,
                          OS1_KERNEL_EVENT_FLAG_SUCCESS,
-                         cpu_cur()->id,
-                         reinterpret_cast<uint64_t>(cpu_cur()),
+                         current->id,
+                         reinterpret_cast<uint64_t>(current),
                          reinterpret_cast<uint64_t>(idle),
                          0);
-
-    if(timer_source_ap_timer_enabled())
-    {
-        if(!cpu_start_local_apic_timer())
-        {
-            debug("cpu ")(cpu_cur()->id)(" lapic timer start failed")();
-        }
-    }
-
-    xchg(&cpu_cur()->booted, 1);
     enter_first_thread(idle, idle->kernel_stack_top);
     cpu_idle_loop();
 }
@@ -227,15 +231,14 @@ cpu* cpu_alloc(void)
 
 void init()
 {
-    if(!cpu_on_boot())
+    cpu* current = cpu_cur();
+    if(current != g_cpu_boot && ApStartupState::Pending == cpu_ap_startup_state(current))
     {
-        debug("CPU ")(cpu_cur()->id)(" is alive at 0x")((uint64_t)cpu_cur(), 16)();
         cpu_init();
         if(nullptr != lapic)
         {
-            cpu_cur()->id = static_cast<uint8_t>(lapic[ID] >> 24);
+            assert(current->id == static_cast<uint8_t>(lapic[ID] >> 24));
         }
-        debug("cpu init worked!")();
         lapic_init();
         cpu_load_idt();
         enter_ap_idle_thread();
@@ -249,16 +252,18 @@ void cpu_boot_others(uint64_t cr3)
     debug("booting other CPUs cr3 = 0x")(cr3, 16)();
     debug("current CPU = ")(cpu_cur()->id)();
     if(!cpu_on_boot())
-    {
-        xchg(&cpu_cur()->booted, 1);
         return;
-    }
 
     extern uint8_t cpu_start_begin[];
     extern uint8_t cpu_start_end[];
     uint8_t* code = kernel_physical_pointer<uint8_t>(kApTrampolineAddress);
     memcpy(code, cpu_start_begin, (cpu_start_end - cpu_start_begin));
 
+    auto* cpu_pages = kernel_physical_pointer<uint64_t>(kApStartupCpuPagesAddress);
+    memset(cpu_pages, 0, kApStartupCpuPageCount * sizeof(*cpu_pages));
+    *kernel_physical_pointer<uint64_t>(kApStartupRipAddress) = reinterpret_cast<uint64_t>(init);
+    *kernel_physical_pointer<uint64_t>(kApStartupCr3Address) = cr3;
+    clear_ap_startup_idt();
     for(cpu* c = g_cpu_boot; c; c = c->next)
     {
         if(c == cpu_cur())
@@ -266,10 +271,13 @@ void cpu_boot_others(uint64_t cr3)
             continue;
         }
 
-        *kernel_physical_pointer<uint64_t>(kApStartupCpuPageAddress) = (uint64_t)c;
-        *kernel_physical_pointer<uint64_t>(kApStartupRipAddress) = (uint64_t)init;
-        *kernel_physical_pointer<uint64_t>(kApStartupCr3Address) = cr3;
-        clear_ap_startup_idt();
+        // Prepare the exception stack here so a pending AP does not take the allocator lock.
+        if(!cpu_prepare_exception_stack(*c, page_frames))
+        {
+            debug("cpu ")(c->id)(" exception stack allocation failed; startup skipped")();
+            continue;
+        }
+        __atomic_store_n(&cpu_pages[c->id], reinterpret_cast<uint64_t>(c), __ATOMIC_RELEASE);
 
         debug("Starting CPU ")(c->id)();
         lapic_start_cpu(c->id, (uint64_t)code);

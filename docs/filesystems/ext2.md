@@ -108,6 +108,16 @@ Counts are individual observations rather than a transaction snapshot.
 
 ## Durability and errors
 
+The device determines whether a supported ext2 volume permits writes.
+
+| Virtio device mode | Mount behavior |
+| --- | --- |
+| Writable | Accept authorized writes and flushes. |
+| Read-only | Permit reads and execution. Deny mutations with `OS1_ERR_ACCESS`. |
+
+A sync on a healthy read-only volume succeeds without a device flush.
+Automatic log export skips the read-only volume.
+
 Before the first mutation after synchronization, the driver writes and flushes the unclean filesystem state.
 Successful `sync` flushes completed writes, writes clean state, and flushes again.
 An I/O error makes the mounted volume fail further disk operations.

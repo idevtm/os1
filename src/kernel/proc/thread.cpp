@@ -21,7 +21,8 @@ namespace
 {
 [[nodiscard]] bool cpu_is_schedulable(const cpu* owner)
 {
-    return (nullptr != owner) && ((owner == g_cpu_boot) || (0u != owner->booted));
+    return (nullptr != owner) &&
+           ((owner == g_cpu_boot) || (ApStartupState::Online == cpu_ap_startup_state(owner)));
 }
 
 [[nodiscard]] cpu* next_schedulable_cpu_after(cpu* after)
@@ -92,18 +93,16 @@ namespace
 
 [[nodiscard]] cpu* select_target_cpu(Thread* thread, cpu* target)
 {
-    if(nullptr != target)
-    {
+    if(thread->pinned_cpu)
+        return cpu_is_schedulable(thread->pinned_cpu) ? thread->pinned_cpu : nullptr;
+    if(cpu_is_schedulable(target))
         return target;
-    }
-    if((nullptr != thread) && thread->user_mode)
+    if(thread->user_mode)
     {
         return select_user_target_cpu();
     }
-    if((nullptr != thread) && (nullptr != thread->scheduler_cpu))
-    {
+    if(cpu_is_schedulable(thread->scheduler_cpu))
         return thread->scheduler_cpu;
-    }
     return cpu_cur();
 }
 
@@ -183,13 +182,11 @@ void dequeue_thread_if_queued(Thread* thread)
 
 bool enqueue_thread_on_cpu(Thread* thread, cpu* target)
 {
-    if(nullptr == thread)
-    {
+    if(nullptr == thread || !cpu_is_schedulable(target))
         return false;
-    }
 
     thread->scheduler_cpu = target;
-    if((nullptr == target) || (thread == idle_thread_for_cpu(target)))
+    if(thread == idle_thread_for_cpu(target))
     {
         thread->run_queue_cpu = nullptr;
         thread->next = nullptr;
@@ -470,6 +467,9 @@ Thread* create_kernel_thread(Process* process,
                              cpu* pinned_cpu,
                              bool start_ready)
 {
+    if(pinned_cpu && !cpu_is_schedulable(pinned_cpu))
+        return nullptr;
+
     Thread* thread = allocate_kernel_thread(process, entry, frames);
     if(nullptr == thread)
     {
@@ -624,6 +624,8 @@ void mark_thread_ready(Thread* thread, cpu* target)
        (ThreadState::Free != thread->state))
     {
         cpu* target_cpu = select_target_cpu(thread, target);
+        if(!cpu_is_schedulable(target_cpu))
+            return;
         thread->state = ThreadState::Ready;
         set_process_state(thread, ProcessState::Ready);
         const bool enqueued = enqueue_thread_on_cpu(thread, target_cpu);

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstring>
+#include <vector>
 
 #include "drivers/usb/xhci_controller.hpp"
 
@@ -824,4 +825,215 @@ TEST(XhciController, ConvertsUsbInterruptIntervalsToMicroframeExponents)
     EXPECT_EQ(xhci::interrupt_interval(2, 10), 6);  // Low speed, 8 ms <= 10 ms.
     EXPECT_EQ(xhci::interrupt_interval(1, 255), 10);
     EXPECT_EQ(xhci::interrupt_interval(3, 4), 3);  // High speed already logarithmic.
+}
+
+TEST(XhciController, HaltedHidCompletionQueuesOneWorkerRecovery)
+{
+    for(uint8_t completion : {3, 4, 6})
+    {
+        xhci::EventInfo event{};
+        event.slot_id = 5;
+        event.endpoint_id = 3;
+        event.parameter = 0x4000;
+        event.completion_code = completion;
+        EXPECT_FALSE(xhci::matches_hid_transfer(event, 4, 3, 0x4000, true));
+        EXPECT_FALSE(xhci::matches_hid_transfer(event, 5, 2, 0x4000, true));
+        EXPECT_FALSE(xhci::matches_hid_transfer(event, 5, 3, 0x4010, true));
+        EXPECT_FALSE(xhci::matches_hid_transfer(event, 5, 3, 0x4000, false));
+        ASSERT_TRUE(xhci::matches_hid_transfer(event, 5, 3, 0x4000, true));
+        xhci::HidRecovery recovery{};
+        EXPECT_EQ(recovery.complete(event.completion_code), xhci::HidCompletion::Recover);
+        EXPECT_EQ(recovery.pending, completion);
+        recovery.pending = 0;  // The worker claims the request before it submits commands.
+        EXPECT_EQ(recovery.complete(completion), xhci::HidCompletion::Retire);
+        EXPECT_EQ(recovery.pending, 0u);
+    }
+}
+
+TEST(XhciController, HidReportRestoresRecoveryAllowance)
+{
+    xhci::HidRecovery recovery{};
+    EXPECT_EQ(recovery.complete(4), xhci::HidCompletion::Recover);
+    recovery.pending = 0;
+    EXPECT_EQ(recovery.complete(13), xhci::HidCompletion::Report);
+    EXPECT_EQ(recovery.complete(6), xhci::HidCompletion::Recover);
+    EXPECT_EQ(recovery.pending, 6u);
+    recovery.pending = 0;
+    EXPECT_EQ(recovery.complete(1), xhci::HidCompletion::Report);
+    EXPECT_EQ(recovery.complete(2), xhci::HidCompletion::Rearm);
+    EXPECT_EQ(recovery.pending, 0u);
+}
+
+TEST(XhciController, HidRestartUsesEventBeforeOutputContextState)
+{
+    constexpr uint8_t endpoint = 3;
+    std::vector<int> steps;
+    auto reset = [&](uint8_t dci) {
+        steps.push_back(dci);
+        return uint8_t(1);
+    };
+    auto clear = [&] {
+        steps.push_back(20);
+        return xhci::HidClearHalt::Cleared;
+    };
+    auto set_dequeue = [&](uint8_t dci) {
+        steps.push_back(30 + dci);
+        return true;
+    };
+    auto running = [&](uint8_t) {
+        ADD_FAILURE() << "Output state must not bypass a halt event";
+        return true;
+    };
+    EXPECT_EQ(xhci::restart_hid_transfer(4, endpoint, reset, clear, set_dequeue, running),
+              xhci::HidRestart::Recovered);
+    EXPECT_EQ(steps, (std::vector<int>{3, 20, 33}));
+}
+
+TEST(XhciController, HidClearHaltProtocolStallRestoresEp0AndRetiresOnlyInput)
+{
+    constexpr uint8_t endpoint = 3;
+    std::vector<int> steps;
+    auto reset = [&](uint8_t dci) {
+        steps.push_back(dci);
+        return uint8_t(1);
+    };
+    auto clear = [&] {
+        steps.push_back(20);
+        return xhci::HidClearHalt::ControlStall;
+    };
+    auto set_dequeue = [&](uint8_t dci) {
+        steps.push_back(30 + dci);
+        return true;
+    };
+    auto running = [](uint8_t) { return false; };
+    EXPECT_EQ(xhci::restart_hid_transfer(6, endpoint, reset, clear, set_dequeue, running),
+              xhci::HidRestart::RetireInput);
+    EXPECT_EQ(steps, (std::vector<int>{3, 20, 1, 31}));
+    EXPECT_EQ(xhci::restart_hid_transfer(
+                  6, endpoint, reset, clear, [](uint8_t) { return false; }, running),
+              xhci::HidRestart::RetireDevice);
+}
+
+TEST(XhciController, OnlyRunningTransactionErrorCanRecoverAfterResetStateError)
+{
+    auto reset = [](uint8_t) { return uint8_t(19); };
+    auto clear = [] {
+        ADD_FAILURE() << "Clear halt needs a successful reset";
+        return xhci::HidClearHalt::Cleared;
+    };
+    auto set_dequeue = [](uint8_t) { return false; };
+    auto running = [](uint8_t dci) { return dci == 3; };
+    EXPECT_EQ(xhci::restart_hid_transfer(4, 3, reset, clear, set_dequeue, running),
+              xhci::HidRestart::Recovered);
+    EXPECT_EQ(xhci::restart_hid_transfer(6, 3, reset, clear, set_dequeue, running),
+              xhci::HidRestart::RetireInput);
+    EXPECT_EQ(xhci::restart_hid_transfer(4, 2, reset, clear, set_dequeue, running),
+              xhci::HidRestart::RetireInput);
+}
+
+namespace
+{
+uint64_t fake_xhci_ticks = 0;
+
+uint64_t read_fake_xhci_clock()
+{
+    return fake_xhci_ticks;
+}
+}  // namespace
+
+TEST(XhciTimeout, ADelayedCommandCanOutlastTheOldPollBudget)
+{
+    fake_xhci_ticks = 10;
+    xhci::PollDeadline deadline(read_fake_xhci_clock, 10, 3);
+    xhci::CommandCompletion command{.expected_trb = 0x4000};
+    for(unsigned tick = 1; tick < 9; ++tick)
+    {
+        ++fake_xhci_ticks;
+        ASSERT_FALSE(deadline.expired());
+        EXPECT_FALSE(command.complete);
+    }
+    ++fake_xhci_ticks;
+    command.record({.parameter = 0x4000, .completion_code = 1, .slot_id = 2});
+    EXPECT_FALSE(deadline.expired());
+    EXPECT_TRUE(command.complete);
+    EXPECT_EQ(2, command.slot);
+
+    ++fake_xhci_ticks;
+    EXPECT_TRUE(deadline.expired());
+}
+
+TEST(XhciTimeout, UnavailableOrStalledClockStillHasABound)
+{
+    fake_xhci_ticks = 0;
+    xhci::PollDeadline stalled(read_fake_xhci_clock, 100, 3);
+    xhci::PollDeadline unavailable(nullptr, 100, 3);
+    for(unsigned poll = 0; poll < 2; ++poll)
+    {
+        EXPECT_FALSE(stalled.expired());
+        EXPECT_FALSE(unavailable.expired());
+    }
+    EXPECT_TRUE(stalled.expired());
+    EXPECT_TRUE(unavailable.expired());
+}
+
+TEST(XhciTimeout, ABackwardClockSampleDoesNotUnderflowTheDeadline)
+{
+    fake_xhci_ticks = 100;
+    xhci::PollDeadline deadline(read_fake_xhci_clock, 50, 3);
+    fake_xhci_ticks = 95;
+    EXPECT_FALSE(deadline.expired());
+    fake_xhci_ticks = 149;
+    EXPECT_FALSE(deadline.expired());
+    fake_xhci_ticks = 150;
+    EXPECT_TRUE(deadline.expired());
+}
+
+TEST(XhciCommandRecovery, RequiresAStoppedRingAndKnownCommandOutcome)
+{
+    xhci::CommandCompletion command{.expected_trb = 0x4000};
+    command.record({.parameter = 0x4010, .completion_code = 1});
+    EXPECT_FALSE(command.complete);
+    EXPECT_FALSE(command.can_reprogram());
+
+    command.record({.parameter = 0x4010, .completion_code = xhci::kCompletionCommandRingStopped});
+    EXPECT_FALSE(command.can_reprogram());
+    command.record({.parameter = 0x4000, .completion_code = xhci::kCompletionCommandAborted});
+    EXPECT_TRUE(command.can_reprogram());
+    EXPECT_EQ(xhci::kCompletionCommandAborted, command.code);
+
+    command = {.expected_trb = 0x4000};
+    command.record({.parameter = 0x4000, .completion_code = xhci::kCompletionCommandRingStopped});
+    EXPECT_TRUE(command.can_reprogram());
+    EXPECT_FALSE(command.complete);
+
+    command = {.expected_trb = 0x4000};
+    command.record({.parameter = 0x4000, .completion_code = 1, .slot_id = 3});
+    EXPECT_FALSE(command.can_reprogram());
+    command.record({.parameter = 0x4010, .completion_code = xhci::kCompletionCommandRingStopped});
+    EXPECT_TRUE(command.can_reprogram());
+    EXPECT_EQ(1, command.code);
+    EXPECT_EQ(3, command.slot);
+}
+
+TEST(XhciCommandRecovery, WritesAbortAndProgramsOnlyAStoppedRing)
+{
+    alignas(8) std::array<uint8_t, 64> operational{};
+    xhci::ControllerLayout controller{};
+    controller.operational = operational.data();
+    constexpr uint64_t ring = 0x1'1234'5000ull;
+    const auto reg = xhci::kOperationalCrcr;
+    write32(operational, reg, xhci::kCrcrCommandRingRunning);
+
+    EXPECT_TRUE(xhci::command_ring_running(controller));
+    EXPECT_FALSE(xhci::program_command_ring(controller, ring, true));
+    EXPECT_TRUE(xhci::request_command_abort(controller, ring));
+    EXPECT_EQ(ring | xhci::kCrcrCommandAbort, read64(operational, reg));
+
+    write32(operational, reg, 0);
+    EXPECT_FALSE(xhci::command_ring_running(controller));
+    EXPECT_TRUE(xhci::request_command_abort(controller, ring));
+    EXPECT_EQ(ring | xhci::kCrcrCommandAbort, read64(operational, reg));
+    EXPECT_FALSE(xhci::request_command_abort(controller, ring + 1));
+    EXPECT_TRUE(xhci::program_command_ring(controller, ring, true));
+    EXPECT_EQ(ring | xhci::kCrcrRingCycleState, read64(operational, reg));
 }

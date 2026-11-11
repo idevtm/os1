@@ -238,15 +238,13 @@ bool pci_enable_intx_interrupt(DeviceId owner,
 
     uint32_t route_irq = 0;
     uint16_t route_flags = 0;
-    bool source_is_gsi = false;
-    const bool have_acpi_route = acpi_resolve_pci_route_details(
-        device.bus,
-        device.slot,
-        device.function,
-        static_cast<uint8_t>(device.interrupt_pin - 1u),
-        route_irq,
-        route_flags,
-        source_is_gsi);
+    const bool have_acpi_route =
+        acpi_resolve_pci_route(device.bus,
+                               device.slot,
+                               device.function,
+                               static_cast<uint8_t>(device.interrupt_pin - 1u),
+                               route_irq,
+                               route_flags);
     if(!have_acpi_route && ((0xFFu == device.interrupt_line) || (device.interrupt_line > 15u)))
     {
         return false;
@@ -259,8 +257,7 @@ bool pci_enable_intx_interrupt(DeviceId owner,
     }
     pci_disable_intx(device, false);
     const bool routed = have_acpi_route
-                            ? (source_is_gsi ? platform_route_gsi_irq(owner, route_irq, route_flags, vector)
-                                             : platform_route_isa_irq(owner, static_cast<int>(route_irq), vector))
+                            ? platform_route_gsi_irq(owner, route_irq, route_flags, vector)
                             : platform_route_isa_irq(owner, device.interrupt_line, vector);
     if(!routed)
     {

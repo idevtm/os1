@@ -26,6 +26,19 @@ TEST(ShellCommand, QuotesOperatorsAndRawTypedArguments)
     EXPECT_STREQ("END", c.input_name);
     EXPECT_STREQ("/tmp/a", c.output_name);
 }
+TEST(ShellCommand, FindsTopLevelOperatorsAfterTypedOrQuotedArguments)
+{
+    EXPECT_TRUE(has_top_level_command_operator(R"shell("f(x)" > "/tmp/out")shell"));
+    EXPECT_TRUE(has_top_level_command_operator(R"shell('('>>"/tmp/out")shell"));
+    EXPECT_TRUE(has_top_level_command_operator(R"shell(print("a>b") < "/tmp/in")shell"));
+    EXPECT_TRUE(has_top_level_command_operator(R"shell(print(<?>) > "/tmp/out")shell"));
+    EXPECT_TRUE(has_top_level_command_operator("label = value"));
+
+    EXPECT_FALSE(has_top_level_command_operator(R"shell("f(x) > y")shell"));
+    EXPECT_FALSE(has_top_level_command_operator(R"shell(print("a>b",{value:"="}))shell"));
+    EXPECT_FALSE(has_top_level_command_operator("argument:<?>"));
+    EXPECT_FALSE(has_top_level_command_operator(R"shell(a\>b)shell"));
+}
 TEST(ShellCommand, RejectsIncompleteAmbiguousAndUnsupportedCommands)
 {
     for(auto text : {"echo >",
@@ -131,6 +144,65 @@ TEST(Ps2Modifiers, ExtendedKeypadEnterAndSlashRemainPrintable)
     EXPECT_EQ(OS1_CONSOLE_KEY_UP, os1::input::navigation_key(key));
     EXPECT_TRUE(m.press(0x20, key));
     EXPECT_FALSE(m.keypad);
+}
+
+TEST(Ps2Modifiers, ConsoleScancodesEmitOnlyIntentionalControlBytes)
+{
+    using os1::input::ps2_console_character;
+    for(bool shift : {false, true})
+    {
+        os1::input::Ps2Modifiers modifiers{};
+        modifiers.shift = shift;
+        for(unsigned scan = 0; scan < 128; ++scan)
+        {
+            const uint8_t byte = ps2_console_character(modifiers, scan);
+            if(byte && byte < 0x20)
+                EXPECT_TRUE((scan == 0x01 && byte == 0x1b) || (scan == 0x0f && byte == '\t') ||
+                            (scan == 0x1c && byte == '\n'))
+                    << scan;
+        }
+        for(unsigned scan : {0x38,
+                             0x3a,
+                             0x3b,
+                             0x3c,
+                             0x3d,
+                             0x3e,
+                             0x3f,
+                             0x40,
+                             0x41,
+                             0x42,
+                             0x43,
+                             0x44,
+                             0x45,
+                             0x46,
+                             0x57,
+                             0x58})
+            EXPECT_EQ(ps2_console_character(modifiers, scan), 0) << scan;
+    }
+}
+
+TEST(Ps2Modifiers, KeypadAndConsoleShortcutsKeepTheirMeaning)
+{
+    using os1::input::ps2_console_character;
+    os1::input::Ps2Modifiers modifiers{};
+    EXPECT_EQ(ps2_console_character(modifiers, 0x37), '*');
+    EXPECT_EQ(ps2_console_character(modifiers, 0x48), '8');
+    EXPECT_EQ(ps2_console_character(modifiers, 0x4a), '-');
+    EXPECT_EQ(ps2_console_character(modifiers, 0x4e), '+');
+    EXPECT_EQ(ps2_console_character(modifiers, 0x52), '0');
+    EXPECT_EQ(ps2_console_character(modifiers, 0x53), '.');
+    EXPECT_EQ(ps2_console_character(modifiers, 0x0e), 0x7f);
+    modifiers.keypad = true;
+    EXPECT_EQ(uint8_t(ps2_console_character(modifiers, 0x48)), OS1_CONSOLE_KEY_UP);
+    EXPECT_EQ(ps2_console_character(modifiers, 0x1c), '\n');
+    EXPECT_EQ(ps2_console_character(modifiers, 0x35), '/');
+    modifiers.keypad = false;
+    modifiers.control = 1;
+    EXPECT_EQ(ps2_console_character(modifiers, 0x2e), 3);
+    EXPECT_EQ(ps2_console_character(modifiers, 0x20), 4);
+    EXPECT_EQ(uint8_t(ps2_console_character(modifiers, 0x39)), OS1_CONSOLE_KEY_COMPLETE);
+    modifiers.shift = 1;
+    EXPECT_EQ(uint8_t(ps2_console_character(modifiers, 0x0f)), OS1_CONSOLE_KEY_BACKTAB);
 }
 
 TEST(ProgramPath, RecoveryPrecedesDiskAndOnlyMissingContinues)

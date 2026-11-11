@@ -172,39 +172,6 @@ typedef char low_handoff_storage_fits_reserved_budget
     return nullptr != boot_info.command_line;
 }
 
-[[nodiscard]] bool populate_memory_map(const LimineBootResponses& responses,
-                                       BootInfo& boot_info,
-                                       BootMemoryRegion* memory_map)
-{
-    if((nullptr == memory_map) || !limine_pointer_mapped(responses.memory_map) ||
-       (responses.memory_map->entry_count > kBootInfoMaxMemoryRegions))
-    {
-        return false;
-    }
-    if(!limine_pointer_mapped(responses.memory_map->entries))
-    {
-        return false;
-    }
-
-    for(uint64_t i = 0; i < responses.memory_map->entry_count; ++i)
-    {
-        const auto* entry = responses.memory_map->entries[i];
-        if(!limine_pointer_mapped(entry))
-        {
-            return false;
-        }
-
-        memory_map[i].physical_start = entry->base;
-        memory_map[i].length = entry->length;
-        memory_map[i].type = translate_memory_type(entry->type);
-        memory_map[i].attributes = 0;
-    }
-
-    boot_info.memory_map = memory_map;
-    boot_info.memory_map_count = static_cast<uint32_t>(responses.memory_map->entry_count);
-    return true;
-}
-
 [[nodiscard]] bool populate_initrd_module(BootInfo& boot_info,
                                           BootStringArena& arena,
                                           const limine_file& initrd_module,
@@ -309,43 +276,64 @@ void populate_firmware_pointers(const LimineBootResponses& responses, BootInfo& 
 }
 }  // namespace
 
-[[nodiscard]] bool prepare_kernel_handoff(uint64_t kernel_physical_end,
+[[nodiscard]] std::span<const BootMemoryRegion> read_memory_map(
+    const limine_memmap_response* response, std::span<BootMemoryRegion> storage)
+{
+    if(!limine_pointer_mapped(response) || response->entry_count > storage.size() ||
+       !limine_pointer_mapped(response->entries))
+        return {};
+
+    for(uint64_t i = 0; i < response->entry_count; ++i)
+    {
+        const auto* entry = response->entries[i];
+        if(!limine_pointer_mapped(entry))
+            return {};
+        storage[i] = {entry->base, entry->length, translate_memory_type(entry->type), 0};
+    }
+    return {storage.data(), static_cast<size_t>(response->entry_count)};
+}
+
+[[nodiscard]] bool prepare_kernel_handoff(std::span<const BootMemoryRegion> memory_map,
+                                          uint64_t kernel_physical_end,
                                           cpu*& cpu_boot,
                                           uint64_t& boot_info_storage_physical,
                                           uint64_t& bootstrap_stack_top)
 {
-    cpu_boot = reinterpret_cast<cpu*>(align_up(kernel_physical_end, kPageSize));
-    uint8_t* cpu_boot_page = map_physical_pointer<uint8_t>(reinterpret_cast<uint64_t>(cpu_boot));
-    if(nullptr == cpu_boot_page)
-    {
-        return false;
-    }
-    freestanding::zero_bytes(cpu_boot_page, kPageSize);
-
-    boot_info_storage_physical =
-        align_up(reinterpret_cast<uint64_t>(cpu_boot) + kPageSize, kPageSize);
-    const uint64_t boot_info_storage_end =
+    const uint64_t cpu_boot_physical = align_up(kernel_physical_end, kPageSize);
+    boot_info_storage_physical = cpu_boot_physical + kPageSize;
+    const uint64_t stack_physical =
         align_up(boot_info_storage_physical + sizeof(LowHandoffBootInfoStorage), kPageSize);
-    uint8_t* bootstrap_stack_page = map_physical_pointer<uint8_t>(boot_info_storage_end);
-    if(nullptr == bootstrap_stack_page)
+    bootstrap_stack_top = stack_physical + kPageSize;
+
+    if(bootstrap_stack_top > kKernelReservedPhysicalEnd ||
+       !boot_memory_range_is_usable(
+           memory_map, cpu_boot_physical, bootstrap_stack_top - cpu_boot_physical))
     {
+        write_serial_ln("[limine-shim] CPU page, BootInfo, or stack destination is not usable RAM");
         return false;
     }
+    if(!boot_memory_range_is_usable(
+           memory_map, kPageFrameBitmapBaseAddress, kPageFrameBitmapSizeBytes))
+    {
+        write_serial_ln("[limine-shim] frame bitmap destination is not usable RAM");
+        return false;
+    }
+
+    auto* cpu_boot_page = map_physical_pointer<uint8_t>(cpu_boot_physical);
+    auto* bootstrap_stack_page = map_physical_pointer<uint8_t>(stack_physical);
+    if(nullptr == cpu_boot_page || nullptr == bootstrap_stack_page)
+        return false;
+
+    freestanding::zero_bytes(cpu_boot_page, kPageSize);
     freestanding::zero_bytes(bootstrap_stack_page, kPageSize);
-
-    const uint64_t bootstrap_stack_end = boot_info_storage_end + kPageSize;
-    if(bootstrap_stack_end > kKernelReservedPhysicalEnd)
-    {
-        return false;
-    }
-
-    bootstrap_stack_top = bootstrap_stack_end;
+    cpu_boot = reinterpret_cast<cpu*>(cpu_boot_physical);
     return true;
 }
 
 [[nodiscard]] __attribute__((noinline)) OS1_GCC_OPTIMIZE_O1 BootInfo* build_boot_info(
     const LimineBootResponses& responses,
     const limine_file& initrd_module,
+    std::span<const BootMemoryRegion> regions,
     uint64_t kernel_physical_start,
     uint64_t kernel_physical_end,
     uint64_t boot_info_storage_physical)
@@ -400,11 +388,9 @@ void populate_firmware_pointers(const LimineBootResponses& responses, BootInfo& 
         return nullptr;
     }
     write_serial_ln("[limine-shim] bootinfo cmdline ok");
-    if(!populate_memory_map(responses, boot, memory_map))
-    {
-        write_serial_ln("[limine-shim] memory map handoff failed");
-        return nullptr;
-    }
+    freestanding::copy_bytes(memory_map, regions.data(), regions.size() * sizeof(BootMemoryRegion));
+    boot.memory_map = memory_map;
+    boot.memory_map_count = static_cast<uint32_t>(regions.size());
     write_serial_ln("[limine-shim] bootinfo memmap ok");
     if(!populate_initrd_module(boot, arena, initrd_module, modules))
     {

@@ -107,6 +107,8 @@ long directory(const char* mount, Ref& base, Ref& logs)
         return r;
     if(!base.node()->operations)
         return OS1_ERR_UNSUPPORTED;
+    if(!(base.node()->allowed_rights & OS1_RIGHT_CREATE))
+        return OS1_ERR_ACCESS;
     r = lookup(base.node(), "log", logs);
     if(r == OS1_ERR_NOT_FOUND)
     {
@@ -904,7 +906,10 @@ void poll()
     bool due = sync_due ||
                now - status.last_drain_ns >= (info.diagnostic ? second / 4 : 2 * second) ||
                pending_bytes >= 32768 || early || closing;
-    if(due && !suspended)
+    const bool disk_read_only = !mounted && !(mount.node()->allowed_rights & OS1_RIGHT_CREATE);
+    if(disk_read_only)
+        retire_closed(false);
+    else if(due && !suspended)
     {
         if(early)
         {
@@ -922,8 +927,13 @@ void poll()
 }
 void final_drain()
 {
-    if(atomic_load_acquire(&initialized) && staging)
-        (void)run(OS1_LOG_EXPORT_DISK);
+    if(!atomic_load_acquire(&initialized) || !staging)
+        return;
+    Ref mount;
+    if(vfs_resolve(initrd_namespace_root(), "disk", 4, mount.object) == 0 &&
+       !(mount.node()->allowed_rights & OS1_RIGHT_CREATE))
+        return;
+    (void)run(OS1_LOG_EXPORT_DISK);
 }
 #ifdef OS1_HOST_TEST
 void test_reset()

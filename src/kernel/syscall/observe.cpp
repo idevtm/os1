@@ -384,7 +384,7 @@ long sys_observe_cpus(const ObserveContext& context,
         record.logical_index = logical_index;
         record.apic_id = entry->id;
         record.flags = (entry == g_cpu_boot) ? static_cast<uint32_t>(OS1_OBSERVE_CPU_FLAG_BSP) : 0u;
-        if((entry == g_cpu_boot) || (0 != entry->booted))
+        if((entry == g_cpu_boot) || (ApStartupState::Online == cpu_ap_startup_state(entry)))
         {
             record.flags |= static_cast<uint32_t>(OS1_OBSERVE_CPU_FLAG_BOOTED);
         }

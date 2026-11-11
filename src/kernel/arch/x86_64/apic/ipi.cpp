@@ -217,7 +217,7 @@ void ipi_retire_tlb()
     (void)ipi_send_all_but_self(g_tlb_shootdown_vector);
     for(cpu* target = g_cpu_boot; target; target = target->next)
     {
-        if(!__atomic_load_n(&target->booted, __ATOMIC_ACQUIRE) && target != cpu_cur())
+        if(ApStartupState::Online != cpu_ap_startup_state(target) && target != cpu_cur())
             continue;
         while(__atomic_load_n(&g_tlb_acknowledged[target->id], __ATOMIC_ACQUIRE) < request)
         {

@@ -17,6 +17,7 @@ namespace
 }  // namespace
 
 [[nodiscard]] bool inspect_kernel_image(const limine_file& kernel_file,
+                                        std::span<const BootMemoryRegion> memory_map,
                                         uint64_t& entry_point,
                                         uint64_t& kernel_physical_start,
                                         uint64_t& kernel_physical_end)
@@ -51,6 +52,17 @@ namespace
         }
         if(!elf::loadable_segment_bounds_valid(*program, kernel_file.size))
         {
+            return false;
+        }
+        if(program->paddr < kKernelReservedPhysicalStart ||
+           program->paddr > kKernelReservedPhysicalEnd ||
+           program->memsz > kKernelReservedPhysicalEnd - program->paddr ||
+           (program->memsz &&
+            !boot_memory_range_is_usable(memory_map, program->paddr, program->memsz)))
+        {
+            write_serial("[limine-shim] PT_LOAD destination is not usable RAM at 0x");
+            write_serial_hex(program->paddr);
+            write_serial_ln("");
             return false;
         }
         if(program->vaddr != (program->paddr + kKernelVirtualOffset))

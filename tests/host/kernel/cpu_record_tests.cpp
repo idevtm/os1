@@ -137,6 +137,20 @@ TEST(CpuRecord, BspSchedulerIgnoresIdleThreadsOwnedByOtherCpus)
     EXPECT_EQ(2u, runnable_thread_count());
 }
 
+TEST(CpuRecord, TimedOutApCannotPublishOnline)
+{
+    cpu late{};
+    cpu ready{};
+    EXPECT_EQ(ApStartupState::Pending, cpu_ap_startup_state(&late));
+    ASSERT_TRUE(cpu_ap_finish_startup(&late, ApStartupState::TimedOut));
+    EXPECT_FALSE(cpu_ap_finish_startup(&late, ApStartupState::Online));
+    EXPECT_EQ(ApStartupState::TimedOut, cpu_ap_startup_state(&late));
+
+    ASSERT_TRUE(cpu_ap_finish_startup(&ready, ApStartupState::Online));
+    EXPECT_FALSE(cpu_ap_finish_startup(&ready, ApStartupState::TimedOut));
+    EXPECT_EQ(ApStartupState::Online, cpu_ap_startup_state(&ready));
+}
+
 TEST(CpuRecord, ExceptionStackExhaustionRejectsBspAndAp)
 {
     PageFrameContainer exhausted;

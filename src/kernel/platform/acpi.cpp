@@ -90,13 +90,16 @@ struct [[gnu::packed]] AcpiFadt
     uint64_t x_dsdt;
 };
 
+// The definition-block inventory reserves its first record for the DSDT.
+constexpr size_t kSsdtInventoryCapacity = kPlatformMaxAcpiDefinitionBlocks - 1;
+
 struct AcpiRootTables
 {
     uint64_t madt_physical;
     uint64_t mcfg_physical;
     uint64_t hpet_physical;
     uint64_t fadt_physical;
-    uint64_t ssdt_physical[kPlatformMaxAcpiDefinitionBlocks];
+    uint64_t ssdt_physical[kSsdtInventoryCapacity];
     size_t ssdt_count;
 };
 
@@ -314,7 +317,7 @@ bool discover_acpi_platform(VirtualMemory& kernel_vm,
                                tables.hpet_physical,
                                tables.fadt_physical,
                                tables.ssdt_physical,
-                               kPlatformMaxAcpiDefinitionBlocks,
+                               kSsdtInventoryCapacity,
                                tables.ssdt_count))
     {
         debug("acpi: ACPICA table discovery failed status=")(acpica_last_status())();

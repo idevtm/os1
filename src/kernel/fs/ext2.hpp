@@ -17,6 +17,7 @@ struct Io
     bool (*flush)(void*);
     uint32_t blocks;
     bool (*clock)(void*, uint64_t&) = nullptr;
+    bool read_only = false;
 };
 struct Inode
 {

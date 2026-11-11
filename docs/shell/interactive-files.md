@@ -78,8 +78,10 @@ For example, `sh < /tmp/script > /tmp/output` writes command results without she
 Quote paths with spaces, for example `cat "/tmp/my note"`.
 Single and double quotes protect operators; backslash escapes outside single quotes.
 Typed constructor and method arguments retain their original syntax after redirection removal.
-The `echo` command prints its arguments separated by one space, followed by a newline, without a prefix.
-With no arguments, it prints one newline. Quoted spaces within an argument remain unchanged.
+The `echo` command accepts one optional String. It prints that String followed by a newline.
+With no argument, it prints one newline. Quoted spaces and parentheses remain part of the String.
+For example, `echo "f(x)" > /tmp/result` writes `f(x)` and a newline to the file.
+See [Typed context and basic commands](typed-context.md) for the `echo` binding.
 
 Here-document collection prints no additional prompt; console input echo remains active.
 Content has no variable expansion, dot termination, or special operator interpretation.

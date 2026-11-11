@@ -43,6 +43,37 @@ inline bool equal(const char* a, const char* b)
     }
     return *a == *b;
 }
+// Typed expressions can contain operators inside quotes or grouped arguments.
+inline bool has_top_level_command_operator(const char* text)
+{
+    char quote = 0;
+    unsigned depth = 0;
+    for(const char* p = text; *p; ++p)
+    {
+        const char c = *p;
+        if(c == '\\' && quote != '\'' && p[1])
+            ++p;
+        else if(quote)
+        {
+            if(c == quote)
+                quote = 0;
+        }
+        else if(c == '\'' || c == '"')
+            quote = c;
+        else if(c == '(' || c == '{' || c == '[')
+            ++depth;
+        else if(c == ')' || c == '}' || c == ']')
+        {
+            if(depth)
+                --depth;
+        }
+        else if(c == '<' && p[1] == '?' && p[2] == '>')
+            p += 2;
+        else if(!depth && (c == '>' || c == '<' || c == '='))
+            return true;
+    }
+    return false;
+}
 // Count bytes independently of shell quoting; never silently truncate a line.
 inline bool parse(const char* text, Command& out)
 {
