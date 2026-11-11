@@ -180,6 +180,7 @@ struct os1_measurement
 // Returns one ready CLOEXEC client; argument is an input-only record.
 #define OS1_IPC_BIND_KERNEL 28u
 #define OS1_IPC_KERNEL_BINDING_LIMIT 16u
+#define OS1_IPC_KERNEL_BINDING_PROCESS_LIMIT 8u
 #define OS1_IPC_KERNEL_OPERATION_LIMIT 4u
 struct os1_ipc_kernel_binding
 {

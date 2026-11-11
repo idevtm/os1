@@ -2239,9 +2239,44 @@ TEST_F(KernelConsole, RetainedResultsAndAliasesKeepOperationQuota)
     ASSERT_GE(ops[0], 0);
     complete(ops[0]);
 }
+TEST_F(KernelConsole, BindingAdmissionLimitsEachCreatorAndTheSystem)
+{
+    constexpr unsigned creator_limit = OS1_IPC_KERNEL_BINDING_PROCESS_LIMIT;
+    os1_ipc_kernel_binding request{
+        1, sizeof(request), OS1_CONSOLE_INTERFACE_ID, 1, OS1_RIGHT_WRITE};
+    ASSERT_TRUE(copy_to_user(frames, thread, address, &request, sizeof(request)));
+    int creator_client = -1;
+    for(unsigned i = 0; i < creator_limit; ++i)
+    {
+        creator_client = sys_ipc(frames, thread, OS1_IPC_BIND_KERNEL, 1, address);
+        ASSERT_GE(creator_client, 0);
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, sys_ipc(frames, thread, OS1_IPC_BIND_KERNEL, 1, address));
+
+    auto* peer = create_user_process("peer", thread->address_space_cr3);
+    auto* third = create_user_process("third", thread->address_space_cr3);
+    ASSERT_NE(nullptr, peer);
+    ASSERT_NE(nullptr, third);
+    ASSERT_EQ(0, descriptor_bootstrap_console(peer->descriptors));
+    ASSERT_EQ(0, descriptor_bootstrap_console(third->descriptors));
+    auto* peer_thread = create_user_thread(peer, address, address + 4096, frames, false);
+    auto* third_thread = create_user_thread(third, address, address + 4096, frames, false);
+    ASSERT_NE(nullptr, peer_thread);
+    ASSERT_NE(nullptr, third_thread);
+    for(unsigned i = creator_limit; i < OS1_IPC_KERNEL_BINDING_LIMIT; ++i)
+    {
+        EXPECT_GE(sys_ipc(frames, peer_thread, OS1_IPC_BIND_KERNEL, 1, address), 0);
+    }
+    EXPECT_EQ(OS1_ERR_LIMIT, sys_ipc(frames, third_thread, OS1_IPC_BIND_KERNEL, 1, address));
+
+    EXPECT_EQ(0, descriptor_close(table(), creator_client));
+    EXPECT_GE(sys_ipc(frames, third_thread, OS1_IPC_BIND_KERNEL, 1, address), 0);
+    descriptor_close_all(peer->descriptors);
+    descriptor_close_all(third->descriptors);
+}
 TEST_F(KernelConsole, BindingQuotaSurvivesClientCloseWhileResultLives)
 {
-    int clients[OS1_IPC_KERNEL_BINDING_LIMIT];
+    int clients[OS1_IPC_KERNEL_BINDING_PROCESS_LIMIT];
     for(auto& client : clients)
     {
         client = bind();
@@ -2295,7 +2330,7 @@ TEST_F(KernelConsole, ClosedOperationStillExecutesAndReleasesQuota)
     ASSERT_TRUE(ipc_run_kernel_request());
     EXPECT_EQ("ABC", host_console_output());
     EXPECT_FALSE(ipc_run_kernel_request());
-    int clients[OS1_IPC_KERNEL_BINDING_LIMIT];
+    int clients[OS1_IPC_KERNEL_BINDING_PROCESS_LIMIT];
     for(auto& fd : clients)
     {
         fd = bind();
@@ -2348,7 +2383,7 @@ TEST_F(KernelConsole, EveryBindingAllocationFailureReleasesSourceAndBudget)
         EXPECT_EQ(OS1_ERR_NO_MEMORY, bind());
         host_ipc_kernel_allocation_budget = -1;
         EXPECT_EQ(source_refs, table().entries[1].instance->references);
-        int clients[OS1_IPC_KERNEL_BINDING_LIMIT];
+        int clients[OS1_IPC_KERNEL_BINDING_PROCESS_LIMIT];
         for(auto& fd : clients)
         {
             fd = bind();
