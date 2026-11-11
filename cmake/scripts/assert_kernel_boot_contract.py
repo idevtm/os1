@@ -142,6 +142,11 @@ def main() -> None:
             f"from 0x{reserved_start:x} to 0x{reserved_end:x}."
         )
 
+    print(
+        f"BIOS kernel slot: {elf_name} uses {file_size} of {disk_slot_bytes} bytes "
+        f"({disk_slot_bytes - file_size} bytes free)."
+    )
+
 
 if __name__ == "__main__":
     main()

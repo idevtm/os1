@@ -62,6 +62,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
     OUTPUT "${output_path}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_BIN_DIR}"
     COMMAND "${CMAKE_CXX_COMPILER}" ${compile_options}
+      -Werror=lto-type-mismatch
       -nostdlib
       -nostartfiles
       -nodefaultlibs

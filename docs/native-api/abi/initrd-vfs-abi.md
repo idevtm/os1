@@ -155,6 +155,8 @@ retains it through commit.
 At `_start`, RDI points to the copied startup record near the stack top; RSP is
 8 modulo 16, below the payload. crt0 constructs a null-terminated argv vector and
 calls `main(int, char**)`, or a typed-entry adapter when the program supplies one.
+Define `main(int, char**)` even when the program uses no arguments.
+The linker treats LTO type mismatches as errors.
 Typed adapters validate/decode constructor data before invoking os_main with a
 separate startup context. The record remains accessible via
 `os1::user::startup_record`. This runtime change requires rebuilding user programs.

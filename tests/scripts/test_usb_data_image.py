@@ -187,7 +187,7 @@ class Images(unittest.TestCase):
         script = "import fcntl,sys,time; f=open(sys.argv[1],'r+b'); fcntl.lockf(f,fcntl.LOCK_EX); print('locked',flush=True); sys.stdin.read()"
         for path in (self.image, self.output):
             if path == self.output: path.write_bytes(b'prior')
-            child = subprocess.Popen([sys.executable, '-c', script, str(path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            child = subprocess.Popen([sys.executable, "-E", '-c', script, str(path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
             try:
                 self.assertEqual(child.stdout.readline(), b'locked\n')
                 with self.assertRaisesRegex(RuntimeError, 'in use'):

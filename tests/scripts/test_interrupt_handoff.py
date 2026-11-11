@@ -59,13 +59,13 @@ def main():
                             '-z', 'max-page-size=0x100', '-z', 'common-page-size=0x100',
                             str(obj), *objects, '-o', str(elf)], check=True)
             subprocess.run([args.strip, '-o', str(stripped), '--strip-unneeded', str(elf)], check=True)
-            subprocess.run([sys.executable, str(root / 'cmake/scripts/compact_user_elf.py'), str(stripped)], check=True)
+            subprocess.run([sys.executable, "-E", str(root / 'cmake/scripts/compact_user_elf.py'), str(stripped)], check=True)
             kernel = stripped.read_bytes()
             assert len(kernel) <= capacity, 'Instrumented kernel exceeds the existing BIOS slot'
             disk = directory / 'boot.raw'
             disk.write_bytes(image[:offset] + kernel.ljust(capacity, b'\0') + image[offset + capacity:])
             transcript = log.with_suffix('.negative.log' if negative else '.positive.log')
-            command = [sys.executable, str(root / 'cmake/scripts/run_smoke.py'),
+            command = [sys.executable, "-E", str(root / 'cmake/scripts/run_smoke.py'),
                        '--log', str(transcript), '--timeout', '20', '--settle-after-markers', '0.2',
                        '--marker', 'shell prompt ready', '--marker', 'handoff-test-ok\n',
                        '--reject-marker', '#GP', '--reject-marker', '#UD', '--reject-marker', '#PF',

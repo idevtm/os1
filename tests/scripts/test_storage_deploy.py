@@ -142,7 +142,7 @@ class Deployment(unittest.TestCase):
 
     def test_active_lock_and_symlink_refused(self):
         code = 'import fcntl,sys; f=open(sys.argv[1],"r+b"); fcntl.lockf(f,fcntl.LOCK_EX); print("locked",flush=True); sys.stdin.read()'
-        child = subprocess.Popen([sys.executable, '-c', code, str(self.image)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        child = subprocess.Popen([sys.executable, "-E", '-c', code, str(self.image)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         try:
             self.assertEqual(child.stdout.readline(), b'locked\n')
             with self.assertRaisesRegex(RuntimeError, 'in use'):
