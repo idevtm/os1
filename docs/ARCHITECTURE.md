@@ -1464,6 +1464,8 @@ The kernel now:
 
 - consumes `BootInfo.rsdp_physical` on both Limine and BIOS boots
 - asks ACPICA to discover `XSDT`/`RSDT`, `MADT`, `MCFG`, `FADT`, HPET, DSDT, and SSDTs
+- records the DSDT and up to 15 SSDTs in the platform inventory
+- lets ACPICA load SSDTs beyond the inventory limit
 - uses ACPICA-backed `MADT` data as the primary source of CPU, LAPIC, IOAPIC, and IRQ-override topology
 - uses ACPICA-backed `MCFG` data to discover PCIe ECAM ranges
 - uses ACPICA namespace/resource APIs for ACPI device records, `_CRS` resources, `_PRT` PCI INTx routing, and `_PS0`/`_PS3` device power transitions

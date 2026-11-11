@@ -67,7 +67,7 @@ struct [[gnu::packed]] TestSdtHeader
 struct [[gnu::packed]] TestXsdt
 {
     TestSdtHeader header;
-    uint64_t entries[2];
+    uint64_t entries[20];
 };
 
 struct [[gnu::packed]] TestMadt
@@ -292,6 +292,66 @@ TEST_F(AcpicaIntegration, InitializesTableManagerFromBootRsdp)
     ASSERT_NE(nullptr, madt);
     EXPECT_EQ(0, std::memcmp(madt->Signature, "APIC", 4));
     AcpiPutTable(madt);
+}
+
+TEST_F(AcpicaIntegration, BoundsSsdtInventoryAndKeepsTablesAvailableToAcpica)
+{
+    constexpr uint64_t mcfg_physical = 0x6000;
+    constexpr uint64_t ssdt_physical = 0x7000;
+    constexpr size_t ssdt_inventory = kPlatformMaxAcpiDefinitionBlocks - 1;
+    for(unsigned supplied : {15, 16, 17})
+    {
+        SCOPED_TRACE(supplied);
+        os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+        build_tables(arena, true, false);
+        auto* xsdt = reinterpret_cast<TestXsdt*>(arena.data() + kXsdtPhysical);
+        auto* mcfg = reinterpret_cast<TestSdtHeader*>(arena.data() + mcfg_physical);
+        initialize_header(*mcfg, "MCFG", sizeof(*mcfg));
+        finalize_sdt(*mcfg);
+        for(unsigned i = 0; i < supplied; ++i)
+        {
+            const uint64_t address = ssdt_physical + 0x100 * i;
+            auto* header = reinterpret_cast<TestSdtHeader*>(arena.data() + address);
+            // Name(Sxxx, ByteConst) gives each table distinct valid AML.
+            const uint8_t aml[]{
+                0x08, 'S', '0', uint8_t('0' + i / 10), uint8_t('0' + i % 10), 0x0a, uint8_t(i)};
+            initialize_header(*header, "SSDT", sizeof(*header) + sizeof(aml));
+            std::memcpy(header + 1, aml, sizeof(aml));
+            finalize_sdt(*header);
+            xsdt->entries[i + 2] = address;
+        }
+        // Find required tables even when they follow entries outside the inventory.
+        xsdt->entries[supplied + 2] = mcfg_physical;
+        xsdt->header.length = sizeof(TestSdtHeader) + (supplied + 3) * sizeof(uint64_t);
+        finalize_sdt(xsdt->header);
+
+        PageFrameContainer frames = make_frames();
+        kmem_init(frames);
+        VirtualMemory vm(frames);
+        const auto boot = make_boot_info(kRsdpPhysical);
+        AcpicaScopedReset reset;
+        ASSERT_TRUE(acpica_initialize_tables(vm, boot));
+        uint64_t madt = 0, mcfg_address = 0, hpet = 0, fadt = 0;
+        std::array<uint64_t, ssdt_inventory + 1> inventory{};
+        inventory.back() = UINT64_MAX;
+        size_t retained = 0;
+        ASSERT_TRUE(acpica_discover_tables(
+            madt, mcfg_address, hpet, fadt, inventory.data(), ssdt_inventory, retained));
+        EXPECT_EQ(retained, ssdt_inventory);
+        EXPECT_EQ(madt, kMadtPhysical);
+        EXPECT_EQ(mcfg_address, mcfg_physical);
+        EXPECT_EQ(fadt, kFadtPhysical);
+        EXPECT_EQ(inventory.back(), UINT64_MAX);
+        for(size_t i = 0; i < retained; ++i)
+            EXPECT_EQ(inventory[i], ssdt_physical + 0x100 * i);
+        ASSERT_TRUE(acpica_load_namespace());
+        char name[]{"\\S000"};
+        name[3] += (supplied - 1) / 10;
+        name[4] += (supplied - 1) % 10;
+        ACPI_HANDLE last = nullptr;
+        EXPECT_EQ(AE_OK, AcpiGetHandle(nullptr, name, &last));
+        EXPECT_NE(last, nullptr);
+    }
 }
 
 TEST_F(AcpicaIntegration, RejectsMissingBootRsdp)

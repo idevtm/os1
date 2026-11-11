@@ -1228,6 +1228,7 @@ bool acpica_discover_tables(uint64_t& madt_physical,
         return false;
     }
 
+    size_t omitted_ssdts = 0;
     for(UINT32 index = 0; index < AcpiGbl_RootTableList.CurrentTableCount; ++index)
     {
         const ACPI_TABLE_DESC& descriptor = AcpiGbl_RootTableList.Tables[index];
@@ -1253,15 +1254,15 @@ bool acpica_discover_tables(uint64_t& madt_physical,
         }
         else if(descriptor_signature_equals(descriptor, "SSDT"))
         {
-            if(ssdt_count >= ssdt_capacity)
-            {
-                g_acpica_state.last_status = AcpiFormatException(AE_LIMIT);
-                debug("acpica: too many SSDTs")();
-                return false;
-            }
-            ssdt_physical[ssdt_count++] = descriptor.Address;
+            if(ssdt_count < ssdt_capacity)
+                ssdt_physical[ssdt_count++] = descriptor.Address;
+            else
+                ++omitted_ssdts;
         }
     }
+
+    if(omitted_ssdts)
+        debug("acpica: SSDT inventory full, omitted=")(omitted_ssdts)();
 
     if((0 == madt_physical) || (0 == mcfg_physical) || (0 == fadt_physical))
     {

@@ -26,6 +26,17 @@ Both observability smokes now require cached-route and passive-snapshot output.
 General device-power diagnostics remain deferred. The later SystemControl contract authorizes explicit shutdown and defines storage synchronization and failure recovery.
 The [historical review](../archive/reviews/2026-11-03-review.md) retains the original findings and hardware-evidence limits.
 
+## Definition-block inventory
+
+The platform inventory stores metadata for the DSDT and up to 15 SSDTs.
+
+| Path | Table handling |
+| --- | --- |
+| Platform inventory | Keep the DSDT and the first 15 SSDTs. Report the number of omitted SSDTs. |
+| ACPICA namespace | Load all tables that ACPICA accepts. |
+
+Table discovery continues after the inventory fills. It still checks for required tables.
+
 ## Shutdown EC support — 2026-11-08
 
 The [EC adapter](acpi-embedded-controller.md) adds shutdown-time access to firmware-declared Embedded Controller regions.
