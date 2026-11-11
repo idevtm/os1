@@ -135,7 +135,7 @@ The complete ASD-STE100 dictionary was unavailable. The prose received a manual 
 
 The user reports smooth pointer movement on the desktop.
 The laptop pointer paused every few seconds during continuous movement.
-The cause remains unknown.
+See the [laptop retest](#laptop-retest-after-the-ehci-ownership-split) for the measured result after the ownership split.
 
 ```text
 pointer events -> wait-many readiness -> bounded event batch -> cursor redraw
@@ -440,5 +440,30 @@ Each run reads back the file. Samples and artifact hashes are in `build/ehci-own
 | BIOS startup | 0.849963 s | 0.846226 s | -0.003736 s, -0.44% |
 | BIOS write | 48.294 ms | 51.181 ms | +2.887 ms, +5.98% |
 
-The short runs measure storage without EHCI pointer traffic. Concurrent input latency and CPU cost remain unmeasured.
-Retest the laptop with the original mouse and ports to measure the change under contention.
+The short runs measure storage without EHCI pointer traffic. CPU cost remains unmeasured.
+
+### Laptop retest after the EHCI ownership split
+
+On November 11, 2026, the Asus G74SX ran the EHCI stall test on revision `0b9c694`.
+The test used the USB mouse and data stick on the shared EHCI controller.
+The user reported smooth movement. Persistent logs contain display fill replies from the run.
+
+| Measure | Before (`930811c`) | After (`0b9c694`) |
+| --- | ---: | ---: |
+| Trace duration | 28.97 s | 31.82 s |
+| Maximum endpoint polling gap | 1,789.99 ms | 6.72 ms |
+| Maximum publication gap | 1,794.99 ms | 262.00 ms |
+| Demo events | 585 | 3,493 |
+| Maximum event age in the demo | 0.81 ms | 23.17 ms |
+| Maximum draw time | 0.67 ms | 23.22 ms |
+| Asynchronous admission skips | 4,842 | 5,590 |
+| Lost input records, transfer errors, and retries | 0 each | 0 each |
+
+The maximum polling gap fell by 1,783.27 ms (99.62%). The retest recorded no polling gaps of 50 ms or more.
+The demo still recorded 14 publication gaps of at least 50 ms. Endpoint polling continued during these gaps.
+The trace does not identify the reason for those remaining report gaps or the timing of individual disk writes.
+The retest confirms the previous polling stall did not recur under the retained logging workload.
+
+The paired trace and demo diagnostics match input identity 1 and capture ticket 1.
+The saved logs identify image `36bed5a1515c2d0e967d04bd5dc1e38ad10971b00717d9b0fc726bc75ab8aeed`.
+Local evidence is in `build/ehci-stall/laptop-ownership-0b9c694/` (`decoded.json`, `persistent.jsonl`, and the extracted `captures.tar`).
