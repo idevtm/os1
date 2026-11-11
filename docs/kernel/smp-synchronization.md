@@ -145,14 +145,17 @@ that had not yet switched away. No scheduler lock is taken under the wait lock.
 
 ## Child exit and collection
 
-The BSP reaper releases the child's address space before it publishes the exit record for collection.
+The BSP worker reaps dying threads and releases each child address space before it publishes the exit record.
 The process table lock protects publication, parent links, and collection claims.
 
 ```text
-Thread handoff -> Release Buffers and descriptors -> Free address space -> Publish exit -> Collect record
+Queue dying thread -> CPU handoff -> BSP worker releases resources -> Publish exit -> Collect record
 ```
 
-After the last thread leaves all CPUs, the reaper removes the thread record.
+The thread registry lock protects the list of dying threads.
+The worker starts blocked. A BSP scheduler tick wakes it when the queue or a retry needs service.
+The worker retries a thread if it is still current on a CPU or has an I/O pin.
+After the last thread leaves all CPUs, the worker removes the thread record.
 The reaper releases Buffer mappings and descriptors before it frees the user page tables and their root.
 The child stays in the process table until its parent collects it or the BSP reaps the orphan record.
 
@@ -160,10 +163,11 @@ A waiter claims the exit record before it copies the status.
 A failed copy releases the claim so a later wait can collect the same child.
 Wait registration takes the process table lock before the queue lock.
 Completion releases the queue lock before it takes the process table lock.
-The BSP checks its child wait queue on each reaper pass.
-It defers a waiter that still runs on another CPU.
-It can complete a wait for its own current thread before scheduler handoff.
-The BSP reaps published exit records that have no parent.
+The worker checks the child wait queue after teardown.
+If a waiter still runs on another CPU, the worker retries on a later BSP tick.
+The wait syscall can collect an exit record that the worker already published.
+The worker reaps published exit records that have no parent.
+If parent collection orphans a published exit record, it requests another worker pass.
 User processes have one thread. A private provider cannot call `waitpid`.
 Its parent can collect the provider through `waitpid`.
 

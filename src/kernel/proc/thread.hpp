@@ -119,6 +119,8 @@ struct Thread
     os1_log_record log_trace{};
     bool log_pending = false;
     uint32_t scheduling_depth = 0;
+    Thread* reap_next = nullptr;
+    cpu* pinned_cpu = nullptr;
 };
 
 #define THREAD_STATIC_ASSERT(name, expr) typedef char thread_static_assert_##name[(expr) ? 1 : -1]
@@ -132,7 +134,11 @@ THREAD_STATIC_ASSERT(stack_top_offset, offsetof(Thread, kernel_stack_top) == 56)
 // Initialize the kmem-backed process and thread registries.
 bool init_tasks(PageFrameContainer& frames, uint64_t kernel_root = 0);
 // Create a kernel-mode thread with a bootstrap frame that enters `entry`.
-Thread* create_kernel_thread(Process* process, void (*entry)(void), PageFrameContainer& frames);
+Thread* create_kernel_thread(Process* process,
+                             void (*entry)(void),
+                             PageFrameContainer& frames,
+                             cpu* pinned_cpu = nullptr,
+                             bool start_ready = true);
 // Create or return the idle thread assigned to one CPU.
 Thread* create_idle_thread_for_cpu(Process* process,
                                    cpu* owner,
@@ -155,8 +161,6 @@ Thread* idle_thread(void);
 Thread* idle_thread_for_cpu(const cpu* owner);
 // Find the next runnable thread after `after` in circular table order.
 Thread* next_runnable_thread(Thread* after);
-// Rebuild next pointers for runnable threads after state changes.
-void relink_runnable_threads();
 // Bind the current CPU to `thread`.
 void set_current_thread(Thread* thread);
 // Mark a thread ready and update its owning process state if needed.
@@ -176,6 +180,11 @@ void wake_block_io_waiters(Completion* completion);
 void mark_current_thread_dying(int exit_status);
 // Reclaim a thread record after its stack and owner state have been torn down.
 void clear_thread(Thread* thread);
+void initialize_reaper();
+bool start_reaper(Process* process, PageFrameContainer& frames);
+void queue_dying_thread(Thread& thread);
+void request_reaper();
+void wake_reaper_on_tick();
 // Reclaim dying threads and their associated process state when possible.
 void reap_dead_threads(PageFrameContainer& frames);
 // Count threads currently eligible to run.

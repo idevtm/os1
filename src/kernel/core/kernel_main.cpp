@@ -776,7 +776,8 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     {
         return;
     }
-    if(!create_idle_threads_for_discovered_cpus(kernel_process))
+    if(!create_idle_threads_for_discovered_cpus(kernel_process) ||
+       !start_reaper(kernel_process, page_frames))
     {
         return;
     }

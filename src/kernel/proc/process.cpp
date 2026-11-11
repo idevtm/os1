@@ -126,6 +126,10 @@ void orphan_children(Process* process)
         if(candidate->parent == process)
         {
             candidate->parent = nullptr;
+            if(candidate->exit_cleanup_complete)
+            {
+                request_reaper();
+            }
         }
     }
 }

@@ -1413,7 +1413,9 @@ If a user process faults:
 - schedules away
 - reaps the dead process later from another stack
 
-The reaper waits for the last thread to leave its stack and address space.
+The exit path puts the dying thread on a queue.
+A kernel worker pinned to the BSP reaps the thread after it leaves its stack and address space.
+The scheduler tick wakes the worker when work is pending.
 It then releases the address space before it publishes the exit record.
 See [Child exit and collection](kernel/smp-synchronization.md#child-exit-and-collection) for the cleanup order.
 

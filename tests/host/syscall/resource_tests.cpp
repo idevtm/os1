@@ -497,7 +497,7 @@ TEST_F(Resources, ReaperWaitsForClaimedReadAndCancellationRetiresItsReference)
     cancel_console_read(thread);
     descriptor_close_all(table());
     EXPECT_EQ(2u, instance->references);
-    thread->state = ThreadState::Dying;
+    queue_dying_thread(*thread);
     process->state = ProcessState::Dying;
     set_current_thread(nullptr);
     reap_dead_threads(frames);

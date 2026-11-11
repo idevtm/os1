@@ -60,6 +60,10 @@ bool g_smp_balancer_enabled = true;
     {
         return false;
     }
+    if(thread->pinned_cpu)
+    {
+        return thread->pinned_cpu == owner;
+    }
     if(owner->id >= 64)
     {
         return true;
@@ -315,15 +319,9 @@ void scheduler_handle_timer_tick()
 Thread* schedule_next(bool keep_current)
 {
     Thread* current = current_thread();
-    const bool was_blocked = current && (ThreadState::Blocked == current->state);
-    if(cpu_on_boot())
-    {
-        reap_dead_threads(page_frames);
-    }
     cpu* local_cpu = cpu_cur();
-    // Reaping can complete the current thread's wait before the CPU handoff.
-    if((keep_current || was_blocked) && current && (current != idle_thread()) &&
-       (ThreadState::Running == current->state))
+    if(keep_current && current && current != idle_thread() &&
+       current->state == ThreadState::Running)
     {
         mark_thread_ready(current, local_cpu);
     }

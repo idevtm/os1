@@ -281,7 +281,7 @@ TEST(TaskRegistry, ThreadsGrowPastLegacyLimitAndReapCleanly)
 
     for(Thread* thread : threads)
     {
-        thread->state = ThreadState::Dying;
+        queue_dying_thread(*thread);
     }
 
     reap_dead_threads(frames);
@@ -373,7 +373,7 @@ TEST(TaskRegistry, WaitpidBlocksBeforeChildExitCanBeWoken)
 
     set_current_thread(nullptr);
     child_thread->exit_status = 9;
-    child_thread->state = ThreadState::Dying;
+    queue_dying_thread(*child_thread);
     child->exit_status = 9;
     child->state = ProcessState::Zombie;
 
@@ -384,7 +384,7 @@ TEST(TaskRegistry, WaitpidBlocksBeforeChildExitCanBeWoken)
     EXPECT_EQ(parent, first_process());
     EXPECT_EQ(nullptr, next_process(parent));
 
-    parent_thread->state = ThreadState::Dying;
+    queue_dying_thread(*parent_thread);
     parent->state = ProcessState::Dying;
     reap_dead_threads(frames);
     EXPECT_EQ(nullptr, first_process());
@@ -451,13 +451,13 @@ TEST(TaskRegistry, ReaperSkipsDyingThreadStillCurrentOnAnotherCpu)
     EXPECT_EQ(parent, first_process());
     EXPECT_EQ(nullptr, next_process(parent));
 
-    parent_thread->state = ThreadState::Dying;
+    queue_dying_thread(*parent_thread);
     parent->state = ProcessState::Dying;
     reap_dead_threads(frames);
     EXPECT_EQ(nullptr, first_process());
 }
 
-TEST(TaskRegistry, WaitpidWakeDuringScheduleKeepsCurrentParentRunnable)
+TEST(TaskRegistry, SchedulerLeavesCleanupAndChildWakeToBspWorker)
 {
     os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
     page_frames = initialized_frames();
@@ -468,6 +468,7 @@ TEST(TaskRegistry, WaitpidWakeDuringScheduleKeepsCurrentParentRunnable)
     ASSERT_NE(nullptr, kernel_process);
     Thread* idle = create_kernel_thread(kernel_process, noop_thread_entry, page_frames);
     ASSERT_NE(nullptr, idle);
+    ASSERT_TRUE(start_reaper(kernel_process, page_frames));
     Process* parent = create_user_process("parent", 0);
     ASSERT_NE(nullptr, parent);
     Process* child = create_user_process("child", 0);
@@ -486,21 +487,112 @@ TEST(TaskRegistry, WaitpidWakeDuringScheduleKeepsCurrentParentRunnable)
     ASSERT_FALSE(try_complete_or_block_wait_pid(page_frames, parent_thread, child_pid, 0, result));
     ASSERT_EQ(ThreadState::Blocked, parent_thread->state);
 
-    // Scheduling reaps the child and wakes the parent before the CPU handoff.
-    Thread* selected = schedule_next(false);
-    EXPECT_EQ(parent_thread, selected);
+    EXPECT_EQ(idle, schedule_next(false));
+    EXPECT_FALSE(child->exit_cleanup_complete);
+    wake_reaper_on_tick();
+    Thread* worker = schedule_next(false);
+    ASSERT_NE(nullptr, worker);
+    ASSERT_NE(idle, worker);
+    ASSERT_NE(parent_thread, worker);
+    EXPECT_EQ(kernel_process, worker->process);
+    EXPECT_EQ(g_cpu_boot, worker->pinned_cpu);
+    EXPECT_EQ(ThreadState::Blocked, parent_thread->state);
+    EXPECT_FALSE(child->exit_cleanup_complete);
+
+    set_current_thread(worker);
+    reap_dead_threads(page_frames);
     EXPECT_EQ(child_pid, parent_thread->frame.rax);
     EXPECT_EQ(ThreadWaitReason::None, parent_thread->wait.reason);
-    EXPECT_EQ(ThreadState::Running, parent_thread->state);
+    EXPECT_EQ(ThreadState::Ready, parent_thread->state);
+    EXPECT_EQ(parent_thread, schedule_next(false));
 
     set_current_thread(nullptr);
-    parent_thread->state = ThreadState::Dying;
+    queue_dying_thread(*parent_thread);
     parent->state = ProcessState::Dying;
-    idle->state = ThreadState::Dying;
+    queue_dying_thread(*idle);
+    queue_dying_thread(*worker);
     reap_dead_threads(page_frames);
     EXPECT_EQ(nullptr, first_thread());
     EXPECT_EQ(nullptr, first_process());
     page_frames = {};
+}
+
+TEST(TaskRegistry, BspReaperTickRetriesPinnedThreadsAndRemoteChildWaiters)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = initialized_frames();
+    kmem_init(frames);
+    HostApCpuScope cpus;
+    ASSERT_TRUE(init_tasks(frames));
+
+    Process* kernel = create_kernel_process(0);
+    ASSERT_NE(nullptr, kernel);
+    Thread* idle = create_kernel_thread(kernel, noop_thread_entry, frames);
+    ASSERT_NE(nullptr, idle);
+    ASSERT_TRUE(start_reaper(kernel, frames));
+    Thread* worker = next_thread(idle);
+    ASSERT_NE(nullptr, worker);
+    ASSERT_EQ(g_cpu_boot, worker->pinned_cpu);
+    ASSERT_EQ(ThreadState::Blocked, worker->state);
+    EXPECT_EQ(idle, schedule_next(false));
+    wake_reaper_on_tick();
+    EXPECT_EQ(ThreadState::Blocked, worker->state);
+
+    Process* parent = create_user_process("parent", 0);
+    ASSERT_NE(nullptr, parent);
+    Thread* waiter = create_user_thread(parent, kUserImageBase, kUserStackTop, frames, false);
+    ASSERT_NE(nullptr, waiter);
+    Process* child = create_user_process("pinned", 0);
+    ASSERT_NE(nullptr, child);
+    child->parent = parent;
+    const auto child_pid = child->pid;
+    Thread* dying = create_user_thread(child, kUserImageBase, kUserStackTop, frames, false);
+    ASSERT_NE(nullptr, dying);
+    atomic_store_release(&dying->io_pins, 1u);
+    set_current_thread(dying);
+    mark_current_thread_dying(0);
+    queue_dying_thread(*dying);
+    set_current_thread(nullptr);
+
+    wake_reaper_on_tick();
+    EXPECT_EQ(ThreadState::Ready, worker->state);
+    set_current_thread(worker);
+    reap_dead_threads(frames);
+    EXPECT_TRUE(process_has_threads(child));
+
+    worker->state = ThreadState::Blocked;
+    set_current_thread(nullptr);
+    atomic_store_release(&dying->io_pins, 0u);
+    wake_reaper_on_tick();
+    ASSERT_EQ(ThreadState::Ready, worker->state);
+    g_cpu_host_current = &cpus.ap;
+    set_current_thread(waiter);
+    long result = -1;
+    ASSERT_FALSE(try_complete_or_block_wait_pid(frames, waiter, child_pid, 0, result));
+    ASSERT_EQ(ThreadState::Blocked, waiter->state);
+    g_cpu_host_current = g_cpu_boot;
+    set_current_thread(worker);
+    reap_dead_threads(frames);
+    EXPECT_TRUE(child->exit_cleanup_complete);
+    EXPECT_EQ(ThreadState::Blocked, waiter->state);
+    EXPECT_EQ(waiter, cpus.ap.current_thread);
+
+    worker->state = ThreadState::Blocked;
+    set_current_thread(nullptr);
+    cpus.ap.current_thread = nullptr;
+    wake_reaper_on_tick();
+    ASSERT_EQ(ThreadState::Ready, worker->state);
+    set_current_thread(worker);
+    reap_dead_threads(frames);
+    EXPECT_EQ(ThreadState::Ready, waiter->state);
+    EXPECT_EQ(child_pid, waiter->frame.rax);
+    EXPECT_EQ(parent, next_process(kernel));
+    EXPECT_EQ(nullptr, next_process(parent));
+
+    worker->state = ThreadState::Blocked;
+    set_current_thread(nullptr);
+    wake_reaper_on_tick();
+    EXPECT_EQ(ThreadState::Blocked, worker->state);
 }
 
 TEST(TaskRegistry, ReapingUserProcessTriggersTlbShootdown)
