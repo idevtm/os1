@@ -41,6 +41,37 @@ bool prepare_head(QueueHead&,
                   bool periodic = false);
 uint32_t remaining(uint32_t token);
 bool root_usable(uint32_t status);
+enum class AsyncTransfer
+{
+    Control,
+    Bulk
+};
+constexpr unsigned async_poll_delay_us = 10;
+constexpr uint64_t async_deadline_100ns(AsyncTransfer transfer)
+{
+    return transfer == AsyncTransfer::Bulk ? 20'000'000 : 10'000'000;
+}
+// A failed stop quarantines controller DMA. A stopped transfer can retire one device.
+template<typename Stop, typename Connected, typename RetireController, typename RetireDevice>
+bool finish_async_transfer(AsyncTransfer transfer,
+                           bool completed,
+                           Stop stop,
+                           Connected connected,
+                           RetireController retire_controller,
+                           RetireDevice retire_device)
+{
+    if(!stop())
+        return false;  // The schedule stop path retires the controller.
+    if(completed)
+        return true;
+    const bool root_connected = connected();
+    // A connected control transfer can leave the device at an unknown address.
+    if(transfer == AsyncTransfer::Control && root_connected)
+        retire_controller();
+    else
+        retire_device(root_connected);
+    return false;
+}
 enum class Schedule
 {
     Asynchronous,

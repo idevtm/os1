@@ -780,6 +780,7 @@ bool resolve_route_entry_irq(ACPI_HANDLE scope_handle,
     {
         source_is_gsi = true;
         irq = entry->SourceIndex;
+        flags = irq_flags_from_resource(ACPI_ACTIVE_LOW, ACPI_LEVEL_SENSITIVE);
         return true;
     }
 
@@ -958,6 +959,7 @@ bool build_routes_for_device(ACPI_HANDLE device_handle,
         {
             route.source_is_gsi = true;
             route.irq = entry->SourceIndex;
+            route.flags = irq_flags_from_resource(ACPI_ACTIVE_LOW, ACPI_LEVEL_SENSITIVE);
         }
         else
         {
@@ -1228,6 +1230,7 @@ bool acpica_discover_tables(uint64_t& madt_physical,
         return false;
     }
 
+    size_t omitted_ssdts = 0;
     for(UINT32 index = 0; index < AcpiGbl_RootTableList.CurrentTableCount; ++index)
     {
         const ACPI_TABLE_DESC& descriptor = AcpiGbl_RootTableList.Tables[index];
@@ -1253,15 +1256,15 @@ bool acpica_discover_tables(uint64_t& madt_physical,
         }
         else if(descriptor_signature_equals(descriptor, "SSDT"))
         {
-            if(ssdt_count >= ssdt_capacity)
-            {
-                g_acpica_state.last_status = AcpiFormatException(AE_LIMIT);
-                debug("acpica: too many SSDTs")();
-                return false;
-            }
-            ssdt_physical[ssdt_count++] = descriptor.Address;
+            if(ssdt_count < ssdt_capacity)
+                ssdt_physical[ssdt_count++] = descriptor.Address;
+            else
+                ++omitted_ssdts;
         }
     }
+
+    if(omitted_ssdts)
+        debug("acpica: SSDT inventory full, omitted=")(omitted_ssdts)();
 
     if((0 == madt_physical) || (0 == mcfg_physical) || (0 == fadt_physical))
     {
@@ -1568,6 +1571,22 @@ bool acpica_load_namespace()
         {
             return set_namespace_error_status(object_status,
                                               "acpica: object init failed");
+        }
+
+        // Inform firmware before evaluating any PCI routing tables.
+        ACPI_OBJECT mode{};
+        mode.Type = ACPI_TYPE_INTEGER;
+        mode.Integer.Value = 1;  // APIC interrupt model.
+        ACPI_OBJECT_LIST arguments{1, &mode};
+        char pic_method[] = "\\_PIC";
+        ACPI_HANDLE pic = nullptr;
+        ACPI_STATUS pic_status = AcpiGetHandle(nullptr, pic_method, &pic);
+        if(pic_status != AE_NOT_FOUND)
+        {
+            if(ACPI_SUCCESS(pic_status))
+                pic_status = AcpiEvaluateObject(pic, nullptr, &arguments, nullptr);
+            if(ACPI_FAILURE(pic_status))
+                return set_namespace_error_status(pic_status, "acpica: APIC mode selection failed");
         }
 
         g_acpica_state.runtime_initialized = true;

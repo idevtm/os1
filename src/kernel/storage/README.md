@@ -10,7 +10,8 @@ BlockRequest -> virtio queue -> device completion -> retained operation result
 
 ## Requests
 
-`BlockDevice` exposes geometry, queue depth, request limits, and submit/flush callbacks.
+`BlockDevice` exposes geometry, queue depth, request limits, read-only status, and submit/flush callbacks.
+Virtio sets the read-only status during device setup. The ext2 mount uses this status to set access rights.
 `BlockRequest` records the operation, sector range, buffer, completion, status, and transferred bytes.
 Statuses distinguish pending, busy, success, device error, invalid input, and timeout.
 The synchronous read/write wrappers reject capacity overflow before submission and divide transfers by the device limit.

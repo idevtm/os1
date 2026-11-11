@@ -165,6 +165,31 @@ BOOTINFO_STATIC_ASSERT(boot_info_module_count_offset, offsetof(BootInfo, module_
     return region.type == BootMemoryType::Usable;
 }
 
+// Require complete usable coverage of a nonempty destination in physical order.
+[[nodiscard]] inline bool boot_memory_range_is_usable(std::span<const BootMemoryRegion> regions,
+                                                      uint64_t start,
+                                                      uint64_t length)
+{
+    if(0 == length || length > UINT64_MAX - start)
+        return false;
+
+    const uint64_t end = start + length;
+    uint64_t covered = start;
+    for(const auto& region : regions)
+    {
+        if(region.length > UINT64_MAX - region.physical_start)
+            return false;
+        const uint64_t region_end = region.physical_start + region.length;
+        if(!region.length || region_end <= start || region.physical_start >= end)
+            continue;
+        if(!boot_memory_region_is_usable(region))
+            return false;
+        if(region.physical_start <= covered && region_end > covered)
+            covered = region_end;
+    }
+    return covered >= end;
+}
+
 // Convert a BootSource enum to a compact debug/observe string.
 [[nodiscard]] inline const char* boot_source_name(BootSource source)
 {

@@ -156,6 +156,12 @@ An eight-byte descriptor prefix supplies the control packet size before the comp
 Evaluate Context updates a changed packet size without resetting the endpoint dequeue position.
 The reference is the [xHCI specification](https://www.intel.ie/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), section 4.6.5.
 Low/full-speed interrupt intervals convert from milliseconds to xHCI microframe exponents.
+The xHCI worker recovers a halted input endpoint before it submits another report buffer.
+It resets the endpoint, clears the device halt, and advances the transfer ring.
+One failed recovery or a second halt before a successful report retires the input.
+If the clear-halt request stalls, the worker resets endpoint zero before it retires the input.
+If endpoint-zero recovery fails, the driver retires the device.
+The kernel log records the completion code.
 Runtime root changes retire the old slot before replacement enumeration.
 Published allocations remain retained even after successful Disable Slot.
 xHCI hubs remain deferred.
@@ -170,6 +176,15 @@ Insufficient schedule capacity rejects the new interface.
 Low/full-speed root devices that require companion controllers remain unsupported.
 Full-speed downstream hubs remain unsupported.
 The reference is the [EHCI specification](https://www.intel.com/content/www/us/en/products/docs/io/universal-serial-bus/ehci-specification.html), sections 3.6 and 4.12.
+
+PS/2 publishes native key state and separately translates console characters.
+
+| PS/2 key group | Console behavior |
+| --- | --- |
+| Text keys and keypad digits | Send text. Keypad operators send their printable characters. |
+| Extended navigation keys | Send the Console navigation values. |
+| F1–F12 | Select a terminal without sending a character. |
+| Alt and lock keys | Send no Console character. |
 
 PS/2 auxiliary initialization selects relative compatibility packets for mouse and touchpad input.
 Pause-key event decoding remains unsupported; ordinary keys and extended navigation keys use the common bitmap.

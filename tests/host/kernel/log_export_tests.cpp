@@ -152,11 +152,12 @@ protected:
         reset_initrd_namespace_for_test();
         bind_initrd_boot_info(nullptr);
     }
-    void mount(const char* fixture = OS1_EXT2_FIXTURE)
+    void mount(const char* fixture = OS1_EXT2_FIXTURE, bool read_only = false)
     {
         std::ifstream file(fixture, std::ios::binary);
         disk.assign(std::istreambuf_iterator<char>(file), {});
         device = {"log-test", disk.size() / 512, 512, 8, 1, this, submit, submit};
+        device.read_only = read_only;
         ASSERT_EQ(0, ext2_mount(initrd_namespace_root(), device));
     }
     static void open_during_snapshot()
@@ -552,6 +553,20 @@ TEST_F(LogExport, DiskFramesSurviveRemountAndBootNumbersIncrease)
     ASSERT_EQ(0, log_export::run(OS1_LOG_EXPORT_DISK));
     EXPECT_EQ(previous + 1, log_export::info().boot_id);
     EXPECT_EQ(bytes, read((std::string("/disk/log/") + name).c_str()));
+}
+TEST_F(LogExport, AutomaticExportSkipsReadOnlyMount)
+{
+    mount(OS1_EXT2_FIXTURE, true);
+    events(100);
+    diagnostic_log::tick(2'000'000'000);
+    log_export::poll();
+    log_export::final_drain();
+    EXPECT_EQ(0u, log_export::info().failures);
+    EXPECT_EQ(0u, write_bytes);
+    EXPECT_EQ(0u, flushes);
+    EXPECT_EQ(OS1_ERR_ACCESS, log_export::run(OS1_LOG_EXPORT_DISK));
+    EXPECT_EQ(0u, write_bytes);
+    EXPECT_EQ(0u, flushes);
 }
 TEST_F(LogExport, FailedFlushSuspendsAndNeedsHealthyMount)
 {

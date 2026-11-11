@@ -116,6 +116,9 @@ EHCI and xHCI defer scheduling while they own a synchronous controller resource.
 IRQ service continues, but scheduling and deferred filesystem work wait until ownership ends.
 The outermost guard requests a pending reschedule when local runnable work exists, including on APs without periodic ticks.
 These synchronous scopes cannot sleep or yield. They can delay other tasks on their CPU during controller timeouts.
+EHCI polls periodic input while it waits for bulk transfers.
+After a confirmed async schedule stop, a bulk timeout retires only the affected storage device.
+See [EHCI and high-speed hubs](hardware/usb-storage.md#ehci-and-high-speed-hubs).
 The [input recovery plan](hardware/input-recovery-plan.md#bios-startup-failure-found-during-validation) records the discovered deadlock and controlled regression evidence.
 
 ## Input services and attachment changes
@@ -145,6 +148,7 @@ xHCI negotiates control packet sizes and supports two boot HID interfaces on eac
 Each interface has its own input identity and endpoint buffers; removal retires both identities.
 Input lifetime records and EHCI failure details support returned-stick diagnosis without logging raw key contents.
 Eligible EHCI split errors receive bounded recovery before retirement.
+The xHCI worker also recovers halted input endpoints. See [Transport and physical acceptance](native-api/abi/input-abi.md#transport-and-physical-acceptance).
 The [recovery plan](hardware/input-recovery-plan.md) records hardware evidence, retry limits, and validation.
 The first diagnostic shell starts the runner before its prompt; normal boot and shell restarts do not.
 A bounded binary catalog supports offline comparison against hashed Linux reference profiles.
@@ -420,16 +424,30 @@ The Limine frontend is now split by responsibility: `entry.cpp` sequences the ha
 
 Both paths finish this phase holding (or able to reach) every piece of bootloader-native data they need for the next step.
 
-### Phase 2 — `BootInfo` build (one-shot, mirrored layout)
+### Phase 2 — `BootInfo` build (one-shot)
 
-On UEFI, `build_boot_info()` in `src/boot/limine/handoff_builder.cpp` walks Limine's HHDM to read memmap entries, translates every Limine-virtual pointer (framebuffer, RSDP, SMBIOS, initrd) into physical addresses with `translate_limine_virtual()`, and writes the result into a `LowHandoffBootInfoStorage` block placed immediately after the loaded kernel image. On BIOS the 64-bit loader writes the same layout from E820 + EDD + CMOS + the earlier RSDP scan.
+On UEFI, the shim reads the Limine memory map into its own stack before it writes to fixed physical destinations.
 
-Both paths finalize identical low-memory arenas:
+| UEFI destination | Check before writing |
+| --- | --- |
+| Each kernel `PT_LOAD` segment | The range fits the kernel reservation and lies entirely in usable RAM. |
+| Boot CPU page, `BootInfo` storage, and stack | The combined range fits the reservation and lies entirely in usable RAM. |
+| Page-frame bitmap | The full 512 KiB range lies in usable RAM. |
 
-- `0x0500` — `BootInfo` header
-- `0x6000` — `BootMemoryRegion[]` memory map
-- `0x7000` — `BootModuleInfo[]` module descriptors
-- `0x7200` — string pool (bootloader name, command line, module names)
+The shim stops with a serial message if a check fails.
+Limine marks its executable, modules, and page tables as occupied memory.
+See the [Limine protocol memory map](https://github.com/limine-bootloader/limine-protocol/blob/trunk/PROTOCOL.md#memory-map-feature).
+
+The shim translates the framebuffer, RSDP, SMBIOS, and initrd pointers into physical addresses.
+It copies the normalized map and builds `LowHandoffBootInfoStorage` after the loaded kernel image.
+The BIOS loader builds the same `BootInfo` ABI from E820, EDD, CMOS, and the RSDP scan.
+
+| BIOS address | Handoff data |
+| --- | --- |
+| `0x0500` | `BootInfo` header |
+| `0x6000` | `BootMemoryRegion[]` |
+| `0x7000` | `BootModuleInfo[]` |
+| `0x7200` | Bootloader name, command line, and module names |
 
 The shim then installs the minimum transition mappings required for handoff: a low identity window for the boot-critical low region and the higher-half alias needed for the shared kernel entry. It then calls `limine_enter_kernel`, which switches to the per-CPU boot stack and jumps to `kernel_main(BootInfo*, cpu*)`.
 
@@ -472,7 +490,7 @@ The shared entry runs one deterministic sequence:
   runs the threaded block smoke, spawns the kernel SMP ping threads, loads
   `/bin/init` from the initrd, marks the first user thread ready, and exits.
   `/bin/init` starts `/disk/bin/sh` and waits for its exit.
-  It restarts the shell after exit, or starts `/bin/rescue` if launch fails.
+  It restarts the shell after exit. It starts rescue after a launch error or repeated rapid exits.
 
 ### Phase 4 — ACPI, PCIe, driver binding, and storage probe
 
@@ -694,27 +712,26 @@ into kernel-owned BSS storage. That matters because bootloader staging memory is
 
 ## Early Physical Layout Shared By Boot Paths
 
-[../src/kernel/handoff/memory_layout.h](../src/kernel/handoff/memory_layout.h) and [../src/kernel/handoff/memory_layout.inc](../src/kernel/handoff/memory_layout.inc) hold the fixed early-boot addresses used by the BIOS loader and mirrored by the Limine shim.
+[../src/kernel/handoff/memory_layout.h](../src/kernel/handoff/memory_layout.h) and [../src/kernel/handoff/memory_layout.inc](../src/kernel/handoff/memory_layout.inc) define the fixed early physical layout. Both paths use the kernel load base and frame bitmap.
 
 The [shared CMake layout](../cmake/kernel_layout.cmake) supplies the kernel boot envelope.
 Production and host tests generate the same C++ header from these values.
 The production build also generates the NASM constants for the BIOS loader.
 
-Key addresses:
+| Address | Boot path | Purpose |
+| --- | --- | --- |
+| `0x0500` | BIOS | `BootInfo` header |
+| `0x6000` | BIOS | `BootMemoryRegion[]` buffer |
+| `0x7000` | BIOS | `BootModuleInfo[]` buffer |
+| `0x7200` | BIOS | String pool for bootloader name, command line, and module names |
+| `0x09000` | BIOS | Disk scratch and then temporary page tables |
+| `0xE000` | BIOS | Kernel image load buffer after the five temporary page tables |
+| `0x8C000` | BIOS | 64 KiB initrd load buffer, ending at `0x9C000` |
+| `0x100000` | Both | Kernel physical load base |
+| `0x1C0000-0x23FFFF` | Both | Page-frame bitmap |
 
-| Address | Purpose |
-| --- | --- |
-| `0x0500` | `BootInfo` header |
-| `0x6000` | `BootMemoryRegion[]` buffer |
-| `0x7000` | `BootModuleInfo[]` buffer |
-| `0x7200` | low-memory string pool for bootloader name, cmdline, module names |
-| `0x09000` | BIOS disk scratch, then temporary page tables after firmware disk I/O completes |
-| `0xE000` | BIOS kernel-image load buffer; follows the five temporary page tables |
-| `0x8C000` | BIOS initrd load buffer (64 KiB slot, ending at `0x9C000`) |
-| `0x100000` | shared kernel physical load base |
-| `0x1C0000-0x23FFFF` | page-frame bitmap |
-
-The modern path deliberately mirrors this layout before entering `kernel_main`. That is not nostalgia. It is a compatibility technique that keeps the shared kernel bootloader-agnostic while the frontends converge on the same higher-half kernel ABI.
+The Limine shim places its `BootInfo` storage after the kernel image and boot CPU page.
+Both paths use the same higher-half kernel entry and `BootInfo` ABI.
 
 ## Modern Default Boot Path: Limine + UEFI
 
@@ -805,14 +822,10 @@ The goal is not to keep Limine's page tables forever. The goal is to make the fi
 
 ### Building The Final `BootInfo`
 
-The shim then mirrors the BIOS handoff layout into low memory:
+The shim places the boot CPU page, `LowHandoffBootInfoStorage`, and boot stack after the loaded image.
+It checks these destinations before it writes to them.
 
-- `BootInfo` at `0x0500`
-- memory map at `0x6000`
-- module descriptors at `0x7000`
-- strings at `0x7200`
-
-That low-memory block is populated with:
+The kernel reads these values from the handoff block.
 
 - `source = Limine`
 - bootloader name and version
@@ -825,7 +838,7 @@ That low-memory block is populated with:
 
 The final transfer happens through `limine_enter_kernel()`, which:
 
-- switches to the low boot CPU page as the stack
+- switches to the validated boot stack
 - passes `RDI = BootInfo*`
 - passes `RSI = cpu*`
 - calls the shared higher-half `kernel_main`
@@ -1036,6 +1049,23 @@ Each CPU gets a dedicated `struct cpu` page containing:
 - kernel stack
 
 The BSP receives its initial `cpu` page from the boot frontend. Additional CPUs are allocated by the kernel.
+
+### AP startup records
+
+The AP trampoline selects a stack by xAPIC ID. A late AP can read only its own startup record.
+
+| Startup data | Lifetime |
+| --- | --- |
+| Entry address, CR3, and temporary IDT | The BSP sets these values before it starts any AP. |
+| CPU page address | The BSP prepares the AP exception stack and sets the slot before it sends the startup IPI. |
+| Startup state | The AP publishes readiness. The BSP can mark a pending AP offline after the deadline. |
+
+After the startup IPIs, the BSP prepares the TSC clock and starts a 500 ms polling interval.
+A spin limit bounds the polling loop if the clock cannot advance.
+If the BSP changes a pending AP to timed out, the AP stays offline.
+The scheduler redirects unpinned work away from offline APs. Thread creation rejects an offline pin.
+The kernel keeps its record and startup stack because the AP can still enter the trampoline.
+The BSP continues to start the remaining APs.
 
 ### Guarded kernel thread stacks
 
@@ -1359,7 +1389,8 @@ Current user programs:
 
 The kernel retains its fixed `/bin/init` boot contract.
 Init starts `/disk/bin/sh` through the existing filesystem-backed loader.
-If launch fails, init reports the error and starts `/bin/rescue`.
+If launch fails or the shell exits rapidly three times, init reports the error and starts `/bin/rescue`.
+See [Boot program placement](native-api/abi/initrd-vfs-abi.md#boot-program-placement) for the restart delays.
 Rescue retry returns to init; it does not mount storage or probe hardware.
 The loader accepts ELF64 `ET_EXEC` images with `PT_LOAD` segments.
 It checks all program headers before it allocates an address space.
@@ -1394,9 +1425,25 @@ Host manifest -> locked image copy -> debugfs -> validation -> atomic image repl
 The [ext2 profile](filesystems/ext2.md) defines exact limits, sync authority, failure behavior, and deployment targets.
 The namespace mounts `/disk` before publication when a supported partition exists.
 It tries the virtio device first, then published USB devices.
+Virtio read-only media mount with read and execute access. Disk log export skips those mounts.
 [USB mass storage](hardware/usb-storage.md) adds bounded SCSI commands over xHCI bulk endpoints.
 An unsupported initialization flush can use confirmed write-through operation; unknown cache behavior still rejects writable storage admission.
 Shared IRQ/poll event consumption uses an event lock; a BSP input queue keeps HID console callbacks on the boot CPU.
+xHCI command, control transfer, and port reset waits use a calibrated 1 s deadline.
+Bulk transfers use a 2 s deadline.
+An unavailable or stalled clock leaves a bounded polling fallback.
+
+| xHCI command timeout result | Driver action |
+| --- | --- |
+| Completion at the deadline | Use the command result. |
+| Abort stops the ring and establishes the command result | Reprogram the command ring. Later commands can use the controller. |
+| Abort cannot establish a safe stop within 5 s | Retire the controller through the existing failure path. |
+
+The driver keeps other endpoint rings active during command-ring recovery.
+If a Disable Slot command aborts, the driver retains the affected slot and its DMA.
+A later port change can retry removal.
+See the [xHCI specification, section 4.6.1](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf).
+
 Failed USB devices retain DMA after hardware publication, and reconnect does not restore old handles.
 File contents remain on disk until read; the mount imports only bounded namespace and allocation metadata.
 Executable files are immutable in this profile. ELF loading owns and releases a stable image snapshot.
@@ -1458,9 +1505,12 @@ The kernel now:
 
 - consumes `BootInfo.rsdp_physical` on both Limine and BIOS boots
 - asks ACPICA to discover `XSDT`/`RSDT`, `MADT`, `MCFG`, `FADT`, HPET, DSDT, and SSDTs
+- records the DSDT and up to 15 SSDTs in the platform inventory
+- lets ACPICA load SSDTs beyond the inventory limit
 - uses ACPICA-backed `MADT` data as the primary source of CPU, LAPIC, IOAPIC, and IRQ-override topology
 - uses ACPICA-backed `MCFG` data to discover PCIe ECAM ranges
 - uses ACPICA namespace/resource APIs for ACPI device records, `_CRS` resources, `_PRT` PCI INTx routing, and `_PS0`/`_PS3` device power transitions
+- selects the ACPI APIC interrupt model before reading PCI routes
 - enumerates PCIe devices and records BAR information
 - separates platform discovery from driver activation so MSI/MSI-X-capable
   drivers bind only after the IDT and LAPIC are online

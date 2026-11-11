@@ -216,6 +216,15 @@ extern "C" [[noreturn]] void limine_start_main()
     const limine_file kernel_module = *kernel_file;
     const limine_file initrd_module = *initrd_file;
 
+    BootMemoryRegion memory_map_storage[kBootInfoMaxMemoryRegions];
+    const auto memory_map =
+        limine_shim::read_memory_map(g_memmap_request.response, memory_map_storage);
+    if(memory_map.empty())
+    {
+        limine_shim::write_serial_ln("[limine-shim] missing or invalid memory map");
+        halt_forever();
+    }
+
     uint64_t entry_point = 0;
     uint64_t kernel_physical_start = 0;
     uint64_t kernel_physical_end = 0;
@@ -223,13 +232,16 @@ extern "C" [[noreturn]] void limine_start_main()
     uint64_t bootstrap_stack_top = 0;
     cpu* cpu_boot = nullptr;
     if(!limine_shim::inspect_kernel_image(
-           kernel_module, entry_point, kernel_physical_start, kernel_physical_end))
+           kernel_module, memory_map, entry_point, kernel_physical_start, kernel_physical_end))
     {
         limine_shim::write_serial_ln("[limine-shim] kernel inspect failed");
         halt_forever();
     }
-        if(!limine_shim::prepare_kernel_handoff(
-            kernel_physical_end, cpu_boot, boot_info_storage_physical, bootstrap_stack_top))
+    if(!limine_shim::prepare_kernel_handoff(memory_map,
+                                            kernel_physical_end,
+                                            cpu_boot,
+                                            boot_info_storage_physical,
+                                            bootstrap_stack_top))
     {
         limine_shim::write_serial_ln("[limine-shim] kernel handoff prep failed");
         halt_forever();
@@ -239,17 +251,16 @@ extern "C" [[noreturn]] void limine_start_main()
     const limine_shim::LimineBootResponses responses{
         .bootloader_info = g_bootloader_info_request.response,
         .cmdline = g_cmdline_request.response,
-        .memory_map = g_memmap_request.response,
         .rsdp = g_rsdp_request.response,
         .smbios = g_smbios_request.response,
         .framebuffer = g_framebuffer_request.response,
     };
-    BootInfo* boot_info = limine_shim::build_boot_info(
-        responses,
-        initrd_module,
-        kernel_physical_start,
-        kernel_physical_end,
-        boot_info_storage_physical);
+    BootInfo* boot_info = limine_shim::build_boot_info(responses,
+                                                       initrd_module,
+                                                       memory_map,
+                                                       kernel_physical_start,
+                                                       kernel_physical_end,
+                                                       boot_info_storage_physical);
     if(nullptr == boot_info)
     {
         limine_shim::write_serial_ln("[limine-shim] BootInfo build failed");

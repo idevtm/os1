@@ -51,6 +51,7 @@ struct BlockDevice
     BlockSubmit submit = nullptr;
     BlockFlush flush = nullptr;
     uint32_t catalog_id = 0;
+    bool read_only = false;
 };
 
 inline bool block_request_succeeded(const BlockRequest& request)

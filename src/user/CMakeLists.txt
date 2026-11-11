@@ -189,6 +189,10 @@ if(BUILD_TESTING)
     "${PROJECT_SOURCE_DIR}/tests/fixtures/entry_probe.cpp" entry_probe_elf)
   add_custom_target(os1_entry_probe DEPENDS "${entry_probe_elf}")
   set(OS1_ENTRY_PROBE_ELF "${entry_probe_elf}" PARENT_SCOPE)
+  os1_add_user_cxx_program(faulting_shell
+    "${PROJECT_SOURCE_DIR}/tests/fixtures/faulting_shell.cpp" faulting_shell_elf)
+  add_custom_target(os1_faulting_shell DEPENDS "${faulting_shell_elf}")
+  set(OS1_FAULTING_SHELL_ELF "${faulting_shell_elf}" PARENT_SCOPE)
   foreach(version IN ITEMS 1 2)
     os1_add_user_cxx_program(deploy_probe_${version}
       "${PROJECT_SOURCE_DIR}/tests/fixtures/deploy_probe.cpp" probe_elf "-DDEPLOY_VERSION=\"${version}\"")

@@ -300,10 +300,13 @@ Transfer transfer(Device& d,
         c.exposed = true;
     if(!schedule(c, true))
         return {Status::Failed, 0};
+    const auto transfer_type = setup ? ehci::AsyncTransfer::Control : ehci::AsyncTransfer::Bulk;
+    const auto deadline = ehci::async_deadline_100ns(transfer_type);
+    const unsigned poll_limit = deadline / (ehci::async_poll_delay_us * 10);
     bool completed = false;
     uint32_t fault = 0;
     const auto start = tsc_clock_now_100ns();
-    for(unsigned attempt = 0; attempt < 100000; ++attempt)
+    for(unsigned attempt = 0; attempt < poll_limit; ++attempt)
     {
         if(c.is_failed())
             return {Status::Failed, 0};
@@ -311,8 +314,6 @@ Transfer transfer(Device& d,
             poll_input_while_waiting(c);
         if(c.is_failed())
             return {Status::Failed, 0};
-        if(tsc_clock_now_100ns() - start >= 10'000'000)
-            break;
         dma_sync_for_cpu(c.schedule);
         for(unsigned i = 0; i <= last; ++i)
             fault |= td[i].token & ehci::errors;
@@ -321,31 +322,33 @@ Transfer transfer(Device& d,
             completed = true;
             break;
         }
-        if((c.op[1] & (1u << 4)) || !root_connected(d))
+        if((c.op[1] & (1u << 4)) || !root_connected(d) || tsc_clock_now_100ns() - start >= deadline)
             break;
-        delay_us(10);
+        delay_us(ehci::async_poll_delay_us);
     }
     if(c.probing)
         d.last_status = td[last].token | fault;
     if(!completed)
         debug("ehci: transfer deadline address=")(d.address)(" endpoint=")(endpoint)();
-    if(!stop_schedule(c))
+    if(!ehci::finish_async_transfer(
+           transfer_type,
+           completed,
+           [&] {
+               if(!stop_schedule(c))
+                   return false;
+               dma_sync_for_cpu(c.schedule);
+               return true;
+           },
+           [&] { return root_connected(d); },
+           [&] { retire(c); },
+           [&](bool connected) {
+               d.failed = true;
+               d.storage.invalidate();
+               input_failure(d, connected ? OS1_USB_INPUT_TRANSFER : OS1_USB_INPUT_DISCONNECTED);
+               native_input::remove(d.input_identity);
+               hardware_catalog::unavailable(d.catalog_id);
+           }))
         return {Status::Failed, 0};
-    dma_sync_for_cpu(c.schedule);
-    if(!completed)
-    {
-        if(!root_connected(d))
-        {
-            d.failed = true;
-            d.storage.invalidate();
-            input_failure(d, OS1_USB_INPUT_DISCONNECTED);
-            native_input::remove(d.input_identity);
-            hardware_catalog::unavailable(d.catalog_id);
-            return {Status::Failed, 0};
-        }
-        retire(c);
-        return {Status::Failed, 0};
-    }
     if(fault)
     {
         if(fault == ehci::halted)

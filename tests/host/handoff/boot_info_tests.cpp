@@ -152,3 +152,37 @@ TEST(BootInfo, FindsRegionContainingWholeRange)
     EXPECT_EQ(nullptr, boot_memory_region_containing(info, 0x4180000, 0x100000));
     EXPECT_EQ(nullptr, boot_memory_region_containing(info, 0x300000, 0x1000));
 }
+
+TEST(BootInfo, UsableDestinationCanSpanAdjacentMemoryRegions)
+{
+    const BootMemoryRegion map[] = {
+        {0x1000, 0x1000, BootMemoryType::Usable, 0},
+        {0x2000, 0x1000, BootMemoryType::Usable, 0},
+        {0x4000, 0x1000, BootMemoryType::Usable, 0},
+    };
+    EXPECT_TRUE(boot_memory_range_is_usable(map, 0x1000, 0x2000));
+    EXPECT_TRUE(boot_memory_range_is_usable(map, 0x1800, 0x1000));
+    EXPECT_FALSE(boot_memory_range_is_usable(map, 0x1000, 0x2001));
+    EXPECT_FALSE(boot_memory_range_is_usable(map, 0x3000, 0x1001));
+    EXPECT_FALSE(boot_memory_range_is_usable({}, 0x1000, 0x1000));
+}
+
+TEST(BootInfo, UsableDestinationRejectsOccupiedAndOverflowingRanges)
+{
+    const BootMemoryRegion map[] = {
+        {0x1000, 0x1000, BootMemoryType::Usable, 0},
+        {0x2000, 0x1000, BootMemoryType::BootloaderReclaimable, 0},
+        {0x3000, 0x1000, BootMemoryType::Reserved, 0},
+        {0x4000, 0x1000, BootMemoryType::Usable, 0},
+        {0x4800, 0x0800, BootMemoryType::KernelImage, 0},
+    };
+    EXPECT_FALSE(boot_memory_range_is_usable(map, 0x1800, 0x1000));
+    EXPECT_FALSE(boot_memory_range_is_usable(map, 0x3000, 0x1000));
+    EXPECT_FALSE(boot_memory_range_is_usable(map, 0x4000, 0x1000));
+    EXPECT_TRUE(boot_memory_range_is_usable(map, 0x4000, 0x0800));
+    EXPECT_FALSE(boot_memory_range_is_usable(map, 0x1000, 0));
+    EXPECT_FALSE(boot_memory_range_is_usable(map, UINT64_MAX - 4, 8));
+
+    const BootMemoryRegion overflowing[] = {{UINT64_MAX - 4, 8, BootMemoryType::Usable, 0}};
+    EXPECT_FALSE(boot_memory_range_is_usable(overflowing, UINT64_MAX - 4, 4));
+}

@@ -75,4 +75,6 @@ struct Ps2Modifiers
         return !released && (!extra || key == 0x1c || key == 0x35 || navigation_key(key));
     }
 };
+
+char ps2_console_character(const Ps2Modifiers& modifiers, uint8_t key);
 }  // namespace os1::input

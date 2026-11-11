@@ -2,7 +2,7 @@
 ; start a new CPU
 ; LOAD at the shared low-memory trampoline page
 ; memory format:
-; at AP_STARTUP_CPU_PAGE_ADDRESS: uint64_t CPU_PAGE => RSP = CPU_PAGE + PAGE_SIZE
+; at AP_STARTUP_CPU_PAGES_ADDRESS: uint64_t CPU_PAGE[256], indexed by xAPIC ID
 ; at AP_STARTUP_RIP_ADDRESS: uint64_t RIP
 ; at AP_STARTUP_CR3_ADDRESS: uint64_t CR3
 ; at AP_STARTUP_IDT_ADDRESS: uint16_t IDT.Length + uint32_t IDT.Base
@@ -12,7 +12,7 @@
 
 %define CODE_SEG     0x0008
 %define DATA_SEG     0x0010
-P_CPU_PAGE		equ AP_STARTUP_CPU_PAGE_ADDRESS
+P_CPU_PAGES		equ AP_STARTUP_CPU_PAGES_ADDRESS
 P_RIP			equ AP_STARTUP_RIP_ADDRESS
 P_CR3			equ AP_STARTUP_CR3_ADDRESS
 P_IDT			equ AP_STARTUP_IDT_ADDRESS
@@ -68,7 +68,13 @@ long_mode:
 	mov gs, ax
 	mov ss, ax
 
-	mov rsi, [P_CPU_PAGE]
+	; Select an immutable record before loading a stack.
+	mov eax, 1
+	cpuid
+	shr ebx, 24
+	mov rsi, [P_CPU_PAGES + rbx * 8]
+	test rsi, rsi
+	jz .die
 	mov rbp, rsi
 	add rbp, PAGE_SIZE
 	mov rsp, rbp
@@ -93,3 +99,7 @@ gdt_pointer:
 
 global cpu_start_end
 cpu_start_end:
+
+%if (cpu_start_end - cpu_start_begin) > (AP_STARTUP_CPU_PAGES_ADDRESS - AP_TRAMPOLINE_ADDRESS)
+    %error "AP trampoline overlaps the CPU page table"
+%endif

@@ -1613,6 +1613,8 @@ inline bool handles(const char* line)
         return true;
     if(os1::discovery::starts(line, "echo "))
     {
+        if(os1::shell::has_top_level_command_operator(line + 5))
+            return false;
         if(os1::discovery::starts(line + 5, "os.devices.") ||
            os1::discovery::starts(line + 5, "os.firmware.") ||
            os1::discovery::starts(line + 5, "os.system.processors."))
@@ -1648,40 +1650,7 @@ inline bool handles(const char* line)
     int id = (*view_pointer).resolve(name);
     if(id < 0)
         return false;
-    // Existing redirection and environment assignment retain their established path.
-    char quote = 0;
-    unsigned depth = 0;
-    for(unsigned i = n; line[i]; ++i)
-    {
-        char c = line[i];
-        if(!quote && c == '<' && line[i + 1] == '?' && line[i + 2] == '>')
-        {
-            i += 2;
-            continue;
-        }
-        if(quote)
-        {
-            if(c == '\\' && quote == '"' && line[i + 1])
-                ++i;
-            else if(c == quote)
-                quote = 0;
-            continue;
-        }
-        if(c == '"' || c == '\'')
-            quote = c;
-        else if(c == '(' || c == '{' || c == '[')
-            ++depth;
-        else if(c == ')' || c == '}' || c == ']')
-        {
-            if(depth)
-                --depth;
-        }
-        else if(!depth && (c == '>' || c == '<') && !(c == '<' && line[i + 1] == '?'))
-            return false;
-        else if(!depth && c == '=')
-            return false;
-    }
-    return true;
+    return !os1::shell::has_top_level_command_operator(line + n);
 }
 
 }  // namespace os1::user::commands

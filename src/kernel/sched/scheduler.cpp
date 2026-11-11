@@ -27,7 +27,8 @@ bool g_smp_balancer_enabled = true;
 
 [[nodiscard]] bool cpu_is_schedulable(const cpu* owner)
 {
-    return (nullptr != owner) && ((owner == g_cpu_boot) || (0u != owner->booted));
+    return (nullptr != owner) &&
+           ((owner == g_cpu_boot) || (ApStartupState::Online == cpu_ap_startup_state(owner)));
 }
 
 [[nodiscard]] size_t schedulable_cpu_count()

@@ -53,7 +53,7 @@ The normal shell runs from ext2. Initrd provides an independent recovery path.
 ```text
 kernel mounts storage -> /bin/init -> /disk/bin/sh -> exit -> restart
                              |
-                             +-- launch failure -> /bin/rescue -> retry
+                             +-- launch failure or repeated rapid exits -> /bin/rescue -> retry
 ```
 
 Stop QEMU before you update an existing data image.
@@ -63,7 +63,8 @@ Create a boot-plus-ext2 image for a new stick.
 A boot-only image starts rescue unless another supported disk supplies `/disk/bin/sh`.
 The full shell is not available from initrd.
 
-Init reports a failed launch or wait status before it starts rescue.
+Init reports the launch, wait, or rapid exit status before it starts rescue.
+See [Boot program placement](../native-api/abi/initrd-vfs-abi.md#boot-program-placement) for the retry delays.
 Rescue accepts `help`, `ls [path]`, `cat path`, `usb`, `retry`, `sync`, `shutdown`, and `reboot`.
 `log_status` shows persistence failures. `log_export` exports available logs to `/tmp/log`.
 File paths are literal text after the command, without quotes or expression evaluation.
@@ -75,7 +76,7 @@ The listing and file-reading code is shared with the standalone `ls` and `cat` u
 `retry` or end-of-input returns to init and attempts `/disk/bin/sh` again.
 It does not rediscover devices, remount storage, or repair a filesystem.
 Use host deployment to restore a missing or invalid shell, then boot again.
-A shell exit normally starts a fresh shell; it does not enter rescue.
+A shell exit starts a fresh shell unless it reaches the rapid-exit limit.
 Kernel drivers remain built into the kernel. Moving programs does not change storage-driver availability.
 
 ## Program manifest

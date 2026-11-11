@@ -219,7 +219,7 @@ bool spawn_kernel_smp_ping_threads(Process* kernel_process)
     size_t booted_ap_count = 0;
     for(cpu* c = g_cpu_boot; nullptr != c; c = c->next)
     {
-        if((c != g_cpu_boot) && (0u != c->booted))
+        if((c != g_cpu_boot) && (ApStartupState::Online == cpu_ap_startup_state(c)))
         {
             ++booted_ap_count;
         }

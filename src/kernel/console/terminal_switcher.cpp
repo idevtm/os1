@@ -8,19 +8,15 @@
 bool kernel_keyboard_hook(uint16_t scancode)
 {
     KASSERT_ON_BSP();
-    uint16_t hotkey[kNumTerminals] = {
+    constexpr uint16_t hotkey[kNumTerminals] = {
         0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58};
-    int index = -1;
-    for(unsigned i = 0; i < kNumTerminals; i++)
+    for(unsigned i = 0; i < kNumTerminals; ++i)
     {
         if(scancode == hotkey[i])
         {
-            index = i;
-            break;
+            console_switch_terminal(i);
+            return false;
         }
     }
-
-    if(index >= 0)
-        console_switch_terminal(index);
     return true;
 }

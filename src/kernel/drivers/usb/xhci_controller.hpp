@@ -55,6 +55,9 @@ constexpr size_t kOperationalUsbsts = 0x04u;
 constexpr size_t kOperationalPagesize = 0x08u;
 constexpr size_t kOperationalDnctrl = 0x14u;
 constexpr size_t kOperationalCrcr = 0x18u;
+constexpr uint32_t kCrcrRingCycleState = 1u << 0;
+constexpr uint32_t kCrcrCommandAbort = 1u << 2;
+constexpr uint32_t kCrcrCommandRingRunning = 1u << 3;
 constexpr size_t kOperationalDcbaap = 0x30u;
 constexpr size_t kOperationalConfig = 0x38u;
 
@@ -181,6 +184,108 @@ struct EventInfo
     uint8_t trb_type = 0;
 };
 
+constexpr uint8_t kCompletionCommandRingStopped = 24u;
+constexpr uint8_t kCompletionCommandAborted = 25u;
+
+// The event lock protects the single command and its abort completion.
+struct CommandCompletion
+{
+    uint64_t expected_trb = 0;
+    uint64_t stopped_at = 0;
+    uint8_t code = 0;
+    uint8_t slot = 0;
+    bool complete = false;
+    bool stopped = false;
+
+    void record(const EventInfo& event);
+    bool can_reprogram() const;
+};
+
+using PollClock = uint64_t (*)();
+
+// The clock determines elapsed time. The poll bound covers an unavailable or stalled clock.
+class PollDeadline
+{
+public:
+    PollDeadline(PollClock clock, uint64_t duration, uint32_t stalled_polls);
+    bool expired();
+
+private:
+    PollClock clock_;
+    uint64_t duration_;
+    uint64_t start_;
+    uint64_t previous_;
+    uint32_t stalled_polls_;
+    uint32_t remaining_polls_;
+};
+
+enum class HidCompletion : uint8_t
+{
+    Report,
+    Rearm,
+    Recover,
+    Retire
+};
+
+// The event lock protects this state. A successful transfer permits another recovery.
+struct HidRecovery
+{
+    uint8_t pending = 0;
+    bool attempted = false;
+    HidCompletion complete(uint8_t completion);
+};
+
+bool matches_hid_transfer(
+    const EventInfo&, uint8_t slot, uint8_t endpoint, uint64_t trb, bool armed);
+
+enum class HidClearHalt : uint8_t
+{
+    Cleared,
+    ControlStall,
+    Failed
+};
+enum class HidRestart : uint8_t
+{
+    Recovered,
+    RetireInput,
+    RetireDevice
+};
+
+template<typename Reset, typename Clear, typename SetDequeue, typename Running>
+HidRestart restart_hid_transfer(uint8_t completion,
+                                uint8_t endpoint,
+                                Reset reset,
+                                Clear clear,
+                                SetDequeue set_dequeue,
+                                Running running)
+{
+    constexpr uint8_t success = 1, transaction_error = 4, context_state_error = 19;
+    constexpr uint8_t control_endpoint = 1;
+    // The controller may publish the event before it writes the Output Endpoint Context.
+    const auto reset_completion = reset(endpoint);
+    if(reset_completion != success)
+    {
+        if(completion == transaction_error && reset_completion == context_state_error &&
+           running(endpoint))
+            return HidRestart::Recovered;
+        return HidRestart::RetireInput;
+    }
+
+    switch(clear())
+    {
+        case HidClearHalt::Cleared:
+            return set_dequeue(endpoint) ? HidRestart::Recovered : HidRestart::RetireInput;
+        case HidClearHalt::ControlStall:
+            // Discard the failed control TD and position EP0 at the next setup TD.
+            if(reset(control_endpoint) == success && set_dequeue(control_endpoint))
+                return HidRestart::RetireInput;
+            return HidRestart::RetireDevice;
+        case HidClearHalt::Failed:
+            return HidRestart::RetireDevice;
+    }
+    return HidRestart::RetireDevice;
+}
+
 // One serialized endpoint-zero request; stage addresses identify completion events.
 struct ControlTransfer
 {
@@ -289,6 +394,9 @@ bool controller_reset(const ControllerLayout& controller,
                       uint32_t timeout_spins,
                       PollHook poll_hook = nullptr,
                       void* poll_context = nullptr);
+bool command_ring_running(const ControllerLayout& controller);
+bool request_command_abort(const ControllerLayout& controller, uint64_t ring_physical);
+bool program_command_ring(const ControllerLayout& controller, uint64_t ring_physical, bool cycle);
 bool controller_program(const ControllerLayout& controller,
                         const RingSet& rings,
                         uint8_t max_device_slots);
