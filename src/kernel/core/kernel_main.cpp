@@ -602,8 +602,7 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
     // `cpu_cur()` reads the self-pointer through GS, so rebind it before the
     // first direct-map `cpu_init()` reloads descriptor state.
     g_cpu_boot->self = g_cpu_boot;
-    wrmsr(0xC0000100, (uint64_t)g_cpu_boot);
-    wrmsr(0xC0000101, (uint64_t)g_cpu_boot);
+    wrmsr(kIa32GsBase, reinterpret_cast<uint64_t>(g_cpu_boot));
     g_cpu_boot->tss.rsp0 = 0;
     cpu_init();
 

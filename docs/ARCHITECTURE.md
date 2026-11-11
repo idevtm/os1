@@ -1030,6 +1030,39 @@ The IDT loader independently rejects a zero IST1 pointer, including release buil
 Repeated setup preserves the existing stack.
 The [reliability record](archive/kernel/2026-11-05-reliability-and-clock-plan.md) documents tests and remaining containment limits.
 
+### Kernel GS base
+
+The kernel uses GS to find the current CPU record.
+Each CPU changes the active GS base at the user boundary.
+
+```text
+                 active GS base         IA32_KERNEL_GS_BASE
+Kernel mode      CPU record             user base
+                         <--- SWAPGS --->
+User mode        user base              CPU record
+```
+
+BSP and AP initialization set the kernel base and set the initial user FS and GS bases to zero.
+The kernel disables `CR4.FSGSBASE` and uses flat user segments.
+After the kernel installs its IDT, every CPU record has an upper-half address.
+
+`SYSCALL` exchanges the bases before it uses GS or the stack.
+Interrupt and exception entry uses the saved privilege level to identify entry from user mode.
+A kernel exception, including an IST event, checks the active GS base before it uses GS.
+This check also applies during entry or return, when the saved code segment can indicate ring 0 with the user base active.
+A kernel exception follows the fatal exception path.
+
+`IRETQ` and `SYSRET` exchange the bases before they return to user mode.
+User `IRETQ` uses a return frame on the kernel stack.
+The same-thread `SYSRET` path checks the return instruction pointer before it loads the user stack pointer.
+If the instruction pointer is outside the lower canonical half, the path uses `IRETQ`.
+Kernel-to-kernel restores keep the kernel base active.
+
+The kernel-entry contract test checks the GS transitions in the linked kernel.
+The smoke tests check user FS and GS reads, syscall results, and timer progress on UEFI and BIOS.
+Each boot path has a one-CPU test and a four-CPU test.
+The checks run a program from a private QEMU disk.
+
 ### Unified `TrapFrame`
 
 The assembly trap entry code now builds a shared `TrapFrame` layout for:
@@ -1039,7 +1072,9 @@ The assembly trap entry code now builds a shared `TrapFrame` layout for:
 - syscalls
 - scheduler return paths
 
-That means the C++ dispatch logic receives one coherent view of machine state. Interrupts and scheduler switches still restore full frames through `iretq`; same-thread syscall returns use the `SYSRET` fast path.
+The C++ dispatcher receives the same frame layout on each path.
+Interrupts and scheduler switches restore the full frame through `IRETQ`.
+An eligible same-thread syscall return uses the `SYSRET` fast path.
 
 Direct kernel handoffs mask interrupts before selecting or publishing the next thread.
 Assembly entry also masks interrupts before changing the stack, CR3, current-thread pointer, or saved-register state.
