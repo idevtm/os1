@@ -115,6 +115,12 @@ request/grant/thread allocation failures also preserve the parent image/table.
 Syscall 11 is `launch(executable_fd, mode, request_pointer)`, with SPAWN=0 and
 EXEC=1 and restricted PRIVATE_PROVIDER=2 (see [the supervision contract](counter-events-abi.md)). It retains a regular-file instance with EXECUTE; READ alone is insufficient.
 Loading uses that immutable object's bytes, independent of its shared cursor.
+
+The loader checks each nonempty `PT_LOAD` segment before it allocates an address space.
+A segment is nonempty if its `p_memsz` is greater than zero.
+Nonempty segments must appear in increasing virtual address order.
+Their virtual page ranges must be disjoint. Adjacent page ranges are valid.
+The loader returns `OS1_ERR_BAD_IMAGE` if segments share a virtual page or appear out of order.
 Disk-backed executable files use a stable snapshot; see the [ext2 profile](../../filesystems/ext2.md).
 There is no secondary privileged pathname lookup.
 

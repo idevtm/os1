@@ -111,6 +111,62 @@ TEST(UserElfPolicy, ValidatesEntryPointInsideLoadableUserSegment)
         user_elf::validate_user_elf_image(*image.header, image.bytes.data(), image.bytes.size()));
 }
 
+TEST(UserElfPolicy, RejectsSegmentsThatShareAMappedPage)
+{
+    auto image = make_user_elf();
+    image.header->phnum = 2;
+    image.program[0].memsz = kPageSize / 4;
+    image.program[1].type = elf::kProgramTypeLoad;
+    image.program[1].vaddr = kUserImageBase + kPageSize / 2;
+    image.program[1].memsz = kPageSize / 4;
+
+    EXPECT_FALSE(
+        user_elf::validate_user_elf_image(*image.header, image.bytes.data(), image.bytes.size()));
+}
+
+TEST(UserElfPolicy, AcceptsAdjacentLoadPagesAndIgnoresEmptySegments)
+{
+    auto image = make_user_elf();
+    image.header->phnum = 3;
+    image.program[1].type = elf::kProgramTypeLoad;
+    image.program[1].vaddr = kUserImageBase;
+    image.program[2].type = elf::kProgramTypeLoad;
+    image.program[2].vaddr = kUserImageBase + kPageSize;
+    image.program[2].memsz = kPageSize;
+    image.header->entry = image.program[2].vaddr;
+
+    EXPECT_TRUE(
+        user_elf::validate_user_elf_image(*image.header, image.bytes.data(), image.bytes.size()));
+}
+
+TEST(UserElfPolicy, RejectsOutOfOrderLoadPages)
+{
+    auto image = make_user_elf();
+    image.header->phnum = 2;
+    image.program[0].vaddr += kPageSize;
+    image.header->entry = image.program[0].vaddr;
+    image.program[1].type = elf::kProgramTypeLoad;
+    image.program[1].vaddr = kUserImageBase;
+    image.program[1].memsz = kPageSize;
+
+    EXPECT_FALSE(
+        user_elf::validate_user_elf_image(*image.header, image.bytes.data(), image.bytes.size()));
+}
+
+TEST(UserElfPolicy, ValidatesSegmentsAfterFindingTheEntryPoint)
+{
+    auto image = make_user_elf();
+    image.header->phnum = 2;
+    image.program[1].type = elf::kProgramTypeLoad;
+    image.program[1].vaddr = kUserImageBase + kPageSize;
+    image.program[1].memsz = kPageSize;
+    image.program[1].offset = image.bytes.size();
+    image.program[1].filesz = 1;
+
+    EXPECT_FALSE(
+        user_elf::validate_user_elf_image(*image.header, image.bytes.data(), image.bytes.size()));
+}
+
 TEST(UserElfPolicy, ComputesStackLayout)
 {
     EXPECT_EQ(kUserStackTop - (kUserStackPages + 1) * kPageSize, user_elf::stack_guard_base());

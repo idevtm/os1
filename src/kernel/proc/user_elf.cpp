@@ -110,10 +110,15 @@ bool plan_load_segment(const elf::Elf64ProgramHeader& program,
     return true;
 }
 
-bool entry_point_in_loadable_segment(const elf::Elf64Header& header,
-                                     const void* image,
-                                     uint64_t image_size)
+bool validate_user_elf_image(const elf::Elf64Header& header, const void* image, uint64_t image_size)
 {
+    if(!validate_executable_header(&header))
+    {
+        return false;
+    }
+
+    uint64_t previous_segment_end = 0;
+    bool entry_found = false;
     for(uint16_t i = 0; i < header.phnum; ++i)
     {
         const auto* program = elf::program_header_from_image(header, image, image_size, i);
@@ -127,28 +132,21 @@ bool entry_point_in_loadable_segment(const elf::Elf64Header& header,
         }
 
         LoadSegmentPlan plan{};
-        if(!plan_load_segment(*program, image_size, plan))
+        // ELF orders PT_LOAD entries by virtual address. Compare page ranges because
+        // segments with disjoint byte ranges can still need the same page.
+        if(!plan_load_segment(*program, image_size, plan) ||
+           (plan.segment_start < previous_segment_end))
         {
             return false;
         }
+        previous_segment_end = plan.segment_end;
 
-        uint64_t raw_segment_end = 0;
-        if(!loadable_segment_raw_end(*program, raw_segment_end))
+        if((header.entry >= program->vaddr) && (header.entry - program->vaddr < program->memsz))
         {
-            return false;
-        }
-        if((header.entry >= program->vaddr) && (header.entry < raw_segment_end))
-        {
-            return true;
+            entry_found = true;
         }
     }
 
-    return false;
-}
-
-bool validate_user_elf_image(const elf::Elf64Header& header, const void* image, uint64_t image_size)
-{
-    return validate_executable_header(&header) &&
-           entry_point_in_loadable_segment(header, image, image_size);
+    return entry_found;
 }
 }  // namespace user_elf

@@ -22,9 +22,6 @@ struct LoadSegmentPlan
 [[nodiscard]] bool plan_load_segment(const elf::Elf64ProgramHeader& program,
                                      uint64_t image_size,
                                      LoadSegmentPlan& plan);
-[[nodiscard]] bool entry_point_in_loadable_segment(const elf::Elf64Header& header,
-                                                   const void* image,
-                                                   uint64_t image_size);
 [[nodiscard]] bool validate_user_elf_image(const elf::Elf64Header& header,
                                            const void* image,
                                            uint64_t image_size);

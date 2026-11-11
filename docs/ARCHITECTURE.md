@@ -1298,7 +1298,14 @@ Init starts `/disk/bin/sh` through the existing filesystem-backed loader.
 If launch fails, init reports the error and starts `/bin/rescue`.
 Rescue retry returns to init; it does not mount storage or probe hardware.
 The loader accepts ELF64 `ET_EXEC` images with `PT_LOAD` segments.
+It checks all program headers before it allocates an address space.
 It maps segment permissions from ELF flags and zero-fills `.bss`.
+
+```text
+ELF program headers -> Validate page ranges -> Allocate and map -> Prepare stack
+```
+
+See the [launch ABI](native-api/abi/initrd-vfs-abi.md#launch-and-startup) for the segment rules.
 
 The user stack is non-executable. ELF segment flags control writable/executable permissions, but the loader does not reject a segment requesting both: strict user-image W^X is not enforced.
 
