@@ -1842,6 +1842,8 @@ if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
     COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_build_configuration.py")
   add_test(NAME os1_target_menu_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/scripts/test_target_menu.py")
+  add_test(NAME os1_source_formatting_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_source_formatting.py")
   add_test(NAME os1_user_elf_dependencies
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_user_elf_dependencies.py"
       --cmake "${CMAKE_COMMAND}" --compiler "${CMAKE_CXX_COMPILER}"

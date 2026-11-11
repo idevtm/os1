@@ -89,8 +89,10 @@ Do not rely only on formatter ignore files.
 Do not modify upstream formatter settings to enforce project policy.
 Disable dependency formatting targets that could run automatically when integrating a dependency with CMake.
 
-The current `autoformat.sh` formats the whole `src/` tree.
-Do not use it for a scoped change without checking every selected file and the resulting diff.
+Run `./autoformat.sh` with explicit tracked C or C++ paths under `src/` or `tests/`.
+The script uses the root format configuration and the ACPICA override configuration.
+Use clang-format 23.1.4 to reproduce the verified formatting.
+The ACPICA override configuration preserves the include order required by ACPICA.
 Keep unrelated formatting out of the task diff.
 
 ## Mandatory documentation standard
