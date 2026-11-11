@@ -139,12 +139,15 @@ If you have an old Make-based or pre-CMake-M3 `build/` directory, remove it once
 rm -rf build
 ```
 
-Configure and build:
+Configure and build with Ninja:
 
 ```sh
-cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/x86_64-elf.cmake
+cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/x86_64-elf.cmake
 cmake --build build
 ```
+
+Use Ninja for incremental user ELF builds.
+GNU Make 3.81 can miss changes that occur within the same second.
 
 The default build now produces both boot artifacts and runs the layout checks
 needed by the smoke tests:

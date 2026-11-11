@@ -589,6 +589,10 @@ Both normal and diagnostic profiles use the shared firmware handoff and port-rou
 The replacement option retains the base image’s UEFI files and updates the kernel and initrd.
 Its BIOS payload remains historical; the fresh hybrid image supplies both current boot paths.
 
+The user-program build compiles each source to a separate object with a compiler depfile.
+The depfile lists direct and transitive headers for that object.
+CMake rebuilds affected objects and links the dependent ELF files.
+
 The CMake build now produces two image families:
 
 - `build/artifacts/os1.iso`
