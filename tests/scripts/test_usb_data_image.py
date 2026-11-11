@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real filesystem updates, bounded writes, rollback, layout rejection, and locks."""
+from contextlib import nullcontext
 import hashlib
 import io
 import json
@@ -186,7 +187,7 @@ class Images(unittest.TestCase):
         script = "import fcntl,sys,time; f=open(sys.argv[1],'r+b'); fcntl.lockf(f,fcntl.LOCK_EX); print('locked',flush=True); sys.stdin.read()"
         for path in (self.image, self.output):
             if path == self.output: path.write_bytes(b'prior')
-            child = subprocess.Popen([sys.executable, '-c', script, str(path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            child = subprocess.Popen([sys.executable, "-E", '-c', script, str(path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
             try:
                 self.assertEqual(child.stdout.readline(), b'locked\n')
                 with self.assertRaisesRegex(RuntimeError, 'in use'):
@@ -199,28 +200,47 @@ class Images(unittest.TestCase):
         build.mkdir()
         (build / 'CMakeCache.txt').write_text('OS1_STORAGE_MANIFEST:FILEPATH=' + str(self.manifest))
         args = types.SimpleNamespace(build_dir=build, toolchain=self.root / 'toolchain')
-        info = {'DeviceIdentifier': 'disk13', 'TotalSize': self.end, 'MediaName': 'Test USB'}
-        for action in (None, 'apply'):
-            calls = []
-            def privileged(command, purpose, **kwargs):
-                calls.append(command)
-                if command[0] == '--read':
-                    with self.image.open('rb') as source:
-                        usb.copy_range(source, kwargs['stdout'], 0, self.end)
-                else:
-                    self.assertEqual(command[0], '--update')
-                    with Path(command[1]).open('rb') as source, self.image.open('r+b') as target:
-                        usb.apply(source, target, 'boot', command[command.index('--before-sha256')+1])
-            with patch.object(writer, 'build_image', return_value=self.boot), \
-                 patch.object(writer, 'list_disks', return_value=[info]), \
-                 patch.object(writer, 'choose_menu', side_effect=[0, action]), \
-                 patch.object(writer, 'sudo_step', side_effect=privileged):
-                writer.update_interactive(args, 'boot')
-            backups = list((build / 'artifacts/usb-backups').glob('*.img'))
-            self.assertTrue(backups)
-            self.assertTrue(all(self.hash(backup) == self.before for backup in backups))
-            self.assertEqual(len(calls), 1 if action is None else 2)
-            self.assertEqual(self.hash(self.image), self.before)
+        info = dict(DeviceIdentifier='disk13', DeviceNode='/dev/disk13', TotalSize=self.end,
+                    MediaName='Test USB', Internal=False, WholeDisk=True, VirtualOrPhysical='Physical',
+                    BusProtocol='USB', DeviceBlockSize=512, Writable=True, IORegistryEntryID=1234)
+        changed = dict(info, IORegistryEntryID=5678)
+        for typed, current in [('\n', info), ('disk14\n', info), ('disk13\n', changed), ('disk13\n', info)]:
+            with self.subTest(typed=typed, changed=current is changed):
+                calls = []
+
+                def privileged(command, purpose, **kwargs):
+                    calls.append(command)
+                    if command[0] == '--read':
+                        with self.image.open('rb') as source:
+                            usb.copy_range(source, kwargs['stdout'], 0, self.end)
+                    else:
+                        self.assertEqual(command[0], '--update')
+                        with Path(command[1]).open('rb') as source, self.image.open('r+b') as target:
+                            usb.apply(source, target, 'boot', command[command.index('--before-sha256') + 1])
+
+                with patch.object(writer, 'build_image', return_value=self.boot), \
+                     patch.object(writer, 'list_disks', return_value=[info]), \
+                     patch.object(writer, 'choose_menu', return_value=0) as menu, \
+                     patch.object(writer, 'sudo_terminal', side_effect=nullcontext), \
+                     patch.object(writer.termios, 'tcflush'), \
+                     patch.object(writer.sys.stdin, 'readline', return_value=typed), \
+                     patch.object(writer, 'disk_info', return_value=current), \
+                     patch.object(writer, 'sudo_step', side_effect=privileged):
+                    if current is changed:
+                        with self.assertRaisesRegex(ValueError, 'USB identity changed'):
+                            writer.update_interactive(args, 'boot')
+                    else:
+                        writer.update_interactive(args, 'boot')
+                self.assertTrue(menu.call_args.kwargs['require_selection'])
+                backups = list((build / 'artifacts/usb-backups').glob('*.img'))
+                self.assertTrue(backups)
+                self.assertTrue(all(self.hash(backup) == self.before for backup in backups))
+                expected = ['--read', '--update'] if typed == 'disk13\n' and current is info else ['--read']
+                self.assertEqual([command[0] for command in calls], expected)
+                for command in calls:
+                    self.assertEqual(command[command.index('--disk') + 1], 'disk13')
+                    self.assertEqual(json.loads(command[command.index('--identity') + 1]), writer.identity(info))
+                self.assertEqual(self.hash(self.image), self.before)
 
     def test_privileged_snapshot_and_apply_use_real_files_without_build_commands(self):
         with self.image.open('r+b') as target, tempfile.TemporaryFile() as output:

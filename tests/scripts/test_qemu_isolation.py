@@ -48,8 +48,8 @@ class IsolationTests(unittest.TestCase):
                           "Path(sys.argv[4]).write_text('guest evidence'); "
                           "print('runner evidence'); sys.exit(" + str(status) + ")")
                 result = subprocess.run(
-                    [sys.executable, str(WRAPPER), '--root', str(root / 'runs'),
-                     '--name', 'same_test', '--', sys.executable, '-c', script,
+                    [sys.executable, "-E", str(WRAPPER), '--root', str(root / 'runs'),
+                     '--name', 'same_test', '--', sys.executable, "-E", '-c', script,
                      '--image', str(source), '--log', 'old.log'], capture_output=True, text=True)
                 self.assertEqual(result.returncode, status, result.stderr)
                 directory = Path(result.stdout.splitlines()[0].removeprefix('Test evidence: '))

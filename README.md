@@ -139,12 +139,15 @@ If you have an old Make-based or pre-CMake-M3 `build/` directory, remove it once
 rm -rf build
 ```
 
-Configure and build:
+Configure and build with Ninja:
 
 ```sh
-cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/x86_64-elf.cmake
+cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/x86_64-elf.cmake
 cmake --build build
 ```
+
+Use Ninja for incremental user ELF builds.
+GNU Make 3.81 can miss changes that occur within the same second.
 
 The default build now produces both boot artifacts and runs the layout checks
 needed by the smoke tests:
@@ -461,11 +464,13 @@ Run `./os1.sh` and select **USB > Build and write USB stick**, or run `./os1.sh 
 | Layout | Choose **Replace kernel and initrd** or **Create a fresh boot image**. |
 | Build | Compile the current kernel and initrd as your normal user. |
 | Target | Use the arrow keys to select **Write to disk…**, then press Enter. |
-| Write | Enter your sudo password when requested; the helper writes, verifies, and ejects the disk. |
+| Confirm | Type the selected disk identifier and press Enter. |
+| Write | Enter your sudo password if prompted. The helper writes, verifies, and ejects the disk. |
 
 This workflow currently supports macOS.
-Use Up/Down and Enter in both menus; press `q` or Escape to cancel.
-Selecting a write destination replaces that disk’s contents without a typed confirmation.
+USB menus start on **Cancel** and discard queued input.
+Press `q` or Escape to cancel a menu.
+A full-image write replaces the selected disk’s contents after confirmation.
 Do not run the whole script with sudo.
 The dedicated build directory defaults to `build/usb-write`; set `USB_BUILD_DIR` to change it.
 The replacement option requires the verified base image; set `OS1_USB_BASE_IMAGE` if it is stored elsewhere.

@@ -9,7 +9,7 @@ using namespace os1::user;
             return 1;                                       \
         }                                                   \
     } while(false)
-int main()
+int main(int, char**)
 {
     CHECK(logs::context(OS1_LOG_CONTEXT_OPEN) == 0, "history open");
     os1_log_command command{};

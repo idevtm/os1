@@ -41,6 +41,9 @@ Documents can contain proposals after promotion, provided their scope and status
 
 ## Implemented profiles
 
+Each public UAPI header can be included on its own in C11 and C++20.
+The host suite checks both languages and the IPC envelope layouts.
+
 | Capability | Current contract |
 | --- | --- |
 | Firmware display, QEMU runtime mode switching, and exclusive graphics sessions | [Display ABI](abi/display-abi.md) |

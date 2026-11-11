@@ -128,7 +128,7 @@ endif()
 # on the fly, terminates QEMU as soon as every marker has appeared, and fails
 # the test with a log dump if the wall-clock timeout is reached first.
 set(runner_command
-  "${PYTHON_EXECUTABLE}"
+  "${PYTHON_EXECUTABLE}" -E -B
   "${SMOKE_RUNNER}"
   --log
   "${LOG_FILE}"

@@ -579,8 +579,8 @@ The runner rejects early exit before its settling interval completes.
 ## Build Outputs And Boot Artifacts
 
 The [USB workflow](hardware/usb-image-workflow.md) builds current payloads through `os1.sh usb` without administrator privileges.
+The writer requires explicit disk selection and typed confirmation before it starts a write.
 A separate macOS helper provides arrow-key menus for image layout and the external physical USB write destination.
-Selecting a write destination starts the writer without a typed confirmation.
 Menus use the alternate terminal screen; the helper restores the normal screen before displaying the sudo password guidance.
 Only raw-device snapshot, write, readback, and eject steps use sudo.
 The [keyboard diagnostic profile](hardware/usb-image-workflow.md#keyboard-independent-diagnostics) uses a separate build and an automatic capture boot.
@@ -588,6 +588,16 @@ Its bounded xHCI observations are read-only.
 Both normal and diagnostic profiles use the shared firmware handoff and port-routing sequence.
 The replacement option retains the base image’s UEFI files and updates the kernel and initrd.
 Its BIOS payload remains historical; the fresh hybrid image supplies both current boot paths.
+
+The user-program build compiles each source to a separate object with a compiler depfile.
+The depfile lists direct and transitive headers for that object.
+CMake rebuilds affected objects and links the dependent ELF files.
+
+Builds from source archives use `unknown` as the revision when Git metadata is unavailable.
+Set `-DOS1_SOURCE_REVISION=<label>` when configuring an archive with a known revision.
+Use up to 40 ASCII letters, digits, dots, underscores, plus signs, or hyphens.
+Supply the same dependency sources as a checkout when the archive omits submodules.
+The build still calculates the content fingerprint. See the [log export ABI](native-api/abi/log-export-abi.md).
 
 The CMake build now produces two image families:
 
@@ -685,6 +695,10 @@ into kernel-owned BSS storage. That matters because bootloader staging memory is
 ## Early Physical Layout Shared By Boot Paths
 
 [../src/kernel/handoff/memory_layout.h](../src/kernel/handoff/memory_layout.h) and [../src/kernel/handoff/memory_layout.inc](../src/kernel/handoff/memory_layout.inc) hold the fixed early-boot addresses used by the BIOS loader and mirrored by the Limine shim.
+
+The [shared CMake layout](../cmake/kernel_layout.cmake) supplies the kernel boot envelope.
+Production and host tests generate the same C++ header from these values.
+The production build also generates the NASM constants for the BIOS loader.
 
 Key addresses:
 
@@ -1641,7 +1655,8 @@ It requires UEFI firmware and enables allocator checks for host and guest builds
 The [testing guide](testing.md) defines the exact hosted selection and evidence locations.
 The [mandatory policy](../AGENTS.md#mandatory-local-test-policy) requires local validation before push or completion.
 
-GitHub uses `ubuntu-24.04`, the host compiler, and the Homebrew cross toolchain.
+GitHub uses `ubuntu-24.04` and its host compiler.
+The guest build uses the [pinned cross toolchain](testing.md#hosted-cross-toolchain).
 It builds normal UEFI, BIOS, and USB images with debugcon and allocator checks enabled.
 Diagnostic capture runs locally instead of in the GitHub job.
 The job retains its `build-and-smoke` name for `act` compatibility.

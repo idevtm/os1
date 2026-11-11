@@ -99,17 +99,17 @@ struct os1_ipc_capability
 struct os1_ipc_capabilities
 {
     uint32_t count, reserved;
-    os1_ipc_capability entries[OS1_IPC_CAP_LIMIT];
+    struct os1_ipc_capability entries[OS1_IPC_CAP_LIMIT];
 };
 struct os1_ipc_message_caps
 {
-    os1_ipc_message message;
-    os1_ipc_capabilities capabilities;
+    struct os1_ipc_message message;
+    struct os1_ipc_capabilities capabilities;
 };
 struct os1_ipc_result_caps
 {
-    os1_ipc_result result;
-    os1_ipc_capabilities capabilities;
+    struct os1_ipc_result result;
+    struct os1_ipc_capabilities capabilities;
 };
 // Input fds are sender-local and require DELEGATE. Output fds are receiver-local,
 // CLOEXEC, and copied (never moved). Unused entries and reserved fields are zero.
@@ -152,13 +152,13 @@ struct os1_ipc_account
 #define OS1_IPC_RESULT_BUFFERS 26u
 struct os1_ipc_message_buffers
 {
-    os1_ipc_message message;
-    os1_ipc_buffers buffers;
+    struct os1_ipc_message message;
+    struct os1_ipc_buffers buffers;
 };
 struct os1_ipc_result_buffers
 {
-    os1_ipc_result result;
-    os1_ipc_buffers buffers;
+    struct os1_ipc_result result;
+    struct os1_ipc_buffers buffers;
 };
 // SUBMIT accepts LOAN. REPLY accepts RETURN or distinct owned MOVE outputs.
 // Unused entries are zero. Receive and result descriptor claims are transactional.
