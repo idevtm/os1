@@ -214,9 +214,19 @@ Each worker sleeps when its lane has no eligible request and uses the existing d
 Wait registration rechecks the queue under the IPC lock.
 A reschedule IPI saves the blocked worker context, including on APs without a periodic timer.
 
-The system permits 16 live kernel bindings and four retained Operations per binding.
-Aliases, wait pins, pending dispatch, and retained results can keep these charges active.
-There are at most 64 accepted kernel Operations across the bindings.
+The kernel limits live bindings by creator and across the system.
+
+| Charge | Limit | Release |
+| --- | --- | --- |
+| Bindings per creating process | 8 | Last connection reference |
+| Bindings across the system | 16 | Last connection reference |
+| Retained Operations per binding | 4 | Final Operation release |
+| Retained Operations across the system | 64 | Final Operation release |
+
+The admission check returns `OS1_ERR_LIMIT` when either binding limit is full.
+Aliases, delegated descriptors, wait pins, and retained Operations can keep a binding live.
+These references keep the charge on the creating process, even after that process exits.
+A new binding uses one slot in each binding limit.
 Admission order determines dispatch order among eligible requests within each lane.
 Deferred admission permits later eligible requests to proceed.
 There is no dispatch ordering between lanes; scheduler wake order is not guaranteed.

@@ -36,6 +36,7 @@ struct Connection
 {
     volatile uint32_t references;
     uint32_t live_operations, live_subscriptions;
+    uint32_t kernel_binding_slot;
     Account* account;
     const KernelProvider* kernel;
     OpenInstance* source;
@@ -93,7 +94,8 @@ WaitQueue waiters{"ipc-state"};
 WaitQueue signalled{"ipc-signalled"};
 uint64_t next_generation = 1;
 uint64_t monotonic_ns = 0;
-uint32_t kernel_bindings = 0;
+// Each occupied slot stores the creator PID until the connection is released.
+uint64_t kernel_binding_creators[OS1_IPC_KERNEL_BINDING_LIMIT]{};
 Operation* kernel_head = nullptr;
 Operation* kernel_tail = nullptr;
 
@@ -114,7 +116,7 @@ void release(Connection* c)
     if(c->kernel)
     {
         IrqSpinGuard guard(waiters.lock);
-        --kernel_bindings;
+        kernel_binding_creators[c->kernel_binding_slot] = 0;
     }
     instance_release(c->source);
     kfree(c);
@@ -614,14 +616,26 @@ long bind_kernel(PageFrameContainer& frames, Thread* thread, uint64_t fd, uint64
     }
     {
         IrqSpinGuard guard(waiters.lock);
-        if(!next_generation || kernel_bindings >= OS1_IPC_KERNEL_BINDING_LIMIT)
+        const uint64_t creator = thread->process->pid;
+        uint32_t slot = OS1_IPC_KERNEL_BINDING_LIMIT;
+        uint32_t creator_bindings = 0;
+        for(uint32_t i = 0; i < OS1_IPC_KERNEL_BINDING_LIMIT; ++i)
+        {
+            if(kernel_binding_creators[i] == creator)
+                ++creator_bindings;
+            if(kernel_binding_creators[i] == 0 && slot == OS1_IPC_KERNEL_BINDING_LIMIT)
+                slot = i;
+        }
+        if(!next_generation || slot == OS1_IPC_KERNEL_BINDING_LIMIT ||
+           creator_bindings >= OS1_IPC_KERNEL_BINDING_PROCESS_LIMIT)
         {
             guard.unlock();
             kfree(c);
             kfree(client);
             return OS1_ERR_LIMIT;
         }
-        ++kernel_bindings;
+        kernel_binding_creators[slot] = creator;
+        c->kernel_binding_slot = slot;
         c->generation = next_generation++;
     }
     c->references = 1;

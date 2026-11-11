@@ -78,6 +78,7 @@ An object handle selects a rights-bearing entry, which retains an open instance 
 The current handle encoding is `fd`; it is not global object identity.
 The [approved handle model](native-api/object-contract.md#object-handles-and-interoperability) defines ownership, transfer, typed-reference direction, and compatibility boundaries.
 The [Console ABI](native-api/abi/kernel-console-abi.md) binds a ready IPC client from an existing console grant.
+The adapter charges each live binding to its creator until the last connection reference is released.
 Two kernel workers invoke callbacks outside IRQ context and global IPC locks.
 One worker serves memory-only providers, including input.
 The other serves File, Directory, system control, and explicit log export, plus automatic persistence.
