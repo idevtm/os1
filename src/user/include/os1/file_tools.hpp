@@ -231,13 +231,11 @@ inline bool dot(Line& line)
     }
     return false;
 }
-inline long here_document(const char* marker, Reader& reader)
+inline long here_document(const char* marker, Reader& reader, bool discard = false)
 {
-    Handle file(temporary());
-    if(file.fd < 0)
-        return file.fd;
+    Handle file(discard ? -1 : temporary());
     Line line;
-    long failure = 0;
+    long failure = file.fd < 0 && !discard ? file.fd : 0;
     for(;;)
     {
         long status = reader.line(line);
@@ -258,16 +256,34 @@ inline long here_document(const char* marker, Reader& reader)
             break;
         if(line.eof)
             return OS1_ERR_CANCELLED;
-        if(!failure && !put(file.fd, line.bytes, line.size))
+        if(!discard && !failure && !put(file.fd, line.bytes, line.size))
             failure = OS1_ERR_LIMIT;
     }
-    if(failure)
+    if(failure || discard)
         return failure;
     long status = seek(file.fd, 0);
     if(status < 0)
         return status;
     return file.take();
 }
+struct PendingHereDocument
+{
+    Reader& reader;
+    const char* marker;
+    bool drain;
+
+    ~PendingHereDocument()
+    {
+        if(drain && marker)
+            (void)here_document(marker, reader, true);
+    }
+
+    long collect()
+    {
+        drain = false;
+        return here_document(marker, reader);
+    }
+};
 inline void touch(size_t argc, char** argv)
 {
     if(argc < 2)
@@ -362,7 +378,7 @@ struct Streams
         return saved[i].fd >= 0;
     }
     bool apply(shell::Command& command,
-               Reader& command_reader,
+               PendingHereDocument& here,
                int copy_source = -2,
                bool recursive = false)
     {
@@ -371,14 +387,12 @@ struct Streams
         if((input && !save(0)) || (output && !save(1)))
             return false;
         Handle in, out;
-        if(input)
-        {
-            in.reset(command.input == shell::Input::Here
-                         ? here_document(command.input_name, command_reader)
-                         : open_file(command.input_name, Mode::Existing));
-            if(in.fd < 0)
-                return false;
-        }
+        if(command.input == shell::Input::Here)
+            in.reset(here.collect());
+        else if(input)
+            in.reset(open_file(command.input_name, Mode::Existing));
+        if(input && in.fd < 0)
+            return false;
         if(output)
         {
             out.reset(open_file(command.output_name, Mode::Keep));

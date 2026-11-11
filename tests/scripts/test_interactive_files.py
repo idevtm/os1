@@ -130,6 +130,37 @@ def main():
         send('END\n')
         assert b'command failed:' not in expect()
         content('/tmp/here', 'first\n\nliteral > data\n')
+        for command, diagnostic in [
+            ('no-such-command << END', b'unknown command: no-such-command\n'),
+            ('cd << END', b'missing parameter\n'),
+            ('echo ( << END ) > /tmp/legacy-here-output', b'too many positional arguments\n'),
+        ]:
+            send(command + '\n')
+            expect(diagnostic)
+            send('touch /tmp/here-injected\nEND\n')
+            assert b'\nEND\n' in expect()
+            assert b'cat/copy failed' in run('cat /tmp/here-injected')
+        assert b'\n<<tag\n' in run('out.print(text:<<tag)')
+        assert b'warning:' in run('label = <<tag')
+        assert b'\n<<tag\n' in run('echo label')
+
+        for command, delimiter, diagnostic in [
+            ('no-such-command ( << FIRST ) << SECOND', 'FIRST', b'duplicate redirection'),
+            ('no-such-command | ( << END', 'END', b'unsupported shell operator'),
+            ('cat << END;', 'END', b'unsupported shell operator'),
+            ('cat << "END";', 'END', b'unsupported shell operator'),
+            ('cat << END >', 'END', b'missing redirection path'),
+            ('out.print(text:<<tag) << END', 'END', b'duplicate redirection'),
+        ]:
+            send(command + '\ntouch /tmp/here-injected\n' + delimiter + '\n')
+            assert diagnostic in expect()
+            assert b'cat/copy failed' in run('cat /tmp/here-injected')
+            assert b'after-document\nos1> ' in run('echo "after-document"')
+
+        assert b'unsupported redirection on typed expression' in run(
+            'out.print(text:<<tag) > /tmp/typed-here-output')
+        assert b'missing redirection path' in run('out.print(text:<<tag) >')
+        assert b'cat/copy failed' in run('cat /tmp/typed-here-output')
         send('cat << STOP > /tmp/absent\n')
         send(b'\x04')
         assert b'redirection failed' in expect()

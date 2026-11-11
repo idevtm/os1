@@ -44,7 +44,14 @@ inline bool equal(const char* a, const char* b)
     return *a == *b;
 }
 // Typed expressions can contain operators inside quotes or grouped arguments.
-inline bool has_top_level_command_operator(const char* text)
+enum class CommandOperator
+{
+    Any,
+    HereDocument,
+    LegacyHereDocument
+};
+inline const char* find_top_level_command_operator(const char* text,
+                                                   CommandOperator match = CommandOperator::Any)
 {
     char quote = 0;
     unsigned depth = 0;
@@ -60,19 +67,27 @@ inline bool has_top_level_command_operator(const char* text)
         }
         else if(c == '\'' || c == '"')
             quote = c;
-        else if(c == '(' || c == '{' || c == '[')
+        else if(c == '{' || c == '[' || (c == '(' && match != CommandOperator::LegacyHereDocument))
             ++depth;
-        else if(c == ')' || c == '}' || c == ']')
+        else if(c == '}' || c == ']' || (c == ')' && match != CommandOperator::LegacyHereDocument))
         {
             if(depth)
                 --depth;
         }
         else if(c == '<' && p[1] == '?' && p[2] == '>')
             p += 2;
-        else if(!depth && (c == '>' || c == '<' || c == '='))
-            return true;
+        else if(!depth)
+        {
+            if(match == CommandOperator::Any ? c == '>' || c == '<' || c == '='
+                                             : c == '<' && p[1] == '<')
+                return p;
+        }
     }
-    return false;
+    return nullptr;
+}
+inline bool has_top_level_command_operator(const char* text)
+{
+    return find_top_level_command_operator(text) != nullptr;
 }
 // Count bytes independently of shell quoting; never silently truncate a line.
 inline bool parse(const char* text, Command& out)
@@ -124,6 +139,8 @@ inline bool parse(const char* text, Command& out)
                 break;
             if(!quote && !depth && (c == '|' || c == ';' || c == '&'))
             {
+                if(redirect == 2 && started)
+                    break;
                 out.error = "unsupported shell operator";
                 return false;
             }

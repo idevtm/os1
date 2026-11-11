@@ -83,11 +83,14 @@ With no argument, it prints one newline. Quoted spaces and parentheses remain pa
 For example, `echo "f(x)" > /tmp/result` writes `f(x)` and a newline to the file.
 See [Typed context and basic commands](typed-context.md) for the `echo` binding.
 
-Here-document collection prints no additional prompt; console input echo remains active.
+Collection prints no additional prompt. Console input echo stays active.
+If the console rejects a command before collection, it discards the body through the recognized delimiter.
 Content has no variable expansion, dot termination, or special operator interpretation.
 The shell collects it in an unlinked `/tmp` file before opening the output file.
 Premature EOF or collection failure prevents output creation or truncation.
 After an overlong line or storage failure, collection drains to the marker or EOF.
+If parsing fails, the console discards the body when it can identify the delimiter.
+A here-document operator inside a typed expression stays part of the expression.
 Temporary storage is released when the command finishes or preparation fails.
 
 Commands permit 1023 bytes; legacy commands retain the 16-argument limit.
