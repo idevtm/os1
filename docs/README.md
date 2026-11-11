@@ -11,6 +11,7 @@ Completed plans and older reviews are preserved in the archive.
 | [Latest review](latest-review.md) | Latest whole-project review and subsequent implementation evidence |
 | [USB image workflow](hardware/usb-image-workflow.md) | Build, write, verify, and eject a boot image |
 | [Testing](testing.md) | Mandatory full local validation and strategic GitHub checks |
+| [Vision](vision.md) | Proposed shared direction for core, desktop, and embedded configurations |
 | [Project goals](../GOALS.md) | Long-term scope, priorities, and dependencies |
 | [Glossary](GLOSSARY.md) and [references](REFERENCES.md) | Domain terminology and external specifications |
 
