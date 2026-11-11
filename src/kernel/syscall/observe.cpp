@@ -4,6 +4,7 @@
 #include <os1/resource.h>
 
 #include "arch/x86_64/cpu/cpu.hpp"
+#include "arch/x86_64/interrupt/interrupt.hpp"
 #include "core/kernel_state.hpp"
 #include "debug/event_ring.hpp"
 #include "drivers/bus/device.hpp"
@@ -336,7 +337,6 @@ long sys_observe_processes(const ObserveContext& context,
             Os1ObserveProcessRecord record{};
             record.pid = entry->process->pid;
             record.tid = entry->tid;
-            record.cr3 = entry->address_space_cr3;
             record.process_state = static_cast<uint32_t>(entry->process->state);
             record.thread_state = static_cast<uint32_t>(entry->state);
             record.flags =
@@ -687,6 +687,26 @@ long sys_observe_initrd(const ObserveContext& context,
     return result;
 }
 
+void redact_event_addresses(Os1ObserveEventRecord& event, uint64_t caller_pid)
+{
+    const bool own_event = caller_pid != 0 && event.pid == caller_pid;
+    if(event.type == OS1_KERNEL_EVENT_TRAP)
+    {
+        const bool own_user_trap = own_event && (event.flags & OS1_KERNEL_EVENT_FLAG_USER);
+        if(!own_user_trap || !user_address::is_user_address_range(event.arg2, 1))
+            event.arg2 = 0;
+        if(!own_user_trap || event.arg0 != T_PGFLT ||
+           !user_address::is_user_address_range(event.arg3, 1))
+            event.arg3 = 0;
+    }
+    else if(event.type == OS1_KERNEL_EVENT_USER_COPY_FAILURE &&
+            (!own_event || !user_address::is_user_address_range(event.arg0, 1)))
+    {
+        event.arg0 = 0;
+        event.arg3 = 0;
+    }
+}
+
 long sys_observe_events(const ObserveContext& context,
                         Thread* thread,
                         uint64_t user_buffer,
@@ -703,6 +723,9 @@ long sys_observe_events(const ObserveContext& context,
     if(!kernel_event::snapshot_all(snapshot.data(), capacity, count))
         return -1;
     observe_snapshot_checkpoint(OS1_OBSERVE_EVENTS);
+    const uint64_t caller_pid = thread->user_mode && thread->process ? thread->process->pid : 0;
+    for(uint32_t i = 0; i < count; ++i)
+        redact_event_addresses(snapshot.data()[i], caller_pid);
     return snapshot.write(context, thread, user_buffer, length, OS1_OBSERVE_EVENTS, count);
 }
 

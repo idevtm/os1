@@ -130,7 +130,7 @@ struct Os1ObserveProcessRecord
 {
     uint64_t pid;
     uint64_t tid;
-    uint64_t cr3;
+    uint64_t cr3;  // Reserved. Process snapshots return zero.
     uint32_t process_state;
     uint32_t thread_state;
     uint32_t flags;
@@ -220,6 +220,7 @@ struct Os1ObserveInitrdRecord
     uint64_t size;
 };
 
+// Event snapshots redact trap and user-copy addresses outside the caller scope.
 struct Os1ObserveEventRecord
 {
     uint64_t sequence;

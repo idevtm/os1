@@ -358,6 +358,101 @@ TEST_F(UsbInputObserve, RegistryGrowthAfterSizingLeavesUserBufferUntouched)
     platform_reset_state();
 }
 
+TEST_F(UsbInputObserve, ProcessSnapshotReservesCr3AsZeroForEveryRow)
+{
+    auto* peer = create_user_process("peer-observe", 0x200000);
+    ASSERT_NE(nullptr, peer);
+    auto* peer_thread = create_user_thread(peer, kUserImageBase, kUserStackTop, frames, false);
+    ASSERT_NE(nullptr, peer_thread);
+    ASSERT_NE(0u, thread->address_space_cr3);
+    ASSERT_NE(0u, peer_thread->address_space_cr3);
+
+    const ObserveContext context{.frames = &frames};
+    constexpr auto bytes = sizeof(Os1ObserveHeader) + 2 * sizeof(Os1ObserveProcessRecord);
+    ASSERT_EQ(bytes, sys_observe(context, OS1_OBSERVE_PROCESSES, kUserImageBase, bytes));
+    std::array<Os1ObserveProcessRecord, 2> rows{};
+    ASSERT_TRUE(copy_from_user(
+        frames, thread, kUserImageBase + sizeof(Os1ObserveHeader), rows.data(), sizeof(rows)));
+    EXPECT_EQ(thread->process->pid, rows[0].pid);
+    EXPECT_EQ(peer->pid, rows[1].pid);
+    EXPECT_EQ(0u, rows[0].cr3);
+    EXPECT_EQ(0u, rows[1].cr3);
+}
+
+TEST_F(UsbInputObserve, EventSnapshotDisclosesOnlyOwnUserFaultAddresses)
+{
+    const auto pid = thread->process->pid;
+    constexpr auto address = kUserImageBase + 0x123;
+    constexpr auto fault = kUserImageBase + 0x456;
+    constexpr auto kernel_address = 0xffffffff80000123ull;
+    constexpr auto trap = OS1_KERNEL_EVENT_TRAP;
+    constexpr auto user = OS1_KERNEL_EVENT_FLAG_USER;
+    constexpr auto copy = OS1_KERNEL_EVENT_USER_COPY_FAILURE;
+    constexpr auto reason = OS1_KERNEL_EVENT_USER_COPY_TRANSLATE;
+    const auto emit = [&](uint32_t type,
+                          uint32_t flags,
+                          uint64_t subject,
+                          uint64_t arg0,
+                          uint64_t arg1,
+                          uint64_t arg2,
+                          uint64_t arg3) {
+        kernel_event::record_subject(type, flags, subject, thread->tid, arg0, arg1, arg2, arg3);
+    };
+    emit(trap, user, pid, 14, 5, address, fault);
+    emit(trap, user, pid + 1, 14, 5, address, fault);
+    emit(trap, 0, pid, 14, 5, kernel_address, kernel_address);
+    emit(trap, user, pid, 13, 0, address, fault);
+    emit(trap, user, pid, 14, 5, address, kernel_address);
+    emit(copy, 0, pid, address, 20, reason, 7);
+    emit(copy, 0, pid + 1, address, 20, reason, 7);
+    emit(copy, 0, 0, address, 20, reason, 7);
+    emit(copy, 0, pid, kernel_address, 20, reason, 7);
+    emit(OS1_KERNEL_EVENT_SMOKE_MARKER, 0, 0, 1, 2, 3, 4);
+    constexpr auto expected = std::array{
+        std::array<uint64_t, 4>{14, 5, address, fault},
+        std::array<uint64_t, 4>{14, 5, 0, 0},
+        std::array<uint64_t, 4>{14, 5, 0, 0},
+        std::array<uint64_t, 4>{13, 0, address, 0},
+        std::array<uint64_t, 4>{14, 5, address, 0},
+        std::array<uint64_t, 4>{address, 20, reason, 7},
+        std::array<uint64_t, 4>{0, 20, reason, 0},
+        std::array<uint64_t, 4>{0, 20, reason, 0},
+        std::array<uint64_t, 4>{0, 20, reason, 0},
+        std::array<uint64_t, 4>{1, 2, 3, 4},
+    };
+
+    constexpr auto capacity = OS1_OBSERVE_EVENT_RING_CAPACITY;
+    constexpr auto bytes = sizeof(Os1ObserveHeader) + capacity * sizeof(Os1ObserveEventRecord);
+    VirtualMemory vm(frames, thread->address_space_cr3);
+    ASSERT_TRUE(
+        vm.allocate_and_map(kUserImageBase + kPageSize, 5, PageFlags::User | PageFlags::Write));
+    std::array<Os1ObserveEventRecord, capacity> raw{};
+    uint32_t count = 0;
+    ASSERT_TRUE(kernel_event::snapshot_all(raw.data(), capacity, count));
+    ASSERT_GE(count, expected.size());
+
+    const ObserveContext context{.frames = &frames};
+    ASSERT_EQ(sizeof(Os1ObserveHeader) + count * sizeof(Os1ObserveEventRecord),
+              sys_observe(context, OS1_OBSERVE_EVENTS, kUserImageBase, bytes));
+    for(size_t i = 0; i < expected.size(); ++i)
+    {
+        const auto index = count - expected.size() + i;
+        const auto offset = sizeof(Os1ObserveHeader) + index * sizeof(Os1ObserveEventRecord);
+        Os1ObserveEventRecord row{};
+        ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase + offset, &row, sizeof(row)));
+        EXPECT_EQ(raw[index].sequence, row.sequence);
+        EXPECT_EQ(raw[index].type, row.type);
+        EXPECT_EQ(raw[index].pid, row.pid);
+        EXPECT_EQ(expected[i], (std::array{row.arg0, row.arg1, row.arg2, row.arg3})) << i;
+    }
+
+    uint32_t after = 0;
+    ASSERT_TRUE(kernel_event::snapshot_all(raw.data(), capacity, after));
+    EXPECT_EQ(count, after);
+    EXPECT_EQ(fault, raw[count - expected.size() + 1].arg3);
+    EXPECT_EQ(address, raw[count - expected.size() + 6].arg0);
+}
+
 TEST_F(UsbInputObserve, EventSyscallKeepsCapturedRecordsDuringOverlappingRead)
 {
     constexpr auto bytes =
