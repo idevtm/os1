@@ -249,3 +249,8 @@ set_tests_properties(${os1_host_tests_TESTS} PROPERTIES LABELS "host;unit")
 add_test(NAME HardwareReferenceComparison
   COMMAND "${Python3_EXECUTABLE}" -E -B "${OS1_REPO_ROOT}/tests/scripts/test_hardware_compare.py")
 set_tests_properties(HardwareReferenceComparison PROPERTIES LABELS "host;unit")
+
+add_test(NAME UapiHeaderCompatibility
+  COMMAND "${Python3_EXECUTABLE}" -E -B "${OS1_REPO_ROOT}/tests/scripts/test_uapi_headers.py"
+    --cc "${CMAKE_C_COMPILER}" --cxx "${CMAKE_CXX_COMPILER}")
+set_tests_properties(UapiHeaderCompatibility PROPERTIES LABELS "host;unit")
