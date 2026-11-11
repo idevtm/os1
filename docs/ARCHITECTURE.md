@@ -1468,13 +1468,17 @@ The high-address mapping regression and both persistence smokes cover this requi
 Canonical console / file -> bounded parser -> command and redirection specification
   -> save stream grants -> prepare input/output -> built-in or child -> restore grants
 Directory/File IPC -> create, truncate, append; descriptor I/O -> shared file cursor
+Editor buffer -> temporary sibling -> complete write -> identity-checked MOVE_AT
 ```
 
 The [shell guide](shell/interactive-files.md) defines `touch`, `write`, `edit`, redirection, and here-documents.
 [File helpers](../src/user/include/os1/file_tools.hpp) own temporary descriptors and restore streams through scoped cleanup.
 Here-documents use unlinked `/tmp` files and finish collection before opening an output target.
 [The editor](../src/user/include/os1/line_editor.hpp) uses a 64 KiB text buffer and a separate insertion buffer of equal size.
-It saves explicitly; failed saves retain the edit buffer and report possible partial file contents.
+It writes a temporary sibling before it publishes a replacement.
+The kernel checks the source object ID under namespace admission before the move.
+A temporary write failure leaves the original file in place.
+The editor retains unsaved text after a save failure.
 The [parser and text model](../src/common/shell) contain bounded logic shared with host tests.
 Native File `append` and descriptor APPEND commit each 256-byte unit under the filesystem lock.
 This preserves one descriptor table, existing grant authority, and shared open-instance state.

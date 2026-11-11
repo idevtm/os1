@@ -379,8 +379,8 @@ TEST_F(LogExport, ScopedMoveInvalidatesBothParentsAndMovedObjectOnBothBackends)
         int fds[] = {
             install(left_node), install(right_node), install(static_cast<VfsNode*>(c->object))};
         auto x = snapshot(fds[0]), y = snapshot(fds[1]), z = snapshot(fds[2]);
-        ASSERT_EQ(0,
-                  left_node->operations->move(left_node, "item", 4, right_node, "moved", 5, false));
+        ASSERT_EQ(
+            0, left_node->operations->move(left_node, "item", 4, right_node, "moved", 5, false, 0));
         EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fds[0], x));
         EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fds[1], y));
         EXPECT_EQ(OS1_ERR_CHANGED, vfs_tree_step(table, fds[2], z));

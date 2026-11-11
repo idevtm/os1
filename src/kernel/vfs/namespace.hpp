@@ -13,7 +13,7 @@ long vfs_context_open(DescriptorTable&,
                       const os1_context_open_request&,
                       const char* path);
 long vfs_describe_path(DescriptorTable&, int root, int object, char* path, size_t capacity);
-long vfs_move_at(DescriptorTable&, int source, const os1_move_request&);
+long vfs_move_at(DescriptorTable&, int source, const os1_move_request&, uint64_t source_id = 0);
 long vfs_same_object(DescriptorTable&, int left, int right);
 
 // NamespaceGuard must be held. Current backends cap tree depth at 32.

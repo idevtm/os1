@@ -112,10 +112,10 @@ struct Reader
     }
 };
 // Native operations accept one child name; path splitting does not add authority.
-inline long parent(const char* path,
-                   char* leaf,
-                   uint32_t rights,
-                   uint32_t file_rights = fs::file_rights)
+inline long parent_resource(const char* path,
+                            char* leaf,
+                            uint32_t rights,
+                            uint32_t file_rights = fs::file_rights)
 {
     size_t n = length(path);
     if(!n || n >= OS1_PATH_MAX || path[n - 1] == '/')
@@ -137,7 +137,14 @@ inline long parent(const char* path,
     else
         for(size_t i = 0; i < start; ++i)
             prefix[i] = path[i];
-    Handle resource(os1::user::open(prefix, rights, file_rights));
+    return os1::user::open(prefix, rights, file_rights);
+}
+inline long parent(const char* path,
+                   char* leaf,
+                   uint32_t rights,
+                   uint32_t file_rights = fs::file_rights)
+{
+    Handle resource(parent_resource(path, leaf, rights, file_rights));
     if(resource.fd < 0)
         return resource.fd;
     return fs::bind(resource.fd, true, rights);
@@ -183,6 +190,21 @@ inline long open_file(const char* path, Mode mode, uint32_t rights = fs::file_ri
     }
     return file.take();
 }
+inline void temporary_name(char (&name)[48])
+{
+    static unsigned sequence = 0;
+    constexpr char prefix[] = ".shell-";
+    for(size_t i = 0; i < sizeof(prefix); ++i)
+        name[i] = prefix[i];
+    size_t at = 7;
+    uint64_t value = (uint64_t(getpid()) << 32) | ++sequence;
+    do
+    {
+        name[at++] = "0123456789abcdef"[value & 15];
+        value >>= 4;
+    } while(value);
+    name[at] = 0;
+}
 inline long temporary()
 {
     Handle root(os1::user::open("/tmp", fs::directory_rights, fs::descendant_rights));
@@ -191,24 +213,15 @@ inline long temporary()
     Handle directory(fs::bind(root.fd, true, fs::directory_rights));
     if(directory.fd < 0)
         return directory.fd;
-    static unsigned sequence = 0;
+    char name[48];
     for(unsigned attempt = 0; attempt < 16; ++attempt)
     {
-        char name[48] = ".shell-";
-        size_t at = 7;
-        uint64_t value = (uint64_t(getpid()) << 32) | ++sequence;
-        do
-        {
-            name[at++] = "0123456789abcdef"[value & 15];
-            value >>= 4;
-        } while(value);
-        name[at] = 0;
-        long fd = fs::open(directory.fd, name, fs::file_rights, 0, OS1_OBJECT_FILE);
-        if(fd == OS1_ERR_EXISTS)
+        temporary_name(name);
+        Handle file(fs::open(directory.fd, name, fs::file_rights, 0, OS1_OBJECT_FILE));
+        if(file.fd == OS1_ERR_EXISTS)
             continue;
-        if(fd < 0)
-            return fd;
-        Handle file(fd);
+        if(file.fd < 0)
+            return file.fd;
         long status = fs::remove(directory.fd, name);
         if(status < 0)
             return status;
