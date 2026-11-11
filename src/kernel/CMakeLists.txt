@@ -122,6 +122,7 @@ set(KERNEL_PROC_SOURCES
   syscall/resource.cpp
   proc/process.cpp
   proc/reaper.cpp
+  proc/kernel_stack.cpp
   proc/thread.cpp
   proc/user_elf.cpp
   proc/user_program.cpp
@@ -214,7 +215,7 @@ target_compile_options(
   os1_acpica
   PRIVATE
     -ffreestanding
-    -mno-red-zone
+    -mno-red-zone -fstack-clash-protection
     -march=x86-64
     -mtune=generic
     -mgeneral-regs-only
@@ -238,7 +239,7 @@ set(OS1_DRIVER_ELF "${OS1_ARTIFACT_DIR}/drivers/virtio-net.elf")
 set(OS1_DRIVER_METADATA "${OS1_GENERATED_DIR}/driver-package.json")
 add_custom_command(OUTPUT "${OS1_DRIVER_ELF}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}/drivers"
-  COMMAND "${CMAKE_CXX_COMPILER}" -std=gnu++20 -ffreestanding -mno-red-zone
+  COMMAND "${CMAKE_CXX_COMPILER}" -std=gnu++20 -ffreestanding -mno-red-zone -fstack-clash-protection
     -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -no-pie -Os
     -fno-stack-protector -fno-exceptions -fno-rtti -fno-threadsafe-statics
     -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nostartfiles
@@ -266,7 +267,7 @@ set(OS1_DISPLAY_DRIVER_ELF "${OS1_ARTIFACT_DIR}/drivers/firmware-framebuffer.elf
 set(OS1_DISPLAY_DRIVER_METADATA "${OS1_GENERATED_DIR}/display-driver-package.json")
 add_custom_command(OUTPUT "${OS1_DISPLAY_DRIVER_ELF}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_ARTIFACT_DIR}/drivers"
-  COMMAND "${CMAKE_CXX_COMPILER}" -std=gnu++20 -ffreestanding -mno-red-zone
+  COMMAND "${CMAKE_CXX_COMPILER}" -std=gnu++20 -ffreestanding -mno-red-zone -fstack-clash-protection
     -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -no-pie -Os
     -fno-stack-protector -fno-exceptions -fno-rtti -fno-threadsafe-statics
     -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nostartfiles
@@ -323,8 +324,8 @@ target_compile_options(
     # The kernel does not enable or context-switch SIMD/FPU state yet. Force
     # integer-register-only codegen so newer cross-compilers cannot introduce
     # XMM/AVX instructions that trap as #UD on the CI runner's virtual CPU.
-    $<$<COMPILE_LANGUAGE:C>:-ffreestanding -mno-red-zone -march=x86-64 -mtune=generic -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -O1 -Wall -Wextra -fno-asynchronous-unwind-tables -fno-unwind-tables>
-    $<$<COMPILE_LANGUAGE:CXX>:-ffreestanding -mno-red-zone -march=x86-64 -mtune=generic -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -Os -Wall -Wextra -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-exceptions -fno-rtti>
+    $<$<COMPILE_LANGUAGE:C>:-ffreestanding -mno-red-zone -fstack-clash-protection -march=x86-64 -mtune=generic -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -O1 -Wall -Wextra -fno-asynchronous-unwind-tables -fno-unwind-tables>
+    $<$<COMPILE_LANGUAGE:CXX>:-ffreestanding -mno-red-zone -fstack-clash-protection -march=x86-64 -mtune=generic -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -Os -Wall -Wextra -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-exceptions -fno-rtti>
 )
 if(OS1_KMEM_DEBUG)
   target_compile_definitions(kernel_core_objects PRIVATE OS1_KMEM_DEBUG=1)

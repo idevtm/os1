@@ -766,7 +766,7 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         }
     }
 
-    if(!init_tasks(page_frames))
+    if(!init_tasks(page_frames, g_kernel_root_cr3))
     {
         return;
     }

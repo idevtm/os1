@@ -130,7 +130,7 @@ THREAD_STATIC_ASSERT(stack_top_offset, offsetof(Thread, kernel_stack_top) == 56)
 #undef THREAD_STATIC_ASSERT
 
 // Initialize the kmem-backed process and thread registries.
-bool init_tasks(PageFrameContainer& frames);
+bool init_tasks(PageFrameContainer& frames, uint64_t kernel_root = 0);
 // Create a kernel-mode thread with a bootstrap frame that enters `entry`.
 Thread* create_kernel_thread(Process* process, void (*entry)(void), PageFrameContainer& frames);
 // Create or return the idle thread assigned to one CPU.

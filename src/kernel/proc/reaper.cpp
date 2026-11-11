@@ -3,8 +3,8 @@
 // re-enters the kernel.
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "buffer/buffer.hpp"
-#include "handoff/memory_layout.h"
 #include "ipc/channel.hpp"
+#include "proc/kernel_stack.hpp"
 #include "proc/thread.hpp"
 #include "syscall/console_read.hpp"
 #include "syscall/vfs.hpp"
@@ -64,10 +64,7 @@ void reap_dead_threads(PageFrameContainer& frames)
         // Thread teardown is deferred until some *other* thread enters the kernel.
         // That keeps us from freeing the current kernel stack out from under the CPU
         // while it is still executing on it.
-        for(size_t page = 0; page < kKernelThreadStackPages; ++page)
-        {
-            frames.free(thread->kernel_stack_base + page * kPageSize);
-        }
+        release_kernel_stack(frames, thread->kernel_stack_base);
 
         Process* owner = thread->process;
         clear_thread(thread);

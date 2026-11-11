@@ -204,27 +204,15 @@ Thread* load_user_program(PageFrameContainer& frames,
         reap_process(process, frames);
         return nullptr;
     }
-    os1_startup_record startup{};
-    startup.version = OS1_STARTUP_VERSION;
-    startup.size = sizeof(startup);
-    startup.root_fd = process->root_fd;
-    startup.cwd_fd = process->cwd_fd;
-    size_t length = 0;
-    while(length < sizeof(startup.strings) && path[length])
-        ++length;
-    if(length == sizeof(startup.strings))
-    {
-        reap_process(process, frames);
-        return nullptr;
-    }
-    memcpy(startup.strings, path, length + 1);
-    startup.argc = 1;
-    startup.string_bytes = length + 1;
     uint64_t argument = 0;
-    if(!install_startup_record(frames, user_cr3, startup, user_rsp, argument))
     {
-        reap_process(process, frames);
-        return nullptr;
+        const LegacyStartupRecord startup(*process, path);
+        if(!startup.get() ||
+           !install_startup_record(frames, user_cr3, *startup.get(), user_rsp, argument))
+        {
+            reap_process(process, frames);
+            return nullptr;
+        }
     }
     Thread* thread = create_user_thread(process, entry, user_rsp, frames, false);
     if(nullptr == thread)

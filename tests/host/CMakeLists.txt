@@ -152,6 +152,7 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/platform/state.cpp"
   "${OS1_REPO_ROOT}/src/kernel/proc/process.cpp"
   "${OS1_REPO_ROOT}/src/kernel/proc/reaper.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/proc/kernel_stack.cpp"
   "${OS1_REPO_ROOT}/src/kernel/proc/thread.cpp"
   "${OS1_REPO_ROOT}/src/kernel/proc/user_elf.cpp"
   "${OS1_REPO_ROOT}/src/kernel/sched/scheduler.cpp"

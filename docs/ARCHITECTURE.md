@@ -958,7 +958,7 @@ That last capability matters on the modern path because initrd modules and frame
 `VirtualMemory` in [../src/kernel/mm/virtual_memory.cpp](../src/kernel/mm/virtual_memory.cpp) manages kernel and user mappings. The steady-state layout is now split into three intentional regions:
 
 - the shared higher-half kernel window at `kKernelVirtualOffset`
-- the kernel-owned direct map at `kDirectMapBase`
+- the kernel-owned direct map from `kDirectMapBase` to the kernel image PML4 slot
 - the dedicated user slot at PML4 index `1`
 
 The kernel image is mapped by section permissions in the final kernel CR3:
@@ -975,7 +975,9 @@ The user layout remains:
 - `kUserStackTop = 0x0000008040000000`
 
 User CR3s share the supervisor half, including higher-half kernel mappings and every occupied direct-map slot.
-This includes high PCI BAR addresses selected by UEFI firmware. The user half, including slot `0`, remains private.
+This includes mapped PCI BARs above the first direct-map slot.
+The direct mapper rejects physical ranges that include an address at or above 127.5 TiB.
+The user half, including slot `0`, remains private.
 
 Supported operations include:
 
@@ -1006,6 +1008,26 @@ Each CPU gets a dedicated `struct cpu` page containing:
 - kernel stack
 
 The BSP receives its initial `cpu` page from the boot frontend. Additional CPUs are allocated by the kernel.
+
+### Guarded kernel thread stacks
+
+Each scheduled thread has a 16 KiB kernel stack with an unmapped guard page below it.
+The kernel shares the stack mapping across supervisor address spaces.
+
+```text
+Lower virtual address                         Higher virtual address
+[ 4 KiB unmapped guard page ][ 16 KiB supervisor stack ] <- initial RSP
+                              Stack grows to the left
+```
+
+The virtual stack range starts at `kKernelStackVirtualBase` in the kernel image PML4 slot.
+Each stack uses four contiguous physical pages and a supervisor-only, non-executable mapping.
+The physical run selects a virtual slot. The guard page uses no physical frame.
+The kernel retains the stack page tables for subsequent allocations.
+
+The compiler probes large stack frames page by page. A guard fault can reach the separate IST1 stack as a double fault.
+The bootstrap stacks and IST1 pages keep their existing mappings.
+See the [stack lifetime rules](kernel/smp-synchronization.md#kernel-stack-lifetime) for reclamation.
 
 ### GDT And TSS
 

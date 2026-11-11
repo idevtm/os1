@@ -30,6 +30,7 @@
 #include <thread>
 #include <vector>
 
+extern void (*host_tlb_retirement_wait)(cpu*);
 void host_console_output_clear();
 const std::string& host_console_output();
 namespace
@@ -296,6 +297,7 @@ struct ApScope
 {
     cpu ap{};
     cpu* previous = g_cpu_boot->next;
+    decltype(host_tlb_retirement_wait) previous_ack = host_tlb_retirement_wait;
     ApScope()
     {
         ap.self = &ap;
@@ -303,9 +305,16 @@ struct ApScope
         ap.booted = 1;
         ap.magic = CPU_MAGIC;
         g_cpu_boot->next = &ap;
+        host_tlb_retirement_wait = [](cpu* target) {
+            auto* saved = g_cpu_host_current;
+            g_cpu_host_current = target;
+            ipi_poll_tlb_shootdown();
+            g_cpu_host_current = saved;
+        };
     }
     ~ApScope()
     {
+        host_tlb_retirement_wait = previous_ack;
         g_cpu_boot->next = previous;
         g_cpu_host_current = g_cpu_boot;
     }
@@ -374,6 +383,34 @@ struct ImageFixture
 };
 uint64_t published_pid = 0;
 PageFrameContainer* publication_frames = nullptr;
+TEST_F(Resources, LegacyStartupRecordReleasesBackingAndHandlesExhaustion)
+{
+    const auto initial_pages = frames.free_page_count();
+    {
+        const LegacyStartupRecord startup(*process, "/bin/test");
+        ASSERT_NE(nullptr, startup.get());
+        EXPECT_EQ(0, validate_startup(*startup.get()));
+        EXPECT_STREQ("/bin/test", startup.get()->strings);
+        EXPECT_EQ(0u, startup.get()->envc);
+        EXPECT_LT(frames.free_page_count(), initial_pages);
+    }
+    EXPECT_EQ(initial_pages, frames.free_page_count());
+
+    std::vector<uint64_t> held_pages;
+    uint64_t page = 0;
+    while(frames.allocate(page))
+    {
+        held_pages.push_back(page);
+    }
+    const LegacyStartupRecord startup(*process, "/bin/test");
+    EXPECT_EQ(nullptr, startup.get());
+    for(uint64_t held : held_pages)
+    {
+        EXPECT_TRUE(frames.free(held));
+    }
+    EXPECT_EQ(initial_pages, frames.free_page_count());
+}
+
 TEST_F(Resources, ChildFrameAndGrantsAreCompleteBeforeRemotePublication)
 {
     ApScope cpus;

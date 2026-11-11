@@ -94,18 +94,11 @@ long sys_exec(const ProcessSyscallContext& context, uint64_t user_path)
     if(resolve_process_image(thread->process, path, image) < 0)
         return -1;
     InstanceRef pin(image);
-    os1_startup_record startup{};
-    startup.version = OS1_STARTUP_VERSION;
-    startup.size = sizeof(startup);
-    startup.root_fd = thread->process->root_fd;
-    startup.cwd_fd = thread->process->cwd_fd;
-    size_t length = 0;
-    while(path[length])
-        ++length;
-    for(size_t i = 0; i <= length; ++i)
-        startup.strings[i] = path[i];
-    startup.argc = 1;
-    startup.string_bytes = length + 1;
-    const long result = replace_process_image(context, thread, image, startup, path);
+    const LegacyStartupRecord startup(*thread->process, path);
+    if(!startup.get())
+    {
+        return -1;
+    }
+    const long result = replace_process_image(context, thread, image, *startup.get(), path);
     return result < 0 ? -1 : result;
 }

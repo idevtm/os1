@@ -87,6 +87,10 @@ constexpr uint64_t kBootLogUefiCandidatesEnd = 0x07D6B000 + kBootLogUefiWindowBy
 
 constexpr uint64_t kKernelPml4Index = (kKernelVirtualOffset >> 39) & 0x1FFull;
 constexpr uint64_t kDirectMapPml4Index = (kDirectMapBase >> 39) & 0x1FFull;
+// Reserve the kernel image's PML4 slot for shared kernel mappings.
+constexpr uint64_t kKernelStackVirtualBase = 0xFFFFFF8000000000ull;
+constexpr uint64_t kDirectMapPhysicalLimit = kKernelStackVirtualBase - kDirectMapBase;
+static_assert(((kKernelStackVirtualBase >> 39) & 0x1FFull) == kKernelPml4Index);
 constexpr uint64_t kKernelVirtualBase = kKernelVirtualOffset + kKernelReservedPhysicalStart;
 constexpr uint64_t kKernelVirtualEnd = kKernelVirtualOffset + kKernelReservedPhysicalEnd;
 constexpr uint64_t kInvalidPhysicalAddress = ~0ull;
@@ -103,7 +107,7 @@ constexpr uint64_t kInvalidPhysicalAddress = ~0ull;
 
 [[nodiscard]] constexpr bool is_direct_map_virtual_address(uint64_t virtual_address)
 {
-	return (virtual_address >= kDirectMapBase) && !is_kernel_virtual_address(virtual_address);
+    return (virtual_address >= kDirectMapBase) && (virtual_address < kKernelStackVirtualBase);
 }
 
 [[nodiscard]] constexpr uint64_t kernel_virt_to_phys(uint64_t virtual_address)

@@ -121,6 +121,10 @@ A segment is nonempty if its `p_memsz` is greater than zero.
 Nonempty segments must appear in increasing virtual address order.
 Their virtual page ranges must be disjoint. Adjacent page ranges are valid.
 The loader returns `OS1_ERR_BAD_IMAGE` if segments share a virtual page or appear out of order.
+
+The kernel prepares the legacy spawn and exec startup record in temporary heap storage.
+If this allocation fails, the legacy syscall returns `-1`.
+The kernel releases the temporary record after it copies it to the user stack or reports a failure.
 Disk-backed executable files use a stable snapshot; see the [ext2 profile](../../filesystems/ext2.md).
 There is no secondary privileged pathname lookup.
 
