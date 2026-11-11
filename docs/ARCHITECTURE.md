@@ -1394,6 +1394,7 @@ Host manifest -> locked image copy -> debugfs -> validation -> atomic image repl
 The [ext2 profile](filesystems/ext2.md) defines exact limits, sync authority, failure behavior, and deployment targets.
 The namespace mounts `/disk` before publication when a supported partition exists.
 It tries the virtio device first, then published USB devices.
+Virtio read-only media mount with read and execute access. Disk log export skips those mounts.
 [USB mass storage](hardware/usb-storage.md) adds bounded SCSI commands over xHCI bulk endpoints.
 An unsupported initialization flush can use confirmed write-through operation; unknown cache behavior still rejects writable storage admission.
 Shared IRQ/poll event consumption uses an event lock; a BSP input queue keeps HID console callbacks on the boot CPU.

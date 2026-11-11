@@ -2037,6 +2037,11 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-ext2-${boot}.log" ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
+    os1_add_qemu_test(NAME os1_smoke_ext2_readonly_${boot}
+      COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_ext2_persistence.py"
+        --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
+        --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}" --utility "${OS1_USER_DISKUTIL_ELF}"
+        --log "${OS1_ARTIFACT_DIR}/smoke-ext2-readonly-${boot}.log" --readonly ${file_test_firmware} ${OS1_EXT2_CHECK_ARGS})
     os1_add_qemu_test(NAME os1_smoke_deploy_${boot}
       COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_deployment_boot.py"
         --programs-manifest "${OS1_GENERATED_DIR}/storage-programs.json"
@@ -2092,8 +2097,8 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_usb_storage_${boot} os1_smoke_usb_deploy_${boot} os1_smoke_usb_failure_${boot})
     set_tests_properties(os1_smoke_deploy_${boot} PROPERTIES TIMEOUT 240)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_deploy_${boot})
-    set_tests_properties(os1_smoke_ext2_${boot} PROPERTIES TIMEOUT 180)
-    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_ext2_${boot})
+    set_tests_properties(os1_smoke_ext2_${boot} os1_smoke_ext2_readonly_${boot} PROPERTIES TIMEOUT 180)
+    list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_ext2_${boot} os1_smoke_ext2_readonly_${boot})
   endforeach()
 endif()
 

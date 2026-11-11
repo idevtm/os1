@@ -80,7 +80,9 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     started = time.monotonic()
     menu = BootMenu(getattr(args, 'boot_menu_entry', 1) if args.code else None)
 
-    rescue = any(getattr(args, name, False) for name in ('readonly', 'stall_init', 'missing_disk', 'rescue'))
+    usb_readonly = getattr(args, 'readonly', False) and args.transport != 'virtio'
+    rescue = usb_readonly or any(getattr(args, name, False)
+                                 for name in ('stall_init', 'missing_disk', 'rescue'))
     prompt = b'rescue> ' if rescue else b'os1> '
 
     def expect(marker=None, timeout=60, allow_errors=False):
@@ -132,7 +134,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
         startup = expect()
         if args.code and getattr(args, 'boot_menu_entry', 1) is not None:
             assert menu.selected, 'shell started without selecting the requested menu entry'
-        if getattr(args, 'readonly', False) or getattr(args, 'stall_init', False):
+        if usb_readonly or getattr(args, 'stall_init', False):
             rejected = b'ehci: storage rejected' if args.transport == 'ehci' else b'usb-storage: unsupported or failed device'
             if getattr(args, 'stall_init', False) and args.transport == 'ehci':
                 rejected = b'ehci: controller retired'
@@ -229,11 +231,14 @@ def main():
     for name in ['qemu', 'image', 'utility', 'log']:
         p.add_argument('--' + name, required=True)
     p.add_argument('--transport', choices=['virtio', 'usb', 'ehci'], default='virtio')
+    p.add_argument('--readonly', action='store_true')
     p.add_argument('--e2fsck')
     p.add_argument('--code')
     p.add_argument('--vars')
     p.add_argument('--programs-manifest', required=True)
     args = p.parse_args()
+    if args.readonly and args.transport != 'virtio':
+        p.error('--readonly requires the virtio transport')
     log = Path(args.log)
     log.parent.mkdir(parents=True, exist_ok=True)
     disk = log.with_suffix('.raw')  # Test-owned image; never the interactive disk.
@@ -251,6 +256,20 @@ def main():
         log.with_suffix(f'.{stage}.fsck.log').write_text(result.stdout + result.stderr)
         assert result.returncode == 0, result.stdout + result.stderr
     check('fresh')
+    if args.readonly:
+        def exercise_readonly(run, _expect):
+            contents = b'Persistent ext2 storage.'
+            run('cat /disk/readme', contents)
+            run('echo damage > /disk/readme', b'redirection failed', allow_errors=True)
+            run('echo damage > /disk/new', b'redirection failed', allow_errors=True)
+            run('cat /disk/readme', contents)
+            run('/disk/diskutil', b'diskutil: seed | verify | sync', allow_errors=True)
+
+        original = disk.read_bytes()
+        boot(args, disk, 'readonly', exercise=exercise_readonly)
+        assert disk.read_bytes() == original, 'read-only test changed the disk image'
+        check('readonly')
+        return
     boot(args, disk, 'write')
     check('written')
     boot(args, disk, 'read')

@@ -266,6 +266,47 @@ TEST_F(Ext2, VfsMountAuthoritySnapshotAndUnlinkPolicy)
     ext2::put32(disk.bytes.data() + 454, UINT32_MAX);
     EXPECT_EQ(ext2_mount(&root_node, device), OS1_ERR_BAD_IMAGE);
 }
+TEST_F(Ext2, ReadOnlyMountKeepsReadsAndSkipsDeviceFlush)
+{
+    os1::host_test::PhysicalMemoryArena arena{16 * 1024 * 1024};
+    PageFrameContainer frames;
+    std::array<BootMemoryRegion, 1> regions{{{0, arena.size(), BootMemoryType::Usable, 0}}};
+    ASSERT_TRUE(frames.initialize(regions, 0x300000, kPageFrameBitmapQwordLimit));
+    kmem_init(frames);
+
+    const auto original = disk.bytes;
+    disk.fail_flush = true;
+    auto device = disk.device();
+    device.read_only = true;
+    VfsNode root{};
+    root.kind = OS1_OBJECT_DIRECTORY;
+    ASSERT_EQ(ext2_mount(&root, device), 0);
+    auto* mount = root.children;
+    ASSERT_NE(mount, nullptr);
+    EXPECT_FALSE(mount->allowed_rights & OS1_RIGHT_CREATE);
+
+    OpenInstance* opened = nullptr;
+    EXPECT_EQ(mount->operations->create(mount, "new", 3, OS1_OBJECT_FILE, opened), OS1_ERR_ACCESS);
+    EXPECT_EQ(opened, nullptr);
+    NativeObject* object = nullptr;
+    ASSERT_EQ(mount->operations->lookup(mount, "readme", 6, object), 0);
+    auto* file = static_cast<VfsNode*>(object);
+    EXPECT_FALSE(file->allowed_rights & OS1_RIGHT_WRITE);
+    EXPECT_FALSE(file->interfaces & OS1_INTERFACE_BYTE_OUTPUT);
+    EXPECT_EQ(file->operations->truncate(file, 0), OS1_ERR_ACCESS);
+    EXPECT_EQ(file->operations->set_times(file, OS1_TIME_MODIFY), OS1_ERR_ACCESS);
+    char contents[10]{};
+    EXPECT_EQ(file->operations->read(file, 0, contents, sizeof(contents)), sizeof(contents));
+    EXPECT_EQ(std::memcmp(contents, "Persistent", sizeof(contents)), 0);
+    EXPECT_EQ(mount->operations->sync(mount), 0);
+    EXPECT_EQ(ext2_system_sync(true), 0);
+    ext2_system_thaw();
+    EXPECT_TRUE(disk.bytes == original);
+
+    object_release(file);
+    object_release(mount);
+}
+
 }  // namespace
 
 TEST_F(Ext2, GrowthClearsForeignNonzeroTail)

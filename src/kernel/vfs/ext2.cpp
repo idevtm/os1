@@ -138,6 +138,9 @@ DiskNode* node(DiskFs& fs,
     // Executable files are immutable in this profile. New writable files cannot gain EXECUTE.
     if(n->kind == OS1_OBJECT_FILE && (ext2::u16(inode.bytes) & 0111))
         n->allowed_rights = (kFileRights);
+    if(fs.volume.io.read_only)
+        n->allowed_rights &= ~(OS1_RIGHT_WRITE | OS1_RIGHT_CREATE | OS1_RIGHT_REMOVE |
+                               OS1_RIGHT_RENAME | OS1_RIGHT_SET_TIMES);
     n->interfaces =
         n->kind == OS1_OBJECT_DIRECTORY
             ? OS1_INTERFACE_DIRECTORY
@@ -242,6 +245,8 @@ long create_locked(VfsNode* base, const char* name, size_t size, uint32_t kind, 
         return OS1_ERR_LIMIT;
     if(find(p, name, size))
         return OS1_ERR_EXISTS;
+    if(fs.volume.io.read_only)
+        return OS1_ERR_ACCESS;
     // Reserve object and open-instance memory before mutating disk metadata.
     ext2::Inode initial{};
     ext2::put16(initial.bytes, kind == OS1_OBJECT_DIRECTORY ? 0x41ed : 0x81a4);
@@ -402,6 +407,8 @@ long move(VfsNode* from,
         return OS1_ERR_NOT_EMPTY;
     if(target && atomic_load_acquire(&target->references) != 1)
         return OS1_ERR_WOULD_BLOCK;
+    if(fs.volume.io.read_only)
+        return OS1_ERR_ACCESS;
     if(q->depth + 1 + vfs_height(child) >= 32 || fs.cookie == UINT64_MAX)
         return OS1_ERR_LIMIT;
     auto* scratch = static_cast<uint8_t*>(kmalloc(2 * ext2::block_bytes));
@@ -681,10 +688,13 @@ long ext2_mount(NativeObject* root, BlockDevice& device)
     fs->device = &device;
     fs->start = start;
     fs->sectors = count;
-    long r = fs->volume.mount(
-        {fs, read_block, write_block, flush, uint32_t(count / 8), [](void*, uint64_t& now) {
-             return wall_clock_now(now);
-         }});
+    long r = fs->volume.mount({fs,
+                               read_block,
+                               write_block,
+                               flush,
+                               uint32_t(count / 8),
+                               [](void*, uint64_t& now) { return wall_clock_now(now); },
+                               device.read_only});
     ext2::Inode inode{};
     if(r == 0)
         r = fs->volume.inode_read(2, inode);
