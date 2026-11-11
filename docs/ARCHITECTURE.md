@@ -116,6 +116,9 @@ EHCI and xHCI defer scheduling while they own a synchronous controller resource.
 IRQ service continues, but scheduling and deferred filesystem work wait until ownership ends.
 The outermost guard requests a pending reschedule when local runnable work exists, including on APs without periodic ticks.
 These synchronous scopes cannot sleep or yield. They can delay other tasks on their CPU during controller timeouts.
+EHCI polls periodic input while it waits for bulk transfers.
+After a confirmed async schedule stop, a bulk timeout retires only the affected storage device.
+See [EHCI and high-speed hubs](hardware/usb-storage.md#ehci-and-high-speed-hubs).
 The [input recovery plan](hardware/input-recovery-plan.md#bios-startup-failure-found-during-validation) records the discovered deadlock and controlled regression evidence.
 
 ## Input services and attachment changes

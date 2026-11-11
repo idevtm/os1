@@ -119,7 +119,10 @@ The driver uses a polling asynchronous schedule for control and bulk transfers.
 Each controller owns one 4-KiB schedule and one 4-KiB transfer buffer, both below 4 GiB.
 A controller without suitable DMA memory or calibrated delays is rejected.
 The schedule must stop before software changes its queue head or transfer descriptors.
-Uncertain completion retires the controller and retains its DMA buffers until reboot.
+A stopped bulk transfer that reaches its two-second limit retires its device.
+The periodic schedule can continue to service input.
+An unconfirmed schedule stop retires the controller and retains its DMA buffers until reboot.
+A connected control transfer still retires the controller when it reaches its one-second limit.
 
 Hub discovery reads configuration and hub descriptors, powers ports, waits for power stabilization, and debounces connections.
 It resets connected ports and clears initial change bits before assigning child addresses.

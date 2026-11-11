@@ -324,6 +324,72 @@ TEST(Ehci, StuckScheduleTransitionFailsWithoutUnsafeToggle)
     EXPECT_EQ(command, 0u);
 }
 
+TEST(Ehci, ConnectedBulkTimeoutAllowsPeriodicScheduleToContinue)
+{
+    // An endpoint that keeps returning NAK leaves its qTD active without an error.
+    ehci::Qtd bulk{};
+    ASSERT_TRUE(ehci::prepare_qtd(bulk, 0x3000, 512, 1, false));
+    ASSERT_NE(bulk.token & ehci::active, 0u);
+    ASSERT_EQ(bulk.token & ehci::errors, 0u);
+    EXPECT_EQ(ehci::async_deadline_100ns(ehci::AsyncTransfer::Control), 10'000'000u);
+    EXPECT_EQ(ehci::async_deadline_100ns(ehci::AsyncTransfer::Bulk), 20'000'000u);
+
+    constexpr uint32_t async_enable = 1u << 5, periodic_enable = 1u << 4;
+    constexpr uint32_t async_running = 1u << 15, periodic_running = 1u << 14;
+    struct Registers
+    {
+        volatile uint32_t command = async_enable | periodic_enable;
+        volatile uint32_t status = async_running | periodic_running;
+        bool stalled_stop = false;
+    };
+    auto progress = [](void* context) {
+        auto& registers = *static_cast<Registers*>(context);
+        if(!registers.stalled_stop)
+            registers.status = periodic_running;
+    };
+    auto check_timeout = [&](ehci::AsyncTransfer type, bool connected, bool stalled_stop) {
+        Registers registers;
+        registers.stalled_stop = stalled_stop;
+        Spinlock lock{"ehci-test"};
+        bool controller_retired = false;
+        bool device_retired = false;
+        auto stop = [&] {
+            bool stopped = ehci::set_schedule(registers.command,
+                                              registers.status,
+                                              lock,
+                                              controller_retired,
+                                              ehci::Schedule::Asynchronous,
+                                              false,
+                                              progress,
+                                              &registers,
+                                              2);
+            if(!stopped)
+                controller_retired = true;  // The driver retires on an unconfirmed stop.
+            return stopped;
+        };
+        EXPECT_FALSE(ehci::finish_async_transfer(
+            type,
+            (bulk.token & ehci::active) == 0,
+            stop,
+            [&] { return connected; },
+            [&] { controller_retired = true; },
+            [&](bool root_connected) {
+                EXPECT_EQ(root_connected, connected);
+                EXPECT_EQ(registers.status, periodic_running);
+                device_retired = true;
+            }));
+        const bool needs_controller_retirement =
+            stalled_stop || (connected && type == ehci::AsyncTransfer::Control);
+        EXPECT_EQ(controller_retired, needs_controller_retirement);
+        EXPECT_NE(device_retired, needs_controller_retirement);
+        if(device_retired)
+            EXPECT_EQ(registers.command, periodic_enable);
+    };
+    check_timeout(ehci::AsyncTransfer::Bulk, true, false);
+    check_timeout(ehci::AsyncTransfer::Bulk, true, true);
+    check_timeout(ehci::AsyncTransfer::Control, true, false);
+    check_timeout(ehci::AsyncTransfer::Control, false, false);
+}
 TEST(Ehci, PeriodicScheduleCanRearmWhileStorageOwnsAsyncSchedule)
 {
     uint8_t async_gate = 0, periodic_gate = 0;
