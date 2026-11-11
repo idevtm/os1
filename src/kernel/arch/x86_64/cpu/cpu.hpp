@@ -81,7 +81,7 @@ struct cpu
     uint32_t user_copy_depth;
     cpu* next;
     uint8_t id;
-    volatile uint32_t booted;
+    uint32_t booted;
     uint32_t magic;
     char kstacklo[1];
     char kstackhi[0] __attribute__((aligned(4096)));
@@ -99,8 +99,31 @@ CPU_STATIC_ASSERT(kstackhi_offset, offsetof(cpu, kstackhi) == 4096);
 
 #undef CPU_STATIC_ASSERT
 
+enum class ApStartupState : uint32_t
+{
+    Pending,
+    Online,
+    TimedOut,
+};
+
+inline ApStartupState cpu_ap_startup_state(const cpu* c)
+{
+    return static_cast<ApStartupState>(__atomic_load_n(&c->booted, __ATOMIC_ACQUIRE));
+}
+
+inline bool cpu_ap_finish_startup(cpu* c, ApStartupState state)
+{
+    auto pending = static_cast<uint32_t>(ApStartupState::Pending);
+    return __atomic_compare_exchange_n(&c->booted,
+                                       &pending,
+                                       static_cast<uint32_t>(state),
+                                       false,
+                                       __ATOMIC_RELEASE,
+                                       __ATOMIC_RELAXED);
+}
+
 extern cpu* g_cpu_boot;
- 
+
 #if defined(OS1_HOST_TEST)
 extern cpu* g_cpu_host_current;
 

@@ -1041,6 +1041,23 @@ Each CPU gets a dedicated `struct cpu` page containing:
 
 The BSP receives its initial `cpu` page from the boot frontend. Additional CPUs are allocated by the kernel.
 
+### AP startup records
+
+The AP trampoline selects a stack by xAPIC ID. A late AP can read only its own startup record.
+
+| Startup data | Lifetime |
+| --- | --- |
+| Entry address, CR3, and temporary IDT | The BSP sets these values before it starts any AP. |
+| CPU page address | The BSP prepares the AP exception stack and sets the slot before it sends the startup IPI. |
+| Startup state | The AP publishes readiness. The BSP can mark a pending AP offline after the deadline. |
+
+After the startup IPIs, the BSP prepares the TSC clock and starts a 500 ms polling interval.
+A spin limit bounds the polling loop if the clock cannot advance.
+If the BSP changes a pending AP to timed out, the AP stays offline.
+The scheduler redirects unpinned work away from offline APs. Thread creation rejects an offline pin.
+The kernel keeps its record and startup stack because the AP can still enter the trampoline.
+The BSP continues to start the remaining APs.
+
 ### Guarded kernel thread stacks
 
 Each scheduled thread has a 16 KiB kernel stack with an unmapped guard page below it.

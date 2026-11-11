@@ -45,7 +45,11 @@ constexpr uint64_t kEarlyLongModePageTablesAddress = 0x9000;
 
 // The AP trampoline communicates through a tiny parameter block in low memory
 // because secondary CPUs start before they have per-CPU stacks or rich state.
-constexpr uint64_t kApStartupCpuPageAddress = 0x20;
+// The upper half of the trampoline page holds one stack pointer base per xAPIC ID.
+constexpr uint64_t kApStartupCpuPagesAddress = kApTrampolineAddress + kPageSize / 2;
+constexpr size_t kApStartupCpuPageCount = 256;
+static_assert(kApStartupCpuPagesAddress + kApStartupCpuPageCount * sizeof(uint64_t) ==
+              kApTrampolineAddress + kPageSize);
 constexpr uint64_t kApStartupRipAddress = 0x28;
 constexpr uint64_t kApStartupCr3Address = 0x30;
 constexpr uint64_t kApStartupIdtAddress = 0x38;

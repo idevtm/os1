@@ -212,6 +212,41 @@ TEST(RunQueue, KernelWakeTargetUsesAssignedCpu)
     EXPECT_EQ(0u, cpu_run_queue_length(&ap_cpu));
 }
 
+TEST(RunQueue, TimedOutApIsRejectedAsAnExplicitOrRememberedTarget)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = initialized_frames();
+    kmem_init(frames);
+
+    cpu offline{};
+    offline.id = 1;
+    ASSERT_TRUE(cpu_ap_finish_startup(&offline, ApStartupState::TimedOut));
+    HostCpuScope cpu_scope(&offline);
+    ASSERT_TRUE(init_tasks(frames));
+    ASSERT_TRUE(ipi_initialize());
+    lapic_stub_reset();
+
+    Process* process = create_kernel_process(0);
+    ASSERT_NE(nullptr, process);
+    ASSERT_NE(nullptr, create_idle_thread_for_cpu(process, g_cpu_boot, idle_entry, frames));
+    ASSERT_NE(nullptr, create_idle_thread_for_cpu(process, &offline, idle_entry, frames));
+    EXPECT_EQ(nullptr, create_kernel_thread(process, idle_entry, frames, &offline));
+
+    Thread* explicit_worker = create_kernel_thread(process, idle_entry, frames, nullptr, false);
+    Thread* remembered_worker = create_kernel_thread(process, idle_entry, frames, nullptr, false);
+    ASSERT_NE(nullptr, explicit_worker);
+    ASSERT_NE(nullptr, remembered_worker);
+    remembered_worker->scheduler_cpu = &offline;
+    wake_blocked_thread(explicit_worker, &offline);
+    wake_blocked_thread(remembered_worker);
+
+    EXPECT_EQ(g_cpu_boot, explicit_worker->run_queue_cpu);
+    EXPECT_EQ(g_cpu_boot, remembered_worker->run_queue_cpu);
+    EXPECT_EQ(0u, cpu_run_queue_length(&offline));
+    EXPECT_EQ(2u, cpu_run_queue_length(g_cpu_boot));
+    EXPECT_EQ(0u, lapic_stub_icr_send_count());
+}
+
 TEST(RunQueue, KernelThreadsRoundRobinAcrossBootedCpus)
 {
     os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
