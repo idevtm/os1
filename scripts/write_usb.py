@@ -27,19 +27,35 @@ sys.path.insert(0, str(ROOT / "cmake/scripts"))
 import usb_data_image
 
 DISKUTIL = "/usr/sbin/diskutil"
+IOREG = "/usr/sbin/ioreg"
 # macOS SDK sys/disk.h: _IO('d', 22); fsync alone does not flush a raw disk.
 DKIOCSYNCHRONIZECACHE = 0x20006416
 IDENTITY_FIELDS = ("DeviceIdentifier", "DeviceNode", "MediaName", "IORegistryEntryName",
                    "DeviceTreePath", "DeviceBlockSize", "TotalSize", "BusProtocol", "Internal", "WholeDisk",
-                   "VirtualOrPhysical", "Writable", "MediaUUID")
+                   "VirtualOrPhysical", "Writable", "MediaUUID", "IORegistryEntryID")
+
+
+def media_entry_id(disk):
+    result = subprocess.run([IOREG, "-a", "-r", "-c", "IOMedia", "-d", "1"],
+                            check=True, capture_output=True)
+    matches = [entry.get("IORegistryEntryID") for entry in plistlib.loads(result.stdout)
+               if entry.get("BSD Name") == disk and entry.get("Whole") is True]
+    if len(matches) != 1 or type(matches[0]) is not int or matches[0] <= 0:
+        raise ValueError(f"cannot identify USB attachment for {disk}")
+    return matches[0]
 
 
 def disk_info(disk):
     if not re.fullmatch(r"disk[0-9]+", disk):
         raise ValueError("select a whole disk such as disk13")
+    attachment = media_entry_id(disk)
     result = subprocess.run([DISKUTIL, "info", "-plist", "/dev/" + disk], check=True,
                             capture_output=True)
-    return plistlib.loads(result.stdout)
+    if media_entry_id(disk) != attachment:
+        raise ValueError(f"USB attachment changed while reading {disk}")
+    info = plistlib.loads(result.stdout)
+    info["IORegistryEntryID"] = attachment
+    return info
 
 
 def identity(info):
@@ -54,6 +70,7 @@ def eligible(info, size):
             and info.get("VirtualOrPhysical") == "Physical"
             and info.get("BusProtocol") == "USB" and info.get("Writable") is True
             and info.get("DeviceBlockSize") == 512
+            and type(info.get("IORegistryEntryID")) is int and info["IORegistryEntryID"] > 0
             and isinstance(info.get("TotalSize"), int) and info["TotalSize"] >= size
             and info["TotalSize"] % 512 == 0)
 
@@ -278,20 +295,22 @@ def menu_frame(title, items, selected, detail, columns, rows):
     return "\x1b[2J\x1b[H" + "\n".join(lines)
 
 
-def choose_menu(title, options, detail="", cancel_label="Cancel", descriptions=None):
+def choose_menu(title, options, detail="", cancel_label="Cancel", descriptions=None, *,
+                require_selection=False):
     """Arrow-key menu; Enter selects, q/Escape cancels. Restore the terminal on exit."""
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
     handlers = {}
     selected = 0
-    items = [*options, (None, cancel_label)]
+    cancel = (None, cancel_label)
+    items = [cancel, *options] if require_selection else [*options, cancel]
     def interrupted(signum, frame):
         raise KeyboardInterrupt
     try:
         for signum in (signal.SIGTERM, signal.SIGHUP):
             handlers[signum] = signal.signal(signum, interrupted)
-        # Keep queued navigation keys when entering a submenu.
-        tty.setcbreak(fd, termios.TCSANOW)
+        # USB prompts discard keys queued during a build or staging.
+        tty.setcbreak(fd, termios.TCSAFLUSH if require_selection else termios.TCSANOW)
         sys.stderr.write("\x1b[?1049h\x1b[?25l")
         while True:
             columns, rows = os.get_terminal_size(fd)
@@ -324,7 +343,7 @@ def choose_boot_only_layout(base):
     if not base.is_file():
         detail = "To preserve a layout, set OS1_USB_BASE_IMAGE to the verified base image."
     detail += " Boot-only images provide rescue; the full shell requires ext2."
-    choice = choose_menu("Build a USB image", options, detail)
+    choice = choose_menu("Build a USB image", options, detail, require_selection=True)
     return choice, base if choice == "preserved" else None
 
 
@@ -337,7 +356,8 @@ def choose_layout(base):
         ("all", "Update boot and programs (preserve data)"),
         ("diagnostic", "Create keyboard diagnostic image (erase USB)"),
         ("legacy", "Boot-only image options (rescue console) >")],
-        "The full shell requires ext2. Initial creation uses 128 MiB. Updates require the os1 boot/data layout.")
+        "The full shell requires ext2. Initial creation uses 128 MiB. Updates require the os1 boot/data layout.",
+        require_selection=True)
     if choice == "legacy":
         return choose_boot_only_layout(base)
     return choice, None
@@ -361,6 +381,23 @@ def sudo_terminal():
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
+def confirm_device(selected, action):
+    disk = selected["DeviceIdentifier"]
+    label = menu_text(selected.get("MediaName", ""))
+    capacity = selected["TotalSize"] / 1_000_000_000
+    with sudo_terminal():
+        termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+        print(f"\n{action} /dev/{disk} — {label} ({capacity:.1f} GB).\n"
+              f"Type {disk} and press Enter to confirm. Press Enter alone to cancel: ",
+              end="", file=sys.stderr, flush=True)
+        if sys.stdin.readline() != disk + "\n":
+            return False
+    current = disk_info(disk)
+    if not eligible(current, 0) or identity(current) != identity(selected):
+        raise ValueError("USB identity changed after selection; refusing to write")
+    return True
+
+
 def sudo_step(command, purpose, **kwargs):
     print(f"\nAdministrator access: {purpose}\n"
           "If prompted, type your macOS password and press Enter; characters are not shown.\n",
@@ -380,7 +417,8 @@ def update_interactive(args, mode):
     options = [(i, f"Update {info['DeviceIdentifier']} — {info.get('MediaName', '')} "
                    f"({info['TotalSize'] / 1_000_000_000:.1f} GB)") for i, info in enumerate(disks)]
     choice = choose_menu("Select USB to update", options,
-                         "Only recognized os1 boot/data layouts are accepted. A backup is retained before changes.")
+                         "Only recognized os1 boot/data layouts are accepted. A backup is retained before changes.",
+                         require_selection=True)
     if choice is None:
         return
     selected = disks[choice]
@@ -412,9 +450,8 @@ def update_interactive(args, mode):
         usb_data_image.stage(backup, staged, mode, boot, manifest)
         with staged.open('rb') as source:
             after = usb_data_image.digest(source, 0, staged.stat().st_size)
-        choice = choose_menu("Apply prepared USB update", [("apply", f"Apply {mode} update to {disk}")],
-                             f"Existing data preserved. Backup: {backup.name}")
-        if choice is None:
+        print(f"Prepared {mode} update. Backup: {backup}", flush=True)
+        if not confirm_device(selected, f"Apply {mode} update to"):
             print(f"Cancelled; USB disk unchanged. Backup: {backup}")
             return
         sudo_step(["--update", str(staged), "--mode", mode, "--before-sha256", before,
@@ -514,11 +551,15 @@ def interactive(args):
                        f"({info['TotalSize'] / 1_000_000_000:.1f} GB)")
                for index, info in enumerate(disks)]
     choice = choose_menu("Write image to USB", options,
-                         f"{image.name} — selecting a disk replaces its contents.")
+                         f"{image.name} — writing the image replaces the selected disk's contents.",
+                         require_selection=True)
     if choice is None:
         print("Cancelled; USB disk unchanged.")
         return
     selected = disks[choice]
+    if not confirm_device(selected, "Replace the contents of"):
+        print("Cancelled; USB disk unchanged.")
+        return
     disk = selected["DeviceIdentifier"]
     command = [sys.executable, "-I", str(Path(__file__).resolve()), "--write", str(image),
                "--disk", disk, "--identity", json.dumps(identity(selected)), "--sha256", checksum]
