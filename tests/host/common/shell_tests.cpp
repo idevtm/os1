@@ -26,6 +26,19 @@ TEST(ShellCommand, QuotesOperatorsAndRawTypedArguments)
     EXPECT_STREQ("END", c.input_name);
     EXPECT_STREQ("/tmp/a", c.output_name);
 }
+TEST(ShellCommand, FindsTopLevelOperatorsAfterTypedOrQuotedArguments)
+{
+    EXPECT_TRUE(has_top_level_command_operator(R"shell("f(x)" > "/tmp/out")shell"));
+    EXPECT_TRUE(has_top_level_command_operator(R"shell('('>>"/tmp/out")shell"));
+    EXPECT_TRUE(has_top_level_command_operator(R"shell(print("a>b") < "/tmp/in")shell"));
+    EXPECT_TRUE(has_top_level_command_operator(R"shell(print(<?>) > "/tmp/out")shell"));
+    EXPECT_TRUE(has_top_level_command_operator("label = value"));
+
+    EXPECT_FALSE(has_top_level_command_operator(R"shell("f(x) > y")shell"));
+    EXPECT_FALSE(has_top_level_command_operator(R"shell(print("a>b",{value:"="}))shell"));
+    EXPECT_FALSE(has_top_level_command_operator("argument:<?>"));
+    EXPECT_FALSE(has_top_level_command_operator(R"shell(a\>b)shell"));
+}
 TEST(ShellCommand, RejectsIncompleteAmbiguousAndUnsupportedCommands)
 {
     for(auto text : {"echo >",
