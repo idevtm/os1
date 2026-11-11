@@ -1413,7 +1413,9 @@ If a user process faults:
 - schedules away
 - reaps the dead process later from another stack
 
-This deferred teardown is important. The kernel does not free the current thread's stack or address space while it is still executing on it.
+The reaper waits for the last thread to leave its stack and address space.
+It then releases the address space before it publishes the exit record.
+See [Child exit and collection](kernel/smp-synchronization.md#child-exit-and-collection) for the cleanup order.
 
 ## Modern Platform Support
 

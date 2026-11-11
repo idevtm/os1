@@ -313,12 +313,16 @@ TEST(TaskRegistry, ReaperCollectsPublishedOrphanAfterParentWaitpid)
     ASSERT_NE(nullptr, parent_thread);
     const auto parent_pid = parent->pid;
 
+    const auto before_exit = frames.free_page_count();
     set_current_thread(child_thread);
     mark_current_thread_dying(7);
     set_current_thread(nullptr);
     reap_dead_threads(frames);
     ASSERT_EQ(child, next_process(parent));
     EXPECT_TRUE(child->exit_cleanup_complete);
+    EXPECT_EQ(0u, child->address_space.cr3);
+    // The root, three user page tables, and one user page are already free.
+    EXPECT_GE(frames.free_page_count(), before_exit + kKernelThreadStackPages + 5);
 
     set_current_thread(parent_thread);
     mark_current_thread_dying(8);
@@ -336,7 +340,7 @@ TEST(TaskRegistry, ReaperCollectsPublishedOrphanAfterParentWaitpid)
     reap_dead_threads(frames);
     EXPECT_EQ(nullptr, next_process(grandparent));
     const auto after = frames.free_page_count();
-    EXPECT_GE(after, before + 5);
+    EXPECT_EQ(before, after);
     reap_dead_threads(frames);
     EXPECT_EQ(after, frames.free_page_count());
     EXPECT_TRUE(reap_process(grandparent, frames));
@@ -397,7 +401,10 @@ TEST(TaskRegistry, ReaperSkipsDyingThreadStillCurrentOnAnotherCpu)
 
     Process* parent = create_user_process("parent", 0);
     ASSERT_NE(nullptr, parent);
-    Process* child = create_user_process("child", 0);
+    VirtualMemory child_vm(frames);
+    ASSERT_TRUE(child_vm.allocate_and_map(kUserImageBase, 1, PageFlags::User | PageFlags::Write));
+    const uint64_t child_root = child_vm.root();
+    Process* child = create_user_process("child", child_root);
     ASSERT_NE(nullptr, child);
     child->parent = parent;
     const uint64_t child_pid = child->pid;
@@ -424,6 +431,8 @@ TEST(TaskRegistry, ReaperSkipsDyingThreadStillCurrentOnAnotherCpu)
     EXPECT_EQ(ThreadState::Dying, child_thread->state);
     EXPECT_EQ(ProcessState::Zombie, child->state);
     EXPECT_EQ(child_thread, cpus.ap.current_thread);
+    EXPECT_EQ(child_root, child->address_space.cr3);
+    EXPECT_FALSE(child->exit_cleanup_complete);
 
     const auto saved_rax = parent_thread->frame.rax;
     cpus.ap.current_thread = parent_thread;
@@ -431,6 +440,8 @@ TEST(TaskRegistry, ReaperSkipsDyingThreadStillCurrentOnAnotherCpu)
     EXPECT_EQ(ThreadState::Blocked, parent_thread->state);
     EXPECT_EQ(saved_rax, parent_thread->frame.rax);
     EXPECT_TRUE(child->exit_cleanup_complete);
+    ASSERT_EQ(0u, child->address_space.cr3);
+    EXPECT_FALSE(frames.free(child_root));
 
     cpus.ap.current_thread = nullptr;
     reap_dead_threads(frames);

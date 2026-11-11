@@ -145,13 +145,16 @@ that had not yet switched away. No scheduler lock is taken under the wait lock.
 
 ## Child exit and collection
 
-The BSP reaper publishes a child for collection after it removes the last thread and releases Buffer mappings and descriptors.
+The BSP reaper releases the child's address space before it publishes the exit record for collection.
 The process table lock protects publication, parent links, and collection claims.
-The address space stays allocated until collection or orphan reaping.
 
 ```text
-Thread handoff -> resource cleanup -> publish exit -> collect or reap orphan
+Thread handoff -> Release Buffers and descriptors -> Free address space -> Publish exit -> Collect record
 ```
+
+After the last thread leaves all CPUs, the reaper removes the thread record.
+The reaper releases Buffer mappings and descriptors before it frees the user page tables and their root.
+The child stays in the process table until its parent collects it or the BSP reaps the orphan record.
 
 A waiter claims the exit record before it copies the status.
 A failed copy releases the claim so a later wait can collect the same child.
