@@ -284,40 +284,70 @@ bool PageFrameContainer::allocate(uint64_t& address)
 bool PageFrameContainer::allocate(uint64_t& address, unsigned count)
 {
     IrqSpinGuard guard(g_page_frames_lock);
-    // check for successful initialization
-    if(!initialized_)
+    if(!initialized_ || (0 == count) || (count > free_page_count_))
+    {
         return false;
-    if(count == 0)
-        return false;
-
-    //	debug("allocate ")(count)(" pages")();
+    }
 
     uint64_t run_start = page_count_;
-    for(uint64_t i = 0; i < page_count_; i++)
+    uint64_t carried = 0;
+    for(uint64_t word = 0; word < bitmap_size_; ++word)
     {
-        if(is_free(i))
+        const uint64_t free = bitmap_[word];
+        if(0 == free)
         {
-            if(run_start == page_count_)
-                run_start = i;
-            if((i - run_start + 1) == count)
+            carried = 0;
+            continue;
+        }
+
+        const uint64_t busy = ~free;
+        const unsigned prefix = busy ? __builtin_ctzll(busy) : 64;
+        if(carried + prefix >= count)
+        {
+            run_start = word * 64 - carried;
+            break;
+        }
+
+        if(count <= 64)
+        {
+            // Each set bit in starts identifies a run of width free pages.
+            // Intersect it with a shifted copy to extend those runs.
+            uint64_t starts = free;
+            for(unsigned width = 1; width < count && starts;)
             {
-                //				debug("return ")(run_start)(" to ")(i)();
-                address = run_start << 12;
-                for(uint64_t j = run_start; j <= i; ++j)
-                {
-                    set_busy(j);
-                }
-                if(free_page_count_ >= count)
-                {
-                    free_page_count_ -= count;
-                }
-                return true;
+                const unsigned extension = (count - width < width) ? count - width : width;
+                starts &= starts >> extension;
+                width += extension;
+            }
+            if(starts)
+            {
+                run_start = word * 64 + __builtin_ctzll(starts);
+                break;
             }
         }
-        else
-            run_start = page_count_;
+
+        carried = busy ? __builtin_clzll(busy) : carried + 64;
     }
-    return false;
+
+    if(run_start == page_count_)
+    {
+        return false;
+    }
+
+    const uint64_t run_end = run_start + count;
+    for(uint64_t page = run_start; page < run_end;)
+    {
+        const unsigned offset = page % 64;
+        const unsigned available = 64 - offset;
+        const unsigned width = (run_end - page < available) ? run_end - page : available;
+        const uint64_t mask = (~uint64_t{0} >> (64 - width)) << offset;
+        bitmap_[page / 64] &= ~mask;
+        page += width;
+    }
+
+    free_page_count_ -= count;
+    address = run_start * kPageSize;
+    return true;
 }
 
 bool PageFrameContainer::free(uint64_t address)
