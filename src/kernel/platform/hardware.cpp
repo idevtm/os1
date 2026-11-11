@@ -277,15 +277,16 @@ void hardware_freeze_bindings()
                               g_platform.device_count,
                               firmware_associations);
 
-    for(unsigned i = 0; i < device_binding_count(); ++i)
-    {
-        const auto& b = device_bindings()[i];
-        if(b.active && b.id.bus == DeviceBus::Pci && b.pci_index < kPlatformMaxPciDevices)
-        {
-            bindings[b.pci_index].name = retain_driver_name(b.driver_name);
-            bindings[b.pci_index].state = static_cast<uint8_t>(b.state);
-        }
-    }
+    (void)visit_device_bindings(
+        [](void*, const DeviceBinding& b) {
+            if(b.active && b.id.bus == DeviceBus::Pci && b.pci_index < kPlatformMaxPciDevices)
+            {
+                bindings[b.pci_index].name = retain_driver_name(b.driver_name);
+                bindings[b.pci_index].state = static_cast<uint8_t>(b.state);
+            }
+            return true;
+        },
+        nullptr);
 }
 long hardware_query(Os1HardwareQuery& request)
 {

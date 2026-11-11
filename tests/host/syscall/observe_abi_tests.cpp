@@ -131,12 +131,19 @@ TEST(ObserveAbi, UsbInputFailureLayout)
 }
 
 #include <array>
+#include <thread>
+#include <vector>
 
+#include "debug/event_ring.hpp"
+#include "drivers/bus/device.hpp"
 #include "drivers/usb/diagnostics.hpp"
 #include "handoff/memory_layout.h"
+#include "mm/dma.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "mm/virtual_memory.hpp"
+#include "platform/irq_registry.hpp"
+#include "platform/state.hpp"
 #include "proc/thread.hpp"
 #include "support/physical_memory.hpp"
 #include "syscall/observe.hpp"
@@ -192,4 +199,242 @@ TEST_F(UsbInputObserve, CopiesRetainedFailureAndRejectsShortOrUnmappedBuffers)
     EXPECT_EQ(-1,
               sys_observe(context, OS1_OBSERVE_USB_INPUT_FAILURES, kUserImageBase + 4096, 4096));
     EXPECT_EQ(1u, usb::diagnostics::input_failure_count());  // Reads do not consume evidence.
+}
+
+TEST_F(UsbInputObserve, LiveSnapshotsRejectShortBuffersWithoutWriting)
+{
+    platform_reset_state();
+    const DeviceId owner{DeviceBus::Platform, 7};
+    ASSERT_TRUE(device_binding_publish(owner, 0, "snapshot-test", nullptr));
+    ASSERT_TRUE(platform_register_isa_irq_route(owner, 5, 5, 0, 37));
+    DmaBuffer dma{};
+    ASSERT_TRUE(dma_allocate_buffer(frames, owner, 128, DmaDirection::Bidirectional, dma));
+
+    const ObserveContext context{.frames = &frames};
+    for(const auto [kind, size] : std::array<std::pair<uint32_t, size_t>, 4>{{
+            {OS1_OBSERVE_PROCESSES, sizeof(Os1ObserveProcessRecord)},
+            {OS1_OBSERVE_DEVICES, sizeof(Os1ObserveDeviceRecord)},
+            {OS1_OBSERVE_RESOURCES, sizeof(Os1ObserveResourceRecord)},
+            {OS1_OBSERVE_IRQS, sizeof(Os1ObserveIrqRecord)},
+        }})
+    {
+        const auto bytes = sizeof(Os1ObserveHeader) + size;
+        std::array<uint8_t, 100> canary;
+        canary.fill(0xa5);
+        ASSERT_TRUE(copy_to_user(frames, thread, kUserImageBase, canary.data(), canary.size()));
+        EXPECT_EQ(-1, sys_observe(context, kind, kUserImageBase, bytes - 1));
+        std::array<uint8_t, 100> observed{};
+        ASSERT_TRUE(
+            copy_from_user(frames, thread, kUserImageBase, observed.data(), observed.size()));
+        EXPECT_EQ(canary, observed);
+        EXPECT_EQ(static_cast<long>(bytes), sys_observe(context, kind, kUserImageBase, bytes));
+        Os1ObserveHeader header{};
+        ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase, &header, sizeof(header)));
+        EXPECT_EQ(kind, header.kind);
+        EXPECT_EQ(1u, header.record_count);
+        EXPECT_EQ(size, header.record_size);
+        uint8_t after = 0;
+        ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase + bytes, &after, sizeof(after)));
+        EXPECT_EQ(0xa5, after);
+    }
+
+    dma_release_buffer(frames, dma);
+    EXPECT_TRUE(platform_release_irq_route(37));
+    device_binding_remove(owner);
+    EXPECT_EQ(
+        sizeof(Os1ObserveHeader),
+        sys_observe(context, OS1_OBSERVE_RESOURCES, kUserImageBase, sizeof(Os1ObserveHeader)));
+    EXPECT_EQ(sizeof(Os1ObserveHeader),
+              sys_observe(context, OS1_OBSERVE_IRQS, kUserImageBase, sizeof(Os1ObserveHeader)));
+    EXPECT_EQ(sizeof(Os1ObserveHeader),
+              sys_observe(context, OS1_OBSERVE_DEVICES, kUserImageBase, sizeof(Os1ObserveHeader)));
+    platform_reset_state();
+}
+
+TEST(ObserveEvents, CallerOwnedSnapshotsSurviveConcurrentPublishing)
+{
+    using namespace kernel_event;
+    record_subject(OS1_KERNEL_EVENT_SMOKE_MARKER, 0, 0, 0);
+    std::array<Os1ObserveEventRecord, OS1_OBSERVE_EVENT_RING_CAPACITY> first{}, second{};
+    uint32_t first_count = 0;
+    ASSERT_TRUE(snapshot_all(first.data(), first.size(), first_count));
+    const auto first_sequence = first[first_count - 1].sequence;
+    std::thread writer([] {
+        for(unsigned i = 0; i < OS1_OBSERVE_EVENT_RING_CAPACITY * 2; ++i)
+            record_subject(OS1_KERNEL_EVENT_SMOKE_MARKER, 0, 0, 0);
+    });
+    bool coherent = true;
+    uint32_t count = 0;
+    for(unsigned i = 0; i < 64; ++i)
+    {
+        coherent &= snapshot_all(second.data(), second.size(), count);
+        for(uint32_t index = 1; index < count; ++index)
+            coherent &= second[index].sequence == second[index - 1].sequence + 1;
+    }
+    writer.join();
+    EXPECT_TRUE(coherent);
+    EXPECT_EQ(first_sequence, first[first_count - 1].sequence);
+    second[0].sequence = 0;
+    EXPECT_FALSE(snapshot_all(second.data(), 1, count));
+    EXPECT_GT(count, 1u);
+    EXPECT_EQ(0u, second[0].sequence);
+}
+
+extern void (*host_observe_snapshot_hook)(uint32_t, void*);
+extern void* host_observe_snapshot_state;
+
+namespace
+{
+class ObserveCheckpoint
+{
+public:
+    ObserveCheckpoint(void (*hook)(uint32_t, void*), void* state)
+    {
+        host_observe_snapshot_state = state;
+        host_observe_snapshot_hook = hook;
+    }
+    ~ObserveCheckpoint()
+    {
+        host_observe_snapshot_hook = nullptr;
+        host_observe_snapshot_state = nullptr;
+    }
+};
+}  // namespace
+
+TEST_F(UsbInputObserve, RegistryGrowthAfterSizingLeavesUserBufferUntouched)
+{
+    platform_reset_state();
+    struct Changes
+    {
+        PageFrameContainer& frames;
+        DmaBuffer dma{};
+        bool ok = false;
+    } changes{frames};
+    const DeviceId owner{DeviceBus::Platform, 8};
+    const ObserveContext context{.frames = &frames};
+
+    for(uint32_t kind :
+        {OS1_OBSERVE_PROCESSES, OS1_OBSERVE_DEVICES, OS1_OBSERVE_RESOURCES, OS1_OBSERVE_IRQS})
+    {
+        const uint64_t canary = 0xa5a5a5a5a5a5a5a5ull;
+        ASSERT_TRUE(copy_to_user(frames, thread, kUserImageBase, &canary, sizeof(canary)));
+        changes.ok = false;
+        ObserveCheckpoint checkpoint(
+            [](uint32_t selected, void* state) {
+                auto& changes = *static_cast<Changes*>(state);
+                const DeviceId owner{DeviceBus::Platform, 8};
+                switch(selected)
+                {
+                    case OS1_OBSERVE_PROCESSES:
+                        changes.ok = create_user_thread(current_thread()->process,
+                                                        kUserImageBase,
+                                                        kUserStackTop,
+                                                        changes.frames,
+                                                        false) != nullptr;
+                        break;
+                    case OS1_OBSERVE_DEVICES:
+                        changes.ok = device_binding_publish(owner, 0, "growth", nullptr);
+                        break;
+                    case OS1_OBSERVE_RESOURCES:
+                        changes.ok = dma_allocate_buffer(
+                            changes.frames, owner, 128, DmaDirection::Bidirectional, changes.dma);
+                        break;
+                    case OS1_OBSERVE_IRQS:
+                        changes.ok = platform_register_isa_irq_route(owner, 5, 5, 0, 37);
+                        break;
+                }
+            },
+            &changes);
+        EXPECT_EQ(-1, sys_observe(context, kind, kUserImageBase, 4096));
+        EXPECT_TRUE(changes.ok);
+        uint64_t observed = 0;
+        ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase, &observed, sizeof(observed)));
+        EXPECT_EQ(canary, observed);
+    }
+
+    dma_release_buffer(frames, changes.dma);
+    EXPECT_TRUE(platform_release_irq_route(37));
+    device_binding_remove(owner);
+    platform_reset_state();
+}
+
+TEST_F(UsbInputObserve, EventSyscallKeepsCapturedRecordsDuringOverlappingRead)
+{
+    constexpr auto bytes =
+        sizeof(Os1ObserveHeader) + sizeof(Os1ObserveEventRecord) * OS1_OBSERVE_EVENT_RING_CAPACITY;
+    constexpr auto second = kUserImageBase + 6 * kPageSize;
+    VirtualMemory vm(frames, thread->address_space_cr3);
+    ASSERT_TRUE(
+        vm.allocate_and_map(kUserImageBase + kPageSize, 11, PageFlags::User | PageFlags::Write));
+    for(unsigned i = 0; i < OS1_OBSERVE_EVENT_RING_CAPACITY; ++i)
+        kernel_event::record_subject(OS1_KERNEL_EVENT_SMOKE_MARKER, 0, 0, 0);
+
+    const ObserveContext context{.frames = &frames};
+    struct Overlap
+    {
+        ObserveContext context;
+        long result = -1;
+    } overlap{context};
+    ObserveCheckpoint checkpoint(
+        [](uint32_t kind, void* state) {
+            auto& overlap = *static_cast<Overlap*>(state);
+            if(kind != OS1_OBSERVE_EVENTS)
+                return;
+            host_observe_snapshot_hook = nullptr;
+            for(unsigned i = 0; i < OS1_OBSERVE_EVENT_RING_CAPACITY; ++i)
+                kernel_event::record_subject(OS1_KERNEL_EVENT_SMOKE_MARKER, 0, 0, 0);
+            std::thread reader([&] {
+                overlap.result = sys_observe(overlap.context, OS1_OBSERVE_EVENTS, second, bytes);
+            });
+            reader.join();
+        },
+        &overlap);
+    const auto free_before = frames.free_page_count();
+    ASSERT_EQ(bytes, sys_observe(context, OS1_OBSERVE_EVENTS, kUserImageBase, bytes));
+    ASSERT_EQ(bytes, overlap.result);
+    EXPECT_EQ(free_before, frames.free_page_count());
+
+    Os1ObserveHeader first_header{}, second_header{};
+    ASSERT_TRUE(
+        copy_from_user(frames, thread, kUserImageBase, &first_header, sizeof(first_header)));
+    ASSERT_TRUE(copy_from_user(frames, thread, second, &second_header, sizeof(second_header)));
+    EXPECT_EQ(OS1_OBSERVE_EVENT_RING_CAPACITY, first_header.record_count);
+    EXPECT_EQ(first_header.record_count, second_header.record_count);
+    uint64_t first_sequence = 0, second_sequence = 0;
+    for(uint32_t i = 0; i < OS1_OBSERVE_EVENT_RING_CAPACITY; ++i)
+    {
+        const auto offset = sizeof(Os1ObserveHeader) + i * sizeof(Os1ObserveEventRecord);
+        Os1ObserveEventRecord a{}, b{};
+        ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase + offset, &a, sizeof(a)));
+        ASSERT_TRUE(copy_from_user(frames, thread, second + offset, &b, sizeof(b)));
+        if(i == 0)
+        {
+            first_sequence = a.sequence;
+            second_sequence = b.sequence;
+        }
+        EXPECT_EQ(first_sequence + i, a.sequence);
+        EXPECT_EQ(second_sequence + i, b.sequence);
+    }
+    EXPECT_EQ(first_sequence + OS1_OBSERVE_EVENT_RING_CAPACITY, second_sequence);
+}
+
+TEST_F(UsbInputObserve, EventSnapshotAllocationFailureDoesNotWriteHeader)
+{
+    const ObserveContext context{.frames = &frames};
+    const uint64_t canary = 0xa5a5a5a5a5a5a5a5ull;
+    ASSERT_TRUE(copy_to_user(frames, thread, kUserImageBase, &canary, sizeof(canary)));
+    std::vector<uint64_t> held;
+    uint64_t physical = 0;
+    while(frames.allocate(physical))
+        held.push_back(physical);
+    EXPECT_EQ(-1,
+              sys_observe(context,
+                          OS1_OBSERVE_EVENTS,
+                          kUserImageBase,
+                          sizeof(Os1ObserveHeader) + 256 * sizeof(Os1ObserveEventRecord)));
+    for(auto page : held)
+        EXPECT_TRUE(frames.free(page));
+    uint64_t observed = 0;
+    ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase, &observed, sizeof(observed)));
+    EXPECT_EQ(canary, observed);
 }

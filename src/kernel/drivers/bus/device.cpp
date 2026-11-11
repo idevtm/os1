@@ -23,8 +23,6 @@ struct DeviceBindingRegistry
     KmemCache* cache = nullptr;
     DeviceBindingNode* head = nullptr;
     DeviceBindingNode* tail = nullptr;
-    DeviceBinding* snapshot = nullptr;
-    size_t snapshot_capacity = 0;
     size_t count = 0;
 };
 
@@ -47,33 +45,6 @@ using DeviceBindingGuard = IrqSpinGuard<Spinlock>;
     g_device_binding_registry.cache =
         kmem_cache_create("device_binding", sizeof(DeviceBindingNode), alignof(DeviceBindingNode));
     return nullptr != g_device_binding_registry.cache;
-}
-
-[[nodiscard]] bool ensure_snapshot_capacity(size_t required_capacity)
-{
-    if(required_capacity <= g_device_binding_registry.snapshot_capacity)
-    {
-        return true;
-    }
-
-    size_t new_capacity = (0u == g_device_binding_registry.snapshot_capacity)
-                              ? 4u
-                              : g_device_binding_registry.snapshot_capacity;
-    while(new_capacity < required_capacity)
-    {
-        new_capacity *= 2u;
-    }
-
-    auto* new_snapshot = static_cast<DeviceBinding*>(kcalloc(new_capacity, sizeof(DeviceBinding)));
-    if(nullptr == new_snapshot)
-    {
-        return false;
-    }
-
-    kfree(g_device_binding_registry.snapshot);
-    g_device_binding_registry.snapshot = new_snapshot;
-    g_device_binding_registry.snapshot_capacity = new_capacity;
-    return true;
 }
 
 DeviceBindingNode* find_binding_node_locked(DeviceId id, DeviceBindingNode** previous = nullptr)
@@ -137,9 +108,6 @@ void device_binding_registry_reset()
     g_device_binding_registry.head = nullptr;
     g_device_binding_registry.tail = nullptr;
     g_device_binding_registry.count = 0;
-    kfree(g_device_binding_registry.snapshot);
-    g_device_binding_registry.snapshot = nullptr;
-    g_device_binding_registry.snapshot_capacity = 0;
 }
 
 static BindingAdmission publish_binding(
@@ -160,8 +128,7 @@ static BindingAdmission publish_binding(
         return BindingAdmission::Published;
     }
 
-    if(!ensure_snapshot_capacity(g_device_binding_registry.count + 1u) ||
-       !ensure_device_binding_cache())
+    if(!ensure_device_binding_cache())
     {
         return BindingAdmission::NoMemory;
     }
@@ -245,21 +212,15 @@ size_t device_binding_count()
     return g_device_binding_registry.count;
 }
 
-const DeviceBinding* device_bindings()
+bool visit_device_bindings(bool (*visitor)(void*, const DeviceBinding&), void* context)
 {
     DeviceBindingGuard guard(g_device_binding_registry.lock);
-    if(0u == g_device_binding_registry.count)
+    for(auto* node = g_device_binding_registry.head; node; node = node->next)
     {
-        return nullptr;
+        if(!visitor(context, node->binding))
+            return false;
     }
-
-    size_t index = 0;
-    for(DeviceBindingNode* node = g_device_binding_registry.head; nullptr != node;
-        node = node->next)
-    {
-        g_device_binding_registry.snapshot[index++] = node->binding;
-    }
-    return g_device_binding_registry.snapshot;
+    return true;
 }
 
 bool device_binding_finish_probe(DeviceId id, bool success)

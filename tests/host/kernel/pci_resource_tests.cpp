@@ -1,13 +1,13 @@
+#include <gtest/gtest.h>
+
+#include <array>
+#include <cstring>
+
 #include "drivers/bus/resource.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "platform/state.hpp"
 #include "support/physical_memory.hpp"
-
-#include <gtest/gtest.h>
-
-#include <array>
-#include <cstring>
 
 namespace
 {
@@ -81,8 +81,7 @@ TEST(PciResource, ReleaseMakesClaimInactive)
     ASSERT_TRUE(claim_pci_bar(DeviceId{DeviceBus::Pci, 0}, 0, 0, resource));
     release_pci_bar(DeviceId{DeviceBus::Pci, 0}, 0, 0);
 
-    const PciBarClaim* claims = pci_bar_claims();
-    EXPECT_EQ(nullptr, claims);
+    EXPECT_TRUE(visit_pci_bar_claims([](void*, const PciBarClaim&) { return false; }, nullptr));
     EXPECT_EQ(0u, pci_bar_claim_count());
 
     platform_reset_state();

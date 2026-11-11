@@ -23,8 +23,6 @@ struct IrqRouteRegistry
     KmemCache* cache = nullptr;
     IrqRouteNode* head = nullptr;
     IrqRouteNode* tail = nullptr;
-    IrqRoute* snapshot = nullptr;
-    size_t snapshot_capacity = 0;
     size_t count = 0;
 };
 
@@ -61,33 +59,6 @@ using IrqRouteGuard = IrqSpinGuard<Spinlock>;
     g_irq_route_registry.cache =
         kmem_cache_create("irq_route", sizeof(IrqRouteNode), alignof(IrqRouteNode));
     return nullptr != g_irq_route_registry.cache;
-}
-
-[[nodiscard]] bool ensure_snapshot_capacity(size_t required_capacity)
-{
-    if(required_capacity <= g_irq_route_registry.snapshot_capacity)
-    {
-        return true;
-    }
-
-    size_t new_capacity = (0u == g_irq_route_registry.snapshot_capacity)
-                              ? 4u
-                              : g_irq_route_registry.snapshot_capacity;
-    while(new_capacity < required_capacity)
-    {
-        new_capacity *= 2u;
-    }
-
-    auto* new_snapshot = static_cast<IrqRoute*>(kcalloc(new_capacity, sizeof(IrqRoute)));
-    if(nullptr == new_snapshot)
-    {
-        return false;
-    }
-
-    kfree(g_irq_route_registry.snapshot);
-    g_irq_route_registry.snapshot = new_snapshot;
-    g_irq_route_registry.snapshot_capacity = new_capacity;
-    return true;
 }
 
 IrqRouteNode* find_route_locked(uint8_t vector, IrqRouteNode** previous = nullptr)
@@ -139,7 +110,7 @@ IrqRoute* reserve_route_slot_locked(uint8_t vector)
         return nullptr;
     }
 
-    if(!ensure_snapshot_capacity(g_irq_route_registry.count + 1u) || !ensure_irq_route_cache())
+    if(!ensure_irq_route_cache())
     {
         debug("platform: IRQ route allocation failed")();
         return nullptr;
@@ -206,7 +177,8 @@ void platform_irq_registry_reset()
         for(IrqRouteNode* node = g_irq_route_registry.head; nullptr != node;)
         {
             IrqRouteNode* next = node->next;
-            if(route_kind_uses_dynamic_vector(node->route.kind) && irq_vector_is_allocated(node->route.vector))
+            if(route_kind_uses_dynamic_vector(node->route.kind) &&
+               irq_vector_is_allocated(node->route.vector))
             {
                 (void)irq_free_vector(node->route.vector);
             }
@@ -220,16 +192,10 @@ void platform_irq_registry_reset()
     g_irq_route_registry.head = nullptr;
     g_irq_route_registry.tail = nullptr;
     g_irq_route_registry.count = 0;
-    kfree(g_irq_route_registry.snapshot);
-    g_irq_route_registry.snapshot = nullptr;
-    g_irq_route_registry.snapshot_capacity = 0;
 }
 
-bool platform_register_isa_irq_route(DeviceId owner,
-                                     uint8_t source_irq,
-                                     uint32_t gsi,
-                                     uint16_t flags,
-                                     uint8_t vector)
+bool platform_register_isa_irq_route(
+    DeviceId owner, uint8_t source_irq, uint32_t gsi, uint16_t flags, uint8_t vector)
 {
     return register_route(IrqRouteKind::LegacyIsa, owner, 0, source_irq, gsi, flags, vector);
 }
@@ -268,11 +234,14 @@ bool platform_register_msix_irq_route(DeviceId owner, uint16_t source_id, uint8_
     return register_route(IrqRouteKind::Msix, owner, source_id, 0, 0, 0, vector);
 }
 
-const IrqRoute* platform_find_irq_route(uint8_t vector)
+bool platform_find_irq_route(uint8_t vector, IrqRoute& route)
 {
     IrqRouteGuard guard(g_irq_route_registry.lock);
     IrqRouteNode* node = find_route_locked(vector);
-    return (nullptr == node) ? nullptr : &node->route;
+    if(!node)
+        return false;
+    route = node->route;
+    return true;
 }
 
 bool platform_release_irq_route(uint8_t vector)
@@ -285,7 +254,8 @@ bool platform_release_irq_route(uint8_t vector)
         return false;
     }
 
-    if(route_kind_uses_dynamic_vector(node->route.kind) && irq_vector_is_allocated(node->route.vector))
+    if(route_kind_uses_dynamic_vector(node->route.kind) &&
+       irq_vector_is_allocated(node->route.vector))
     {
         (void)irq_free_vector(node->route.vector);
     }
@@ -304,7 +274,8 @@ void platform_release_irq_routes_for_owner(DeviceId owner)
     {
         if(device_id_equal(node->route.owner, owner))
         {
-            if(route_kind_uses_dynamic_vector(node->route.kind) && irq_vector_is_allocated(node->route.vector))
+            if(route_kind_uses_dynamic_vector(node->route.kind) &&
+               irq_vector_is_allocated(node->route.vector))
             {
                 (void)irq_free_vector(node->route.vector);
             }
@@ -327,18 +298,13 @@ size_t platform_irq_route_count()
     return g_irq_route_registry.count;
 }
 
-const IrqRoute* platform_irq_routes()
+bool visit_irq_routes(bool (*visitor)(void*, const IrqRoute&), void* context)
 {
     IrqRouteGuard guard(g_irq_route_registry.lock);
-    if(0u == g_irq_route_registry.count)
+    for(auto* node = g_irq_route_registry.head; node; node = node->next)
     {
-        return nullptr;
+        if(!visitor(context, node->route))
+            return false;
     }
-
-    size_t index = 0;
-    for(IrqRouteNode* node = g_irq_route_registry.head; nullptr != node; node = node->next)
-    {
-        g_irq_route_registry.snapshot[index++] = node->route;
-    }
-    return g_irq_route_registry.snapshot;
+    return true;
 }

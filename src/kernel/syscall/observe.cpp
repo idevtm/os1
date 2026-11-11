@@ -11,8 +11,10 @@
 #include "drivers/usb/diagnostics.hpp"
 #include "drivers/usb/stall_trace.hpp"
 #include "fs/initrd.hpp"
+#include "handoff/memory_layout.h"
 #include "mm/dma.hpp"
 #include "mm/kmem.hpp"
+#include "mm/user_address.hpp"
 #include "mm/user_copy.hpp"
 #include "platform/hardware.hpp"
 #include "platform/platform.hpp"
@@ -21,8 +23,23 @@
 #include "sync/smp.hpp"
 #include "util/fixed_string.hpp"
 
+#if defined(OS1_HOST_TEST)
+void (*host_observe_snapshot_hook)(uint32_t kind, void* state) = nullptr;
+void* host_observe_snapshot_state = nullptr;
+#endif
+
 namespace
 {
+void observe_snapshot_checkpoint(uint32_t kind)
+{
+#if defined(OS1_HOST_TEST)
+    if(host_observe_snapshot_hook)
+        host_observe_snapshot_hook(kind, host_observe_snapshot_state);
+#else
+    (void)kind;
+#endif
+}
+
 [[nodiscard]] size_t count_active_processes()
 {
     IrqSpinGuard guard(g_process_table_lock);
@@ -30,81 +47,6 @@ namespace
     for(Process* process = first_process(); nullptr != process; process = next_process(process))
     {
         if(ProcessState::Free != process->state)
-        {
-            ++count;
-        }
-    }
-    return count;
-}
-
-[[nodiscard]] uint32_t count_active_device_bindings()
-{
-    uint32_t count = 0;
-    const DeviceBinding* bindings = device_bindings();
-    const size_t binding_count = device_binding_count();
-    for(size_t i = 0; i < binding_count; ++i)
-    {
-        if(bindings[i].active)
-        {
-            ++count;
-        }
-    }
-    return count;
-}
-
-[[nodiscard]] uint32_t count_active_acpi_devices()
-{
-    uint32_t count = 0;
-    const AcpiDeviceInfo* devices = platform_acpi_devices();
-    const size_t device_count = platform_acpi_device_count();
-    for(size_t i = 0; i < device_count; ++i)
-    {
-        if(devices[i].active && (0 != (devices[i].status & 0x1u)))
-        {
-            ++count;
-        }
-    }
-    return count;
-}
-
-[[nodiscard]] uint32_t count_active_irq_routes()
-{
-    uint32_t count = 0;
-    const IrqRoute* routes = platform_irq_routes();
-    const size_t route_count = platform_irq_route_count();
-    for(size_t i = 0; i < route_count; ++i)
-    {
-        if(routes[i].active)
-        {
-            ++count;
-        }
-    }
-    return count;
-}
-
-[[nodiscard]] uint32_t count_active_pci_bar_claims()
-{
-    uint32_t count = 0;
-    const PciBarClaim* claims = pci_bar_claims();
-    const size_t claim_count = pci_bar_claim_count();
-    for(size_t i = 0; i < claim_count; ++i)
-    {
-        if(claims[i].active)
-        {
-            ++count;
-        }
-    }
-    return count;
-}
-
-[[nodiscard]] uint32_t count_active_dma_allocations()
-{
-    uint32_t count = 0;
-    const DmaAllocationRecord* allocations = dma_allocation_records();
-    const size_t allocation_count = dma_allocation_count();
-    for(size_t i = 0; i < allocation_count; ++i)
-    {
-        if(allocations[i].active)
         {
             ++count;
         }
@@ -155,7 +97,8 @@ bool begin_observe_transfer(const ObserveContext& context,
         return false;
     }
     const size_t total_bytes = sizeof(Os1ObserveHeader) + payload_bytes;
-    if(total_bytes < sizeof(Os1ObserveHeader) || (user_length < total_bytes))
+    if(total_bytes < sizeof(Os1ObserveHeader) || total_bytes > INT64_MAX ||
+       user_length < total_bytes || !user_address::is_user_address_range(user_buffer, total_bytes))
     {
         return false;
     }
@@ -193,6 +136,121 @@ bool write_observe_record(const ObserveContext& context,
     }
     offset += record_size;
     return true;
+}
+
+// Capacity comes from both the registry size and the caller's byte budget.
+template<class Record>
+class ObserveSnapshot
+{
+public:
+    ObserveSnapshot(PageFrameContainer* frames, size_t capacity)
+        : capacity_(capacity), frames_(frames)
+    {
+        if(capacity <= kInlineRecords)
+        {
+            records_ = inline_records_;
+            return;
+        }
+
+        const size_t bytes = capacity * sizeof(Record);
+        const size_t pages = bytes / kPageSize + (bytes % kPageSize != 0);
+        if(frames && pages <= UINT32_MAX &&
+           frames->allocate(physical_, static_cast<unsigned>(pages)))
+        {
+            pages_ = static_cast<unsigned>(pages);
+            records_ = kernel_physical_pointer<Record>(physical_);
+        }
+    }
+
+    ~ObserveSnapshot()
+    {
+        for(unsigned page = 0; page < pages_; ++page)
+            frames_->free(physical_ + page * kPageSize);
+    }
+    ObserveSnapshot(const ObserveSnapshot&) = delete;
+    ObserveSnapshot& operator=(const ObserveSnapshot&) = delete;
+
+    bool ready() const
+    {
+        return !capacity_ || records_;
+    }
+    Record* data()
+    {
+        return records_;
+    }
+
+    bool append(const Record& record)
+    {
+        if(count_ == capacity_)
+            return false;
+        records_[count_++] = record;
+        return true;
+    }
+
+    template<class Source, class Convert>
+    bool collect(bool (*visit)(bool (*)(void*, const Source&), void*), Convert convert)
+    {
+        struct Capture
+        {
+            ObserveSnapshot& snapshot;
+            Convert convert;
+        } capture{*this, convert};
+        return visit(
+            [](void* state, const Source& source) {
+                auto& capture = *static_cast<Capture*>(state);
+                return !source.active || capture.snapshot.append(capture.convert(source));
+            },
+            &capture);
+    }
+
+    long write(const ObserveContext& context,
+               Thread* thread,
+               uint64_t user_buffer,
+               size_t length,
+               uint32_t kind) const
+    {
+        return write(context, thread, user_buffer, length, kind, count_);
+    }
+
+    long write(const ObserveContext& context,
+               Thread* thread,
+               uint64_t user_buffer,
+               size_t length,
+               uint32_t kind,
+               uint32_t count) const
+    {
+        size_t offset = 0;
+        long result = -1;
+        if(count > capacity_ ||
+           !begin_observe_transfer(
+               context, thread, user_buffer, length, kind, sizeof(Record), count, offset, result))
+            return -1;
+        if(count && !write_observe_record(
+                        context, thread, user_buffer, offset, records_, sizeof(Record) * count))
+            return -1;
+        return result;
+    }
+
+private:
+    static constexpr size_t kInlineRecords = 512 / sizeof(Record);
+    static_assert(kInlineRecords > 0);
+    size_t capacity_;
+    PageFrameContainer* frames_;
+    uint64_t physical_ = 0;
+    unsigned pages_ = 0;
+    Record* records_ = nullptr;
+    Record inline_records_[kInlineRecords];
+    uint32_t count_ = 0;
+};
+
+template<class Record>
+size_t snapshot_capacity(size_t length, size_t hint)
+{
+    if(length < sizeof(Os1ObserveHeader))
+        return 0;
+    const size_t limit = (length - sizeof(Os1ObserveHeader)) / sizeof(Record);
+    const size_t count = hint < limit ? hint : limit;
+    return count < UINT32_MAX ? count : UINT32_MAX;
 }
 
 long sys_observe_system(const ObserveContext& context,
@@ -246,7 +304,7 @@ long sys_observe_processes(const ObserveContext& context,
                            uint64_t user_buffer,
                            size_t length)
 {
-    uint32_t record_count = 0;
+    size_t record_count = 0;
     {
         IrqSpinGuard process_guard(g_process_table_lock);
         IrqSpinGuard thread_guard(g_thread_registry_lock);
@@ -259,46 +317,38 @@ long sys_observe_processes(const ObserveContext& context,
         }
     }
 
-    size_t offset = 0;
-    long result = -1;
-    if(!begin_observe_transfer(context,
-                               thread,
-                               user_buffer,
-                               length,
-                               OS1_OBSERVE_PROCESSES,
-                               sizeof(Os1ObserveProcessRecord),
-                               record_count,
-                               offset,
-                               result))
-    {
+    ObserveSnapshot<Os1ObserveProcessRecord> snapshot(
+        context.frames, snapshot_capacity<Os1ObserveProcessRecord>(length, record_count));
+    if(!snapshot.ready())
         return -1;
-    }
+    observe_snapshot_checkpoint(OS1_OBSERVE_PROCESSES);
 
-    IrqSpinGuard process_guard(g_process_table_lock);
-    IrqSpinGuard thread_guard(g_thread_registry_lock);
-    for(Thread* entry = first_thread(); nullptr != entry; entry = next_thread(entry))
     {
-        if((ThreadState::Free == entry->state) || (nullptr == entry->process))
+        IrqSpinGuard process_guard(g_process_table_lock);
+        IrqSpinGuard thread_guard(g_thread_registry_lock);
+        for(Thread* entry = first_thread(); nullptr != entry; entry = next_thread(entry))
         {
-            continue;
-        }
+            if((ThreadState::Free == entry->state) || (nullptr == entry->process))
+            {
+                continue;
+            }
 
-        Os1ObserveProcessRecord record{};
-        record.pid = entry->process->pid;
-        record.tid = entry->tid;
-        record.cr3 = entry->address_space_cr3;
-        record.process_state = static_cast<uint32_t>(entry->process->state);
-        record.thread_state = static_cast<uint32_t>(entry->state);
-        record.flags =
-            entry->user_mode ? static_cast<uint32_t>(OS1_OBSERVE_PROCESS_FLAG_USER_MODE) : 0u;
-        copy_fixed_string(record.name, sizeof(record.name), entry->process->name);
-        if(!write_observe_record(context, thread, user_buffer, offset, &record, sizeof(record)))
-        {
-            return -1;
+            Os1ObserveProcessRecord record{};
+            record.pid = entry->process->pid;
+            record.tid = entry->tid;
+            record.cr3 = entry->address_space_cr3;
+            record.process_state = static_cast<uint32_t>(entry->process->state);
+            record.thread_state = static_cast<uint32_t>(entry->state);
+            record.flags =
+                entry->user_mode ? static_cast<uint32_t>(OS1_OBSERVE_PROCESS_FLAG_USER_MODE) : 0u;
+            copy_fixed_string(record.name, sizeof(record.name), entry->process->name);
+            if(!snapshot.append(record))
+            {
+                return -1;
+            }
         }
     }
-
-    return result;
+    return snapshot.write(context, thread, user_buffer, length, OS1_OBSERVE_PROCESSES);
 }
 
 long sys_observe_cpus(const ObserveContext& context,
@@ -420,46 +470,28 @@ long sys_observe_devices(const ObserveContext& context,
                          uint64_t user_buffer,
                          size_t length)
 {
-    const DeviceBinding* bindings = device_bindings();
-    const size_t binding_count = device_binding_count();
-
-    size_t offset = 0;
-    long result = -1;
-    if(!begin_observe_transfer(context,
-                               thread,
-                               user_buffer,
-                               length,
-                               OS1_OBSERVE_DEVICES,
-                               sizeof(Os1ObserveDeviceRecord),
-                               count_active_device_bindings() + count_active_acpi_devices(),
-                               offset,
-                               result))
-    {
+    ObserveSnapshot<Os1ObserveDeviceRecord> snapshot(
+        context.frames,
+        snapshot_capacity<Os1ObserveDeviceRecord>(
+            length, device_binding_count() + platform_acpi_device_count()));
+    if(!snapshot.ready())
         return -1;
-    }
+    observe_snapshot_checkpoint(OS1_OBSERVE_DEVICES);
 
-    for(size_t i = 0; i < binding_count; ++i)
-    {
-        if(!bindings[i].active)
-        {
-            continue;
-        }
-
-        Os1ObserveDeviceRecord record{};
-        record.bus = static_cast<uint8_t>(bindings[i].id.bus);
-        record.state = static_cast<uint8_t>(bindings[i].state);
-        record.id = bindings[i].id.index;
-        record.pci_index = (DeviceBus::Pci == bindings[i].id.bus)
-                               ? bindings[i].pci_index
-                               : static_cast<uint16_t>(OS1_OBSERVE_INDEX_NONE);
-        copy_fixed_string(record.driver_name,
-                          sizeof(record.driver_name),
-                          (nullptr != bindings[i].driver_name) ? bindings[i].driver_name : "");
-        if(!write_observe_record(context, thread, user_buffer, offset, &record, sizeof(record)))
-        {
-            return -1;
-        }
-    }
+    if(!snapshot.collect(visit_device_bindings, [](const DeviceBinding& source) {
+           Os1ObserveDeviceRecord record{};
+           record.bus = static_cast<uint8_t>(source.id.bus);
+           record.state = static_cast<uint8_t>(source.state);
+           record.id = source.id.index;
+           record.pci_index = (DeviceBus::Pci == source.id.bus)
+                                  ? source.pci_index
+                                  : static_cast<uint16_t>(OS1_OBSERVE_INDEX_NONE);
+           copy_fixed_string(record.driver_name,
+                             sizeof(record.driver_name),
+                             (nullptr != source.driver_name) ? source.driver_name : "");
+           return record;
+       }))
+        return -1;
 
     const AcpiDeviceInfo* acpi_devices = platform_acpi_devices();
     const size_t acpi_device_count = platform_acpi_device_count();
@@ -479,13 +511,13 @@ long sys_observe_devices(const ObserveContext& context,
                           sizeof(record.driver_name),
                           (0 != acpi_devices[i].hardware_id[0]) ? acpi_devices[i].hardware_id
                                                                 : acpi_devices[i].name);
-        if(!write_observe_record(context, thread, user_buffer, offset, &record, sizeof(record)))
+        if(!snapshot.append(record))
         {
             return -1;
         }
     }
 
-    return result;
+    return snapshot.write(context, thread, user_buffer, length, OS1_OBSERVE_DEVICES);
 }
 
 long sys_observe_resources(const ObserveContext& context,
@@ -493,74 +525,45 @@ long sys_observe_resources(const ObserveContext& context,
                            uint64_t user_buffer,
                            size_t length)
 {
-    const PciBarClaim* claims = pci_bar_claims();
-    const size_t claim_count = pci_bar_claim_count();
-    const DmaAllocationRecord* allocations = dma_allocation_records();
-    const size_t allocation_count = dma_allocation_count();
-
-    size_t offset = 0;
-    long result = -1;
-    if(!begin_observe_transfer(context,
-                               thread,
-                               user_buffer,
-                               length,
-                               OS1_OBSERVE_RESOURCES,
-                               sizeof(Os1ObserveResourceRecord),
-                               count_active_pci_bar_claims() + count_active_dma_allocations(),
-                               offset,
-                               result))
-    {
+    ObserveSnapshot<Os1ObserveResourceRecord> snapshot(
+        context.frames,
+        snapshot_capacity<Os1ObserveResourceRecord>(
+            length, pci_bar_claim_count() + dma_allocation_count()));
+    if(!snapshot.ready())
         return -1;
-    }
+    observe_snapshot_checkpoint(OS1_OBSERVE_RESOURCES);
 
-    for(size_t i = 0; i < claim_count; ++i)
-    {
-        if(!claims[i].active)
-        {
-            continue;
-        }
+    if(!snapshot.collect(visit_pci_bar_claims, [](const PciBarClaim& source) {
+           Os1ObserveResourceRecord record{};
+           record.base = source.base;
+           record.size = source.size;
+           record.owner_id = source.owner.index;
+           record.reference_id = source.pci_index;
+           record.kind = OS1_OBSERVE_RESOURCE_PCI_BAR;
+           record.owner_bus = static_cast<uint8_t>(source.owner.bus);
+           record.entry_index = source.bar_index;
+           record.detail = static_cast<uint8_t>(source.type);
+           return record;
+       }))
+        return -1;
 
-        Os1ObserveResourceRecord record{};
-        record.base = claims[i].base;
-        record.size = claims[i].size;
-        record.owner_id = claims[i].owner.index;
-        record.reference_id = claims[i].pci_index;
-        record.kind = OS1_OBSERVE_RESOURCE_PCI_BAR;
-        record.owner_bus = static_cast<uint8_t>(claims[i].owner.bus);
-        record.entry_index = claims[i].bar_index;
-        record.detail = static_cast<uint8_t>(claims[i].type);
-        if(!write_observe_record(context, thread, user_buffer, offset, &record, sizeof(record)))
-        {
-            return -1;
-        }
-    }
+    if(!snapshot.collect(visit_dma_allocations, [](const DmaAllocationRecord& source) {
+           Os1ObserveResourceRecord record{};
+           record.base = source.physical_base;
+           record.size = source.size_bytes;
+           record.flags =
+               source.coherent ? static_cast<uint32_t>(OS1_OBSERVE_RESOURCE_FLAG_COHERENT) : 0u;
+           record.page_count = source.page_count;
+           record.owner_id = source.owner.index;
+           record.reference_id = OS1_OBSERVE_INDEX_NONE;
+           record.kind = OS1_OBSERVE_RESOURCE_DMA;
+           record.owner_bus = static_cast<uint8_t>(source.owner.bus);
+           record.detail = static_cast<uint8_t>(source.direction);
+           return record;
+       }))
+        return -1;
 
-    for(size_t i = 0; i < allocation_count; ++i)
-    {
-        if(!allocations[i].active)
-        {
-            continue;
-        }
-
-        Os1ObserveResourceRecord record{};
-        record.base = allocations[i].physical_base;
-        record.size = allocations[i].size_bytes;
-        record.flags = allocations[i].coherent
-                           ? static_cast<uint32_t>(OS1_OBSERVE_RESOURCE_FLAG_COHERENT)
-                           : 0u;
-        record.page_count = allocations[i].page_count;
-        record.owner_id = allocations[i].owner.index;
-        record.reference_id = OS1_OBSERVE_INDEX_NONE;
-        record.kind = OS1_OBSERVE_RESOURCE_DMA;
-        record.owner_bus = static_cast<uint8_t>(allocations[i].owner.bus);
-        record.detail = static_cast<uint8_t>(allocations[i].direction);
-        if(!write_observe_record(context, thread, user_buffer, offset, &record, sizeof(record)))
-        {
-            return -1;
-        }
-    }
-
-    return result;
+    return snapshot.write(context, thread, user_buffer, length, OS1_OBSERVE_RESOURCES);
 }
 
 long sys_observe_irqs(const ObserveContext& context,
@@ -568,47 +571,27 @@ long sys_observe_irqs(const ObserveContext& context,
                       uint64_t user_buffer,
                       size_t length)
 {
-    const IrqRoute* routes = platform_irq_routes();
-    const size_t route_count = platform_irq_route_count();
-
-    size_t offset = 0;
-    long result = -1;
-    if(!begin_observe_transfer(context,
-                               thread,
-                               user_buffer,
-                               length,
-                               OS1_OBSERVE_IRQS,
-                               sizeof(Os1ObserveIrqRecord),
-                               count_active_irq_routes(),
-                               offset,
-                               result))
-    {
+    ObserveSnapshot<Os1ObserveIrqRecord> snapshot(
+        context.frames, snapshot_capacity<Os1ObserveIrqRecord>(length, platform_irq_route_count()));
+    if(!snapshot.ready())
         return -1;
-    }
+    observe_snapshot_checkpoint(OS1_OBSERVE_IRQS);
 
-    for(size_t i = 0; i < route_count; ++i)
-    {
-        if(!routes[i].active)
-        {
-            continue;
-        }
+    if(!snapshot.collect(visit_irq_routes, [](const IrqRoute& source) {
+           Os1ObserveIrqRecord record{};
+           record.vector = source.vector;
+           record.kind = static_cast<uint8_t>(source.kind);
+           record.owner_bus = static_cast<uint8_t>(source.owner.bus);
+           record.source_irq = source.source_irq;
+           record.owner_id = source.owner.index;
+           record.source_id = source.source_id;
+           record.flags = source.flags;
+           record.gsi = source.gsi;
+           return record;
+       }))
+        return -1;
 
-        Os1ObserveIrqRecord record{};
-        record.vector = routes[i].vector;
-        record.kind = static_cast<uint8_t>(routes[i].kind);
-        record.owner_bus = static_cast<uint8_t>(routes[i].owner.bus);
-        record.source_irq = routes[i].source_irq;
-        record.owner_id = routes[i].owner.index;
-        record.source_id = routes[i].source_id;
-        record.flags = routes[i].flags;
-        record.gsi = routes[i].gsi;
-        if(!write_observe_record(context, thread, user_buffer, offset, &record, sizeof(record)))
-        {
-            return -1;
-        }
-    }
-
-    return result;
+    return snapshot.write(context, thread, user_buffer, length, OS1_OBSERVE_IRQS);
 }
 
 struct InitrdCountContext
@@ -704,45 +687,23 @@ long sys_observe_initrd(const ObserveContext& context,
     return result;
 }
 
-OS1_BSP_ONLY Os1ObserveEventRecord g_event_observe_snapshot[OS1_OBSERVE_EVENT_RING_CAPACITY];
-
 long sys_observe_events(const ObserveContext& context,
                         Thread* thread,
                         uint64_t user_buffer,
                         size_t length)
 {
-    const uint32_t record_count =
-        kernel_event::snapshot(g_event_observe_snapshot, OS1_OBSERVE_EVENT_RING_CAPACITY);
-
-    size_t offset = 0;
-    long result = -1;
-    if(!begin_observe_transfer(context,
-                               thread,
-                               user_buffer,
-                               length,
-                               OS1_OBSERVE_EVENTS,
-                               sizeof(Os1ObserveEventRecord),
-                               record_count,
-                               offset,
-                               result))
-    {
+    if(length < sizeof(Os1ObserveHeader))
         return -1;
-    }
-
-    for(uint32_t i = 0; i < record_count; ++i)
-    {
-        if(!write_observe_record(context,
-                                 thread,
-                                 user_buffer,
-                                 offset,
-                                 &g_event_observe_snapshot[i],
-                                 sizeof(g_event_observe_snapshot[i])))
-        {
-            return -1;
-        }
-    }
-
-    return result;
+    const auto capacity = static_cast<uint32_t>(
+        snapshot_capacity<Os1ObserveEventRecord>(length, OS1_OBSERVE_EVENT_RING_CAPACITY));
+    ObserveSnapshot<Os1ObserveEventRecord> snapshot(context.frames, capacity);
+    if(!snapshot.ready())
+        return -1;
+    uint32_t count = 0;
+    if(!kernel_event::snapshot_all(snapshot.data(), capacity, count))
+        return -1;
+    observe_snapshot_checkpoint(OS1_OBSERVE_EVENTS);
+    return snapshot.write(context, thread, user_buffer, length, OS1_OBSERVE_EVENTS, count);
 }
 
 long sys_observe_usb(const ObserveContext& context,

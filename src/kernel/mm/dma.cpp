@@ -21,18 +21,17 @@ struct DmaAllocationRegistry
     KmemCache* cache = nullptr;
     DmaAllocationNode* head = nullptr;
     DmaAllocationNode* tail = nullptr;
-    DmaAllocationRecord* snapshot = nullptr;
-    size_t snapshot_capacity = 0;
     size_t count = 0;
 };
 
-OS1_BSP_ONLY DmaAllocationRegistry g_dma_allocation_registry{};
+DmaAllocationRegistry g_dma_allocation_registry{};
 
 using DmaAllocationGuard = IrqSpinGuard<Spinlock>;
 
 [[nodiscard]] uint32_t bytes_to_pages(size_t size_bytes)
 {
-    return static_cast<uint32_t>((size_bytes + kPageSize - 1u) / kPageSize);
+    const size_t pages = size_bytes / kPageSize + (size_bytes % kPageSize != 0);
+    return pages <= UINT32_MAX ? static_cast<uint32_t>(pages) : 0;
 }
 
 [[nodiscard]] bool ensure_dma_allocation_cache()
@@ -47,37 +46,12 @@ using DmaAllocationGuard = IrqSpinGuard<Spinlock>;
     return nullptr != g_dma_allocation_registry.cache;
 }
 
-[[nodiscard]] bool ensure_snapshot_capacity(size_t required_capacity)
-{
-    if(required_capacity <= g_dma_allocation_registry.snapshot_capacity)
-    {
-        return true;
-    }
-
-    size_t new_capacity = (0u == g_dma_allocation_registry.snapshot_capacity)
-                              ? 4u
-                              : g_dma_allocation_registry.snapshot_capacity;
-    while(new_capacity < required_capacity)
-    {
-        new_capacity *= 2u;
-    }
-
-    auto* new_snapshot = static_cast<DmaAllocationRecord*>(kcalloc(new_capacity, sizeof(DmaAllocationRecord)));
-    if(nullptr == new_snapshot)
-    {
-        return false;
-    }
-
-    kfree(g_dma_allocation_registry.snapshot);
-    g_dma_allocation_registry.snapshot = new_snapshot;
-    g_dma_allocation_registry.snapshot_capacity = new_capacity;
-    return true;
-}
-
-DmaAllocationNode* find_allocation_locked(uint64_t physical_base, DmaAllocationNode** previous = nullptr)
+DmaAllocationNode* find_allocation_locked(uint64_t physical_base,
+                                          DmaAllocationNode** previous = nullptr)
 {
     DmaAllocationNode* prior = nullptr;
-    for(DmaAllocationNode* node = g_dma_allocation_registry.head; nullptr != node; node = node->next)
+    for(DmaAllocationNode* node = g_dma_allocation_registry.head; nullptr != node;
+        node = node->next)
     {
         if(node->record.physical_base == physical_base)
         {
@@ -142,9 +116,6 @@ void dma_registry_reset()
     g_dma_allocation_registry.head = nullptr;
     g_dma_allocation_registry.tail = nullptr;
     g_dma_allocation_registry.count = 0;
-    kfree(g_dma_allocation_registry.snapshot);
-    g_dma_allocation_registry.snapshot = nullptr;
-    g_dma_allocation_registry.snapshot_capacity = 0;
 }
 
 bool dma_allocate_buffer(PageFrameContainer& frames,
@@ -161,7 +132,7 @@ bool dma_allocate_buffer(PageFrameContainer& frames,
 
     {
         DmaAllocationGuard guard(g_dma_allocation_registry.lock);
-        if(!ensure_snapshot_capacity(g_dma_allocation_registry.count + 1u) || !ensure_dma_allocation_cache())
+        if(!ensure_dma_allocation_cache())
         {
             return false;
         }
@@ -177,43 +148,41 @@ bool dma_allocate_buffer(PageFrameContainer& frames,
     void* virtual_address = kernel_physical_pointer<void>(physical);
     memset(virtual_address, 0, static_cast<size_t>(page_count) * kPageSize);
 
-    DmaAllocationGuard guard(g_dma_allocation_registry.lock);
-    auto* node = static_cast<DmaAllocationNode*>(
-        kmem_cache_alloc(g_dma_allocation_registry.cache, KmallocFlags::Zero));
-    if(nullptr == node)
     {
-        free_buffer_pages(frames, physical, page_count);
-        return false;
+        DmaAllocationGuard guard(g_dma_allocation_registry.lock);
+        auto* node = g_dma_allocation_registry.cache
+                         ? static_cast<DmaAllocationNode*>(kmem_cache_alloc(
+                               g_dma_allocation_registry.cache, KmallocFlags::Zero))
+                         : nullptr;
+        if(node)
+        {
+            node->record.owner = owner;
+            node->record.direction = direction;
+            node->record.physical_base = physical;
+            node->record.size_bytes = size_bytes;
+            node->record.page_count = page_count;
+            node->record.coherent = true;
+            node->record.active = true;
+            if(auto* tail = g_dma_allocation_registry.tail)
+                tail->next = node;
+            else
+                g_dma_allocation_registry.head = node;
+            g_dma_allocation_registry.tail = node;
+            ++g_dma_allocation_registry.count;
+            buffer.owner = owner;
+            buffer.virtual_address = virtual_address;
+            buffer.physical_address = physical;
+            buffer.size_bytes = size_bytes;
+            buffer.page_count = page_count;
+            buffer.direction = direction;
+            buffer.coherent = true;
+            buffer.active = true;
+            return true;
+        }
     }
 
-    node->record.active = true;
-    node->record.owner = owner;
-    node->record.direction = direction;
-    node->record.coherent = true;
-    node->record.page_count = page_count;
-    node->record.physical_base = physical;
-    node->record.size_bytes = static_cast<uint64_t>(size_bytes);
-
-    if(nullptr == g_dma_allocation_registry.tail)
-    {
-        g_dma_allocation_registry.head = node;
-    }
-    else
-    {
-        g_dma_allocation_registry.tail->next = node;
-    }
-    g_dma_allocation_registry.tail = node;
-    ++g_dma_allocation_registry.count;
-
-    buffer.owner = owner;
-    buffer.virtual_address = virtual_address;
-    buffer.physical_address = physical;
-    buffer.size_bytes = size_bytes;
-    buffer.page_count = page_count;
-    buffer.direction = direction;
-    buffer.coherent = true;
-    buffer.active = true;
-    return true;
+    free_buffer_pages(frames, physical, page_count);
+    return false;
 }
 
 void dma_release_buffer(PageFrameContainer& frames, DmaBuffer& buffer)
@@ -257,18 +226,13 @@ size_t dma_allocation_count()
     return g_dma_allocation_registry.count;
 }
 
-const DmaAllocationRecord* dma_allocation_records()
+bool visit_dma_allocations(bool (*visitor)(void*, const DmaAllocationRecord&), void* context)
 {
     DmaAllocationGuard guard(g_dma_allocation_registry.lock);
-    if(0u == g_dma_allocation_registry.count)
+    for(auto* node = g_dma_allocation_registry.head; node; node = node->next)
     {
-        return nullptr;
+        if(!visitor(context, node->record))
+            return false;
     }
-
-    size_t index = 0;
-    for(DmaAllocationNode* node = g_dma_allocation_registry.head; nullptr != node; node = node->next)
-    {
-        g_dma_allocation_registry.snapshot[index++] = node->record;
-    }
-    return g_dma_allocation_registry.snapshot;
+    return true;
 }

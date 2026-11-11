@@ -25,4 +25,5 @@ bool device_binding_set_state(DeviceId id, DeviceState state);
 void device_binding_remove(DeviceId id);
 DeviceBinding* device_binding_find(DeviceId id);
 size_t device_binding_count();
-const DeviceBinding* device_bindings();
+// Visit records under the registry lock. The callback must not block or retain references.
+bool visit_device_bindings(bool (*visitor)(void*, const DeviceBinding&), void* context);

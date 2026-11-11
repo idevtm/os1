@@ -10,7 +10,7 @@ namespace
 SchedulerTimerSource g_scheduler_timer_source = SchedulerTimerSource::Pit;
 LapicTimerCalibration g_lapic_calibration{0, 0, 0, false};
 bool g_ap_timer_enabled = true;
-}
+}  // namespace
 
 void timer_source_set_scheduler(SchedulerTimerSource source)
 {
@@ -29,9 +29,9 @@ bool timer_vector_is_scheduler_tick(uint8_t vector)
         return IRQ_TIMER == legacy_irq_from_vector(vector);
     }
 
-    const IrqRoute* route = platform_find_irq_route(vector);
-    return (nullptr != route) && (IrqRouteKind::LocalApic == route->kind) &&
-           (T_LTIMER == route->source_id);
+    IrqRoute route{};
+    return platform_find_irq_route(vector, route) && route.kind == IrqRouteKind::LocalApic &&
+           route.source_id == T_LTIMER;
 }
 
 void timer_source_set_lapic_calibration(uint8_t vector,

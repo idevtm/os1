@@ -1,11 +1,11 @@
 // Deterministic suspend/resume sequencing for bound PCI drivers and ACPI
 // companion power methods.
-#include "platform/platform.hpp"
-
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "freestanding/string.hpp"
+#include "mm/kmem.hpp"
 #include "platform/acpi_aml.hpp"
+#include "platform/platform.hpp"
 #include "platform/state.hpp"
 
 namespace
@@ -40,21 +40,66 @@ namespace
     for(size_t i = 0; i < g_platform.acpi_device_count; ++i)
     {
         const AcpiDeviceInfo& device = g_platform.acpi_devices[i];
-        if(device.active && (0 != (device.flags & kAcpiDeviceHasAdr)) && (device.bus_number == pci.bus) &&
-           (device.adr == adr))
+        if(device.active && (0 != (device.flags & kAcpiDeviceHasAdr)) &&
+           (device.bus_number == pci.bus) && (device.adr == adr))
         {
             return &device;
         }
     }
     return nullptr;
 }
+// Suspend and resume callbacks run outside the binding registry lock.
+class PowerBindings
+{
+public:
+    PowerBindings()
+        : capacity_(device_binding_count())
+        , records_(capacity_
+                       ? static_cast<DeviceBinding*>(kcalloc(capacity_, sizeof(DeviceBinding)))
+                       : nullptr)
+    {
+    }
+    ~PowerBindings()
+    {
+        kfree(records_);
+    }
+    PowerBindings(const PowerBindings&) = delete;
+    PowerBindings& operator=(const PowerBindings&) = delete;
+
+    bool capture()
+    {
+        if(capacity_ && !records_)
+            return false;
+        return visit_device_bindings(
+            [](void* context, const DeviceBinding& binding) {
+                auto& snapshot = *static_cast<PowerBindings*>(context);
+                if(binding.id.bus != DeviceBus::Pci)
+                    return true;
+                if(snapshot.count == snapshot.capacity_)
+                    return false;
+                snapshot.records_[snapshot.count++] = binding;
+                return true;
+            },
+            this);
+    }
+    const DeviceBinding& operator[](size_t index) const
+    {
+        return records_[index];
+    }
+    size_t count = 0;
+
+private:
+    size_t capacity_;
+    DeviceBinding* records_;
+};
 }  // namespace
 
 bool platform_suspend_devices()
 {
-    const DeviceBinding* bindings = device_bindings();
-    const size_t binding_count = device_binding_count();
-    for(size_t i = binding_count; i > 0; --i)
+    PowerBindings bindings;
+    if(!bindings.capture())
+        return false;
+    for(size_t i = bindings.count; i > 0; --i)
     {
         const DeviceBinding& binding = bindings[i - 1];
         if(!binding.active)
@@ -82,9 +127,10 @@ bool platform_suspend_devices()
 
 bool platform_resume_devices()
 {
-    const DeviceBinding* bindings = device_bindings();
-    const size_t binding_count = device_binding_count();
-    for(size_t i = 0; i < binding_count; ++i)
+    PowerBindings bindings;
+    if(!bindings.capture())
+        return false;
+    for(size_t i = 0; i < bindings.count; ++i)
     {
         const DeviceBinding& binding = bindings[i];
         if(!binding.active)

@@ -1,14 +1,14 @@
-#include "mm/dma.hpp"
-#include "mm/kmem.hpp"
-
-#include "handoff/memory_layout.h"
-#include "platform/state.hpp"
-#include "support/physical_memory.hpp"
-
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstring>
+#include <thread>
+
+#include "handoff/memory_layout.h"
+#include "mm/dma.hpp"
+#include "mm/kmem.hpp"
+#include "platform/state.hpp"
+#include "support/physical_memory.hpp"
 
 namespace
 {
@@ -47,9 +47,14 @@ TEST(DmaBuffer, AllocateAndReleasePublishesOwnership)
     EXPECT_NE(nullptr, buffer.virtual_address);
     EXPECT_EQ(1u, dma_allocation_count());
 
-    const DmaAllocationRecord* records = dma_allocation_records();
-    ASSERT_NE(nullptr, records);
-    EXPECT_TRUE(records[0].active);
+    DmaAllocationRecord record{};
+    EXPECT_TRUE(visit_dma_allocations(
+        [](void* out, const DmaAllocationRecord& source) {
+            *static_cast<DmaAllocationRecord*>(out) = source;
+            return true;
+        },
+        &record));
+    EXPECT_TRUE(record.active);
 
     dma_release_buffer(frames, buffer);
     EXPECT_FALSE(buffer.active);
@@ -84,5 +89,46 @@ TEST(DmaBuffer, AllocationsGrowPastLegacyLimit)
     }
     EXPECT_EQ(0u, dma_allocation_count());
 
+    platform_reset_state();
+}
+
+TEST(DmaBuffer, ConcurrentPublishersHaveNoSharedSnapshotCapacity)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = initialized_frames();
+    kmem_init(frames);
+    platform_reset_state();
+
+    std::array<DmaBuffer, 64> buffers{};
+    bool completed[2] = {};
+    auto allocate = [&](unsigned group) {
+        completed[group] = true;
+        for(unsigned i = group; i < buffers.size(); i += 2)
+            completed[group] &= dma_allocate_buffer(frames,
+                                                    {DeviceBus::Pci, static_cast<uint16_t>(i)},
+                                                    4096,
+                                                    DmaDirection::Bidirectional,
+                                                    buffers[i]);
+    };
+    std::thread first(allocate, 0), second(allocate, 1);
+    first.join();
+    second.join();
+    EXPECT_TRUE(completed[0] && completed[1]);
+    std::array<bool, 64> seen{};
+    EXPECT_TRUE(visit_dma_allocations(
+        [](void* out, const DmaAllocationRecord& record) {
+            auto& seen = *static_cast<std::array<bool, 64>*>(out);
+            if(!record.active || record.owner.index >= seen.size() || seen[record.owner.index])
+                return false;
+            seen[record.owner.index] = true;
+            return true;
+        },
+        &seen));
+    for(size_t i = 0; i < buffers.size(); ++i)
+    {
+        EXPECT_TRUE(seen[i]);
+        dma_release_buffer(frames, buffers[i]);
+    }
+    EXPECT_EQ(0u, dma_allocation_count());
     platform_reset_state();
 }

@@ -20,8 +20,6 @@ struct PciBarClaimRegistry
     KmemCache* cache = nullptr;
     PciBarClaimNode* head = nullptr;
     PciBarClaimNode* tail = nullptr;
-    PciBarClaim* snapshot = nullptr;
-    size_t snapshot_capacity = 0;
     size_t count = 0;
 };
 
@@ -46,34 +44,9 @@ using PciBarClaimGuard = IrqSpinGuard<Spinlock>;
     return nullptr != g_pci_bar_claim_registry.cache;
 }
 
-[[nodiscard]] bool ensure_snapshot_capacity(size_t required_capacity)
-{
-    if(required_capacity <= g_pci_bar_claim_registry.snapshot_capacity)
-    {
-        return true;
-    }
-
-    size_t new_capacity = (0u == g_pci_bar_claim_registry.snapshot_capacity)
-                              ? 4u
-                              : g_pci_bar_claim_registry.snapshot_capacity;
-    while(new_capacity < required_capacity)
-    {
-        new_capacity *= 2u;
-    }
-
-    auto* new_snapshot = static_cast<PciBarClaim*>(kcalloc(new_capacity, sizeof(PciBarClaim)));
-    if(nullptr == new_snapshot)
-    {
-        return false;
-    }
-
-    kfree(g_pci_bar_claim_registry.snapshot);
-    g_pci_bar_claim_registry.snapshot = new_snapshot;
-    g_pci_bar_claim_registry.snapshot_capacity = new_capacity;
-    return true;
-}
-
-PciBarClaimNode* find_claim_locked(uint16_t pci_index, uint8_t bar_index, PciBarClaimNode** previous = nullptr)
+PciBarClaimNode* find_claim_locked(uint16_t pci_index,
+                                   uint8_t bar_index,
+                                   PciBarClaimNode** previous = nullptr)
 {
     PciBarClaimNode* prior = nullptr;
     for(PciBarClaimNode* node = g_pci_bar_claim_registry.head; nullptr != node; node = node->next)
@@ -133,9 +106,6 @@ void pci_bar_claim_registry_reset()
     g_pci_bar_claim_registry.head = nullptr;
     g_pci_bar_claim_registry.tail = nullptr;
     g_pci_bar_claim_registry.count = 0;
-    kfree(g_pci_bar_claim_registry.snapshot);
-    g_pci_bar_claim_registry.snapshot = nullptr;
-    g_pci_bar_claim_registry.snapshot_capacity = 0;
 }
 
 bool claim_pci_bar(DeviceId owner, uint16_t pci_index, uint8_t bar_index, PciBarResource& resource)
@@ -170,7 +140,7 @@ bool claim_pci_bar(DeviceId owner, uint16_t pci_index, uint8_t bar_index, PciBar
         return true;
     }
 
-    if(!ensure_snapshot_capacity(g_pci_bar_claim_registry.count + 1u) || !ensure_pci_bar_claim_cache())
+    if(!ensure_pci_bar_claim_cache())
     {
         debug("pci: BAR claim allocation failed")();
         return false;
@@ -252,18 +222,13 @@ size_t pci_bar_claim_count()
     return g_pci_bar_claim_registry.count;
 }
 
-const PciBarClaim* pci_bar_claims()
+bool visit_pci_bar_claims(bool (*visitor)(void*, const PciBarClaim&), void* context)
 {
     PciBarClaimGuard guard(g_pci_bar_claim_registry.lock);
-    if(0u == g_pci_bar_claim_registry.count)
+    for(auto* node = g_pci_bar_claim_registry.head; node; node = node->next)
     {
-        return nullptr;
+        if(!visitor(context, node->claim))
+            return false;
     }
-
-    size_t index = 0;
-    for(PciBarClaimNode* node = g_pci_bar_claim_registry.head; nullptr != node; node = node->next)
-    {
-        g_pci_bar_claim_registry.snapshot[index++] = node->claim;
-    }
-    return g_pci_bar_claim_registry.snapshot;
+    return true;
 }
