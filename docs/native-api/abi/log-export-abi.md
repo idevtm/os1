@@ -133,6 +133,10 @@ Directory scans are bounded to 256 entries and 128 recognized managed files.
 These bounds can stop export in a directory containing excessive unrelated files.
 
 Each frame carries the source revision and a source/build-profile SHA-256 fingerprint.
+The revision field holds up to 40 bytes.
+A dirty checkout uses the first 34 characters of its revision followed by `-dirty`.
+An archive uses the supplied `OS1_SOURCE_REVISION` label or `unknown`.
+The label does not change the fingerprint.
 The fingerprint covers project-owned source, CMake scripts, and the configured compiler profile.
 It is not a byte hash of the complete boot image or third-party dependencies.
 Clock fields provide coarse monotonic time, wall time when available, and resolution.

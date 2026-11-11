@@ -1828,6 +1828,8 @@ if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_data_image.py")
   add_test(NAME os1_storage_deploy_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_storage_deploy.py")
+  add_test(NAME os1_source_identity_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_source_identity.py")
   add_test(NAME os1_build_configuration_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_build_configuration.py")
   add_test(NAME os1_target_menu_contract
@@ -1890,6 +1892,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
         COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_device_runner.py"
           --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
           --program-disk "${OS1_PROGRAM_TEST_DISK}" --log "${OS1_ARTIFACT_DIR}/smoke-device-runner-${boot}.log"
+          --identity "${OS1_GENERATED_DIR}/log_build_identity.hpp"
           --debugfs "${OS1_DEBUGFS_EXECUTABLE}" --e2fsck "${OS1_E2FSCK_EXECUTABLE}"
           ${file_test_firmware})
       set_tests_properties(os1_smoke_device_runner_${boot} PROPERTIES TIMEOUT 180)

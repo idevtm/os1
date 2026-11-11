@@ -56,6 +56,20 @@ class Compare(unittest.TestCase):
     def compare(self, profiles=None):
         return c.compare(self.root, profiles or [self.profile])
 
+    def test_build_identity_accepts_archive_and_dirty_revisions(self):
+        for revision in ('unknown', 'archive-1', 'a' * 34 + '-dirty'):
+            with self.subTest(revision=revision):
+                (self.root / 'manifest.txt').write_text(
+                    f'kernel_revision={revision}\nkernel_build=' + 'b' * 64 + '\n')
+                self.assertEqual(self.compare()['manifest']['kernel_revision'], revision)
+        for revision, fingerprint in (('bad label', 'b' * 64), ('a' * 41, 'b' * 64),
+                                      ('unknown', 'b' * 63)):
+            with self.subTest(revision=revision, fingerprint=fingerprint):
+                (self.root / 'manifest.txt').write_text(
+                    f'kernel_revision={revision}\nkernel_build={fingerprint}\n')
+                with self.assertRaisesRegex(ValueError, 'invalid build identity'):
+                    self.compare()
+
     def test_usb_retirement_capture_decodes_first_cause(self):
         record = c.USB_FAILURE.pack(1, 123, 7, 1376640, 1, 9, 1, 1, 2, 3, 0x81,
                                    0x30d52, 4, 0x2005, 0)

@@ -593,6 +593,12 @@ The user-program build compiles each source to a separate object with a compiler
 The depfile lists direct and transitive headers for that object.
 CMake rebuilds affected objects and links the dependent ELF files.
 
+Builds from source archives use `unknown` as the revision when Git metadata is unavailable.
+Set `-DOS1_SOURCE_REVISION=<label>` when configuring an archive with a known revision.
+Use up to 40 ASCII letters, digits, dots, underscores, plus signs, or hyphens.
+Supply the same dependency sources as a checkout when the archive omits submodules.
+The build still calculates the content fingerprint. See the [log export ABI](native-api/abi/log-export-abi.md).
+
 The CMake build now produces two image families:
 
 - `build/artifacts/os1.iso`

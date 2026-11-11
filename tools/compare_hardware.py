@@ -206,9 +206,9 @@ def usb_input_failures(data):
 def compare(run, profiles, machine=None):
     manifest = key_values(bounded(run / 'manifest.txt', 16384))
     summary = key_values(bounded(run / 'summary.txt', 16384))
-    for key, length in (('kernel_revision', 40), ('kernel_build', 64)):
-        if not re.fullmatch(f'[0-9a-f]{{{length}}}', manifest.get(key, '')):
-            raise ValueError('invalid build identity')
+    if (not re.fullmatch(r'[A-Za-z0-9._+\-]{1,40}', manifest.get('kernel_revision', ''))
+            or not re.fullmatch(r'[a-f0-9]{64}', manifest.get('kernel_build', ''))):
+        raise ValueError('invalid build identity')
     members = captures(run / 'captures.tar')
     records = catalog(members['catalog.bin'])
     active = [r for r in records if r['state'] not in ('unavailable', 'disconnected')]

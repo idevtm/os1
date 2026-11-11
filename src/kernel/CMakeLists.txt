@@ -228,9 +228,11 @@ target_compile_options(
     -w
 )
 
+set(OS1_SOURCE_REVISION "" CACHE STRING "Revision label for source archives without Git metadata")
 add_custom_target(os1_log_build_identity
-  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/log_build_identity.py"
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" -E "${PROJECT_SOURCE_DIR}/cmake/scripts/log_build_identity.py"
           --root "${PROJECT_SOURCE_DIR}" --output "${OS1_GENERATED_DIR}/log_build_identity.hpp"
+          "--archive-revision=${OS1_SOURCE_REVISION}"
           --profile "${CMAKE_BUILD_TYPE}:${CMAKE_CXX_COMPILER_ID}:${CMAKE_CXX_COMPILER_VERSION}:${CMAKE_CXX_FLAGS}:${OS1_KMEM_DEBUG}:${OS1_QEMU_DEBUGCON}:${OS1_BOOT_DIAGNOSTICS}:${OS1_USB_KEYBOARD_DIAGNOSTICS}"
   BYPRODUCTS "${OS1_GENERATED_DIR}/log_build_identity.hpp"
   VERBATIM)
