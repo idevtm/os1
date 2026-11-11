@@ -257,7 +257,8 @@ constexpr uint16_t cache_alignment_for_size(uint16_t object_size)
 
 OS1_BSP_ONLY PageFrameContainer* g_kmem_frames = nullptr;
 OS1_BSP_ONLY bool g_kmem_ready = false;
-OS1_BSP_ONLY KmemGlobalStats g_kmem_global_stats{};
+Spinlock g_kmem_stats_lock{"kmem-stats"};
+OS1_LOCKED_BY(g_kmem_stats_lock) KmemGlobalStats g_kmem_global_stats{};
 OS1_BSP_ONLY Spinlock g_named_cache_registry_lock{"kmem-cache-registry"};
 OS1_BSP_ONLY KmemCache* g_named_cache_head = nullptr;
 OS1_BSP_ONLY size_t g_named_cache_count = 0;
@@ -493,6 +494,21 @@ void record_cache_failure(KmemCache& cache)
 #endif
 }
 
+void increment_global_stat(uint64_t KmemGlobalStats::* counter)
+{
+    CacheLockGuard guard(g_kmem_stats_lock);
+    ++(g_kmem_global_stats.*counter);
+}
+
+void record_slab_page_release()
+{
+    CacheLockGuard guard(g_kmem_stats_lock);
+    if(0u != g_kmem_global_stats.slab_page_count)
+    {
+        --g_kmem_global_stats.slab_page_count;
+    }
+}
+
 [[noreturn]] void kmem_corruption(const char* reason,
                                  const void* ptr,
                                  uint64_t header_address = 0,
@@ -501,7 +517,7 @@ void record_cache_failure(KmemCache& cache)
                                  uint32_t expected_magic = 0,
                                  uint32_t observed_magic = 0)
 {
-    ++g_kmem_global_stats.corruption_count;
+    increment_global_stat(&KmemGlobalStats::corruption_count);
     kernel_event::record(OS1_KERNEL_EVENT_KMEM_CORRUPTION,
                          OS1_KERNEL_EVENT_FLAG_FAILURE,
                          reinterpret_cast<uint64_t>(ptr),
@@ -664,9 +680,19 @@ void debug_initialize_free_slot(SlabPageHeader& slab, uint16_t index, void* next
 }
 #endif
 
-[[nodiscard]] void* kmem_fail(const char* reason, size_t size, KmallocFlags flags)
+[[nodiscard]] void* kmem_fail(const char* reason,
+                              size_t size,
+                              KmallocFlags flags,
+                              bool large = false)
 {
-    ++g_kmem_global_stats.failed_alloc_count;
+    {
+        CacheLockGuard guard(g_kmem_stats_lock);
+        ++g_kmem_global_stats.failed_alloc_count;
+        if(large)
+        {
+            ++g_kmem_global_stats.failed_large_alloc_count;
+        }
+    }
     if(has_flag(flags, KmallocFlags::PanicOnFail))
     {
         debug("kmem: allocation failed: ")(reason)(" size=")(static_cast<uint64_t>(size))();
@@ -835,7 +861,7 @@ void move_slab(KmemCache& cache, SlabPageHeader* slab, SlabListKind kind)
     attach_slab(cache, slab, SlabListKind::Empty);
     ++cache.slab_count;
     ++cache.slab_growth_count;
-    ++g_kmem_global_stats.slab_page_count;
+    increment_global_stat(&KmemGlobalStats::slab_page_count);
     return true;
 }
 
@@ -949,8 +975,7 @@ void snapshot_list(const SlabPageHeader* head,
 {
     if(has_flag(flags, KmallocFlags::NoGrow) || has_flag(flags, KmallocFlags::Atomic))
     {
-        ++g_kmem_global_stats.failed_large_alloc_count;
-        return kmem_fail("large allocations require growth", size, flags);
+        return kmem_fail("large allocations require growth", size, flags, true);
     }
 
     uint32_t page_count = 0;
@@ -958,15 +983,13 @@ void snapshot_list(const SlabPageHeader* head,
     size_t usable_size = 0;
     if(!large_layout_for_size(size, page_count, payload_offset, usable_size))
     {
-        ++g_kmem_global_stats.failed_large_alloc_count;
-        return kmem_fail("large allocation overflow", size, flags);
+        return kmem_fail("large allocation overflow", size, flags, true);
     }
 
     uint64_t physical_base = 0;
     if(!g_kmem_frames->allocate(physical_base, static_cast<unsigned>(page_count)))
     {
-        ++g_kmem_global_stats.failed_large_alloc_count;
-        return kmem_fail("out of physical pages", size, flags);
+        return kmem_fail("out of physical pages", size, flags, true);
     }
 
     auto* header = kernel_physical_pointer<LargeAllocationHeader>(physical_base);
@@ -993,9 +1016,12 @@ void snapshot_list(const SlabPageHeader* head,
     }
 #endif
 
-    ++g_kmem_global_stats.live_large_allocation_count;
-    g_kmem_global_stats.live_large_allocation_bytes += size;
-    ++g_kmem_global_stats.alloc_count;
+    {
+        CacheLockGuard guard(g_kmem_stats_lock);
+        ++g_kmem_global_stats.live_large_allocation_count;
+        g_kmem_global_stats.live_large_allocation_bytes += size;
+        ++g_kmem_global_stats.alloc_count;
+    }
     return large_payload(*header);
 }
 
@@ -1003,7 +1029,7 @@ void release_large_allocation(LargeAllocationHeader* header)
 {
     if((nullptr == header) || (0u == header->page_count))
     {
-        ++g_kmem_global_stats.invalid_free_count;
+        increment_global_stat(&KmemGlobalStats::invalid_free_count);
         kmem_corruption("invalid large allocation header",
                         header,
                         reinterpret_cast<uint64_t>(header),
@@ -1011,19 +1037,17 @@ void release_large_allocation(LargeAllocationHeader* header)
                         "large");
     }
 
-    if((0u == g_kmem_global_stats.live_large_allocation_count) ||
-       (g_kmem_global_stats.live_large_allocation_bytes < header->requested_size))
     {
-        kmem_corruption("large allocation stats underflow",
-                        header,
-                        reinterpret_cast<uint64_t>(header),
-                        header->physical_base,
-                        "large");
+        CacheLockGuard guard(g_kmem_stats_lock);
+        if(0u != g_kmem_global_stats.live_large_allocation_count)
+        {
+            --g_kmem_global_stats.live_large_allocation_count;
+        }
+        uint64_t& live_bytes = g_kmem_global_stats.live_large_allocation_bytes;
+        live_bytes =
+            (live_bytes < header->requested_size) ? 0u : live_bytes - header->requested_size;
+        ++g_kmem_global_stats.free_count;
     }
-
-    --g_kmem_global_stats.live_large_allocation_count;
-    g_kmem_global_stats.live_large_allocation_bytes -= header->requested_size;
-    ++g_kmem_global_stats.free_count;
 
     const uint64_t physical_base = header->physical_base;
     const uint32_t page_count = header->page_count;
@@ -1099,7 +1123,7 @@ void release_large_allocation(LargeAllocationHeader* header)
     debug_mark_slot_allocated(*slab, slot_index);
     cache.debug_last_alloc_caller = caller;
 #endif
-    ++g_kmem_global_stats.alloc_count;
+    increment_global_stat(&KmemGlobalStats::alloc_count);
 
     const SlabListKind target = (0u == slab->free_count) ? SlabListKind::Full : SlabListKind::Partial;
     move_slab(cache, slab, target);
@@ -1111,7 +1135,7 @@ void release_large_allocation(LargeAllocationHeader* header)
     uint16_t slot_index = 0;
     if(!slot_index_for_pointer(*slab, ptr, slot_index))
     {
-        ++g_kmem_global_stats.invalid_free_count;
+        increment_global_stat(&KmemGlobalStats::invalid_free_count);
         kmem_corruption("pointer outside slab",
                         ptr,
                         reinterpret_cast<uint64_t>(slab),
@@ -1122,7 +1146,7 @@ void release_large_allocation(LargeAllocationHeader* header)
 #if defined(OS1_KMEM_DEBUG)
     if(!debug_slot_is_allocated(*slab, slot_index))
     {
-        ++g_kmem_global_stats.invalid_free_count;
+        increment_global_stat(&KmemGlobalStats::invalid_free_count);
         kmem_corruption("double free",
                         ptr,
                         reinterpret_cast<uint64_t>(slab),
@@ -1141,7 +1165,7 @@ void release_large_allocation(LargeAllocationHeader* header)
 
     if(pointer_on_free_list(*slab, ptr))
     {
-        ++g_kmem_global_stats.invalid_free_count;
+        increment_global_stat(&KmemGlobalStats::invalid_free_count);
         kmem_corruption("double free",
                         ptr,
                         reinterpret_cast<uint64_t>(slab),
@@ -1168,7 +1192,7 @@ void release_large_allocation(LargeAllocationHeader* header)
     ++slab->free_count;
     --cache.live_objects;
     ++cache.free_count;
-    ++g_kmem_global_stats.free_count;
+    increment_global_stat(&KmemGlobalStats::free_count);
     if(slab->free_count > slab->object_count)
     {
         kmem_corruption("free count overflow",
@@ -1293,7 +1317,7 @@ void free_object(void* ptr, KmemCache* expected_cache)
     }
     if(!g_kmem_ready || (nullptr == g_kmem_frames))
     {
-        ++g_kmem_global_stats.invalid_free_count;
+        increment_global_stat(&KmemGlobalStats::invalid_free_count);
         kmem_corruption("free before initialization", ptr);
     }
 
@@ -1304,7 +1328,7 @@ void free_object(void* ptr, KmemCache* expected_cache)
     {
         if(nullptr != expected_cache)
         {
-            ++g_kmem_global_stats.invalid_free_count;
+            increment_global_stat(&KmemGlobalStats::invalid_free_count);
             kmem_corruption("cache free used for large allocation",
                             ptr,
                             page_base,
@@ -1315,7 +1339,7 @@ void free_object(void* ptr, KmemCache* expected_cache)
         auto* large = reinterpret_cast<LargeAllocationHeader*>(page_base);
         if(!pointer_is_large_allocation(*large, ptr))
         {
-            ++g_kmem_global_stats.invalid_free_count;
+            increment_global_stat(&KmemGlobalStats::invalid_free_count);
             kmem_corruption("invalid large allocation pointer",
                             ptr,
                             reinterpret_cast<uint64_t>(large),
@@ -1330,7 +1354,7 @@ void free_object(void* ptr, KmemCache* expected_cache)
     auto* slab = reinterpret_cast<SlabPageHeader*>(page_base);
     if((AllocationKind::Slab != kind) || (nullptr == slab->cache))
     {
-        ++g_kmem_global_stats.invalid_free_count;
+        increment_global_stat(&KmemGlobalStats::invalid_free_count);
         kmem_corruption("invalid slab header",
                         ptr,
                         reinterpret_cast<uint64_t>(slab),
@@ -1343,7 +1367,7 @@ void free_object(void* ptr, KmemCache* expected_cache)
     KmemCache& cache = *slab->cache;
     if((nullptr != expected_cache) && (&cache != expected_cache))
     {
-        ++g_kmem_global_stats.invalid_free_count;
+        increment_global_stat(&KmemGlobalStats::invalid_free_count);
         kmem_corruption("cache free mismatch",
                         ptr,
                         reinterpret_cast<uint64_t>(slab),
@@ -1357,7 +1381,7 @@ void free_object(void* ptr, KmemCache* expected_cache)
         CacheLockGuard guard(cache.lock);
         if((slab->cache != &cache) || (slab->object_size != cache.slot_size))
         {
-            ++g_kmem_global_stats.invalid_free_count;
+            increment_global_stat(&KmemGlobalStats::invalid_free_count);
             kmem_corruption("cache mismatch",
                             ptr,
                             reinterpret_cast<uint64_t>(slab),
@@ -1380,15 +1404,7 @@ void free_object(void* ptr, KmemCache* expected_cache)
             }
             --cache.slab_count;
             ++cache.slab_return_count;
-            if(0u == g_kmem_global_stats.slab_page_count)
-            {
-                kmem_corruption("global slab page underflow",
-                                ptr,
-                                reinterpret_cast<uint64_t>(slab),
-                                slab->physical_page,
-                                cache.name);
-            }
-            --g_kmem_global_stats.slab_page_count;
+            record_slab_page_release();
         }
     }
 
@@ -1422,15 +1438,7 @@ void release_cache_slabs(KmemCache& cache)
                                 physical_page,
                                 cache.name);
             }
-            if(0u == g_kmem_global_stats.slab_page_count)
-            {
-                kmem_corruption("global slab page underflow",
-                                head,
-                                reinterpret_cast<uint64_t>(head),
-                                physical_page,
-                                cache.name);
-            }
-            --g_kmem_global_stats.slab_page_count;
+            record_slab_page_release();
             poison_physical_pages(physical_page, 1u);
             (void)g_kmem_frames->free(physical_page);
             head = next;
@@ -1447,7 +1455,10 @@ void release_cache_slabs(KmemCache& cache)
 void kmem_init(PageFrameContainer& frames)
 {
     g_kmem_frames = &frames;
-    g_kmem_global_stats = {};
+    {
+        CacheLockGuard guard(g_kmem_stats_lock);
+        g_kmem_global_stats = {};
+    }
     for(size_t index = 0; index < builtin_cache_count(); ++index)
     {
         reset_cache(g_builtin_caches[index]);
@@ -1561,7 +1572,7 @@ void kmem_cache_free(KmemCache* cache, void* ptr)
     }
     if((nullptr == cache) || !cache->active)
     {
-        ++g_kmem_global_stats.invalid_free_count;
+        increment_global_stat(&KmemGlobalStats::invalid_free_count);
         kmem_corruption("free with invalid cache handle", ptr);
     }
     free_object(ptr, cache);
@@ -1648,7 +1659,10 @@ bool kmem_get_cache_stats(size_t index, KmemCacheStats& stats)
 
 void kmem_get_global_stats(KmemGlobalStats& stats)
 {
-    stats = g_kmem_global_stats;
+    {
+        CacheLockGuard guard(g_kmem_stats_lock);
+        stats = g_kmem_global_stats;
+    }
     stats.cache_count = kmem_cache_stats_count();
 }
 

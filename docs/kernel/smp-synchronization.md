@@ -41,6 +41,7 @@ then release it before making threads runnable.
 
 | State | Existing protection or ownership |
 | --- | --- |
+| Kernel heap statistics | `g_kmem_stats_lock` in `mm/kmem.cpp`. See [Kernel heap accounting](#kernel-heap-accounting). |
 | Physical page allocation/free | `g_page_frames_lock`; allocator initialization remains BSP-owned. |
 | Process registry and PID allocation | `g_process_table_lock` in `proc/process.cpp`. |
 | Thread registry and TID allocation | `g_thread_registry_lock` in `proc/thread.cpp`. |
@@ -86,6 +87,23 @@ Rules:
   scheduler/run-queue lock to wake them.
 - Locks protect data ownership; they do not replace lifetime rules. Process,
   thread, page-table, and device lifetimes still need explicit ownership transitions.
+
+## Kernel heap accounting
+
+The heap uses one IRQ-safe lock for global counter updates and snapshots.
+Each large allocation, release, or failure updates its related counters together.
+
+```mermaid
+flowchart LR
+    A[Heap operation] --> B[Global counter lock]
+    C[Statistics reader] --> B
+    B --> D[Global counters]
+```
+
+The counter lock is terminal. Release it before acquiring any other lock.
+The cache count comes from a separate registry read.
+A release clamps a counter at zero if subtraction would underflow.
+Header and object validity checks still govern whether the allocator can release memory.
 
 ## Console Descriptor Lifetime
 
