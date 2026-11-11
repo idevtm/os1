@@ -476,7 +476,7 @@ The shared entry runs one deterministic sequence:
   runs the threaded block smoke, spawns the kernel SMP ping threads, loads
   `/bin/init` from the initrd, marks the first user thread ready, and exits.
   `/bin/init` starts `/disk/bin/sh` and waits for its exit.
-  It restarts the shell after exit, or starts `/bin/rescue` if launch fails.
+  It restarts the shell after exit. It starts rescue after a launch error or repeated rapid exits.
 
 ### Phase 4 — ACPI, PCIe, driver binding, and storage probe
 
@@ -1363,7 +1363,8 @@ Current user programs:
 
 The kernel retains its fixed `/bin/init` boot contract.
 Init starts `/disk/bin/sh` through the existing filesystem-backed loader.
-If launch fails, init reports the error and starts `/bin/rescue`.
+If launch fails or the shell exits rapidly three times, init reports the error and starts `/bin/rescue`.
+See [Boot program placement](native-api/abi/initrd-vfs-abi.md#boot-program-placement) for the restart delays.
 Rescue retry returns to init; it does not mount storage or probe hardware.
 The loader accepts ELF64 `ET_EXEC` images with `PT_LOAD` segments.
 It checks all program headers before it allocates an address space.

@@ -2,6 +2,7 @@
 """Normal shell startup, independent rescue, and preserving migration checks."""
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -16,7 +17,7 @@ from test_ext2_persistence import boot
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    for name in ('qemu', 'image', 'program-disk', 'manifest', 'log'):
+    for name in ('qemu', 'image', 'program-disk', 'manifest', 'faulting-shell', 'log'):
         p.add_argument('--' + name, required=True)
     p.add_argument('--code')
     p.add_argument('--vars')
@@ -48,6 +49,33 @@ def main():
         run('usb', b'USB boot snapshot')
         run('retry', b'init: cannot start /disk/bin/sh')
         run('help', b'log_export')
+
+    # A valid disk shell that faults repeatedly must reach the rescue console.
+    shutil.copyfile(args.program_disk, disk)
+    manifest = log.with_suffix('.faulting.json')
+    manifest.write_text(json.dumps({'version': 1, 'programs': [
+        {'source': str(Path(args.faulting_shell).resolve()), 'destination': '/disk/bin/sh'}]}))
+    deploy(disk, manifest)
+    args.rescue = True
+    args.startup_timeout = 15
+    repeated = b'init: disk shell exited repeatedly; starting rescue'
+    def fault_cycle(run, _expect):
+        run('help', b'log_export')
+        run('retry', repeated)
+        run('help', b'log_export')
+        run('\x04', repeated, append_newline=False)
+        run('help', b'log_export')
+
+    boot(args, disk, 'faulting-shell', exercise=fault_cycle)
+    transcript = log.with_suffix('.faulting-shell.log').read_bytes()
+    starts = [int(value) for value in re.findall(rb'faulting shell start ns=(\d+)', transcript)]
+    assert len(starts) == 9, starts
+    minimum_delays = (100, 100, 250, 100, 100, 250, 100, 100)
+    assert all(b - a >= delay * 1_000_000
+               for a, b, delay in zip(starts, starts[1:], minimum_delays)), starts
+    assert transcript.count(repeated) == 3, transcript[-4000:]
+    args.rescue = False
+    args.startup_timeout = 60
 
     # A blank storage image must not prevent the independent rescue console.
     with disk.open('wb') as out:

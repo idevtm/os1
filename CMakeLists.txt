@@ -2022,6 +2022,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_PYTHON_EXECUTABLE)
       COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_shell_bootstrap.py"
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${file_test_image}"
         --program-disk "${OS1_PROGRAM_TEST_DISK}" --manifest "${OS1_GENERATED_DIR}/storage-programs.json"
+        --faulting-shell "${OS1_FAULTING_SHELL_ELF}"
         --log "${OS1_ARTIFACT_DIR}/smoke-bootstrap-${boot}.log" ${file_test_firmware})
     set_tests_properties(os1_smoke_bootstrap_${boot} PROPERTIES TIMEOUT 240)
     list(APPEND OS1_QEMU_SMOKE_TESTS os1_smoke_bootstrap_${boot})
@@ -2127,8 +2128,8 @@ if(OS1_QEMU_EXECUTABLE)
 endif()
 
 if(BUILD_TESTING)
-  add_dependencies(os1_image os1_deploy_probe_1 os1_deploy_probe_2 os1_entry_probe)
-  add_dependencies(os1_bios_image os1_deploy_probe_1 os1_deploy_probe_2 os1_entry_probe)
+  add_dependencies(os1_image os1_deploy_probe_1 os1_deploy_probe_2 os1_entry_probe os1_faulting_shell)
+  add_dependencies(os1_bios_image os1_deploy_probe_1 os1_deploy_probe_2 os1_entry_probe os1_faulting_shell)
 endif()
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
   add_custom_target(smoke_storage

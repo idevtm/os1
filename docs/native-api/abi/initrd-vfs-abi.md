@@ -12,7 +12,17 @@ General generated bindings and runtime reflection remain proposals.
 ## Boot program placement
 
 The kernel loads `/bin/init` from immutable initrd.
-Init supervises `/disk/bin/sh` and starts `/bin/rescue` if shell launch fails.
+Init supervises `/disk/bin/sh` and starts `/bin/rescue` after a launch or wait error.
+
+| Shell result | Init action |
+| --- | --- |
+| Shell exits after one second or longer | Reset the rapid-exit count and restart. |
+| First or second rapid exit | Wait 100 ms and restart. |
+| Third consecutive rapid exit | Start rescue. |
+
+Init waits 250 ms after rescue returns before it tries the disk shell again.
+Init keeps a private IPC pair for deadline waits.
+If the wait fails, init yields until the deadline or until the clock stops making progress.
 Normal programs and resources reside on ext2.
 This placement changes executable paths, not startup records or inherited authority.
 See [boot and recovery](../../filesystems/program-deployment.md#boot-and-recovery) for deployment and failure behavior.

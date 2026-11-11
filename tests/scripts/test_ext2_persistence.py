@@ -109,13 +109,13 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             assert forbidden not in result, result[-2000:]
         return result
 
-    def run(text, marker=None, allow_errors=False, timeout=60, action=None):
+    def run(text, marker=None, allow_errors=False, timeout=60, action=None, append_newline=True):
         command_started = time.monotonic()
         completed = False
         try:
             if text == 'reboot':
                 menu.reset()
-            child.stdin.write((text + '\n').encode())
+            child.stdin.write((text + ('\n' if append_newline else '')).encode())
             child.stdin.flush()
             if action:
                 action()
@@ -131,7 +131,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     try:
         if before_boot is not None:
             before_boot()
-        startup = expect()
+        startup = expect(timeout=getattr(args, 'startup_timeout', 60))
         if args.code and getattr(args, 'boot_menu_entry', 1) is not None:
             assert menu.selected, 'shell started without selecting the requested menu entry'
         if usb_readonly or getattr(args, 'stall_init', False):
