@@ -111,7 +111,7 @@ The shared IPC timer wait supplies an explicit reschedule and wakeup, including 
 Interrupt handlers, early boot, and user syscall frames poll instead of halting without a wake source.
 User syscall frames cannot park through the kernel-thread scheduling path.
 Read, write, and flush requests share this rule; accepted requests retain completion-based waiting.
-EHCI and xHCI defer scheduling while they own a controller busy flag.
+EHCI and xHCI defer scheduling while they own a synchronous controller resource.
 IRQ service continues, but scheduling and deferred filesystem work wait until ownership ends.
 The outermost guard requests a pending reschedule when local runnable work exists, including on APs without periodic ticks.
 These synchronous scopes cannot sleep or yield. They can delay other tasks on their CPU during controller timeouts.
@@ -159,6 +159,12 @@ The runner accumulates input failures in memory and reports them after observati
 The [failure diagnostics plan](hardware/input-failure-diagnostics-plan.md) records the physical evidence and validation.
 Removed attachments keep unavailable identities; new attachments receive new identities.
 Existing storage mounts do not automatically switch to replacement media.
+
+### EHCI stall diagnostics
+
+The [stall trace](native-api/abi/input-abi.md#ehci-stall-trace) correlates USB worker timing with one pointer's reports.
+The worker records bounded samples in memory during the interactive demo.
+The runner saves the trace and demo summary after the capture ends.
 
 ## Glossary
 
@@ -897,6 +903,23 @@ The active backend is chosen from `BootInfo`:
 - Limine/UEFI uses the framebuffer backend when the format is supported
 - otherwise the kernel continues with serial-only diagnostics
 
+### Graphics sessions
+
+The [display service](native-api/abi/display-abi.md) exposes graphics through an exclusive session.
+
+```text
+validated framebuffer -> ext2 driver match -> os.display -> DisplaySession
+text cells -> console output lock -> text redraw when the session ends
+```
+
+The boot driver loader checks the framebuffer before it reads the graphics package.
+The kernel verifies the package digest and maps the module in its own supervisor window.
+The graphics module converts RGB values and writes bounded rectangles.
+The console keeps its logical text state while a session owns pixel output.
+The QEMU Standard VGA backend switches the scanout resolution during session acquisition.
+The final session release restores the boot mode before it redraws the active terminal.
+The demo uses waitable pointer subscriptions. It reports input and draw timing after it releases the display.
+
 ### Framebuffer Text Rendering
 
 The framebuffer backend is intentionally minimal:
@@ -1573,7 +1596,11 @@ See the [control-transfer correction](hardware/2026-11-06-xhci-control-transfers
 
 The USB block-device list combines xHCI and EHCI devices before the filesystem mount probe.
 Both controllers reuse the SCSI and Bulk-Only Transport implementation.
-EHCI owns a serialized polling schedule and discovers high-speed hubs during boot.
+EHCI serializes bulk commands and hub control through asynchronous schedule ownership.
+A separate periodic gate lets the worker service mouse reports while storage is active.
+A storage wait can also service the periodic schedule if it acquires that gate.
+Topology changes and retirement of all attached devices require both gates.
+A short register lock serializes schedule changes with controller shutdown.
 Hardware drivers remain in the kernel; the native File/Directory contract does not change.
 See [USB storage](hardware/usb-storage.md#ehci-and-high-speed-hubs) for limits and DMA lifetime rules.
 

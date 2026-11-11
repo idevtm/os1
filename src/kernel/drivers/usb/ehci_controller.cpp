@@ -1,4 +1,6 @@
 #include "drivers/usb/ehci_controller.hpp"
+
+#include "sync/smp.hpp"
 namespace ehci
 {
 bool prepare_qtd(Qtd& td,
@@ -61,19 +63,26 @@ bool root_usable(uint32_t status)
     // Connection/enable changes also reject an unplug/replug between requests.
     return (status & 5u) == 5u && !(status & (0x3au | (1u << 7) | (1u << 8) | (1u << 13)));
 }
-bool set_async(volatile uint32_t& command,
-               volatile uint32_t& status,
-               bool enabled,
-               void (*poll)(void*),
-               void* context,
-               unsigned limit)
+bool set_schedule(volatile uint32_t& command,
+                  volatile uint32_t& status,
+                  Spinlock& command_lock,
+                  const bool& failed,
+                  Schedule schedule,
+                  bool enabled,
+                  void (*poll)(void*),
+                  void* context,
+                  unsigned limit,
+                  uint64_t (*clock_100ns)())
 {
-    constexpr uint32_t enable = 1u << 5, running = 1u << 15;
+    const unsigned bit = schedule == Schedule::Asynchronous ? 5 : 4;
+    const uint32_t enable = 1u << bit, running = 1u << (bit + 10);
     auto wait = [&](bool expected) {
+        const uint64_t start = clock_100ns ? clock_100ns() : 0;
         for(unsigned i = 0; i < limit; ++i)
         {
             uint32_t snapshot = status;
-            if(snapshot & (1u << 4))
+            if(__atomic_load_n(&failed, __ATOMIC_ACQUIRE) || (snapshot & (1u << 4)) ||
+               (clock_100ns && clock_100ns() - start >= 10'000'000))
                 return false;
             if(bool(snapshot & running) == expected)
                 return true;
@@ -81,9 +90,20 @@ bool set_async(volatile uint32_t& command,
         }
         return false;
     };
-    if(!wait(bool(command & enable)))
+    bool previous;
+    {
+        IrqSpinGuard guard(command_lock);
+        previous = command & enable;
+    }
+    if(!wait(previous))
         return false;
-    command = enabled ? command | enable : command & ~enable;
+    {
+        IrqSpinGuard guard(command_lock);
+        if(__atomic_load_n(&failed, __ATOMIC_ACQUIRE))
+            return false;
+        auto value = command;
+        command = enabled ? value | enable : value & ~enable;
+    }
     return wait(enabled);
 }
 }  // namespace ehci

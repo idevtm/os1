@@ -64,7 +64,8 @@ The input record occupies 56 bytes.
 | 16 | `u64 nanoseconds` | Absolute IPC CLOCK deadline, 0–INT64_MAX; UINT64_MAX disables the deadline |
 | 24 | `i32 fds[8]` | READ authority; unused entries are zero |
 
-Supported kinds are client endpoints, provider endpoints, Operations, subscriptions, and [ConsoleInputSession](kernel-console-abi.md#interactive-input-session).
+IPC endpoints, Operations, and IPC subscriptions are waitable.
+So are [ConsoleInputSession](kernel-console-abi.md#interactive-input-session) and [native InputSubscription](input-abi.md#bounds-and-failures).
 Repeated descriptors or aliases of the same object return INVALID.
 Malformed records and nonzero unused entries return INVALID.
 Invalid descriptors return BAD_DESCRIPTOR; denied rights return ACCESS.

@@ -19,6 +19,7 @@ enum
     OS1_OBSERVE_USB = 12,
     OS1_OBSERVE_HARDWARE = 13,
     OS1_OBSERVE_USB_INPUT_FAILURES = 14,
+    OS1_OBSERVE_EHCI_STALL_TRACE = 15,
     OS1_USB_INPUT_TRANSFER = 1,
     OS1_USB_INPUT_CONTROLLER = 2,
     OS1_USB_INPUT_ROOT_CHANGE = 3,
@@ -270,3 +271,42 @@ struct Os1ObserveAcpiRecord
 };
 
 #pragma pack(pop)
+
+enum
+{
+    OS1_EHCI_TRACE_WORKER = 0,
+    OS1_EHCI_TRACE_BUSY,
+    OS1_EHCI_TRACE_POLL,
+    OS1_EHCI_TRACE_REPORT,
+    OS1_EHCI_TRACE_PUBLISH,
+    OS1_EHCI_TRACE_ERROR,
+    OS1_EHCI_TRACE_RETRY,
+    OS1_EHCI_TRACE_PUBLISH_GAP,
+    OS1_EHCI_TRACE_KIND_COUNT,
+    OS1_EHCI_TRACE_CAPACITY = 48,
+    OS1_EHCI_TRACE_CLOCK_TICK = 1,
+    OS1_EHCI_TRACE_CLOCK_HPET = 2,
+    OS1_EHCI_TRACE_EXPIRED = 1u << 0,
+    OS1_EHCI_TRACE_CLOCK_LOST = 1u << 1,
+};
+
+struct Os1EhciStallEvent
+{
+    uint64_t at_ns, elapsed_ns;
+    uint32_t kind, pci, input, token;
+    uint64_t busy, errors, retries;
+};
+
+struct Os1ObserveEhciStallTrace
+{
+    uint64_t start_ns, end_ns;
+    uint32_t clock, count, dropped, flags, input, ticket;
+    uint64_t samples[OS1_EHCI_TRACE_KIND_COUNT];
+    uint64_t max_ns[OS1_EHCI_TRACE_KIND_COUNT];
+    struct Os1EhciStallEvent events[OS1_EHCI_TRACE_CAPACITY];
+};
+
+#ifdef __cplusplus
+static_assert(sizeof(Os1EhciStallEvent) == 56);
+static_assert(sizeof(Os1ObserveEhciStallTrace) == 2856);
+#endif

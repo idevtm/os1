@@ -93,6 +93,34 @@ TEST_F(InputService, BroadcastFutureOnlyAndUnsubscribe)
     native_input::keyboard(id, keys);
     EXPECT_EQ(sizeof(os1_input_event), read(second).payload_bytes);
 }
+TEST_F(InputService, ReadinessTracksMatchingEventsLossAndClosure)
+{
+    const auto other = native_input::attach(OS1_INPUT_POINTER, "other pointer");
+    subscribe(first);
+    ASSERT_NE(nullptr, first.instance);
+    EXPECT_TRUE(first.rights & OS1_RIGHT_READ);
+    EXPECT_FALSE(device.rights & OS1_RIGHT_READ);
+    const auto* subscription = first.instance->object;
+    EXPECT_FALSE(native_input::ready(subscription));
+    native_input::pointer(other, 0, 1, 0);
+    EXPECT_FALSE(native_input::ready(subscription));
+    uint8_t keys[32]{16};
+    native_input::keyboard(id, keys);
+    EXPECT_TRUE(native_input::ready(subscription));
+    EXPECT_EQ(sizeof(os1_input_event), read(first).payload_bytes);
+    EXPECT_FALSE(native_input::ready(subscription));
+    for(unsigned i = 0; i <= OS1_INPUT_EVENT_LIMIT; ++i)
+        native_input::pointer(other, 0, 1, 0);
+    EXPECT_TRUE(native_input::ready(subscription));
+    auto lost = read(first);
+    os1_input_event event{};
+    ASSERT_EQ(sizeof(event), lost.payload_bytes);
+    std::memcpy(&event, lost.payload, sizeof(event));
+    EXPECT_EQ(OS1_INPUT_LOST, event.flags);
+    EXPECT_FALSE(native_input::ready(subscription));
+    native_input::remove(id);
+    EXPECT_TRUE(native_input::ready(subscription));
+}
 TEST_F(InputService, OverflowSnapshotAndRemovalNeverReviveIdentity)
 {
     subscribe(first);

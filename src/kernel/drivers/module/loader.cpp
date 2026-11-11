@@ -4,10 +4,12 @@
 #include "core/kernel_state.hpp"
 #include "crypto/sha256.hpp"
 #include "debug/debug.hpp"
+#include "display_driver_trust.hpp"
 #include "driver/image.hpp"
 #include "driver_trust.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "drivers/bus/pci_bus.hpp"
+#include "drivers/display/service.hpp"
 #include "drivers/module/virtio_host.hpp"
 #include "fs/initrd.hpp"
 #include "mm/kmem.hpp"
@@ -46,14 +48,13 @@ const PciDriver pci_driver = {.name = "virtio-net",
                               .probe = probe,
                               .remove = remove,
                               .quiesce = quiesce};
-long snapshot(uint8_t*& bytes, uint64_t& size)
+long snapshot(const char* path, size_t path_bytes, uint8_t*& bytes, uint64_t& size)
 {
     NamespaceGuard guard;
     if(!guard.held)
         return OS1_ERR_WOULD_BLOCK;
     NativeObject* object = nullptr;
-    long status =
-        vfs_resolve(initrd_namespace_root(), kDriverPath + 1, sizeof(kDriverPath) - 2, object);
+    long status = vfs_resolve(initrd_namespace_root(), path + 1, path_bytes - 1, object);
     if(status < 0)
         return status;
     auto* file = static_cast<VfsNode*>(object);
@@ -132,12 +133,80 @@ bool map_image(VirtualMemory& vm, const driver::Image& image, const uint8_t* byt
     ipi_retire_tlb();
     return false;
 }
+bool load_image(VirtualMemory& vm,
+                const char* path,
+                size_t path_bytes,
+                const uint8_t* expected,
+                uint64_t base,
+                driver::Image& image,
+                uint64_t& size)
+{
+    uint8_t* bytes = nullptr;
+    long status = snapshot(path, path_bytes, bytes, size);
+    if(status < 0)
+    {
+        debug("driver: ")(path)(" package unavailable status=-")(uint64_t(-status))();
+        return false;
+    }
+    uint8_t digest[32];
+    crypto::sha256(bytes, size, digest);
+    if(memcmp(digest, expected, sizeof(digest)))
+    {
+        debug("driver: ")(path)(" digest rejected")();
+        kfree(bytes);
+        return false;
+    }
+    if(!driver::validate_image(bytes, size, image, base))
+    {
+        debug("driver: ")(path)(" ELF rejected")();
+        kfree(bytes);
+        return false;
+    }
+    if(!map_image(vm, image, bytes))
+    {
+        debug("driver: ")(path)(" mapping failed")();
+        kfree(bytes);
+        return false;
+    }
+    kfree(bytes);
+    return true;
+}
+void load_display()
+{
+    if(!native_display::compatible())
+        return;
+    VirtualMemory vm(page_frames, g_kernel_root_cr3);
+    driver::Image image;
+    uint64_t size = 0;
+    if(!load_image(vm,
+                   kDisplayDriverPath,
+                   sizeof(kDisplayDriverPath) - 1,
+                   kDisplayDriverDigest,
+                   OS1_DISPLAY_MODULE_BASE,
+                   image,
+                   size))
+        return;
+    auto* exports = reinterpret_cast<os1_display_entry>(image.entry)();
+    if(!driver::contains(image, reinterpret_cast<uint64_t>(exports), sizeof(*exports), 4) ||
+       exports->version != OS1_DISPLAY_MODULE_ABI || exports->bytes != sizeof(*exports) ||
+       !driver::contains(image, reinterpret_cast<uint64_t>(exports->probe), 1, 5) ||
+       !driver::contains(image, reinterpret_cast<uint64_t>(exports->fill), 1, 5) ||
+       !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_read), 1, 5) ||
+       !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_set), 1, 5) ||
+       !native_display::bind(*exports, vm))
+    {
+        debug("driver: firmware-framebuffer rejected")();
+        return;
+    }
+    debug("driver: loaded firmware-framebuffer from ")(kDisplayDriverPath)(" bytes=")(size)();
+}
 }  // namespace
 void load_boot_drivers()
 {
     if(attempted)
         return;
     attempted = true;
+    load_display();
     bool match = false;
     for(size_t i = 0; i < platform_pci_device_count(); ++i)
         if(pci_driver_matches_device(pci_driver, platform_pci_devices()[i]))
@@ -147,37 +216,17 @@ void load_boot_drivers()
         debug("driver: virtio-net not needed")();
         return;
     }
-    uint8_t* bytes = nullptr;
-    uint64_t size = 0;
-    long status = snapshot(bytes, size);
-    if(status < 0)
-    {
-        debug("driver: virtio-net package unavailable status=-")(uint64_t(-status))();
-        return;
-    }
-    uint8_t digest[32];
-    crypto::sha256(bytes, size, digest);
-    if(memcmp(digest, kDriverDigest, sizeof(digest)))
-    {
-        debug("driver: virtio-net digest rejected")();
-        kfree(bytes);
-        return;
-    }
-    driver::Image image;
-    if(!driver::validate_image(bytes, size, image))
-    {
-        debug("driver: virtio-net ELF rejected")();
-        kfree(bytes);
-        return;
-    }
     VirtualMemory vm(page_frames, g_kernel_root_cr3);
-    if(!map_image(vm, image, bytes))
-    {
-        debug("driver: virtio-net mapping failed")();
-        kfree(bytes);
+    driver::Image image;
+    uint64_t size = 0;
+    if(!load_image(vm,
+                   kDriverPath,
+                   sizeof(kDriverPath) - 1,
+                   kDriverDigest,
+                   OS1_DRIVER_MODULE_BASE,
+                   image,
+                   size))
         return;
-    }
-    kfree(bytes);
     auto entry = reinterpret_cast<os1_driver_entry>(image.entry);
     module = entry(&driver_host_api());
     if(!driver::contains(image, reinterpret_cast<uint64_t>(module), sizeof(*module), 4) ||

@@ -38,6 +38,7 @@ Normal and diagnostic boots retain xHCI outcomes.
 
 | Path | Content |
 | --- | --- |
+| `os.display` | Graphics backend, boot geometry, and mode count. See the [Display ABI](display-abi.md). |
 | `os.devices.inventory.pci` | All cached PCI functions, including unbound functions |
 | `os.devices.inventory.usb` | Captured USB ports and devices |
 | `os.devices.topology` | PCI and USB records without a known physical parent |

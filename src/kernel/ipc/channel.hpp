@@ -7,6 +7,8 @@ long sys_ipc(PageFrameContainer&, Thread*, uint64_t operation, uint64_t fd, uint
 void cancel_ipc_wait(Thread*);
 // Drains already-signalled waiters only; does not poll endpoint/Operation readiness.
 void ipc_drain_wakeups();
+// Call after hardware dispatch and after releasing controller and input locks.
+void ipc_refresh_input_waiters();
 
 // Called once per BSP scheduler tick, independent of AP count.
 void ipc_timer_tick(uint64_t elapsed_ns);

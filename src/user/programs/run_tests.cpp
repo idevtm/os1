@@ -240,7 +240,7 @@ bool output_directory(uint64_t fingerprint, const char* label)
     }
     return false;
 }
-long snapshot(const char* name, unsigned kind)
+long snapshot(const char* name, unsigned kind, unsigned ticket = 0)
 {
     Artifact out(name);
     if(out.fd < 0)
@@ -248,7 +248,71 @@ long snapshot(const char* name, unsigned kind)
     long n = u::observe(kind, scratch, sizeof(scratch));
     if(n < 0)
         return n;
+    if(ticket)
+    {
+        constexpr auto offset =
+            sizeof(Os1ObserveHeader) + offsetof(Os1ObserveEhciStallTrace, ticket);
+        unsigned observed = 0;
+        if(n != sizeof(Os1ObserveHeader) + sizeof(Os1ObserveEhciStallTrace))
+            return OS1_ERR_INVALID;
+        __builtin_memcpy(&observed, scratch + offset, sizeof(observed));
+        if(observed != ticket)
+            return OS1_ERR_CANCELLED;
+    }
     return f::put(out.fd, reinterpret_cast<char*>(scratch), n) ? 0 : OS1_ERR_IO;
+}
+unsigned report_number(const char* text, const char* key)
+{
+    for(; *text; ++text)
+    {
+        if(*text != ' ')
+            continue;
+        const char* value = text + 1;
+        const char* k = key;
+        while(*k && *value == *k)
+        {
+            ++value;
+            ++k;
+        }
+        if(*k)
+            continue;
+        unsigned n = 0;
+        while(*value >= '0' && *value <= '9')
+        {
+            if(n > (UINT32_MAX - unsigned(*value - '0')) / 10)
+                return 0;
+            n = n * 10 + unsigned(*value++ - '0');
+        }
+        return n;
+    }
+    return 0;
+}
+long ehci_stall_capture()
+{
+    Artifact demo("gfxdemo-diagnostics.txt");
+    if(demo.fd < 0)
+        return demo.fd;
+    text(1, "Move the USB mouse continuously for 20 to 30 seconds. Press q when done.\n");
+    const char* args[] = {"gfxdemo", "--stall-report"};
+    const long pid = u::run_program(
+        "/disk/bin/gfxdemo", 2, args, false, 0, nullptr, nullptr, nullptr, -1, nullptr, demo.fd);
+    if(pid < 0)
+        return pid;
+    int child_status = 0;
+    const long waited = u::waitpid(pid, &child_status);
+    if(waited != pid || u::seek(demo.fd, 0) < 0)
+        return waited < 0 ? waited : OS1_ERR_IO;
+    const long count = u::read(demo.fd, scratch, 1024);
+    if(count <= 0 || count == 1024)
+        return count < 0 ? count : OS1_ERR_IO;
+    scratch[count] = 0;
+    const auto* report = reinterpret_cast<const char*>(scratch);
+    const unsigned ticket = report_number(report, "trace_ticket=");
+    const unsigned events = report_number(report, "events=");
+    if(!ticket)
+        return OS1_ERR_NOT_FOUND;
+    const long saved = snapshot("ehci-stalls.bin", OS1_OBSERVE_EHCI_STALL_TRACE, ticket);
+    return saved < 0 ? saved : child_status || !events ? OS1_ERR_IO : 0;
 }
 long inventory(const char* name, unsigned mode)
 {
@@ -649,11 +713,13 @@ void observe_input(bool stimulus)
 int main(int argc, char** argv)
 {
     const char* label = nullptr;
-    bool stimulus = true, expect_mouse = true;
+    bool stimulus = true, expect_mouse = true, ehci_stalls = false;
     for(int i = 1; i < argc; ++i)
     {
         if(u::hardware_tools::equal(argv[i], "--input"))
             stimulus = true;
+        else if(u::hardware_tools::equal(argv[i], "--ehci-stalls"))
+            ehci_stalls = true;
         else if(u::hardware_tools::equal(argv[i], "--no-input"))
             stimulus = false;
         else if(u::hardware_tools::equal(argv[i], "--no-expect-usb-mouse"))
@@ -665,7 +731,9 @@ int main(int argc, char** argv)
             label = argv[++i];
         else
         {
-            f::message("usage: run-tests [--machine NAME] [--no-input] [--no-expect-usb-mouse]\n");
+            f::message(
+                "usage: run-tests [--machine NAME] [--no-input] [--no-expect-usb-mouse] "
+                "[--ehci-stalls]\n");
             return 2;
         }
     }
@@ -715,6 +783,8 @@ int main(int argc, char** argv)
     field(manifest.fd, "pid", u::getpid());
     field(manifest.fd, "input_observation", stimulus);
     field(manifest.fd, "expect_usb_mouse", expect_mouse);
+    if(ehci_stalls)
+        field(manifest.fd, "ehci_stalls", 1);
     {
         f::Handle binary(u::open("/disk/bin/run-tests", OS1_RIGHT_READ));
         tr::Hash deployed;
@@ -755,6 +825,11 @@ int main(int argc, char** argv)
     result("USB input failures after",
            snapshot("usb-input-after.bin", OS1_OBSERVE_USB_INPUT_FAILURES));
     result("USB after input", inventory("lsusb-after.txt", 2));
+    if(ehci_stalls)
+    {
+        stage("EHCI pointer stall capture");
+        result("EHCI trace and graphics diagnostics", ehci_stall_capture());
+    }
     stage("log capture");
     long exported = export_tmp(log.fd);
     result("log export", exported);

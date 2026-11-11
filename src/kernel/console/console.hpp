@@ -15,7 +15,22 @@ void write_console_bytes(const char* data, size_t length);
 
 // write a nul-terminated line and append a newline on both console backends.
 void write_console_line(const char* text);
+void console_echo_backspace();
 
 // Debug mirror sink that draws one byte on the active terminal. Bytes are
 // dropped while the console is busy so debug output can never deadlock it.
 void console_mirror_debug_byte(char c);
+
+// Hold the console lock across an exclusive framebuffer operation.
+struct FramebufferTextDisplay;
+struct os1_framebuffer_surface;
+struct os1_display_driver;
+struct os1_display_fill;
+struct NativeObject;
+long console_display_acquire(NativeObject*);
+void console_display_release(NativeObject*, bool restored);
+long console_display_fill(NativeObject*,
+                          const os1_display_driver&,
+                          const os1_framebuffer_surface&,
+                          const os1_display_fill&);
+void console_switch_terminal(unsigned index);
