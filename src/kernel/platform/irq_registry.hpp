@@ -8,11 +8,8 @@
 #include "platform/types.hpp"
 
 // Register one ISA/IOAPIC-backed route owned by a platform or PCI device.
-bool platform_register_isa_irq_route(DeviceId owner,
-                                     uint8_t source_irq,
-                                     uint32_t gsi,
-                                     uint16_t flags,
-                                     uint8_t vector);
+bool platform_register_isa_irq_route(
+    DeviceId owner, uint8_t source_irq, uint32_t gsi, uint16_t flags, uint8_t vector);
 
 // Register one local APIC vector record owned by a platform device.
 bool platform_register_local_apic_irq_route(DeviceId owner, uint16_t source_id, uint8_t vector);
@@ -26,8 +23,8 @@ bool platform_register_msi_irq_route(DeviceId owner, uint16_t source_id, uint8_t
 // Register one MSI-X-backed vector record owned by a PCI device.
 bool platform_register_msix_irq_route(DeviceId owner, uint16_t source_id, uint8_t vector);
 
-// Return the active route for one vector, or nullptr when unowned.
-const IrqRoute* platform_find_irq_route(uint8_t vector);
+// Copy the active route for one vector. Return false when unowned.
+bool platform_find_irq_route(uint8_t vector, IrqRoute& route);
 
 // Release one registered route and free its dynamic vector when needed.
 bool platform_release_irq_route(uint8_t vector);

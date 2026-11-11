@@ -1,9 +1,8 @@
 #pragma once
 
+#include <os1/observe.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#include <os1/observe.h>
 
 namespace kernel_event
 {
@@ -25,8 +24,7 @@ public:
                                  uint64_t arg2,
                                  uint64_t arg3);
 
-    [[nodiscard]] uint32_t snapshot(Os1ObserveEventRecord* records,
-                                    uint32_t max_records) const;
+    [[nodiscard]] uint32_t snapshot(Os1ObserveEventRecord* records, uint32_t max_records) const;
 
     [[nodiscard]] uint32_t count() const;
     [[nodiscard]] uint64_t next_sequence() const;
@@ -54,6 +52,6 @@ void record_subject(uint32_t type,
                     uint64_t arg2 = 0,
                     uint64_t arg3 = 0);
 
-uint32_t snapshot(Os1ObserveEventRecord* records, uint32_t max_records);
+bool snapshot_all(Os1ObserveEventRecord* records, uint32_t capacity, uint32_t& count);
 
 }  // namespace kernel_event

@@ -53,8 +53,8 @@ const PciDevice* platform_pci_devices();
 // Return the number of active IRQ resource records.
 size_t platform_irq_route_count();
 
-// Return the fixed IRQ route table owned by platform state.
-const IrqRoute* platform_irq_routes();
+// Visit records under the registry lock. The callback must not block or retain references.
+bool visit_irq_routes(bool (*visitor)(void*, const IrqRoute&), void* context);
 
 // Return the number of ACPI namespace devices parsed from DSDT/SSDT AML.
 size_t platform_acpi_device_count();

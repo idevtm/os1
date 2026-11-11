@@ -19,4 +19,5 @@ bool claim_pci_bar(DeviceId owner, uint16_t pci_index, uint8_t bar_index, PciBar
 void release_pci_bar(DeviceId owner, uint16_t pci_index, uint8_t bar_index);
 void release_pci_bars_for_owner(DeviceId owner);
 size_t pci_bar_claim_count();
-const PciBarClaim* pci_bar_claims();
+// Visit records under the registry lock. The callback must not block or retain references.
+bool visit_pci_bar_claims(bool (*visitor)(void*, const PciBarClaim&), void* context);

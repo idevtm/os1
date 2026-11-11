@@ -31,4 +31,5 @@ void dma_sync_for_device(const DmaBuffer& buffer);
 void dma_sync_for_cpu(const DmaBuffer& buffer);
 
 size_t dma_allocation_count();
-const DmaAllocationRecord* dma_allocation_records();
+// Visit records under the registry lock. The callback must not block or retain references.
+bool visit_dma_allocations(bool (*visitor)(void*, const DmaAllocationRecord&), void* context);

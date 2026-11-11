@@ -296,10 +296,12 @@ TEST(PciBus, RemoveMatchesDriverNameByContentAndReleasesResources)
     EXPECT_EQ(nullptr, device_binding_find(owner));
     EXPECT_EQ(0u, device_binding_count());
 
-    const PciBarClaim* claims = pci_bar_claims();
-    EXPECT_EQ(nullptr, claims);
+    EXPECT_TRUE(visit_pci_bar_claims([](void*, const PciBarClaim&) { return false; }, nullptr));
     EXPECT_EQ(0u, pci_bar_claim_count());
-    EXPECT_EQ(nullptr, platform_find_irq_route(vector));
+    {
+        IrqRoute absent{};
+        EXPECT_FALSE(platform_find_irq_route(vector, absent));
+    }
     EXPECT_FALSE(irq_vector_is_allocated(vector));
     EXPECT_FALSE(g_remove_harness.dma_buffer.active);
     EXPECT_EQ(0u, dma_allocation_count());

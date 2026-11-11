@@ -1,12 +1,12 @@
 #include "debug/event_ring.hpp"
 
 #include "debug/log.hpp"
+#include "sync/smp.hpp"
 
 #if !defined(OS1_HOST_TEST)
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "core/kernel_state.hpp"
 #include "proc/thread.hpp"
-#include "sync/smp.hpp"
 #endif
 
 namespace kernel_event
@@ -15,8 +15,9 @@ namespace
 {
 KernelEventRing g_event_ring;
 
-#if !defined(OS1_HOST_TEST)
 Spinlock g_event_ring_lock("event_ring");
+
+#if !defined(OS1_HOST_TEST)
 
 [[nodiscard]] uint32_t current_cpu_id()
 {
@@ -105,12 +106,8 @@ uint64_t KernelEventRing::next_sequence() const
     return next_sequence_;
 }
 
-void record(uint32_t type,
-            uint32_t flags,
-            uint64_t arg0,
-            uint64_t arg1,
-            uint64_t arg2,
-            uint64_t arg3)
+void record(
+    uint32_t type, uint32_t flags, uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3)
 {
 #if defined(OS1_HOST_TEST)
     record_subject(type, flags, 0, 0, arg0, arg1, arg2, arg3);
@@ -143,25 +140,23 @@ void record_subject(uint32_t type,
                     uint64_t arg2,
                     uint64_t arg3)
 {
+    IrqSpinGuard guard(g_event_ring_lock);
 #if defined(OS1_HOST_TEST)
     g_event_ring.append(0, type, flags, 0, pid, tid, arg0, arg1, arg2, arg3);
 #else
-    IrqSpinGuard guard(g_event_ring_lock);
     diagnostic_log::event(type, flags, pid, arg0, arg1);
     g_event_ring.append(
         g_timer_ticks, type, flags, current_cpu_id(), pid, tid, arg0, arg1, arg2, arg3);
 #endif
 }
 
-uint32_t snapshot(Os1ObserveEventRecord* records, uint32_t max_records)
+bool snapshot_all(Os1ObserveEventRecord* records, uint32_t capacity, uint32_t& count)
 {
-#if defined(OS1_HOST_TEST)
-    return g_event_ring.snapshot(records, max_records);
-#else
     IrqSpinGuard guard(g_event_ring_lock);
-    const uint32_t count = g_event_ring.snapshot(records, max_records);
-    return count;
-#endif
+    count = g_event_ring.count();
+    if(count > capacity)
+        return false;
+    return g_event_ring.snapshot(records, capacity) == count;
 }
 
 }  // namespace kernel_event
