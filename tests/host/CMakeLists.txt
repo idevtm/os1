@@ -77,6 +77,7 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/kernel_provider.cpp"
   "${OS1_REPO_ROOT}/src/kernel/drivers/input/service.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/drivers/input/ps2_console.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/system_control.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/system_power.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/acpica_ec.cpp"

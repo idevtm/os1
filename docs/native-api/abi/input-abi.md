@@ -177,6 +177,15 @@ Low/full-speed root devices that require companion controllers remain unsupporte
 Full-speed downstream hubs remain unsupported.
 The reference is the [EHCI specification](https://www.intel.com/content/www/us/en/products/docs/io/universal-serial-bus/ehci-specification.html), sections 3.6 and 4.12.
 
+PS/2 publishes native key state and separately translates console characters.
+
+| PS/2 key group | Console behavior |
+| --- | --- |
+| Text keys and keypad digits | Send text. Keypad operators send their printable characters. |
+| Extended navigation keys | Send the Console navigation values. |
+| F1–F12 | Select a terminal without sending a character. |
+| Alt and lock keys | Send no Console character. |
+
 PS/2 auxiliary initialization selects relative compatibility packets for mouse and touchpad input.
 Pause-key event decoding remains unsupported; ordinary keys and extended navigation keys use the common bitmap.
 The user verified keyboard Left Shift state and laptop touchpad movement and buttons on 2026-11-10.

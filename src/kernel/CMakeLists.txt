@@ -44,6 +44,7 @@ set(KERNEL_DRIVER_SOURCES
   drivers/display/service.cpp
   drivers/input/service.cpp
   drivers/input/ps2_keyboard.cpp
+  drivers/input/ps2_console.cpp
   drivers/module/loader.cpp
   drivers/module/virtio_host.cpp
   drivers/timer/pit.cpp
