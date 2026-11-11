@@ -1179,6 +1179,7 @@ A queued thread becomes eligible for migration only after assembly leaves its st
 Reaping can complete the current thread's child-exit wait before a CPU handoff.
 The scheduler keeps that awakened thread runnable.
 A deterministic host regression and guest state capture verify this correction.
+The [child exit and collection contract](kernel/smp-synchronization.md#child-exit-and-collection) defines remote wake and cleanup ordering.
 
 ### User Address Spaces
 

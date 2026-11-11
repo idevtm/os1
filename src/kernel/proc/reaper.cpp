@@ -37,7 +37,8 @@ void reap_dead_threads(PageFrameContainer& frames)
         Thread* thread = nullptr;
         {
             IrqSpinGuard guard(g_thread_registry_lock);
-            for(Thread* candidate = first_thread(); nullptr != candidate; candidate = next_thread(candidate))
+            for(Thread* candidate = first_thread(); nullptr != candidate;
+                candidate = next_thread(candidate))
             {
                 if((ThreadState::Dying == candidate->state) &&
                    !thread_is_current_on_any_cpu(candidate) &&
@@ -57,7 +58,8 @@ void reap_dead_threads(PageFrameContainer& frames)
         cancel_console_read(thread);
         cancel_vfs_wait(thread);
         cancel_ipc_wait(thread);
-        if(atomic_load_acquire(&thread->io_pins) != 0) continue;
+        if(atomic_load_acquire(&thread->io_pins) != 0)
+            continue;
 
         // Thread teardown is deferred until some *other* thread enters the kernel.
         // That keeps us from freeing the current kernel stack out from under the CPU
@@ -72,17 +74,44 @@ void reap_dead_threads(PageFrameContainer& frames)
 
         if(owner && !process_has_threads(owner))
         {
-            // Zombies keep their exit record, not Buffer mappings or authority.
-            buffer_process_cleanup(frames, owner);
-            descriptor_close_all(owner->descriptors);
-            if(ProcessState::Zombie == owner->state)
+            bool retain_exit;
             {
-                wake_child_waiters(frames, owner->parent);
-                continue;
+                IrqSpinGuard guard(g_process_table_lock);
+                retain_exit = owner->state == ProcessState::Zombie && owner->parent;
             }
-
-            reap_process(owner, frames);
+            if(retain_exit)
+            {
+                buffer_process_cleanup(frames, owner);
+                descriptor_close_all(owner->descriptors);
+                IrqSpinGuard guard(g_process_table_lock);
+                owner->exit_cleanup_complete = true;
+            }
+            else
+            {
+                reap_process(owner, frames);
+            }
         }
+    }
+
+    wake_child_waiters(frames);
+    for(;;)
+    {
+        Process* orphan = nullptr;
+        {
+            IrqSpinGuard guard(g_process_table_lock);
+            for(Process* process = first_process(); process; process = next_process(process))
+            {
+                if(process->exit_cleanup_complete && process->state == ProcessState::Zombie &&
+                   !process->parent && !process->wait_claimed)
+                {
+                    orphan = process;
+                    break;
+                }
+            }
+        }
+        if(!orphan)
+            break;
+        reap_process(orphan, frames);
     }
 
     relink_runnable_threads();

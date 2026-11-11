@@ -352,10 +352,9 @@ long sys_launch(const ProcessSyscallContext& context,
     const char* name = request->startup.argc ? request->startup.strings : "native-image";
     if(mode == OS1_LAUNCH_EXEC)
         return replace_process_image(context, thread, image, request->startup, name);
-    Process* child = create_user_process(name, 0);
+    Process* child = create_user_process(name, 0, thread->process);
     if(!child)
         return OS1_ERR_NO_MEMORY;
-    child->parent = thread->process;
     diagnostic_log::inherit(child, thread->process);
     result = install_child_grants(thread->process->descriptors, child->descriptors, *request);
     if(result < 0)

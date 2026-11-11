@@ -22,4 +22,3 @@ bool try_complete_or_block_wait_pid(PageFrameContainer& frames,
                                     long& result);
 // Wake threads blocked on child-exit waits after a process exits or reaps.
 void wake_child_waiters(PageFrameContainer& frames);
-void wake_child_waiters(PageFrameContainer& frames, Process* parent);
