@@ -14,6 +14,38 @@
 #include "vfs/initrd.hpp"
 #include "vfs/tmpfs.hpp"
 
+LegacyStartupRecord::LegacyStartupRecord(const Process& process, const char* path)
+{
+    size_t length = 0;
+    while(length < sizeof(record_->strings) && path[length])
+    {
+        ++length;
+    }
+    if(length == sizeof(record_->strings))
+    {
+        return;
+    }
+
+    record_ = static_cast<os1_startup_record*>(kmalloc(sizeof(*record_), KmallocFlags::Zero));
+    if(nullptr == record_)
+    {
+        return;
+    }
+
+    record_->version = OS1_STARTUP_VERSION;
+    record_->size = sizeof(*record_);
+    record_->root_fd = process.root_fd;
+    record_->cwd_fd = process.cwd_fd;
+    record_->argc = 1;
+    record_->string_bytes = length + 1;
+    memcpy(record_->strings, path, length + 1);
+}
+
+LegacyStartupRecord::~LegacyStartupRecord()
+{
+    kfree(record_);
+}
+
 long validate_startup(const os1_startup_record& record)
 {
     if(record.version != OS1_STARTUP_VERSION || record.size != sizeof(record) || record.reserved ||

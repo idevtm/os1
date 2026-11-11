@@ -48,6 +48,12 @@ bool map_direct_range(VirtualMemory& vm, uint64_t physical_start, uint64_t lengt
         return true;
     }
 
+    if((physical_start >= kDirectMapPhysicalLimit) ||
+       (length > kDirectMapPhysicalLimit - physical_start))
+    {
+        return false;
+    }
+
     uint64_t current = align_down(physical_start, kPageSize);
     const uint64_t end = align_up(physical_start + length, kPageSize);
     while(current < end)

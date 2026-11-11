@@ -2,10 +2,12 @@
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "core/kernel_state.hpp"
 #include "handoff/memory_layout.h"
+#include "mm/boot_mapping.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "mm/virtual_memory.hpp"
 #include "proc/process.hpp"
+#include "proc/kernel_stack.hpp"
 #include "proc/thread.hpp"
 #include "sched/scheduler.hpp"
 #include "support/lapic_stub.hpp"
@@ -24,6 +26,8 @@
 
 #include <array>
 #include <vector>
+
+extern void (*host_tlb_retirement_wait)(cpu*);
 
 namespace
 {
@@ -73,6 +77,139 @@ struct HostApCpuScope
     cpu* saved_current = nullptr;
 };
 }  // namespace
+
+TEST(TaskRegistry, GuardedStacksShareSupervisorMappingsAndReleaseBacking)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = initialized_frames();
+    VirtualMemory kernel(frames);
+    ASSERT_TRUE(kernel.map_physical(kKernelVirtualBase, 0x100000, 1, PageFlags::Write));
+    ASSERT_TRUE(initialize_kernel_stacks(frames, kernel.root()));
+
+    // Clone before mapping a stack, as happens for an existing process.
+    VirtualMemory process(frames);
+    ASSERT_TRUE(process.clone_kernel_mappings(kernel.root()));
+    uint64_t physical = 0, top = 0;
+    ASSERT_TRUE(allocate_kernel_stack(frames, physical, top));
+    const uint64_t bottom = top - kKernelThreadStackPages * kPageSize;
+
+    uint64_t translated = 0, flags = 0;
+    EXPECT_FALSE(process.translate(bottom - kPageSize, translated, flags));
+    EXPECT_FALSE(process.translate(top, translated, flags));
+    for(size_t page = 0; page < kKernelThreadStackPages; ++page)
+    {
+        ASSERT_TRUE(process.translate(bottom + page * kPageSize, translated, flags));
+        EXPECT_EQ(physical + page * kPageSize, translated);
+        EXPECT_EQ(
+            static_cast<uint64_t>(PageFlags::Present | PageFlags::Write | PageFlags::NoExecute),
+            flags);
+    }
+    EXPECT_FALSE(map_direct_range(kernel, kDirectMapPhysicalLimit - 1, 2));
+    EXPECT_EQ(kInvalidPhysicalAddress, virt_to_phys(bottom));
+
+    const auto before_release = frames.free_page_count();
+    {
+        HostApCpuScope cpus;
+        ASSERT_TRUE(ipi_initialize());
+        static VirtualMemory* remote = nullptr;
+        static PageFrameContainer* allocator = nullptr;
+        static uint64_t address = 0, free_pages = 0;
+        static unsigned acknowledgments = 0;
+        remote = &process;
+        allocator = &frames;
+        address = bottom;
+        free_pages = before_release;
+        acknowledgments = 0;
+        host_tlb_retirement_wait = [](cpu* target) {
+            if(target == cpu_cur())
+                return;
+            uint64_t physical_address = 0, leaf_flags = 0;
+            EXPECT_FALSE(remote->translate(address, physical_address, leaf_flags));
+            EXPECT_EQ(free_pages, allocator->free_page_count());
+            auto* saved = g_cpu_host_current;
+            g_cpu_host_current = target;
+            ipi_poll_tlb_shootdown();
+            g_cpu_host_current = saved;
+            ++acknowledgments;
+        };
+        release_kernel_stack(frames, physical);
+        host_tlb_retirement_wait = nullptr;
+        EXPECT_EQ(1u, acknowledgments);
+    }
+    EXPECT_EQ(before_release + kKernelThreadStackPages, frames.free_page_count());
+    EXPECT_FALSE(process.translate(bottom, translated, flags));
+    EXPECT_FALSE(process.translate(top - 1, translated, flags));
+
+    uint64_t reused = 0, reused_top = 0;
+    ASSERT_TRUE(allocate_kernel_stack(frames, reused, reused_top));
+    EXPECT_EQ(physical, reused);
+    EXPECT_EQ(top, reused_top);
+    release_kernel_stack(frames, reused);
+}
+
+TEST(TaskRegistry, GuardedStackAllocationReturnsBackingIfPageTablesCannotGrow)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = initialized_frames();
+    VirtualMemory kernel(frames);
+    ASSERT_TRUE(kernel.map_physical(kKernelVirtualBase, 0x100000, 1, PageFlags::Write));
+    ASSERT_TRUE(initialize_kernel_stacks(frames, kernel.root()));
+
+    std::vector<uint64_t> held_pages;
+    while(frames.free_page_count() > kKernelThreadStackPages)
+    {
+        uint64_t held = 0;
+        ASSERT_TRUE(frames.allocate(held));
+        held_pages.push_back(held);
+    }
+
+    uint64_t physical = 0, top = 0;
+    EXPECT_FALSE(allocate_kernel_stack(frames, physical, top));
+    EXPECT_EQ(0u, physical);
+    EXPECT_EQ(0u, top);
+    EXPECT_EQ(kKernelThreadStackPages, frames.free_page_count());
+    for(uint64_t held : held_pages)
+    {
+        EXPECT_TRUE(frames.free(held));
+    }
+}
+
+TEST(TaskRegistry, GuardedStackAllocationRollsBackPartialMapping)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = initialized_frames();
+    VirtualMemory kernel(frames);
+
+    constexpr uint64_t stack_bytes = kKernelThreadStackPages * kPageSize;
+    constexpr uint64_t slot = 409;
+    constexpr uint64_t backing = slot * stack_bytes;
+    constexpr uint64_t bottom =
+        kKernelStackVirtualBase + slot * (stack_bytes + kPageSize) + kPageSize;
+    constexpr uint64_t leaf_table_bytes = 512 * kPageSize;
+    static_assert(bottom % leaf_table_bytes == leaf_table_bytes - 2 * kPageSize);
+
+    // The first two stack pages fit in an existing leaf table.
+    constexpr uint64_t neighbor = bottom - 2 * kPageSize;
+    ASSERT_TRUE(kernel.map_physical(neighbor, 0x100000, 1, PageFlags::Write));
+    ASSERT_TRUE(initialize_kernel_stacks(frames, kernel.root()));
+    ASSERT_TRUE(frames.reserve_range(0, backing));
+    ASSERT_TRUE(frames.reserve_range(backing + stack_bytes, kArenaBytes - backing - stack_bytes));
+    ASSERT_EQ(kKernelThreadStackPages, frames.free_page_count());
+
+    uint64_t physical = 0, top = 0;
+    EXPECT_FALSE(allocate_kernel_stack(frames, physical, top));
+    EXPECT_EQ(0u, physical);
+    EXPECT_EQ(0u, top);
+    EXPECT_EQ(kKernelThreadStackPages, frames.free_page_count());
+
+    uint64_t translated = 0, flags = 0;
+    for(size_t offset = 0; offset < stack_bytes; offset += kPageSize)
+    {
+        EXPECT_FALSE(kernel.translate(bottom + offset, translated, flags));
+    }
+    ASSERT_TRUE(kernel.translate(neighbor, translated, flags));
+    EXPECT_EQ(0x100000u, translated);
+}
 
 TEST(TaskRegistry, ProcessesGrowPastLegacyLimit)
 {

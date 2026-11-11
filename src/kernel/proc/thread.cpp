@@ -9,6 +9,7 @@
 #include "handoff/memory_layout.h"
 #include "ipc/channel.hpp"
 #include "mm/kmem.hpp"
+#include "proc/kernel_stack.hpp"
 #include "proc/thread.hpp"
 #include "sync/smp.hpp"
 #include "sync/wait_queue.hpp"
@@ -356,15 +357,11 @@ Thread* allocate_kernel_thread(Process* process, void (*entry)(void), PageFrameC
         return nullptr;
     }
 
-    uint64_t stack_base = 0;
-    if(!frames.allocate(stack_base, kKernelThreadStackPages))
+    if(!allocate_kernel_stack(frames, thread->kernel_stack_base, thread->kernel_stack_top))
     {
         release_thread_record(thread);
         return nullptr;
     }
-    uint8_t* stack_memory = kernel_physical_pointer<uint8_t>(stack_base);
-    memset(stack_memory, 0, kKernelThreadStackPages * kPageSize);
-    const uint64_t stack_top = (uint64_t)(stack_memory + kKernelThreadStackPages * kPageSize);
 
     {
         IrqSpinGuard guard(g_thread_registry_lock);
@@ -374,13 +371,10 @@ Thread* allocate_kernel_thread(Process* process, void (*entry)(void), PageFrameC
     thread->state = ThreadState::Ready;
     thread->user_mode = false;
     thread->address_space_cr3 = process->address_space.cr3;
-    thread->kernel_stack_base = stack_base;
-    thread->kernel_stack_top = stack_top;
     thread->exit_status = 0;
     thread->frame = {};
     // Kernel threads resume through `iretq` into a small trampoline that aligns
     // the stack before calling the C++ entry point carried in RDI.
-    *reinterpret_cast<uint64_t*>(thread->kernel_stack_top - 3 * sizeof(uint64_t)) = 0;
     thread->frame.rip = (uint64_t)kernel_thread_start;
     thread->frame.rdi = (uint64_t)entry;
     thread->frame.cs = kKernelCodeSegment;
@@ -425,10 +419,11 @@ bool initialize_thread_table(PageFrameContainer& frames)
 }
 }  // namespace
 
-bool init_tasks(PageFrameContainer& frames)
+bool init_tasks(PageFrameContainer& frames, uint64_t kernel_root)
 {
     KASSERT_ON_BSP();
-    if(!initialize_process_table(frames) || !initialize_thread_table(frames))
+    if(!initialize_kernel_stacks(frames, kernel_root) || !initialize_process_table(frames) ||
+       !initialize_thread_table(frames))
     {
         return false;
     }
@@ -555,15 +550,11 @@ Thread* create_user_thread(Process* process,
         return nullptr;
     }
 
-    uint64_t stack_base = 0;
-    if(!frames.allocate(stack_base, kKernelThreadStackPages))
+    if(!allocate_kernel_stack(frames, thread->kernel_stack_base, thread->kernel_stack_top))
     {
         release_thread_record(thread);
         return nullptr;
     }
-    uint8_t* stack_memory = kernel_physical_pointer<uint8_t>(stack_base);
-    memset(stack_memory, 0, kKernelThreadStackPages * kPageSize);
-    const uint64_t stack_top = (uint64_t)(stack_memory + kKernelThreadStackPages * kPageSize);
 
     {
         IrqSpinGuard guard(g_thread_registry_lock);
@@ -573,8 +564,6 @@ Thread* create_user_thread(Process* process,
     thread->state = start_ready ? ThreadState::Ready : ThreadState::Blocked;
     thread->user_mode = true;
     thread->address_space_cr3 = process->address_space.cr3;
-    thread->kernel_stack_base = stack_base;
-    thread->kernel_stack_top = stack_top;
     thread->scheduler_cpu = select_target_cpu(thread, nullptr);
     thread->exit_status = 0;
     thread->frame = {};

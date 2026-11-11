@@ -62,7 +62,8 @@ no static or runtime lock-tier checker. Do not introduce a new lock outside this
 order without updating this document first.
 
 1. CPU-local interrupt state: acquire `IrqGuard` before taking any lock that can also be touched from an interrupt path.
-2. Physical memory allocator: `page_frames` lock.
+2. Kernel stack mapping lock, then the physical memory allocator lock.
+   The stack mapper can allocate page-table frames while it holds the stack mapping lock.
 3. Virtual memory/address-space ownership locks.
 4. Process table lock.
    Process descriptor-table locks follow this tier; do not nest two descriptor
@@ -87,6 +88,20 @@ Rules:
   scheduler/run-queue lock to wake them.
 - Locks protect data ownership; they do not replace lifetime rules. Process,
   thread, page-table, and device lifetimes still need explicit ownership transitions.
+
+## Kernel stack lifetime
+
+The kernel maps each thread stack before it publishes the thread.
+The reaper removes the stack mapping after all CPUs leave the thread.
+
+```text
+Map stack -> Publish thread -> Leave thread -> Remove mapping -> Retire TLB entries -> Free frames
+```
+
+The IRQ-safe stack lock serializes changes to shared stack page tables.
+The kernel releases this lock before it waits for TLB retirement.
+All online CPUs acknowledge retirement before the kernel returns stack frames to the allocator.
+A failed allocation removes any partial stack mapping and returns its data frames.
 
 ## Kernel heap accounting
 

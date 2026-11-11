@@ -3,6 +3,25 @@
 
 #include "proc/thread.hpp"
 #include "syscall/process.hpp"
+
+class LegacyStartupRecord
+{
+public:
+    LegacyStartupRecord(const Process& process, const char* path);
+    ~LegacyStartupRecord();
+
+    LegacyStartupRecord(const LegacyStartupRecord&) = delete;
+    LegacyStartupRecord& operator=(const LegacyStartupRecord&) = delete;
+
+    const os1_startup_record* get() const
+    {
+        return record_;
+    }
+
+private:
+    os1_startup_record* record_ = nullptr;
+};
+
 long validate_startup(const os1_startup_record&);
 long validate_namespace_roles(DescriptorTable&, int root, int cwd, bool exec);
 long install_child_grants(DescriptorTable&, DescriptorTable&, const os1_launch_request&);
