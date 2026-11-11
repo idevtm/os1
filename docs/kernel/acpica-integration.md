@@ -37,6 +37,20 @@ The platform inventory stores metadata for the DSDT and up to 15 SSDTs.
 
 Table discovery continues after the inventory fills. It still checks for required tables.
 
+## PCI INTx routing
+
+ACPICA selects the APIC interrupt model before it evaluates `_PRT`.
+
+| Firmware object | Route handling |
+| --- | --- |
+| `\_PIC` | Pass the integer 1. Continue if the method is absent. |
+| Direct `_PRT` GSI | Use active-low, level-triggered flags. |
+| `_PRT` link device | Use the GSI and flags from the current interrupt resource. |
+| PCI configuration interrupt line | Use the ISA route when ACPI supplies no route. |
+
+A failure in the present `\_PIC` method stops platform discovery.
+The [ACPI specification](https://uefi.org/specs/ACPI/6.6/06_Device_Configuration.html#prt-pci-routing-table) defines the PCI routing table.
+
 ## Shutdown EC support — 2026-11-08
 
 The [EC adapter](acpi-embedded-controller.md) adds shutdown-time access to firmware-declared Embedded Controller regions.

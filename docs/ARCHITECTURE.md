@@ -1469,6 +1469,7 @@ The kernel now:
 - uses ACPICA-backed `MADT` data as the primary source of CPU, LAPIC, IOAPIC, and IRQ-override topology
 - uses ACPICA-backed `MCFG` data to discover PCIe ECAM ranges
 - uses ACPICA namespace/resource APIs for ACPI device records, `_CRS` resources, `_PRT` PCI INTx routing, and `_PS0`/`_PS3` device power transitions
+- selects the ACPI APIC interrupt model before reading PCI routes
 - enumerates PCIe devices and records BAR information
 - separates platform discovery from driver activation so MSI/MSI-X-capable
   drivers bind only after the IDT and LAPIC are online

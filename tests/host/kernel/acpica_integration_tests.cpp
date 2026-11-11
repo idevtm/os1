@@ -689,6 +689,46 @@ Aml package(Aml opcode, const Aml& body)
     append(opcode, body);
     return opcode;
 }
+void pci_route_tables(os1::host_test::PhysicalMemoryArena& arena, bool broken_pic = false)
+{
+    build_tables(arena, true, false);
+    // _PIC(Arg0) stores the selected interrupt model. _PRT reads that value.
+    Aml aml{0x08, 'P', 'M', 'O', 'D', 0};
+    append(aml,
+           package({0x14},
+                   {'_',
+                    'P',
+                    'I',
+                    'C',
+                    1,
+                    0x70,
+                    0x68,
+                    broken_pic ? uint8_t('X') : uint8_t('P'),
+                    'M',
+                    'O',
+                    'D'}));
+    auto route = [](uint8_t gsi) {
+        Aml entry{4, 0x0c, 0xff, 0xff, 1, 0, 0, 0, 0x0a, gsi};
+        Aml entries{1};
+        append(entries, package({0x12}, entry));
+        return package({0x12}, entries);
+    };
+    Aml body{'P', 'C', 'I', '0', 0x08, '_', 'H',  'I', 'D', 0x0d, 'P', 'N',
+             'P', '0', 'A', '0', '8',  0,   0x08, '_', 'B', 'B',  'N', 0};
+    Aml prt{'_', 'P', 'R', 'T', 0};
+    Aml apic{0x5c, 'P', 'M', 'O', 'D', 0xa4};
+    append(apic, route(16));
+    append(prt, package({0xa0}, apic));
+    prt.push_back(0xa4);
+    append(prt, route(9));
+    append(body, package({0x14}, prt));
+    append(aml, package({0x5b, 0x82}, body));
+    auto* dsdt = reinterpret_cast<TestSdtHeader*>(arena.data() + kDsdtPhysical);
+    dsdt->length = sizeof(*dsdt) + aml.size();
+    std::memcpy(dsdt + 1, aml.data(), aml.size());
+    finalize_sdt(*dsdt);
+}
+
 void ec_tables(os1::host_test::PhysicalMemoryArena& arena,
                int glk = 0,
                uint16_t data_port = 0x62,
@@ -872,6 +912,62 @@ struct EcDevice
     }
 };
 }  // namespace
+
+TEST_F(AcpicaIntegration, SelectsApicModeAndKeepsDirectPciRoutesLevelLow)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    pci_route_tables(arena);
+    PageFrameContainer frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    const auto boot = make_boot_info(kRsdpPhysical);
+    AcpicaScopedReset reset;
+    ASSERT_TRUE(acpica_initialize_tables(vm, boot));
+    ASSERT_TRUE(acpica_load_namespace());
+
+    AcpiDeviceInfo root{};
+    root.active = true;
+    root.bus_number = 0;
+    std::strcpy(root.path, "\\PCI0");
+    g_platform.acpi_devices = &root;
+    g_platform.acpi_device_count = 1;
+    auto check_route = [] {
+        uint32_t irq = 0;
+        uint16_t flags = 0;
+        bool direct = false;
+        ASSERT_TRUE(acpica_resolve_pci_route_details(0, 1, 0, 0, irq, flags, direct));
+        EXPECT_EQ(irq, 16u);
+        EXPECT_EQ(flags, 0x0fu);
+        EXPECT_TRUE(direct);
+    };
+    check_route();
+
+    std::vector<AcpiDeviceInfo> devices(kAcpiMaxDevices);
+    std::vector<AcpiPciRoute> routes(kAcpiMaxPciRoutes);
+    size_t device_count = 0, route_count = 0;
+    ASSERT_TRUE(acpica_build_device_info(devices.data(), device_count, routes.data(), route_count));
+    ASSERT_EQ(route_count, 1u);
+    EXPECT_EQ(routes[0].irq, 16u);
+    EXPECT_EQ(routes[0].flags, 0x0fu);
+    EXPECT_TRUE(routes[0].source_is_gsi);
+    g_platform.acpi_device_count = 0;  // Verify the cached path without the namespace fallback.
+    check_route();
+}
+
+TEST_F(AcpicaIntegration, ReportsFailureFromPresentPicMethod)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    pci_route_tables(arena, true);
+    PageFrameContainer frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    const auto boot = make_boot_info(kRsdpPhysical);
+    AcpicaScopedReset reset;
+    ASSERT_TRUE(acpica_initialize_tables(vm, boot));
+    EXPECT_FALSE(acpica_load_namespace());
+    EXPECT_NE(std::string(acpica_namespace_last_error()), "ok");
+}
+
 
 TEST_F(AcpicaIntegration, EcConnectsRegionAndExecutesShutdownFirmware)
 {
