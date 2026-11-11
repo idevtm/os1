@@ -1655,7 +1655,8 @@ It requires UEFI firmware and enables allocator checks for host and guest builds
 The [testing guide](testing.md) defines the exact hosted selection and evidence locations.
 The [mandatory policy](../AGENTS.md#mandatory-local-test-policy) requires local validation before push or completion.
 
-GitHub uses `ubuntu-24.04`, the host compiler, and the Homebrew cross toolchain.
+GitHub uses `ubuntu-24.04` and its host compiler.
+The guest build uses the [pinned cross toolchain](testing.md#hosted-cross-toolchain).
 It builds normal UEFI, BIOS, and USB images with debugcon and allocator checks enabled.
 Diagnostic capture runs locally instead of in the GitHub job.
 The job retains its `build-and-smoke` name for `act` compatibility.

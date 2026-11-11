@@ -120,6 +120,21 @@ Known failures outside the subset remain open requirements.
 Do not change selection to hide a failure.
 The [implementation record](archive/tooling/2026-11-09-strategic-ci.md) retains measurements and known limitations.
 
+## Hosted cross toolchain
+
+The workflow pins each GitHub Action to a commit.
+The guest build uses GCC 11.2.0 and GNU Binutils 2.37 for `x86_64-elf`.
+
+```text
+GNU source archives -> SHA-256 check -> build and cache -> version check -> image build
+```
+
+The [installer](../scripts/ci-cross-toolchain.sh) verifies both archive checksums before the build.
+CI logs and checks the cross compiler and linker versions on each run, including cache hits.
+The BIOS image build logs the stripped kernel size, slot capacity, and free bytes.
+The build fails if the kernel exceeds the slot.
+Local `act` uses and reports the installed cross toolchain.
+
 ## Physical device results
 
 Use [`run-tests`](hardware/device-test-runner-plan.md) to save traceable checks on the attached ext2 data partition.

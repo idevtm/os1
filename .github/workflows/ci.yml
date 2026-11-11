@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           submodules: recursive
 
@@ -35,7 +35,8 @@ jobs:
             command -v qemu-system-x86_64
           else
             sudo apt-get update
-            sudo apt-get install -y e2fsprogs nasm cpio xorriso ovmf qemu-system-x86 cmake ninja-build
+            sudo apt-get install -y e2fsprogs nasm cpio xorriso ovmf qemu-system-x86 cmake ninja-build \
+              libgmp10 libmpfr6 libmpc3
           fi
 
       - name: Configure host unit tests
@@ -47,24 +48,34 @@ jobs:
       - name: Run host unit tests
         run: ctest --test-dir build-host-tests --output-on-failure --no-tests=error
 
-      - name: Enable Homebrew
+      - name: Cache cross toolchain
         if: ${{ !env.ACT }}
-        run: |
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          echo "$HOMEBREW_PREFIX/bin" >> "$GITHUB_PATH"
-          echo "$HOMEBREW_PREFIX/sbin" >> "$GITHUB_PATH"
+        id: cross-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/os1-cross
+          key: os1-cross-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('scripts/ci-cross-toolchain.sh') }}
 
-      - name: Install cross toolchain
+      - name: Build pinned cross toolchain
+        if: ${{ !env.ACT && steps.cross-cache.outputs.cache-hit != 'true' }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get install -y build-essential libgmp-dev libmpfr-dev libmpc-dev
+          bash scripts/ci-cross-toolchain.sh install "$RUNNER_TEMP/os1-cross" "$(nproc)"
+
+      - name: Verify cross toolchain
         shell: bash
         run: |
           set -euxo pipefail
           if [ "${ACT:-}" = "true" ]; then
-            command -v x86_64-elf-gcc
-            command -v x86_64-elf-g++
-            command -v x86_64-elf-ld
+            x86_64-elf-gcc --version
+            x86_64-elf-g++ --version
+            "$(x86_64-elf-gcc -print-prog-name=as)" --version
+            x86_64-elf-ld --version
           else
-            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-            brew install x86_64-elf-gcc
+            bash scripts/ci-cross-toolchain.sh check "$RUNNER_TEMP/os1-cross"
+            echo "$RUNNER_TEMP/os1-cross/bin" >> "$GITHUB_PATH"
           fi
 
       # OS1_REQUIRE_UEFI_SMOKE=ON turns a missing OVMF firmware into a
