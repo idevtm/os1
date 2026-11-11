@@ -385,7 +385,8 @@ TEST_F(BufferMemory, ZombieExitReleasesReservationsBeforeParentWaitpid)
     ASSERT_TRUE(init_tasks(frames));
     VirtualMemory child_vm(frames);
     ASSERT_TRUE(child_vm.allocate_and_map(control, 1, PageFlags::User | PageFlags::Write));
-    auto* child = create_user_process("buffer-zombie", child_vm.root());
+    const auto child_root = child_vm.root();
+    auto* child = create_user_process("buffer-zombie", child_root);
     ASSERT_NE(nullptr, child);
     child->parent = &caller;
     auto* child_thread = create_user_thread(child, control, control + kPageSize, frames, false);
@@ -393,7 +394,7 @@ TEST_F(BufferMemory, ZombieExitReleasesReservationsBeforeParentWaitpid)
     const auto child_pid = child->pid;
     const int fd = create(*child_thread, OS1_BUFFER_BYTES_MAX);
     ASSERT_GE(fd, 0);
-    const auto origin = map(*child_thread, fd);
+    ASSERT_NE(0u, map(*child_thread, fd));
     BufferLoanBatch* loans = nullptr;
     ASSERT_EQ(0, buffer_prepare_loans(frames, child_thread, attachment(fd), loans));
     os1_ipc_buffers received{};
@@ -405,10 +406,10 @@ TEST_F(BufferMemory, ZombieExitReleasesReservationsBeforeParentWaitpid)
     reap_dead_threads(frames);
     EXPECT_EQ(ProcessState::Zombie, child->state);
     EXPECT_FALSE(process_has_threads(child));
-    EXPECT_EQ(child_vm.root(), child->address_space.cr3);
+    EXPECT_TRUE(child->exit_cleanup_complete);
+    ASSERT_EQ(0u, child->address_space.cr3);
+    EXPECT_FALSE(frames.free(child_root));
     buffer_finish_loans(loans);
-    uint64_t physical = 0, flags = 0;
-    EXPECT_FALSE(child_vm.translate(origin, physical, flags));
     EXPECT_FALSE(readable(b, borrowed));
     buffer_release_loans(loans);
     ASSERT_EQ(0, descriptor_close(provider.descriptors, received.entries[0].fd));

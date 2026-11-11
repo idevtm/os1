@@ -6,6 +6,7 @@
 #include "ipc/channel.hpp"
 #include "proc/kernel_stack.hpp"
 #include "proc/thread.hpp"
+#include "proc/user_program.hpp"
 #include "syscall/console_read.hpp"
 #include "syscall/vfs.hpp"
 #include "syscall/wait.hpp"
@@ -80,6 +81,16 @@ void reap_dead_threads(PageFrameContainer& frames)
             {
                 buffer_process_cleanup(frames, owner);
                 descriptor_close_all(owner->descriptors);
+                uint64_t cr3 = 0;
+                {
+                    IrqSpinGuard guard(g_process_table_lock);
+                    cr3 = owner->address_space.cr3;
+                    owner->address_space.cr3 = 0;
+                }
+                if(cr3)
+                {
+                    destroy_user_address_space(frames, cr3);
+                }
                 IrqSpinGuard guard(g_process_table_lock);
                 owner->exit_cleanup_complete = true;
             }
