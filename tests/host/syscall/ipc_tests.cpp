@@ -2444,6 +2444,16 @@ class LogIpc : public Ipc
 {
 protected:
     bool diagnostic_mode = true;
+    NativeObject history_root{
+        1, OS1_OBJECT_DIRECTORY, 0, OS1_RIGHT_LOOKUP | OS1_RIGHT_LOG_READ, nullptr};
+    void install_history_root(Process& process, uint32_t rights = OS1_RIGHT_LOG_READ)
+    {
+        InstanceRef root(open_instance(&history_root));
+        ASSERT_NE(nullptr, root.get());
+        constexpr int fd = OS1_DESCRIPTOR_LIMIT - 1;
+        ASSERT_EQ(fd, descriptor_install(process.descriptors, root.get(), rights, 0, fd));
+        process.root_fd = fd;
+    }
     void SetUp() override
     {
         Ipc::SetUp();
@@ -2503,11 +2513,41 @@ TEST_F(NormalLogIpc, TimestampMutationsAreCapturedButReadsAreOmitted)
         EXPECT_EQ(0, diagnostic_log::read(query, record));
     }
 }
+TEST_F(LogIpc, HistoryAdmissionRequiresLogReadOnTheRootDescriptor)
+{
+    auto& process = *thread->process;
+    const auto slots = diagnostic_log::info().history_slots;
+    EXPECT_EQ(OS1_ERR_ACCESS, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
+    EXPECT_EQ(slots, diagnostic_log::info().history_slots);
+    EXPECT_EQ(nullptr, process.log_history);
+
+    install_history_root(process, OS1_RIGHT_LOOKUP);
+    EXPECT_EQ(OS1_ERR_ACCESS, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
+    EXPECT_EQ(slots, diagnostic_log::info().history_slots);
+
+    os1_log_command command{};
+    command.version = 1;
+    command.size = sizeof(command);
+    ASSERT_EQ(0, context(OS1_LOG_COMMAND_BEGIN, command));
+    EXPECT_NE(0u, command.command_id);
+    EXPECT_EQ(0, context(OS1_LOG_COMMAND_END, command));
+
+    install_history_root(process);
+    ASSERT_EQ(0, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
+    EXPECT_EQ(slots + 1, diagnostic_log::info().history_slots);
+    ASSERT_EQ(0, descriptor_close(table(), process.root_fd));
+    EXPECT_EQ(0, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
+    EXPECT_EQ(slots + 1, diagnostic_log::info().history_slots);
+    diagnostic_log::cleanup(&process);
+    EXPECT_EQ(slots, diagnostic_log::info().history_slots);
+    EXPECT_EQ(OS1_ERR_ACCESS, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
+}
 TEST_F(LogIpc, CommandsAreAssignedAndParentContextRestored)
 {
     auto* p = thread->process;
     p->log_command = 55;
     p->log_session = 9;
+    install_history_root(*p);
     ASSERT_EQ(0, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
     os1_log_command c{};
     c.version = 1;
@@ -2538,14 +2578,19 @@ TEST_F(LogIpc, SuppressionAndQuotaFailureDoNotPreventCorrelation)
 {
     Process others[4];
     Thread temporary{};
+    install_history_root(*thread->process);
     for(unsigned i = 0; i < 4; ++i)
     {
         temporary.process = &others[i];
+        install_history_root(others[i]);
         ASSERT_EQ(0, diagnostic_log::context(frames, &temporary, OS1_LOG_CONTEXT_OPEN, 0));
     }
     EXPECT_EQ(OS1_ERR_LIMIT, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
     for(auto& p : others)
+    {
         diagnostic_log::cleanup(&p);
+        descriptor_close_all(p.descriptors);
+    }
     ASSERT_EQ(0, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
     os1_log_command c{};
     c.version = 1;
@@ -2622,6 +2667,7 @@ TEST(LogProvider, RequiresDistinctAuthority)
 
 TEST_F(LogIpc, ExecReleasesScopeButRetainsOriginForReplacement)
 {
+    install_history_root(*thread->process);
     ASSERT_EQ(0, diagnostic_log::context(frames, thread, OS1_LOG_CONTEXT_OPEN, 0));
     os1_log_command first{};
     first.version = 1;

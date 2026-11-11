@@ -13,6 +13,7 @@
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "proc/thread.hpp"
+#include "resource/descriptor.hpp"
 #include "util/memory.h"
 #ifndef OS1_HOST_TEST
 #include "arch/x86_64/cpu/cpu.hpp"
@@ -466,6 +467,10 @@ long context(PageFrameContainer& frames, Thread* t, uint64_t op, uint64_t pointe
     {
         if(p->log_history)
             return 0;
+        OpenInstance* root = nullptr;
+        if(descriptor_acquire(p->descriptors, p->root_fd, OS1_RIGHT_LOG_READ, root) < 0)
+            return OS1_ERR_ACCESS;
+        InstanceRef grant(root);
         {
             IrqSpinGuard guard(lock);
             if(histories == 4)
