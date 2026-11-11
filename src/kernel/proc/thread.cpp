@@ -427,6 +427,7 @@ bool init_tasks(PageFrameContainer& frames, uint64_t kernel_root)
     {
         return false;
     }
+    initialize_reaper();
     set_current_thread(nullptr);
     return true;
 }
@@ -439,11 +440,6 @@ Thread* first_thread(void)
 Thread* next_thread(const Thread* thread)
 {
     return (nullptr != thread) ? thread->registry_next : nullptr;
-}
-
-void relink_runnable_threads()
-{
-    // Phase 4 moves ready-thread ownership to per-CPU run queues.
 }
 
 void clear_thread(Thread* thread)
@@ -468,7 +464,11 @@ void clear_thread(Thread* thread)
     release_thread_record(thread);
 }
 
-Thread* create_kernel_thread(Process* process, void (*entry)(void), PageFrameContainer& frames)
+Thread* create_kernel_thread(Process* process,
+                             void (*entry)(void),
+                             PageFrameContainer& frames,
+                             cpu* pinned_cpu,
+                             bool start_ready)
 {
     Thread* thread = allocate_kernel_thread(process, entry, frames);
     if(nullptr == thread)
@@ -476,14 +476,16 @@ Thread* create_kernel_thread(Process* process, void (*entry)(void), PageFrameCon
         return nullptr;
     }
 
-    cpu* owner = cpu_cur();
-    if((nullptr == owner) || (nullptr != owner->idle_thread))
+    cpu* owner = pinned_cpu ? pinned_cpu : cpu_cur();
+    if(!pinned_cpu && ((nullptr == owner) || (nullptr != owner->idle_thread)))
     {
         IrqSpinGuard guard(g_thread_registry_lock);
         owner = next_schedulable_cpu_after(g_last_kernel_thread_cpu);
         g_last_kernel_thread_cpu = owner;
     }
     thread->scheduler_cpu = owner;
+    thread->pinned_cpu = pinned_cpu;
+    thread->state = start_ready ? ThreadState::Ready : ThreadState::Blocked;
     if((nullptr != owner) && (nullptr == owner->idle_thread))
     {
         publish_idle_thread(owner, thread);
@@ -493,7 +495,10 @@ Thread* create_kernel_thread(Process* process, void (*entry)(void), PageFrameCon
         IrqSpinGuard guard(g_thread_registry_lock);
         link_thread(thread);
     }
-    mark_thread_ready(thread, owner);
+    if(start_ready)
+    {
+        mark_thread_ready(thread, owner);
+    }
     return thread;
 }
 
@@ -758,7 +763,7 @@ void mark_current_thread_dying(int exit_status)
         thread->process->state =
             thread->process->parent ? ProcessState::Zombie : ProcessState::Dying;
     }
-    thread->state = ThreadState::Dying;
+    queue_dying_thread(*thread);
 }
 
 SchedulingGuard::SchedulingGuard()

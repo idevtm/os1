@@ -103,8 +103,9 @@ bool try_complete_or_block_wait_pid(PageFrameContainer& frames,
     return wait_pid(frames, thread, pid, user_status_pointer, result, true);
 }
 
-void wake_child_waiters(PageFrameContainer& frames)
+bool wake_child_waiters(PageFrameContainer& frames)
 {
+    bool retry_remote = false;
     Thread* pending = wait_queue_dequeue_all(g_child_waiters);
     Thread* still_waiting_head = nullptr;
     Thread* still_waiting_tail = nullptr;
@@ -115,12 +116,13 @@ void wake_child_waiters(PageFrameContainer& frames)
         thread->wait_link = nullptr;
 
         long result = -1;
-        if(!current_on_remote_cpu(thread) &&
-           try_complete_wait_pid(frames,
-                                 thread,
-                                 thread->wait.child_exit.pid,
-                                 thread->wait.child_exit.user_status_pointer,
-                                 result))
+        const bool remote = current_on_remote_cpu(thread);
+        retry_remote |= remote;
+        if(!remote && try_complete_wait_pid(frames,
+                                            thread,
+                                            thread->wait.child_exit.pid,
+                                            thread->wait.child_exit.user_status_pointer,
+                                            result))
         {
             thread->frame.rax = static_cast<uint64_t>(result);
             wake_blocked_thread(thread);
@@ -149,4 +151,5 @@ void wake_child_waiters(PageFrameContainer& frames)
             thread = next;
         }
     }
+    return retry_remote;
 }

@@ -1,6 +1,5 @@
-// Deferred thread/process reaping. The active kernel stack cannot be freed by
-// the thread currently running on it, so reclamation happens when another thread
-// re-enters the kernel.
+// The BSP worker owns deferred thread and process teardown.
+#include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "buffer/buffer.hpp"
 #include "ipc/channel.hpp"
@@ -13,6 +12,39 @@
 
 namespace
 {
+OS1_LOCKED_BY(g_thread_registry_lock) Thread* g_dying_threads = nullptr;
+volatile bool g_reaper_requested = false;
+Thread* g_reaper_thread = nullptr;
+PageFrameContainer* g_reaper_frames = nullptr;
+
+void push_dying_thread_locked(Thread& thread)
+{
+    thread.reap_next = g_dying_threads;
+    g_dying_threads = &thread;
+    request_reaper();
+}
+
+void reaper_worker()
+{
+#if !defined(OS1_HOST_TEST)
+    Thread* thread = current_thread();
+    for(;;)
+    {
+        reap_dead_threads(*g_reaper_frames);
+
+        // Only the BSP tick wakes this thread. Keep IRQs masked through parking
+        // so the tick sees either a running worker or a complete blocked state.
+        IrqGuard irq;
+        thread->state = ThreadState::Blocked;
+        while(thread->state == ThreadState::Blocked)
+        {
+            (void)ipi_send_reschedule(cpu_cur());
+            asm volatile("sti; hlt; cli" ::: "memory");
+        }
+    }
+#endif
+}
+
 bool thread_is_current_on_any_cpu(const Thread* thread)
 {
     if(nullptr == thread)
@@ -31,40 +63,76 @@ bool thread_is_current_on_any_cpu(const Thread* thread)
 }
 }  // namespace
 
+void initialize_reaper()
+{
+    g_dying_threads = nullptr;
+    atomic_store_release(&g_reaper_requested, false);
+    g_reaper_thread = nullptr;
+    g_reaper_frames = nullptr;
+}
+
+bool start_reaper(Process* process, PageFrameContainer& frames)
+{
+    g_reaper_frames = &frames;
+    g_reaper_thread = create_kernel_thread(process, reaper_worker, frames, g_cpu_boot, false);
+    return g_reaper_thread != nullptr;
+}
+
+void request_reaper()
+{
+    atomic_store_release(&g_reaper_requested, true);
+}
+
+void queue_dying_thread(Thread& thread)
+{
+    IrqSpinGuard guard(g_thread_registry_lock);
+    if(thread.state != ThreadState::Dying)
+    {
+        thread.state = ThreadState::Dying;
+        push_dying_thread_locked(thread);
+    }
+}
+
+void wake_reaper_on_tick()
+{
+    if(atomic_load_acquire(&g_reaper_requested) && g_reaper_thread &&
+       g_reaper_thread->state == ThreadState::Blocked)
+    {
+        wake_blocked_thread(g_reaper_thread, g_cpu_boot);
+    }
+}
+
 void reap_dead_threads(PageFrameContainer& frames)
 {
-    for(;;)
+    (void)atomic_exchange(&g_reaper_requested, false);
+    Thread* pending = nullptr;
     {
-        Thread* thread = nullptr;
+        IrqSpinGuard guard(g_thread_registry_lock);
+        pending = g_dying_threads;
+        g_dying_threads = nullptr;
+    }
+    while(pending)
+    {
+        Thread* thread = pending;
+        pending = thread->reap_next;
+        thread->reap_next = nullptr;
+
+        const bool ready =
+            !thread_is_current_on_any_cpu(thread) && atomic_load_acquire(&thread->io_pins) == 0;
+        if(ready)
+        {
+            cancel_console_read(thread);
+            cancel_vfs_wait(thread);
+            cancel_ipc_wait(thread);
+        }
+        if(!ready || atomic_load_acquire(&thread->io_pins) != 0)
         {
             IrqSpinGuard guard(g_thread_registry_lock);
-            for(Thread* candidate = first_thread(); nullptr != candidate;
-                candidate = next_thread(candidate))
-            {
-                if((ThreadState::Dying == candidate->state) &&
-                   !thread_is_current_on_any_cpu(candidate) &&
-                   atomic_load_acquire(&candidate->io_pins) == 0)
-                {
-                    thread = candidate;
-                    break;
-                }
-            }
-        }
-
-        if(nullptr == thread)
-        {
-            break;
-        }
-
-        cancel_console_read(thread);
-        cancel_vfs_wait(thread);
-        cancel_ipc_wait(thread);
-        if(atomic_load_acquire(&thread->io_pins) != 0)
+            push_dying_thread_locked(*thread);
             continue;
+        }
 
-        // Thread teardown is deferred until some *other* thread enters the kernel.
-        // That keeps us from freeing the current kernel stack out from under the CPU
-        // while it is still executing on it.
+        // The outgoing CPU has switched off this stack before the worker frees it.
         release_kernel_stack(frames, thread->kernel_stack_base);
 
         Process* owner = thread->process;
@@ -101,7 +169,10 @@ void reap_dead_threads(PageFrameContainer& frames)
         }
     }
 
-    wake_child_waiters(frames);
+    if(wake_child_waiters(frames))
+    {
+        request_reaper();
+    }
     for(;;)
     {
         Process* orphan = nullptr;
@@ -122,5 +193,4 @@ void reap_dead_threads(PageFrameContainer& frames)
         reap_process(orphan, frames);
     }
 
-    relink_runnable_threads();
 }

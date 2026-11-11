@@ -139,6 +139,10 @@ Thread* handle_irq(TrapFrame* frame)
     }
     if(scheduler_tick || reschedule_ipi)
     {
+        if(scheduler_tick && cpu_on_boot())
+        {
+            wake_reaper_on_tick();
+        }
         if(!trap_frame_is_user(*frame) && current_thread()->user_mode)
         {
             return current_thread();
@@ -146,10 +150,6 @@ Thread* handle_irq(TrapFrame* frame)
         return schedule_next(true);
     }
 
-    if(cpu_on_boot())
-    {
-        reap_dead_threads(page_frames);
-    }
     if((current_thread() == idle_thread()) && (0u != cpu_run_queue_length(cpu_cur())))
     {
         return schedule_next(true);
