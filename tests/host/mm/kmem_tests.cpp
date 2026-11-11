@@ -6,8 +6,10 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <limits>
+#include <thread>
 #include <vector>
 
 namespace
@@ -226,6 +228,71 @@ TEST(Kmem, LargeAllocationsUsePageRuns)
     EXPECT_EQ(0u, global.live_large_allocation_count);
     EXPECT_EQ(0u, global.live_large_allocation_bytes);
     EXPECT_EQ(1u, global.free_count);
+}
+
+TEST(Kmem, ConcurrentLargeAllocationStatsStayConsistent)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = initialized_frames();
+    kmem_init(frames);
+
+    constexpr size_t allocation_size = 5000;
+    constexpr size_t iterations = 512;
+    const uint64_t initial_free_pages = frames.free_page_count();
+    std::atomic<bool> start{false};
+    std::atomic<size_t> ready{0};
+    std::array<std::thread, 4> workers;
+    std::atomic<bool> consistent{true};
+
+    for(auto& worker : workers)
+    {
+        worker = std::thread([&] {
+            ++ready;
+            while(!start.load())
+            {
+                std::this_thread::yield();
+            }
+
+            for(size_t iteration = 0; iteration < iterations; ++iteration)
+            {
+                void* allocation = kmalloc(allocation_size);
+                void* rejected = kmalloc(allocation_size, KmallocFlags::NoGrow);
+                KmemGlobalStats stats{};
+                kmem_get_global_stats(stats);
+                if((nullptr == allocation) || (nullptr != rejected) ||
+                   (stats.live_large_allocation_count * allocation_size !=
+                    stats.live_large_allocation_bytes) ||
+                   (stats.free_count + stats.live_large_allocation_count != stats.alloc_count) ||
+                   (stats.failed_alloc_count != stats.failed_large_alloc_count))
+                {
+                    consistent = false;
+                }
+                kfree(rejected);
+                kfree(allocation);
+            }
+        });
+    }
+    while(ready.load() != workers.size())
+    {
+        std::this_thread::yield();
+    }
+    start = true;
+    for(auto& worker : workers)
+    {
+        worker.join();
+    }
+
+    KmemGlobalStats stats{};
+    kmem_get_global_stats(stats);
+    const size_t expected = workers.size() * iterations;
+    EXPECT_TRUE(consistent.load());
+    EXPECT_EQ(0u, stats.live_large_allocation_count);
+    EXPECT_EQ(0u, stats.live_large_allocation_bytes);
+    EXPECT_EQ(expected, stats.alloc_count);
+    EXPECT_EQ(expected, stats.free_count);
+    EXPECT_EQ(expected, stats.failed_alloc_count);
+    EXPECT_EQ(expected, stats.failed_large_alloc_count);
+    EXPECT_EQ(initial_free_pages, frames.free_page_count());
 }
 
 TEST(Kmem, StatsTrackCacheFailuresAndReturns)

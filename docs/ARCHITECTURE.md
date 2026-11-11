@@ -1135,6 +1135,10 @@ Current observe kinds include:
 - kernel small-object allocator snapshot
 - cached ACPICA route snapshot (`OS1_OBSERVE_ACPI`)
 
+`OS1_OBSERVE_KMEM` exports per-cache statistics.
+The allocator uses separate locks for global counters and per-cache statistics.
+See [Kernel heap accounting](kernel/smp-synchronization.md#kernel-heap-accounting) for the global counter rules.
+
 `OS1_OBSERVE_ACPI` reads only boot-discovered PCI and route records.
 Boot discovery resolves missing enumerated-device routes into the bounded cache before user execution.
 
