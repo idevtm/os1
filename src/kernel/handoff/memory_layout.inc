@@ -30,9 +30,6 @@
 %define AP_STARTUP_IDT_ADDRESS 0x38
 %define AP_STARTUP_IDT_SIZE_BYTES 6
 
-%define PAGE_FRAME_BITMAP_BASE_ADDRESS 0x198000
-%define PAGE_FRAME_BITMAP_SIZE_BYTES 0x80000
-
 %define EARLY_RESERVED_PHYSICAL_END 0x20000
 
 ; Persistent RAM boot log for BIOS bring-up on real hardware. The BIOS loader

@@ -690,6 +690,10 @@ into kernel-owned BSS storage. That matters because bootloader staging memory is
 
 [../src/kernel/handoff/memory_layout.h](../src/kernel/handoff/memory_layout.h) and [../src/kernel/handoff/memory_layout.inc](../src/kernel/handoff/memory_layout.inc) hold the fixed early-boot addresses used by the BIOS loader and mirrored by the Limine shim.
 
+The [shared CMake layout](../cmake/kernel_layout.cmake) supplies the kernel boot envelope.
+Production and host tests generate the same C++ header from these values.
+The production build also generates the NASM constants for the BIOS loader.
+
 Key addresses:
 
 | Address | Purpose |

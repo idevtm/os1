@@ -9,6 +9,19 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class Configuration(unittest.TestCase):
+    def test_host_and_production_generate_the_same_kernel_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            production, host = root / 'production', root / 'host'
+            for command in (
+                ['cmake', '--preset', 'default', '-B', str(production)],
+                ['cmake', '-S', 'tests/host', '-B', str(host), '-G', 'Ninja'],
+            ):
+                result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            header = Path('generated/kernel_layout.hpp')
+            self.assertEqual((host / header).read_text(), (production / header).read_text())
+
     def test_fresh_default_and_testing_disabled(self):
         with tempfile.TemporaryDirectory() as directory:
             for mode in ('default', 'off', 'no-qemu', 'diagnostic'):
