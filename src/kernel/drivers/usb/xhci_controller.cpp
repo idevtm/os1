@@ -314,6 +314,34 @@ bool enqueue_command_trb(void* ring_base,
     return true;
 }
 
+bool matches_hid_transfer(
+    const EventInfo& event, uint8_t slot, uint8_t endpoint, uint64_t trb, bool armed)
+{
+    return armed && event.slot_id == slot && event.endpoint_id == endpoint &&
+           event.parameter == trb;
+}
+
+HidCompletion HidRecovery::complete(uint8_t completion)
+{
+    switch(completion)
+    {
+        case 1:   // Success.
+        case 13:  // Short Packet.
+            attempted = false;
+            return HidCompletion::Report;
+        case 3:  // Babble.
+        case 4:  // USB Transaction Error.
+        case 6:  // Stall.
+            if(attempted)
+                return HidCompletion::Retire;
+            attempted = true;
+            pending = completion;
+            return HidCompletion::Recover;
+        default:
+            return HidCompletion::Rearm;
+    }
+}
+
 bool queue_control_transfer(void* ring_base,
                             size_t ring_bytes,
                             uint64_t ring_physical,

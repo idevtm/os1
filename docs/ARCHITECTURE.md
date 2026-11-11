@@ -148,6 +148,7 @@ xHCI negotiates control packet sizes and supports two boot HID interfaces on eac
 Each interface has its own input identity and endpoint buffers; removal retires both identities.
 Input lifetime records and EHCI failure details support returned-stick diagnosis without logging raw key contents.
 Eligible EHCI split errors receive bounded recovery before retirement.
+The xHCI worker also recovers halted input endpoints. See [Transport and physical acceptance](native-api/abi/input-abi.md#transport-and-physical-acceptance).
 The [recovery plan](hardware/input-recovery-plan.md) records hardware evidence, retry limits, and validation.
 The first diagnostic shell starts the runner before its prompt; normal boot and shell restarts do not.
 A bounded binary catalog supports offline comparison against hashed Linux reference profiles.

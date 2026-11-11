@@ -163,6 +163,7 @@ constexpr unsigned kXhciInputInterfaces = 2;
 struct XhciInputState
 {
     uint64_t input_identity = 0;
+    unsigned catalog_id = 0;
     HidBootProtocol protocol = HidBootProtocol::None;
     uint8_t interface_number = 0;
     uint8_t endpoint_address = 0;
@@ -172,6 +173,7 @@ struct XhciInputState
     DmaBuffer interrupt_ring_dma{}, report_buffer_dma{};
     xhci::CommandRingInfo interrupt_ring{};
     usb::hid::BootKeyboardState keyboard_state{};
+    xhci::HidRecovery recovery{};
     bool interrupt_transfer_armed = false;
     uint64_t interrupt_transfer_trb = 0;
     uint32_t report_count = 0;
@@ -737,6 +739,16 @@ bool arm_interrupt_transfer(XhciControllerState& controller,
     return true;
 }
 
+void retire_input(XhciDeviceState& device, XhciInputState& input, uint8_t completion)
+{
+    debug("xhci: input retired port=")(device.port_id)(" dci=")(input.endpoint_dci)(" cc=")(
+        completion)();
+    native_input::remove(input.input_identity);
+    input.interrupt_transfer_armed = false;
+    input.recovery.pending = 0;
+    hardware_catalog::unavailable(input.catalog_id);
+}
+
 void process_transfer_event(XhciControllerState& controller, const xhci::EventInfo& event)
 {
     for(auto& device : controller.devices)
@@ -781,8 +793,11 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
 
         for(auto& input : device.inputs)
         {
-            if(event.endpoint_id == input.endpoint_dci && input.interrupt_transfer_armed &&
-               (input.interrupt_transfer_trb == event.parameter))
+            if(xhci::matches_hid_transfer(event,
+                                          device.slot_id,
+                                          input.endpoint_dci,
+                                          input.interrupt_transfer_trb,
+                                          input.interrupt_transfer_armed))
             {
                 if(bootlog_diagnostics_enabled() && input.diagnostic_reports < 8u)
                 {
@@ -793,9 +808,17 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
                 else if(bootlog_diagnostics_enabled() && input.diagnostic_reports == 8u)
                     ++input.diagnostic_reports;
                 input.interrupt_transfer_armed = false;
-                dma_sync_for_cpu(input.report_buffer_dma);
-                if(transfer_completion_ok(event.completion_code))
+                const auto action = input.recovery.complete(event.completion_code);
+                if(action == xhci::HidCompletion::Recover)
+                    return;
+                if(action == xhci::HidCompletion::Retire)
                 {
+                    retire_input(device, input, event.completion_code);
+                    return;
+                }
+                if(action == xhci::HidCompletion::Report)
+                {
+                    dma_sync_for_cpu(input.report_buffer_dma);
                     if(HidBootProtocol::Keyboard == input.protocol &&
                        event.transfer_length <= input.endpoint_max_packet_size &&
                        input.endpoint_max_packet_size - event.transfer_length == 8)
@@ -809,7 +832,8 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
                         handle_mouse_report(input);
                     }
                 }
-                (void)arm_interrupt_transfer(controller, device, input);
+                if(!arm_interrupt_transfer(controller, device, input))
+                    retire_input(device, input, event.completion_code);
                 return;
             }
         }
@@ -998,9 +1022,12 @@ bool submit_control_transfer(XhciControllerState& controller,
                              const void* out_buffer,
                              void* in_buffer,
                              size_t buffer_length,
-                             size_t& actual_length)
+                             size_t& actual_length,
+                             bool* protocol_stall = nullptr)
 {
     actual_length = 0;
+    if(protocol_stall)
+        *protocol_stall = false;
     if(buffer_length > device.control_buffer_dma.size_bytes || setup.length != buffer_length)
     {
         return false;
@@ -1071,7 +1098,10 @@ bool submit_control_transfer(XhciControllerState& controller,
         debug("xhci: control failed port=")(device.port_id)(" request=")(setup.request)(
             " value=0x")(setup.value, 16)(" requested=")(buffer_length)(" completed=")(
             completed)(" cc=")(completion_code)(" residual=")(residual_length)();
-        fail_device(device);
+        if(protocol_stall && completed && completion_code == 6)
+            *protocol_stall = true;
+        else
+            fail_device(device);
         return false;
     }
 
@@ -1272,11 +1302,91 @@ bool disable_slot(XhciControllerState& controller, uint8_t slot)
     return submit_command(controller, trb, completion, returned_slot, kXhciInitTimeoutSpins);
 }
 
-bool storage_control(XhciDeviceState& device, uint8_t type, uint8_t request, uint16_t index)
+bool control_without_data(
+    XhciDeviceState& device, uint8_t type, uint8_t request, uint16_t index, bool* stall = nullptr)
 {
     UsbSetupPacket setup{type, request, 0, index, 0};
     size_t actual = 0;
-    return submit_control_transfer(*device.controller, device, setup, nullptr, nullptr, 0, actual);
+    return submit_control_transfer(
+        *device.controller, device, setup, nullptr, nullptr, 0, actual, stall);
+}
+
+xhci::HidRestart recover_hid_endpoint(XhciControllerState& controller,
+                                      XhciDeviceState& device,
+                                      XhciInputState& input,
+                                      uint8_t completion)
+{
+    auto endpoint_command = [&](uint8_t type, uint8_t dci, uint64_t parameter = 0) {
+        xhci::TrbFields command{};
+        command.parameter = parameter;
+        command.control =
+            (uint32_t(type) << 10) | (uint32_t(dci) << 16) | (uint32_t(device.slot_id) << 24);
+        uint8_t code = 0, slot = 0;
+        (void)submit_command(controller, command, code, slot, kXhciInitTimeoutSpins);
+        return slot == device.slot_id ? code : uint8_t(0);
+    };
+    return xhci::restart_hid_transfer(
+        completion,
+        input.endpoint_dci,
+        [&](uint8_t dci) { return endpoint_command(xhci::kTrbTypeResetEndpointCommand, dci); },
+        [&] {
+            bool stall = false;
+            if(control_without_data(device, 2, 1, input.endpoint_address, &stall))
+                return xhci::HidClearHalt::Cleared;
+            return stall ? xhci::HidClearHalt::ControlStall : xhci::HidClearHalt::Failed;
+        },
+        [&](uint8_t dci) {
+            const bool control = dci == kXhciControlEndpointDci;
+            const auto& ring = control ? device.control_ring : input.interrupt_ring;
+            const auto& dma = control ? device.control_ring_dma : input.interrupt_ring_dma;
+            const auto dequeue = (dma.physical_address + uint64_t(ring.enqueue_index) * 16) |
+                                 uint64_t(ring.cycle_state);
+            return endpoint_command(xhci::kTrbTypeSetTrDequeueCommand, dci, dequeue) ==
+                   kXhciCompletionSuccess;
+        },
+        [&](uint8_t dci) {
+            dma_sync_for_cpu(device.device_context_dma);
+            const size_t offset = size_t(controller.controller.capability.context_size_bytes) * dci;
+            const auto* context =
+                static_cast<const uint8_t*>(device.device_context_dma.virtual_address);
+            return (*reinterpret_cast<const volatile uint32_t*>(context + offset) & 7u) == 1;
+        });
+}
+
+void recover_hid_inputs(XhciControllerState& controller)
+{
+    for(auto& device : controller.devices)
+        for(auto& input : device.inputs)
+        {
+            uint8_t completion = 0;
+            {
+                IrqSpinGuard guard(g_event_lock);
+                if(!device.present || !device.configured ||
+                   __atomic_load_n(&device.failed, __ATOMIC_ACQUIRE) ||
+                   controller.port_changed[device.port_id])
+                    continue;
+                completion = input.recovery.pending;
+                input.recovery.pending = 0;
+            }
+            if(!completion)
+                continue;
+            debug("xhci: input recovery port=")(device.port_id)(" dci=")(input.endpoint_dci)(
+                " cc=")(completion)();
+            const auto recovery = recover_hid_endpoint(controller, device, input, completion);
+            IrqSpinGuard guard(g_event_lock);
+            if(recovery == xhci::HidRestart::RetireDevice)
+            {
+                fail_device(device);
+                hardware_catalog::unavailable(device.catalog_id);
+                continue;
+            }
+            if(__atomic_load_n(&device.failed, __ATOMIC_ACQUIRE) ||
+               controller.port_changed[device.port_id])
+                continue;
+            if(recovery != xhci::HidRestart::Recovered ||
+               !arm_interrupt_transfer(controller, device, input))
+                retire_input(device, input, completion);
+        }
 }
 
 bool storage_clear_halt(void* context, bool in)
@@ -1285,7 +1395,7 @@ bool storage_clear_halt(void* context, bool in)
     auto& controller = *device.controller;
     uint8_t address = in ? device.storage_interface.in : device.storage_interface.out;
     uint8_t endpoint = endpoint_dci_from_address(address);
-    if(!storage_control(device, 2, 1, address))
+    if(!control_without_data(device, 2, 1, address))
         return false;
     xhci::TrbFields command{};
     command.control = (xhci::kTrbTypeResetEndpointCommand << 10) | (uint32_t(endpoint) << 16) |
@@ -1306,9 +1416,9 @@ bool storage_reset(void* context)
 {
     auto& device = *static_cast<XhciDeviceState*>(context);
     // BOT reset recovery in wire order. This path retires the device, not its buffers.
-    bool reset = storage_control(device, 0x21, 0xff, device.storage_interface.number);
-    bool in = storage_control(device, 2, 1, device.storage_interface.in);
-    bool out = storage_control(device, 2, 1, device.storage_interface.out);
+    bool reset = control_without_data(device, 0x21, 0xff, device.storage_interface.number);
+    bool in = control_without_data(device, 2, 1, device.storage_interface.in);
+    bool out = control_without_data(device, 2, 1, device.storage_interface.out);
     return reset && in && out;
 }
 
@@ -1727,7 +1837,7 @@ bool initialize_port(PageFrameContainer& frames,
     for(unsigned i = 0; i < device->input_count; ++i)
     {
         auto& input = device->inputs[i];
-        hardware_catalog::usb_bind(
+        input.catalog_id = hardware_catalog::usb_bind(
             catalog_device, device->configuration_value, input.interface_number, "usb-hid", false);
         if(!usb_set_boot_protocol(controller, *device, input.interface_number))
         {
@@ -1758,6 +1868,12 @@ bool initialize_port(PageFrameContainer& frames,
                 fail_device(*device);
                 return false;
             }
+        for(unsigned i = 0; i < device->input_count; ++i)
+            hardware_catalog::usb_bind(catalog_device,
+                                       device->configuration_value,
+                                       device->inputs[i].interface_number,
+                                       "usb-hid",
+                                       true);
     }
     for(unsigned i = 0; i < device->input_count; ++i)
     {
@@ -1765,8 +1881,6 @@ bool initialize_port(PageFrameContainer& frames,
         debug("xhci: HID ")((HidBootProtocol::Keyboard == input.protocol) ? "keyboard" : "mouse")(
             " ready port=")(port_id)(" slot=")(device->slot_id)(" ep=0x")(
             input.endpoint_address, 16, 2)(" mps=")(input.endpoint_max_packet_size)();
-        hardware_catalog::usb_bind(
-            catalog_device, device->configuration_value, input.interface_number, "usb-hid", true);
     }
 
     observation.stage = "hid-ready";
@@ -2186,6 +2300,8 @@ void xhci_poll_devices(PageFrameContainer& frames)
             if(status.connected)
                 (void)initialize_port(frames, *c, uint8_t(port), c->catalog_ports[port]);
         }
+        if(!__atomic_load_n(&c->failed, __ATOMIC_ACQUIRE))
+            recover_hid_inputs(*c);
         __atomic_store_n(&c->storage_busy, 0, __ATOMIC_RELEASE);
     }
 }

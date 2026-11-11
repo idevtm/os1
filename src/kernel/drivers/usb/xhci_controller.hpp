@@ -181,6 +181,73 @@ struct EventInfo
     uint8_t trb_type = 0;
 };
 
+enum class HidCompletion : uint8_t
+{
+    Report,
+    Rearm,
+    Recover,
+    Retire
+};
+
+// The event lock protects this state. A successful transfer permits another recovery.
+struct HidRecovery
+{
+    uint8_t pending = 0;
+    bool attempted = false;
+    HidCompletion complete(uint8_t completion);
+};
+
+bool matches_hid_transfer(
+    const EventInfo&, uint8_t slot, uint8_t endpoint, uint64_t trb, bool armed);
+
+enum class HidClearHalt : uint8_t
+{
+    Cleared,
+    ControlStall,
+    Failed
+};
+enum class HidRestart : uint8_t
+{
+    Recovered,
+    RetireInput,
+    RetireDevice
+};
+
+template<typename Reset, typename Clear, typename SetDequeue, typename Running>
+HidRestart restart_hid_transfer(uint8_t completion,
+                                uint8_t endpoint,
+                                Reset reset,
+                                Clear clear,
+                                SetDequeue set_dequeue,
+                                Running running)
+{
+    constexpr uint8_t success = 1, transaction_error = 4, context_state_error = 19;
+    constexpr uint8_t control_endpoint = 1;
+    // The controller may publish the event before it writes the Output Endpoint Context.
+    const auto reset_completion = reset(endpoint);
+    if(reset_completion != success)
+    {
+        if(completion == transaction_error && reset_completion == context_state_error &&
+           running(endpoint))
+            return HidRestart::Recovered;
+        return HidRestart::RetireInput;
+    }
+
+    switch(clear())
+    {
+        case HidClearHalt::Cleared:
+            return set_dequeue(endpoint) ? HidRestart::Recovered : HidRestart::RetireInput;
+        case HidClearHalt::ControlStall:
+            // Discard the failed control TD and position EP0 at the next setup TD.
+            if(reset(control_endpoint) == success && set_dequeue(control_endpoint))
+                return HidRestart::RetireInput;
+            return HidRestart::RetireDevice;
+        case HidClearHalt::Failed:
+            return HidRestart::RetireDevice;
+    }
+    return HidRestart::RetireDevice;
+}
+
 // One serialized endpoint-zero request; stage addresses identify completion events.
 struct ControlTransfer
 {

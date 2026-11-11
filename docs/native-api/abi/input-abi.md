@@ -156,6 +156,12 @@ An eight-byte descriptor prefix supplies the control packet size before the comp
 Evaluate Context updates a changed packet size without resetting the endpoint dequeue position.
 The reference is the [xHCI specification](https://www.intel.ie/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), section 4.6.5.
 Low/full-speed interrupt intervals convert from milliseconds to xHCI microframe exponents.
+The xHCI worker recovers a halted input endpoint before it submits another report buffer.
+It resets the endpoint, clears the device halt, and advances the transfer ring.
+One failed recovery or a second halt before a successful report retires the input.
+If the clear-halt request stalls, the worker resets endpoint zero before it retires the input.
+If endpoint-zero recovery fails, the driver retires the device.
+The kernel log records the completion code.
 Runtime root changes retire the old slot before replacement enumeration.
 Published allocations remain retained even after successful Disable Slot.
 xHCI hubs remain deferred.

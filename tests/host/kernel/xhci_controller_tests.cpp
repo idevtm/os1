@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstring>
+#include <vector>
 
 #include "drivers/usb/xhci_controller.hpp"
 
@@ -824,4 +825,108 @@ TEST(XhciController, ConvertsUsbInterruptIntervalsToMicroframeExponents)
     EXPECT_EQ(xhci::interrupt_interval(2, 10), 6);  // Low speed, 8 ms <= 10 ms.
     EXPECT_EQ(xhci::interrupt_interval(1, 255), 10);
     EXPECT_EQ(xhci::interrupt_interval(3, 4), 3);  // High speed already logarithmic.
+}
+
+TEST(XhciController, HaltedHidCompletionQueuesOneWorkerRecovery)
+{
+    for(uint8_t completion : {3, 4, 6})
+    {
+        xhci::EventInfo event{};
+        event.slot_id = 5;
+        event.endpoint_id = 3;
+        event.parameter = 0x4000;
+        event.completion_code = completion;
+        EXPECT_FALSE(xhci::matches_hid_transfer(event, 4, 3, 0x4000, true));
+        EXPECT_FALSE(xhci::matches_hid_transfer(event, 5, 2, 0x4000, true));
+        EXPECT_FALSE(xhci::matches_hid_transfer(event, 5, 3, 0x4010, true));
+        EXPECT_FALSE(xhci::matches_hid_transfer(event, 5, 3, 0x4000, false));
+        ASSERT_TRUE(xhci::matches_hid_transfer(event, 5, 3, 0x4000, true));
+        xhci::HidRecovery recovery{};
+        EXPECT_EQ(recovery.complete(event.completion_code), xhci::HidCompletion::Recover);
+        EXPECT_EQ(recovery.pending, completion);
+        recovery.pending = 0;  // The worker claims the request before it submits commands.
+        EXPECT_EQ(recovery.complete(completion), xhci::HidCompletion::Retire);
+        EXPECT_EQ(recovery.pending, 0u);
+    }
+}
+
+TEST(XhciController, HidReportRestoresRecoveryAllowance)
+{
+    xhci::HidRecovery recovery{};
+    EXPECT_EQ(recovery.complete(4), xhci::HidCompletion::Recover);
+    recovery.pending = 0;
+    EXPECT_EQ(recovery.complete(13), xhci::HidCompletion::Report);
+    EXPECT_EQ(recovery.complete(6), xhci::HidCompletion::Recover);
+    EXPECT_EQ(recovery.pending, 6u);
+    recovery.pending = 0;
+    EXPECT_EQ(recovery.complete(1), xhci::HidCompletion::Report);
+    EXPECT_EQ(recovery.complete(2), xhci::HidCompletion::Rearm);
+    EXPECT_EQ(recovery.pending, 0u);
+}
+
+TEST(XhciController, HidRestartUsesEventBeforeOutputContextState)
+{
+    constexpr uint8_t endpoint = 3;
+    std::vector<int> steps;
+    auto reset = [&](uint8_t dci) {
+        steps.push_back(dci);
+        return uint8_t(1);
+    };
+    auto clear = [&] {
+        steps.push_back(20);
+        return xhci::HidClearHalt::Cleared;
+    };
+    auto set_dequeue = [&](uint8_t dci) {
+        steps.push_back(30 + dci);
+        return true;
+    };
+    auto running = [&](uint8_t) {
+        ADD_FAILURE() << "Output state must not bypass a halt event";
+        return true;
+    };
+    EXPECT_EQ(xhci::restart_hid_transfer(4, endpoint, reset, clear, set_dequeue, running),
+              xhci::HidRestart::Recovered);
+    EXPECT_EQ(steps, (std::vector<int>{3, 20, 33}));
+}
+
+TEST(XhciController, HidClearHaltProtocolStallRestoresEp0AndRetiresOnlyInput)
+{
+    constexpr uint8_t endpoint = 3;
+    std::vector<int> steps;
+    auto reset = [&](uint8_t dci) {
+        steps.push_back(dci);
+        return uint8_t(1);
+    };
+    auto clear = [&] {
+        steps.push_back(20);
+        return xhci::HidClearHalt::ControlStall;
+    };
+    auto set_dequeue = [&](uint8_t dci) {
+        steps.push_back(30 + dci);
+        return true;
+    };
+    auto running = [](uint8_t) { return false; };
+    EXPECT_EQ(xhci::restart_hid_transfer(6, endpoint, reset, clear, set_dequeue, running),
+              xhci::HidRestart::RetireInput);
+    EXPECT_EQ(steps, (std::vector<int>{3, 20, 1, 31}));
+    EXPECT_EQ(xhci::restart_hid_transfer(
+                  6, endpoint, reset, clear, [](uint8_t) { return false; }, running),
+              xhci::HidRestart::RetireDevice);
+}
+
+TEST(XhciController, OnlyRunningTransactionErrorCanRecoverAfterResetStateError)
+{
+    auto reset = [](uint8_t) { return uint8_t(19); };
+    auto clear = [] {
+        ADD_FAILURE() << "Clear halt needs a successful reset";
+        return xhci::HidClearHalt::Cleared;
+    };
+    auto set_dequeue = [](uint8_t) { return false; };
+    auto running = [](uint8_t dci) { return dci == 3; };
+    EXPECT_EQ(xhci::restart_hid_transfer(4, 3, reset, clear, set_dequeue, running),
+              xhci::HidRestart::Recovered);
+    EXPECT_EQ(xhci::restart_hid_transfer(6, 3, reset, clear, set_dequeue, running),
+              xhci::HidRestart::RetireInput);
+    EXPECT_EQ(xhci::restart_hid_transfer(4, 2, reset, clear, set_dequeue, running),
+              xhci::HidRestart::RetireInput);
 }
