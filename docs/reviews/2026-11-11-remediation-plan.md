@@ -1,10 +1,10 @@
 # Remediation plan for the 2026-11-11 project review
 
 This plan sets the order and acceptance criteria for the findings from the 2026-11-11 project review.
-The local review file is `docs/reviews/2026-11-11-review.md`.
+The [November 11 project review](2026-11-11-review.md) records the findings.
 The review examined `main` at `f1dbfb5eb99085fcfdc69ba6484dfaa6ddcaf489`.
 The R and P identifiers in this plan refer to that review.
-The first implementation PR protects kernel entry.
+The first implementation PR protects kernel entry. [PR #56](https://github.com/idevtm/os1/pull/56)
 The next PR corrects process exit, wait, and reap as one lifecycle.
 
 | Order | Work | Findings |
@@ -101,7 +101,7 @@ Boot the generated USB image in QEMU and verify shell startup.
 ## Subsystem follow-ups
 
 Compare each finding with the latest `main` before implementation.
-Check R12, P11, P12, and overlapping EHCI changes against the framebuffer branch before assigning work.
+Check R12, P11, and P12 against the EHCI changes in PR #52 and later framebuffer work.
 The review reproduced R1 in UEFI.
 Host and build checks reproduced R10, R21, R28, and R45–R47.
 R2, R3, R7, R8, and the R22 read-side race have source evidence.
