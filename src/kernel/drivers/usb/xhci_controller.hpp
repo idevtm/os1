@@ -55,6 +55,9 @@ constexpr size_t kOperationalUsbsts = 0x04u;
 constexpr size_t kOperationalPagesize = 0x08u;
 constexpr size_t kOperationalDnctrl = 0x14u;
 constexpr size_t kOperationalCrcr = 0x18u;
+constexpr uint32_t kCrcrRingCycleState = 1u << 0;
+constexpr uint32_t kCrcrCommandAbort = 1u << 2;
+constexpr uint32_t kCrcrCommandRingRunning = 1u << 3;
 constexpr size_t kOperationalDcbaap = 0x30u;
 constexpr size_t kOperationalConfig = 0x38u;
 
@@ -179,6 +182,41 @@ struct EventInfo
     uint8_t endpoint_id = 0;
     uint8_t port_id = 0;
     uint8_t trb_type = 0;
+};
+
+constexpr uint8_t kCompletionCommandRingStopped = 24u;
+constexpr uint8_t kCompletionCommandAborted = 25u;
+
+// The event lock protects the single command and its abort completion.
+struct CommandCompletion
+{
+    uint64_t expected_trb = 0;
+    uint64_t stopped_at = 0;
+    uint8_t code = 0;
+    uint8_t slot = 0;
+    bool complete = false;
+    bool stopped = false;
+
+    void record(const EventInfo& event);
+    bool can_reprogram() const;
+};
+
+using PollClock = uint64_t (*)();
+
+// The clock determines elapsed time. The poll bound covers an unavailable or stalled clock.
+class PollDeadline
+{
+public:
+    PollDeadline(PollClock clock, uint64_t duration, uint32_t stalled_polls);
+    bool expired();
+
+private:
+    PollClock clock_;
+    uint64_t duration_;
+    uint64_t start_;
+    uint64_t previous_;
+    uint32_t stalled_polls_;
+    uint32_t remaining_polls_;
 };
 
 enum class HidCompletion : uint8_t
@@ -356,6 +394,9 @@ bool controller_reset(const ControllerLayout& controller,
                       uint32_t timeout_spins,
                       PollHook poll_hook = nullptr,
                       void* poll_context = nullptr);
+bool command_ring_running(const ControllerLayout& controller);
+bool request_command_abort(const ControllerLayout& controller, uint64_t ring_physical);
+bool program_command_ring(const ControllerLayout& controller, uint64_t ring_physical, bool cycle);
 bool controller_program(const ControllerLayout& controller,
                         const RingSet& rings,
                         uint8_t max_device_slots);

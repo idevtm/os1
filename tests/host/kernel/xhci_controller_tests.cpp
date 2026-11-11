@@ -930,3 +930,110 @@ TEST(XhciController, OnlyRunningTransactionErrorCanRecoverAfterResetStateError)
     EXPECT_EQ(xhci::restart_hid_transfer(4, 2, reset, clear, set_dequeue, running),
               xhci::HidRestart::RetireInput);
 }
+
+namespace
+{
+uint64_t fake_xhci_ticks = 0;
+
+uint64_t read_fake_xhci_clock()
+{
+    return fake_xhci_ticks;
+}
+}  // namespace
+
+TEST(XhciTimeout, ADelayedCommandCanOutlastTheOldPollBudget)
+{
+    fake_xhci_ticks = 10;
+    xhci::PollDeadline deadline(read_fake_xhci_clock, 10, 3);
+    xhci::CommandCompletion command{.expected_trb = 0x4000};
+    for(unsigned tick = 1; tick < 9; ++tick)
+    {
+        ++fake_xhci_ticks;
+        ASSERT_FALSE(deadline.expired());
+        EXPECT_FALSE(command.complete);
+    }
+    ++fake_xhci_ticks;
+    command.record({.parameter = 0x4000, .completion_code = 1, .slot_id = 2});
+    EXPECT_FALSE(deadline.expired());
+    EXPECT_TRUE(command.complete);
+    EXPECT_EQ(2, command.slot);
+
+    ++fake_xhci_ticks;
+    EXPECT_TRUE(deadline.expired());
+}
+
+TEST(XhciTimeout, UnavailableOrStalledClockStillHasABound)
+{
+    fake_xhci_ticks = 0;
+    xhci::PollDeadline stalled(read_fake_xhci_clock, 100, 3);
+    xhci::PollDeadline unavailable(nullptr, 100, 3);
+    for(unsigned poll = 0; poll < 2; ++poll)
+    {
+        EXPECT_FALSE(stalled.expired());
+        EXPECT_FALSE(unavailable.expired());
+    }
+    EXPECT_TRUE(stalled.expired());
+    EXPECT_TRUE(unavailable.expired());
+}
+
+TEST(XhciTimeout, ABackwardClockSampleDoesNotUnderflowTheDeadline)
+{
+    fake_xhci_ticks = 100;
+    xhci::PollDeadline deadline(read_fake_xhci_clock, 50, 3);
+    fake_xhci_ticks = 95;
+    EXPECT_FALSE(deadline.expired());
+    fake_xhci_ticks = 149;
+    EXPECT_FALSE(deadline.expired());
+    fake_xhci_ticks = 150;
+    EXPECT_TRUE(deadline.expired());
+}
+
+TEST(XhciCommandRecovery, RequiresAStoppedRingAndKnownCommandOutcome)
+{
+    xhci::CommandCompletion command{.expected_trb = 0x4000};
+    command.record({.parameter = 0x4010, .completion_code = 1});
+    EXPECT_FALSE(command.complete);
+    EXPECT_FALSE(command.can_reprogram());
+
+    command.record({.parameter = 0x4010, .completion_code = xhci::kCompletionCommandRingStopped});
+    EXPECT_FALSE(command.can_reprogram());
+    command.record({.parameter = 0x4000, .completion_code = xhci::kCompletionCommandAborted});
+    EXPECT_TRUE(command.can_reprogram());
+    EXPECT_EQ(xhci::kCompletionCommandAborted, command.code);
+
+    command = {.expected_trb = 0x4000};
+    command.record({.parameter = 0x4000, .completion_code = xhci::kCompletionCommandRingStopped});
+    EXPECT_TRUE(command.can_reprogram());
+    EXPECT_FALSE(command.complete);
+
+    command = {.expected_trb = 0x4000};
+    command.record({.parameter = 0x4000, .completion_code = 1, .slot_id = 3});
+    EXPECT_FALSE(command.can_reprogram());
+    command.record({.parameter = 0x4010, .completion_code = xhci::kCompletionCommandRingStopped});
+    EXPECT_TRUE(command.can_reprogram());
+    EXPECT_EQ(1, command.code);
+    EXPECT_EQ(3, command.slot);
+}
+
+TEST(XhciCommandRecovery, WritesAbortAndProgramsOnlyAStoppedRing)
+{
+    alignas(8) std::array<uint8_t, 64> operational{};
+    xhci::ControllerLayout controller{};
+    controller.operational = operational.data();
+    constexpr uint64_t ring = 0x1'1234'5000ull;
+    const auto reg = xhci::kOperationalCrcr;
+    write32(operational, reg, xhci::kCrcrCommandRingRunning);
+
+    EXPECT_TRUE(xhci::command_ring_running(controller));
+    EXPECT_FALSE(xhci::program_command_ring(controller, ring, true));
+    EXPECT_TRUE(xhci::request_command_abort(controller, ring));
+    EXPECT_EQ(ring | xhci::kCrcrCommandAbort, read64(operational, reg));
+
+    write32(operational, reg, 0);
+    EXPECT_FALSE(xhci::command_ring_running(controller));
+    EXPECT_TRUE(xhci::request_command_abort(controller, ring));
+    EXPECT_EQ(ring | xhci::kCrcrCommandAbort, read64(operational, reg));
+    EXPECT_FALSE(xhci::request_command_abort(controller, ring + 1));
+    EXPECT_TRUE(xhci::program_command_ring(controller, ring, true));
+    EXPECT_EQ(ring | xhci::kCrcrRingCycleState, read64(operational, reg));
+}

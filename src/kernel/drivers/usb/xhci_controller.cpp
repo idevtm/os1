@@ -83,6 +83,54 @@ bool wait_for_mask(volatile uint8_t* operational,
 }
 }  // namespace
 
+void CommandCompletion::record(const EventInfo& event)
+{
+    if(event.completion_code == kCompletionCommandRingStopped)
+    {
+        stopped = true;
+        stopped_at = event.parameter;
+    }
+    else if(expected_trb && event.parameter == expected_trb && !complete)
+    {
+        complete = true;
+        code = event.completion_code;
+        slot = event.slot_id;
+    }
+}
+
+bool CommandCompletion::can_reprogram() const
+{
+    // If no completion preceded the stop, the dequeue pointer must still name the command.
+    return expected_trb && stopped && (complete || stopped_at == expected_trb);
+}
+
+PollDeadline::PollDeadline(PollClock clock, uint64_t duration, uint32_t stalled_polls)
+    : clock_(clock)
+    , duration_(duration)
+    , start_(clock ? clock() : 0)
+    , previous_(start_)
+    , stalled_polls_(stalled_polls)
+    , remaining_polls_(stalled_polls)
+{
+}
+
+bool PollDeadline::expired()
+{
+    if(clock_)
+    {
+        const uint64_t now = clock_();
+        if(now > previous_)
+        {
+            if(now - start_ >= duration_)
+                return true;
+            previous_ = now;
+            remaining_polls_ = stalled_polls_;
+            return false;
+        }
+    }
+    return remaining_polls_ == 0 || --remaining_polls_ == 0;
+}
+
 void set_slot_context(uint32_t* words, uint8_t speed, uint8_t port, uint8_t context_entries)
 {
     words[0] = (uint32_t(speed) << 20) | (uint32_t(context_entries) << 27);
@@ -717,6 +765,32 @@ bool controller_reset(const ControllerLayout& controller,
                          poll_context);
 }
 
+bool command_ring_running(const ControllerLayout& controller)
+{
+    return controller.operational &&
+           (read32(controller.operational, kOperationalCrcr) & kCrcrCommandRingRunning);
+}
+
+bool request_command_abort(const ControllerLayout& controller, uint64_t ring_physical)
+{
+    if(!controller.operational || !ring_physical || (ring_physical & 0x3full))
+        return false;
+    // Confirm the abort with its stop event and a post-write CRR read.
+    write64(controller.operational, kOperationalCrcr, ring_physical | kCrcrCommandAbort);
+    return true;
+}
+
+bool program_command_ring(const ControllerLayout& controller, uint64_t ring_physical, bool cycle)
+{
+    if(!controller.operational || !ring_physical || (ring_physical & 0x3full) ||
+       command_ring_running(controller))
+        return false;
+    write64(controller.operational,
+            kOperationalCrcr,
+            ring_physical | (cycle ? kCrcrRingCycleState : 0u));
+    return true;
+}
+
 bool controller_program(const ControllerLayout& controller,
                         const RingSet& rings,
                         uint8_t max_device_slots)
@@ -730,11 +804,10 @@ bool controller_program(const ControllerLayout& controller,
         return false;
     }
 
+    if(!program_command_ring(
+           controller, rings.command_ring_physical, rings.command_ring_cycle_state))
+        return false;
     write32(controller.operational, kOperationalDnctrl, 0u);
-    write64(
-        controller.operational,
-        kOperationalCrcr,
-        (rings.command_ring_physical & ~0x3Full) | (rings.command_ring_cycle_state ? 1ull : 0ull));
     write64(controller.operational, kOperationalDcbaap, rings.dcbaa_physical);
     write32(controller.operational, kOperationalConfig, max_device_slots);
 

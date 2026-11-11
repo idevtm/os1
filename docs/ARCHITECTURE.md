@@ -1429,6 +1429,21 @@ Virtio read-only media mount with read and execute access. Disk log export skips
 [USB mass storage](hardware/usb-storage.md) adds bounded SCSI commands over xHCI bulk endpoints.
 An unsupported initialization flush can use confirmed write-through operation; unknown cache behavior still rejects writable storage admission.
 Shared IRQ/poll event consumption uses an event lock; a BSP input queue keeps HID console callbacks on the boot CPU.
+xHCI command, control transfer, and port reset waits use a calibrated 1 s deadline.
+Bulk transfers use a 2 s deadline.
+An unavailable or stalled clock leaves a bounded polling fallback.
+
+| xHCI command timeout result | Driver action |
+| --- | --- |
+| Completion at the deadline | Use the command result. |
+| Abort stops the ring and establishes the command result | Reprogram the command ring. Later commands can use the controller. |
+| Abort cannot establish a safe stop within 5 s | Retire the controller through the existing failure path. |
+
+The driver keeps other endpoint rings active during command-ring recovery.
+If a Disable Slot command aborts, the driver retains the affected slot and its DMA.
+A later port change can retry removal.
+See the [xHCI specification, section 4.6.1](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf).
+
 Failed USB devices retain DMA after hardware publication, and reconnect does not restore old handles.
 File contents remain on disk until read; the mount imports only bounded namespace and allocation metadata.
 Executable files are immutable in this profile. ELF loading owns and releases a stable image snapshot.
