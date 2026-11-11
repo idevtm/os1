@@ -1171,6 +1171,20 @@ Current observe kinds include:
 - kernel small-object allocator snapshot
 - cached ACPICA route snapshot (`OS1_OBSERVE_ACPI`)
 
+Process snapshots return zero in the reserved `cr3` field.
+Event snapshots retain all captured rows and their order.
+The query clears address fields in its private snapshot before copy-out.
+
+| Event | Address fields | Disclosure rule |
+| --- | --- | --- |
+| Trap | `arg2` (RIP), `arg3` (CR2) | Return user-space addresses only for a user trap with the caller's PID. Return CR2 only for a page fault. |
+| User-copy failure | `arg0` (pointer), `arg3` (offset) | Return the pointer and offset only for the caller's PID and a pointer in user space. |
+
+The query returns zero for each field that the rule hides.
+Event types, sequence numbers, subject identifiers, and other arguments stay visible.
+The rules apply to `observe` and preserve the internal event ring.
+The [memory log ABI](native-api/abi/memory-log-abi.md#authority-and-interfaces) defines access to separate diagnostic records.
+
 `OS1_OBSERVE_KMEM` exports per-cache statistics.
 The allocator uses separate locks for global counters and per-cache statistics.
 See [Kernel heap accounting](kernel/smp-synchronization.md#kernel-heap-accounting) for the global counter rules.
