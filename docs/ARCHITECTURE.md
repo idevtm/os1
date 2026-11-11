@@ -111,7 +111,7 @@ The shared IPC timer wait supplies an explicit reschedule and wakeup, including 
 Interrupt handlers, early boot, and user syscall frames poll instead of halting without a wake source.
 User syscall frames cannot park through the kernel-thread scheduling path.
 Read, write, and flush requests share this rule; accepted requests retain completion-based waiting.
-EHCI and xHCI defer scheduling while they own a controller busy flag.
+EHCI and xHCI defer scheduling while they own a synchronous controller resource.
 IRQ service continues, but scheduling and deferred filesystem work wait until ownership ends.
 The outermost guard requests a pending reschedule when local runnable work exists, including on APs without periodic ticks.
 These synchronous scopes cannot sleep or yield. They can delay other tasks on their CPU during controller timeouts.
@@ -1596,7 +1596,11 @@ See the [control-transfer correction](hardware/2026-11-06-xhci-control-transfers
 
 The USB block-device list combines xHCI and EHCI devices before the filesystem mount probe.
 Both controllers reuse the SCSI and Bulk-Only Transport implementation.
-EHCI owns a serialized polling schedule and discovers high-speed hubs during boot.
+EHCI serializes bulk commands and hub control through asynchronous schedule ownership.
+A separate periodic gate lets the worker service mouse reports while storage is active.
+A storage wait can also service the periodic schedule if it acquires that gate.
+Topology changes and retirement of all attached devices require both gates.
+A short register lock serializes schedule changes with controller shutdown.
 Hardware drivers remain in the kernel; the native File/Directory contract does not change.
 See [USB storage](hardware/usb-storage.md#ehci-and-high-speed-hubs) for limits and DMA lifetime rules.
 

@@ -2,6 +2,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+class Spinlock;
+
 namespace ehci
 {
 constexpr uint32_t terminate = 1;
@@ -39,13 +41,48 @@ bool prepare_head(QueueHead&,
                   bool periodic = false);
 uint32_t remaining(uint32_t token);
 bool root_usable(uint32_t status);
-// Never change ASE while its command and status bits disagree (EHCI 2.3.1).
-bool set_async(volatile uint32_t& command,
-               volatile uint32_t& status,
-               bool enabled,
-               void (*poll)(void*),
-               void* context,
-               unsigned limit);
+enum class Schedule
+{
+    Asynchronous,
+    Periodic
+};
+
+// Neither gate blocks. Each schedule retains its own descriptors until stopped.
+class ScheduleLease
+{
+public:
+    explicit ScheduleLease(uint8_t& gate)
+        : gate_(gate), owned_(!__atomic_exchange_n(&gate_, 1, __ATOMIC_ACQUIRE))
+    {
+    }
+    ~ScheduleLease()
+    {
+        if(owned_)
+            __atomic_store_n(&gate_, 0, __ATOMIC_RELEASE);
+    }
+    ScheduleLease(const ScheduleLease&) = delete;
+    ScheduleLease& operator=(const ScheduleLease&) = delete;
+    explicit operator bool() const
+    {
+        return owned_;
+    }
+
+private:
+    uint8_t& gate_;
+    bool owned_;
+};
+
+// Change only the owned schedule bit, with no register lock held during waits.
+bool set_schedule(volatile uint32_t& command,
+                  volatile uint32_t& status,
+                  Spinlock& command_lock,
+                  const bool& failed,
+                  Schedule schedule,
+                  bool enabled,
+                  void (*poll)(void*),
+                  void* context,
+                  unsigned limit,
+                  uint64_t (*clock_100ns)() = nullptr);
 }  // namespace ehci
 
 namespace ehci

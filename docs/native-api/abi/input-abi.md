@@ -328,15 +328,17 @@ The record uses little-endian fields.
 Each record contains two u64 times, four u32 identifiers, and three u64 counters.
 The times are the sample timestamp and interval. The identifiers are kind, PCI index, input identity, and EHCI token.
 The counters are cumulative controller-busy skips, errors, and scheduled retries.
-Controller-busy skips are aggregate across EHCI controllers. The report and poll measurements cover the selected pointer.
+Asynchronous admission skips are aggregate across EHCI controllers.
+Periodic polling can continue during those skips and can also run in a storage wait.
+The report and poll measurements cover the selected pointer.
 The worker and controller samples use input identity zero.
 
 | Kind | Measurement |
 | ---: | --- |
 | 0 | Time since the previous USB worker iteration |
-| 1 | EHCI controller admission skipped because it was busy |
+| 1 | EHCI asynchronous admission skipped because it was busy |
 | 2 | Time since the previous poll of the selected endpoint |
-| 3 | Time since the previous valid HID report completion observed by the worker |
+| 3 | Time since the previous valid HID report completion observed during polling |
 | 4 | Time from observed report completion to native pointer publication |
 | 5 | Transfer error |
 | 6 | Transfer retry scheduled |
@@ -345,7 +347,7 @@ The worker and controller samples use input identity zero.
 Counts and maxima include all captured samples.
 The trace retains the first 48 intervals of at least 50 ms, errors, and retries.
 The dropped count covers subsequent qualifying records.
-The trace counts busy skips without adding a record for each skip.
+The trace counts asynchronous admission skips without adding a record for each skip.
 Clock 2 uses HPET and aligns with the demo report. Clock 1 uses the scheduler tick.
 An invalid HPET read ends the trace at its last valid timestamp.
 Flags bit 0 marks expiry. Bit 1 marks clock loss.

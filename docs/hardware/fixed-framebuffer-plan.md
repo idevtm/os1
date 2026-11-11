@@ -337,3 +337,108 @@ Samples and artifact hashes are in `build/ehci-stall/boot-comparison.json`.
 | BIOS echo | 13.885 ms | 11.982 ms | -1.903 ms, -13.70% |
 
 These short runs do not establish a performance trend.
+
+## Laptop retest and EHCI ownership split
+
+The November 11 laptop capture ran for 28.97 seconds on revision `930811c`.
+The mouse and the USB data disk share EHCI controller `00:1d.0` and its integrated hub.
+The trace found controller contention that aligns with log export to the data disk.
+
+| Measure | Laptop result |
+| --- | ---: |
+| USB worker iterations | 5,788 |
+| Controller admission skips | 4,842 |
+| Maximum worker interval | 7.00 ms |
+| Maximum mouse endpoint poll interval | 1,789.99 ms |
+| Mouse events and lost records | 585 events, zero losses |
+| Transfer errors and retries | Zero |
+| Maximum event age and redraw time | 0.81 ms and 0.67 ms |
+
+All 16 retained long poll gaps started within 8 ms of a persistent log frame timestamp.
+The comparison aligns the HPET trace and kernel log clocks at trace start.
+The SystemControl start reply at kernel time 73,551 ms is the alignment point.
+For each poll row, subtract its interval from its end timestamp to obtain the gap start.
+The trace retained 48 records and dropped four.
+The persistent logs contain mainly display fill calls during this interval.
+The log timestamps precede the writes. The trace does not identify individual requests.
+See `build/ehci-stall/laptop-retest-2026-11-11/decoded.json` and `persistent.jsonl` in that directory.
+
+```text
+storage command -> asynchronous queue and DMA ownership
+mouse reports   -> periodic queue and DMA ownership
+both schedules  -> short command register lock
+failure         -> disable DMA -> retire devices with both ownership gates held
+```
+
+Keep the display logging workload for the contention retest.
+Allow periodic input to consume and rearm reports while bulk storage waits.
+Keep topology changes and hub control transfers serialized with storage.
+Use the same laptop test after the change.
+Compare the maximum poll, report, and publication intervals. Check errors and retries.
+The busy counter can remain high when periodic input continues.
+
+| Area | Impact |
+| --- | --- |
+| Scope | Separate EHCI schedule ownership to address the physical pointer stalls. |
+| Boot and platform | Preserve EHCI boot, BIOS, UEFI, and current interrupt configuration. |
+| Memory and isolation | Preserve DMA ownership and quarantine uncertain mappings after failure. |
+| Concurrency | Separate queue ownership. Serialize shared register updates and controller teardown. |
+| Interfaces | Keep input, storage, and diagnostic record layouts. Report skipped async admission as before. |
+| Resources | Measure image size and contention. Keep full display logging as the workload. |
+| Validation | Run the full matrix and verify storage failure handling. Retest physical contention separately. |
+
+### EHCI ownership validation
+
+`./scripts/check-local.sh` passed on `930811c` plus the ownership changes.
+The source and test diff has SHA-256 `85dd7f697c3fd9663f59c35f9e51afef36f093efb7452683660f226682d9c52e`.
+The normal image build ID is `7f848fb07be351824e564a93133277f34b35fa32fea9fbbd49233b1a0afb1b04`.
+The unrelated project review draft was outside the change.
+
+| Profile | Passed | Test time |
+| --- | ---: | ---: |
+| Host | 686 / 686 | 20.35 s |
+| Normal image | 94 / 94 | 396.29 s |
+| Diagnostic image | 3 / 3 | 9.99 s |
+
+The command log is `build/ehci-ownership/full-local.log`. Profile logs are in `build/local-validation/`.
+The host regression verifies periodic schedule rearming with the asynchronous schedule active.
+BIOS and UEFI tests cover EHCI storage and failure handling. Both log export tests passed.
+The local fixtures do not test simultaneous EHCI mouse and storage traffic on one controller.
+
+Independent review covered schedule ownership, DMA, lock ordering, failure cleanup, and trace interpretation.
+Review corrections added host coverage, periodic service during asynchronous schedule transitions, and elapsed-time checks.
+No blocking findings remained after the corrections.
+A cooperative input pass can delay the next elapsed-time check.
+
+### EHCI ownership resource measurements
+
+The baseline uses a clean build of `930811c`. The candidate uses the source diff above.
+Both builds use GCC 11.2.0, Debug configuration, and kernel `-Os`.
+Both use kernel memory checks and QEMU debug output. Boot and USB keyboard diagnostic image options are off.
+
+| Artifact | Baseline bytes | Candidate bytes | Difference |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 630,712 | 631,976 | +1,264 bytes, +0.20% |
+| UEFI ISO | 4,366,336 | 4,368,384 | +2,048 bytes, +0.05% |
+| BIOS image | 1,474,560 | 1,474,560 | 0 bytes, 0% |
+| Initrd | 10,240 | 10,240 | 0 bytes, 0% |
+| Program disk | 34,603,008 | 34,603,008 | 0 bytes, 0% |
+| EHCI controller pool | 40,352 | 40,416 | +64 bytes, +0.16% |
+
+`llvm-nm -S` measures the static controller pool. The split does not allocate more DMA buffers.
+
+The timing comparison uses QEMU 11.1.3 TCG on arm64 macOS 26.6.2.
+Each q35 guest uses four CPUs, 128 MiB, and an EHCI data disk. The UEFI guests use Homebrew OVMF.
+The runner alternates baseline and candidate with one guest at a time.
+Each row shows the median of three samples. The write measures the command through the next shell prompt.
+Each run reads back the file. Samples and artifact hashes are in `build/ehci-ownership/boot-comparison.json`.
+
+| Workload | Baseline | Candidate | Difference |
+| --- | ---: | ---: | ---: |
+| UEFI startup | 2.951667 s | 2.948329 s | -0.003338 s, -0.11% |
+| UEFI write | 33.117 ms | 33.309 ms | +0.192 ms, +0.58% |
+| BIOS startup | 0.849963 s | 0.846226 s | -0.003736 s, -0.44% |
+| BIOS write | 48.294 ms | 51.181 ms | +2.887 ms, +5.98% |
+
+The short runs measure storage without EHCI pointer traffic. Concurrent input latency and CPU cost remain unmeasured.
+Retest the laptop with the original mouse and ports to measure the change under contention.
