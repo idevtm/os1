@@ -135,6 +135,26 @@ TEST_F(Ext2, RejectsFeaturesGeometryDirtyStateAndBitmapCounters)
         EXPECT_EQ(v->mount(disk.io()), OS1_ERR_BAD_IMAGE) << offset;
     }
 }
+TEST_F(Ext2, DirtyStateClearsCleanBitWithoutSettingErrorBit)
+{
+    const auto* state = disk.bytes.data() + start + 1024 + 58;
+    ASSERT_EQ(ext2::u16(state), 1u);
+    const unsigned writes_before = disk.total_writes;
+    const unsigned flushes_before = disk.flushes;
+    ASSERT_EQ(fs->begin_write(), 0);
+    EXPECT_EQ(ext2::u16(state), 0u);
+    EXPECT_EQ(disk.total_writes - writes_before, 1u);
+    EXPECT_EQ(disk.flushes - flushes_before, 1u);
+
+    auto reopened = std::make_unique<ext2::Volume>();
+    EXPECT_EQ(reopened->mount(disk.io()), OS1_ERR_BAD_IMAGE);
+    ASSERT_EQ(fs->sync(), 0);
+    EXPECT_EQ(ext2::u16(state), 1u);
+    EXPECT_EQ(disk.total_writes - writes_before, 2u);
+    EXPECT_EQ(disk.flushes - flushes_before, 3u);
+    reopened = std::make_unique<ext2::Volume>();
+    EXPECT_EQ(reopened->mount(disk.io()), 0);
+}
 TEST_F(Ext2, RejectsMetadataAndDuplicateBlockReferences)
 {
     ext2::Inode file{};
@@ -738,7 +758,7 @@ TEST_F(Ext2, SystemSyncFreezesWritesAndCanThawAfterFailedTransition)
     OpenInstance* opened = nullptr;
     ASSERT_EQ(0, mount->operations->create(mount, "lifecycle", 9, OS1_OBJECT_FILE, opened));
     instance_release(opened);
-    EXPECT_EQ(2, ext2::u16(disk.bytes.data() + start + 1082));
+    EXPECT_EQ(0, ext2::u16(disk.bytes.data() + start + 1082));
     ASSERT_EQ(0, ext2_system_sync(true));
     EXPECT_EQ(1, ext2::u16(disk.bytes.data() + start + 1082));
     EXPECT_EQ(OS1_ERR_WOULD_BLOCK, mount->operations->remove(mount, "lifecycle", 9, 0));
@@ -747,7 +767,7 @@ TEST_F(Ext2, SystemSyncFreezesWritesAndCanThawAfterFailedTransition)
     EXPECT_EQ(OS1_ERR_UNSUPPORTED, system_control(OS1_SYSTEM_SHUTDOWN));
     EXPECT_EQ("system: shutdown stage=acpi-tables detail=not-initialized\n", host_console_output());
     EXPECT_EQ(0, mount->operations->remove(mount, "lifecycle", 9, 0));
-    EXPECT_EQ(2, ext2::u16(disk.bytes.data() + start + 1082));
+    EXPECT_EQ(0, ext2::u16(disk.bytes.data() + start + 1082));
     disk.fail_flush = true;
     host_console_output_clear();
     EXPECT_EQ(OS1_ERR_IO, system_control(OS1_SYSTEM_SHUTDOWN));
@@ -755,7 +775,7 @@ TEST_F(Ext2, SystemSyncFreezesWritesAndCanThawAfterFailedTransition)
     host_console_output_clear();
     EXPECT_EQ(OS1_ERR_IO, system_control(OS1_SYSTEM_REBOOT));
     EXPECT_EQ("system: reboot stage=storage-sync detail=failed\n", host_console_output());
-    EXPECT_EQ(2, ext2::u16(disk.bytes.data() + start + 1082));
+    EXPECT_EQ(0, ext2::u16(disk.bytes.data() + start + 1082));
     object_release(mount);
     EXPECT_EQ(0, ext2_system_sync(false));
 }

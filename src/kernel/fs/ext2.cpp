@@ -202,7 +202,7 @@ long Volume::begin_write()
         return OS1_ERR_IO;
     if(dirty)
         return 0;
-    put16(super + 58, 2);  // Mark unclean before the first metadata/data mutation.
+    put16(super + 58, 0);  // Clear EXT2_VALID_FS without setting EXT2_ERROR_FS.
     if(!read_block(0, meta))
         return OS1_ERR_IO;
     memcpy(meta + 1024, super, 1024);
