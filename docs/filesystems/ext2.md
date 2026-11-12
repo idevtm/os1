@@ -118,10 +118,14 @@ The device determines whether a supported ext2 volume permits writes.
 A sync on a healthy read-only volume succeeds without a device flush.
 Automatic log export skips the read-only volume.
 
-Before the first mutation after synchronization, the driver writes and flushes the unclean filesystem state.
-Successful `sync` flushes completed writes, writes clean state, and flushes again.
+Before the first mutation after synchronization, the driver writes zero to the superblock field `s_state` and flushes the device.
+Zero clears `EXT2_VALID_FS` and leaves `EXT2_ERROR_FS` clear.
+Successful `sync` flushes completed writes, sets `EXT2_VALID_FS`, and flushes again.
 An I/O error makes the mounted volume fail further disk operations.
 No success result hides a failed read, write, or flush.
+
+A cross-directory move writes and flushes the destination directory block before it writes the source directory block.
+An interruption between those writes can leave both names for the moved object.
 
 Ext2 has no journal. Failed or interrupted updates can need offline repair.
 This milestone establishes persistence after successful synchronization, not power-loss atomicity for metadata updates.

@@ -1,5 +1,4 @@
 [bits 16]
-%define EARLY_PAGE_TABLE_BYTES (5 * PAGE_SIZE)
 %if EARLY_LONG_MODE_PAGE_TABLES_ADDRESS < (LOADER16_LOAD_ADDRESS + LOADER16_IMAGE_SECTOR_COUNT * 512)
     %error "Early page tables overlap the BIOS loader"
 %endif

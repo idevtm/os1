@@ -471,8 +471,10 @@ TEST(Ehci, SplitControlAndPeriodicUseExplicitTranslatorAndMasks)
     EXPECT_EQ(2u, (q.capabilities >> 16) & 127);
     EXPECT_EQ(3u, (q.capabilities >> 23) & 127);
     EXPECT_EQ(0u, q.capabilities & 65535);
+    EXPECT_EQ(4u, (q.endpoint >> 28) & 15u);
     ASSERT_TRUE(ehci::prepare_head(q, 0x1000, 0x1080, 4, 1, 8, 1, 2, 3, true));
     EXPECT_EQ(0x1c01u, q.capabilities & 65535);
+    EXPECT_EQ(0u, (q.endpoint >> 28) & 15u);
     EXPECT_EQ(0u, q.endpoint & ((1u << 27) | (1u << 15)));
     EXPECT_FALSE(ehci::prepare_head(q, 0x1000, 0x1080, 4, 0, 64, 1, 2, 3));
     EXPECT_FALSE(ehci::prepare_head(q, 0x1000, 0x1080, 4, 0, 8, 1, 0, 3));

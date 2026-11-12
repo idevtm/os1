@@ -23,6 +23,9 @@ struct [[gnu::packed]] Trb
     uint32_t control;
 };
 
+static_assert(sizeof(Trb) == kTrbBytes);
+static_assert(offsetof(Trb, control) % alignof(uint32_t) == 0);
+
 [[nodiscard]] uint32_t read32(volatile const uint8_t* base, size_t offset)
 {
     return *reinterpret_cast<volatile const uint32_t*>(base + offset);
@@ -261,6 +264,7 @@ bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayo
     out.capability.max_interrupters = static_cast<uint16_t>((hcsp1 >> 8) & 0x7FFu);
     out.capability.max_ports = static_cast<uint8_t>((hcsp1 >> 24) & 0xFFu);
     out.capability.context_size_bytes = (0 != (hccparams1 & (1u << 2))) ? 64u : 32u;
+    out.capability.address_64 = (hccparams1 & 1u) != 0;
     out.capability.scratchpad_buffers =
         static_cast<uint16_t>(((hcsp2 >> 27) & 0x1Fu) | (((hcsp2 >> 21) & 0x1Fu) << 5));
     out.capability.doorbell_offset = doorbell_offset;
@@ -269,6 +273,12 @@ bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayo
     out.runtime = base + runtime_offset;
     out.doorbells = base + doorbell_offset;
     return true;
+}
+
+bool dma_range_supported(const Capability& capability, uint64_t address, size_t bytes)
+{
+    const uint64_t limit = capability.address_64 ? UINT64_MAX : UINT32_MAX;
+    return bytes && address <= limit && bytes - 1 <= limit - address;
 }
 
 uint32_t read_page_size_mask(const ControllerLayout& controller)
@@ -578,8 +588,8 @@ bool dequeue_event_trb(
     void* ring_base, size_t ring_bytes, uint64_t ring_physical, EventRingInfo& ring, EventInfo& out)
 {
     out = {};
-    if((nullptr == ring_base) || (0 == ring.trb_count) ||
-       (ring_bytes != (static_cast<size_t>(ring.trb_count) * kTrbBytes)) ||
+    if((nullptr == ring_base) || (reinterpret_cast<uintptr_t>(ring_base) % alignof(uint32_t)) ||
+       (0 == ring.trb_count) || (ring_bytes != (static_cast<size_t>(ring.trb_count) * kTrbBytes)) ||
        (ring.dequeue_index >= ring.trb_count))
     {
         return false;
@@ -587,7 +597,11 @@ bool dequeue_event_trb(
 
     const auto* trbs = static_cast<const Trb*>(ring_base);
     const Trb& entry = trbs[ring.dequeue_index];
-    const bool cycle = 0 != (entry.control & kTrbCycleBit);
+    const auto* control_word = reinterpret_cast<const uint32_t*>(
+        reinterpret_cast<const uint8_t*>(&entry) + offsetof(Trb, control));
+    // The controller publishes ownership through the cycle bit on coherent DMA memory.
+    const uint32_t control = __atomic_load_n(control_word, __ATOMIC_ACQUIRE);
+    const bool cycle = 0 != (control & kTrbCycleBit);
     if(cycle != ring.cycle_state)
     {
         return false;
@@ -595,21 +609,21 @@ bool dequeue_event_trb(
 
     out.parameter = (static_cast<uint64_t>(entry.parameter_high) << 32) | entry.parameter_low;
     out.status = entry.status;
-    out.control = entry.control;
-    out.transfer_length = entry.status & kEventTransferLengthMask;
-    out.completion_code = static_cast<uint8_t>(entry.status >> kEventCompletionCodeShift);
-    out.trb_type = static_cast<uint8_t>((entry.control & kTrbTypeMask) >> kTrbTypeShift);
+    out.control = control;
+    out.transfer_length = out.status & kEventTransferLengthMask;
+    out.completion_code = static_cast<uint8_t>(out.status >> kEventCompletionCodeShift);
+    out.trb_type = static_cast<uint8_t>((control & kTrbTypeMask) >> kTrbTypeShift);
 
     switch(out.trb_type)
     {
         case kTrbTypeTransferEvent:
             out.type = EventType::Transfer;
-            out.slot_id = static_cast<uint8_t>(entry.control >> 24);
-            out.endpoint_id = static_cast<uint8_t>((entry.control >> 16) & 0x1Fu);
+            out.slot_id = static_cast<uint8_t>(control >> 24);
+            out.endpoint_id = static_cast<uint8_t>((control >> 16) & 0x1Fu);
             break;
         case kTrbTypeCommandCompletionEvent:
             out.type = EventType::CommandCompletion;
-            out.slot_id = static_cast<uint8_t>(entry.control >> 24);
+            out.slot_id = static_cast<uint8_t>(control >> 24);
             break;
         case kTrbTypePortStatusChangeEvent:
             out.type = EventType::PortStatusChange;
@@ -643,6 +657,12 @@ void ring_doorbell(const ControllerLayout& controller,
     write32(controller.doorbells,
             static_cast<size_t>(doorbell_index) * kDoorbellBytes,
             static_cast<uint32_t>(target) | (static_cast<uint32_t>(stream_id) << 16));
+}
+
+bool port_reset_recovered(const PortStatus& status, uint8_t speed, bool connection_changed)
+{
+    return !connection_changed && !(status.raw & kPortScConnectStatusChange) && status.connected &&
+           status.enabled && !status.reset && status.speed == speed;
 }
 
 bool read_port_status(const ControllerLayout& controller, uint8_t port_id, PortStatus& out)
@@ -734,7 +754,8 @@ bool controller_stop(const ControllerLayout& controller,
 bool controller_reset(const ControllerLayout& controller,
                       uint32_t timeout_spins,
                       PollHook poll_hook,
-                      void* poll_context)
+                      void* poll_context,
+                      void (*intel_reset_delay)(uint32_t, void*))
 {
     if(!controller_stop(controller, timeout_spins, poll_hook, poll_context))
     {
@@ -745,6 +766,9 @@ bool controller_reset(const ControllerLayout& controller,
     write32(controller.operational,
             kOperationalUsbcmd,
             static_cast<uint32_t>(command | kUsbcmdHostControllerReset));
+    // Intel controllers need this delay before the next register access.
+    if(intel_reset_delay)
+        intel_reset_delay(1000u, poll_context);
     if(!wait_for_mask(controller.operational,
                       kOperationalUsbcmd,
                       kUsbcmdHostControllerReset,
@@ -771,18 +795,25 @@ bool command_ring_running(const ControllerLayout& controller)
            (read32(controller.operational, kOperationalCrcr) & kCrcrCommandRingRunning);
 }
 
-bool request_command_abort(const ControllerLayout& controller, uint64_t ring_physical)
+bool request_command_abort(const ControllerLayout& controller,
+                           uint64_t ring_physical,
+                           size_t ring_bytes)
 {
-    if(!controller.operational || !ring_physical || (ring_physical & 0x3full))
+    if(!controller.operational || !ring_physical || (ring_physical & 0x3full) ||
+       !dma_range_supported(controller.capability, ring_physical, ring_bytes))
         return false;
     // Confirm the abort with its stop event and a post-write CRR read.
     write64(controller.operational, kOperationalCrcr, ring_physical | kCrcrCommandAbort);
     return true;
 }
 
-bool program_command_ring(const ControllerLayout& controller, uint64_t ring_physical, bool cycle)
+bool program_command_ring(const ControllerLayout& controller,
+                          uint64_t ring_physical,
+                          size_t ring_bytes,
+                          bool cycle)
 {
     if(!controller.operational || !ring_physical || (ring_physical & 0x3full) ||
+       !dma_range_supported(controller.capability, ring_physical, ring_bytes) ||
        command_ring_running(controller))
         return false;
     write64(controller.operational,
@@ -799,13 +830,23 @@ bool controller_program(const ControllerLayout& controller,
        (0 == rings.dcbaa_physical) || (0 == rings.command_ring_physical) ||
        (0 == rings.event_ring_physical) || (0 == rings.erst_physical) ||
        (0 == rings.event_ring_trb_count) || (0 == max_device_slots) ||
-       (max_device_slots > controller.capability.max_slots))
+       (max_device_slots > controller.capability.max_slots) ||
+       !dma_range_supported(controller.capability,
+                            rings.dcbaa_physical,
+                            (size_t(max_device_slots) + 1) * sizeof(uint64_t)) ||
+       !dma_range_supported(controller.capability,
+                            rings.event_ring_physical,
+                            size_t(rings.event_ring_trb_count) * kTrbBytes) ||
+       !dma_range_supported(
+           controller.capability, rings.erst_physical, sizeof(EventRingSegmentTableEntry)))
     {
         return false;
     }
 
-    if(!program_command_ring(
-           controller, rings.command_ring_physical, rings.command_ring_cycle_state))
+    if(!program_command_ring(controller,
+                             rings.command_ring_physical,
+                             rings.command_ring_bytes,
+                             rings.command_ring_cycle_state))
         return false;
     write32(controller.operational, kOperationalDnctrl, 0u);
     write64(controller.operational, kOperationalDcbaap, rings.dcbaa_physical);

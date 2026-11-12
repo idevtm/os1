@@ -3,6 +3,8 @@
 
 #include <os1/console.h>
 
+#include "input/hid_boot.hpp"
+
 namespace usb::hid
 {
 namespace
@@ -119,6 +121,9 @@ bool boot_keyboard_apply_report(BootKeyboardState& state,
         return false;
     }
 
+    if(os1::input::boot_keyboard_has_error(report))
+        return true;
+
     const uint8_t modifiers = report[0];
     const uint8_t* usages = report + 2u;
     const bool shift = shift_active(modifiers);
@@ -126,7 +131,7 @@ bool boot_keyboard_apply_report(BootKeyboardState& state,
     for(size_t index = 0; index < 6u; ++index)
     {
         const uint8_t usage = usages[index];
-        if((0u == usage) || (1u == usage) || has_usage(state.keys, usage))
+        if((0u == usage) || has_usage(state.keys, usage))
         {
             continue;
         }

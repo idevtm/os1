@@ -55,6 +55,10 @@ Process cleanup detaches Buffer leaves before address-space destruction.
 Borrowed mappings have a separate role from origin reservations.
 This distinction permits same-process loans without removing original reservations during borrower retirement.
 
+Restoration fills empty leaves in the retained page tables.
+If a page fails to map, the module detaches and retires the restored prefix.
+The module releases the failed alias and keeps the Buffer backing available to the owner.
+
 ## Retirement rules
 
 The user-copy gate serializes ownership changes with translation and direct-map access.

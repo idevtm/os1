@@ -183,14 +183,14 @@ void text(char c)
     }
     lock.unlock();
 }
-void event(uint32_t type, uint32_t flags, uint64_t pid, uint64_t a, uint64_t b)
+void event(uint32_t type, uint32_t flags, uint64_t pid, uint64_t a, uint64_t b, Process* context)
 {
     // High-frequency scheduler/IRQ records stay in the existing observation ring.
     if(type != OS1_KERNEL_EVENT_TRAP && type != OS1_KERNEL_EVENT_PCI_BIND &&
        type != OS1_KERNEL_EVENT_KMEM_CORRUPTION && type != OS1_KERNEL_EVENT_USER_COPY_FAILURE &&
        type != OS1_KERNEL_EVENT_TIMER_SOURCE && !(flags & OS1_KERNEL_EVENT_FLAG_FAILURE))
         return;
-    auto r = origin(current(), OS1_LOG_EVENT);
+    auto r = origin(pid ? context : nullptr, OS1_LOG_EVENT);
     r.pid = pid;
     r.arg0 = a;
     r.arg1 = b;

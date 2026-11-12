@@ -2,6 +2,15 @@
 #include <stdint.h>
 namespace os1::input
 {
+// Call after validating the eight-byte boot keyboard report.
+inline bool boot_keyboard_has_error(const uint8_t* report)
+{
+    for(unsigned i = 2; i < 8; ++i)
+        if(report[i] && report[i] <= 3)
+            return true;
+    return false;
+}
+
 struct HidBoot
 {
     unsigned configuration{}, interface{}, protocol{}, endpoint{}, packet{}, interval{};

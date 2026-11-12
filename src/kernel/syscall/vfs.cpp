@@ -308,8 +308,20 @@ long sys_vfs(
         os1_move_request request{};
         if(!copy_from_user(frames, thread, argument, &request, sizeof(request)))
             return OS1_ERR_FAULT;
-        if(request.version != OS1_VFS_ABI_VERSION || request.size != sizeof(request) ||
-           request.replace > 1 || !request.source_bytes || request.source_bytes > 63 ||
+        uint64_t source_id = 0;
+        if(request.version == OS1_MOVE_GUARDED_VERSION)
+        {
+            if(request.size != sizeof(os1_guarded_move_request))
+                return OS1_ERR_INVALID;
+            if(!copy_from_user(
+                   frames, thread, argument + sizeof(request), &source_id, sizeof(source_id)))
+                return OS1_ERR_FAULT;
+            if(!source_id)
+                return OS1_ERR_INVALID;
+        }
+        else if(request.version != OS1_VFS_ABI_VERSION || request.size != sizeof(request))
+            return OS1_ERR_INVALID;
+        if(request.replace > 1 || !request.source_bytes || request.source_bytes > 63 ||
            !request.destination_bytes || request.destination_bytes > 63)
             return OS1_ERR_INVALID;
         for(unsigned i = request.source_bytes; i < sizeof(request.source); ++i)
@@ -318,7 +330,7 @@ long sys_vfs(
         for(unsigned i = request.destination_bytes; i < sizeof(request.destination); ++i)
             if(request.destination[i])
                 return OS1_ERR_INVALID;
-        return vfs_move_at(table, fd, request);
+        return vfs_move_at(table, fd, request, source_id);
     }
     if(operation == OS1_RESOURCE_CONTEXT_OPEN)
     {

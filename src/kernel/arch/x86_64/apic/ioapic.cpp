@@ -157,8 +157,7 @@ bool ioapic_enable_gsi(uint32_t gsi, uint8_t vector, uint16_t flags)
         return false;
     }
 
-    const uint32_t destination =
-        (nullptr != g_cpu_boot) ? (static_cast<uint32_t>(g_cpu_boot->id) << 24) : 0;
+    const uint32_t destination = static_cast<uint32_t>(cpu_boot_apic_id()) << 24;
     ioapic_write(REG_TABLE + 2 * intin, INT_FIXED | mode_bits | vector);
     ioapic_write(REG_TABLE + 2 * intin + 1, destination);
     return true;

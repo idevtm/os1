@@ -153,7 +153,9 @@ Rollback removes provisional descriptors and borrower mappings before returning 
 Reply preparation validates the complete output batch.
 It places distinct outputs in reply escrow and removes provider access.
 Terminal handling revokes borrower mappings, retires translations, and restores surviving origin reservations at their original addresses.
-Completion becomes visible only after restoration. Restoration requires no new allocation.
+Completion becomes visible after restoration. Restoration uses the retained page tables.
+If an alias cannot be restored, the kernel removes its restored leaves and releases its mapping record.
+The owner can use its Buffer descriptor to request a new mapping.
 
 A result claim installs every output descriptor and copies the result envelope.
 A failed installation or copy preserves outputs for retry.

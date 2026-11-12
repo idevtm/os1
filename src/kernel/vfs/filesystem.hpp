@@ -14,7 +14,7 @@ struct VfsOperations
     os1_filesystem_info (*info)(VfsNode*);
     long (*sync)(VfsNode*);
     long (*snapshot)(VfsNode*, uint8_t*&, uint64_t&);
-    long (*move)(VfsNode*, const char*, size_t, VfsNode*, const char*, size_t, bool);
+    long (*move)(VfsNode*, const char*, size_t, VfsNode*, const char*, size_t, bool, uint64_t);
     long (*metadata)(VfsNode*, os1_metadata&) = nullptr;
     long (*space)(VfsNode*, os1_space&) = nullptr;
     // Internal entry points: caller holds NamespaceGuard.

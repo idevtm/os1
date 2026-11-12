@@ -202,7 +202,7 @@ long Volume::begin_write()
         return OS1_ERR_IO;
     if(dirty)
         return 0;
-    put16(super + 58, 2);  // Mark unclean before the first metadata/data mutation.
+    put16(super + 58, 0);  // Clear EXT2_VALID_FS without setting EXT2_ERROR_FS.
     if(!read_block(0, meta))
         return OS1_ERR_IO;
     memcpy(meta + 1024, super, 1024);
@@ -798,7 +798,13 @@ long Volume::move(uint32_t source_parent,
     r = begin_write();
     if(r < 0)
         return r;
-    if(!write_block(from_block, from) || (to != from && !write_block(to_block, to)))
+    // Flush the destination before removing the source entry.
+    if(to != from && (!write_block(to_block, to) || !io.flush(io.context)))
+    {
+        failed = true;
+        return OS1_ERR_IO;
+    }
+    if(!write_block(from_block, from))
         return OS1_ERR_IO;
     if(directory(inode) && source_parent != destination_parent)
     {

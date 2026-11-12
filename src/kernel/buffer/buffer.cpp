@@ -132,6 +132,24 @@ void revoke(Buffer* b, Budget* from, bool discard, bool borrowed_only = false)
             if(m.budget == from && (!borrowed_only || m.borrowed))
                 erase_map(b, m);
 }
+bool map_alias(Buffer* b, VirtualMemory& vm, uint64_t address, bool writable, bool reserved)
+{
+    const auto flags = PageFlags::User | PageFlags::NoExecute | PageFlags::SharedBacking |
+                       (writable ? PageFlags::Write : PageFlags::None);
+    for(uint32_t i = 0; i < b->page_count; ++i)
+    {
+        const uint64_t virtual_page = address + i * kPageSize;
+        const bool mapped = reserved ? vm.map_reserved_user_page(virtual_page, b->pages[i], flags)
+                                     : vm.map_physical(virtual_page, b->pages[i], 1, flags);
+        if(!mapped)
+        {
+            vm.detach(address, i);
+            ipi_retire_tlb();
+            return false;
+        }
+    }
+    return true;
+}
 void restore(Buffer* b, Budget* to)
 {
     set_owner(b, to);
@@ -144,11 +162,10 @@ void restore(Buffer* b, Budget* to)
                 continue;
             }
             VirtualMemory vm(*b->frames, m.cr3);
-            const auto flags = PageFlags::User | PageFlags::NoExecute | PageFlags::SharedBacking |
-                               (m.writable ? PageFlags::Write : PageFlags::None);
-            for(uint32_t i = 0; i < b->page_count; ++i)
-                vm.map_physical(m.address + i * kPageSize, b->pages[i], 1, flags);
-            m.present = true;
+            if(map_alias(b, vm, m.address, m.writable, true))
+                m.present = true;
+            else
+                erase_map(b, m);
         }
 }
 bool authority(Buffer* b, Budget* owner, const OpenInstance* instance)
@@ -357,18 +374,8 @@ long sys_buffer(PageFrameContainer& frames, Thread* t, uint64_t fd, uint64_t op,
     }
     if(address >= kMapBase + OS1_BUFFER_PROCESS_MAP_LIMIT * OS1_BUFFER_BYTES_MAX)
         return OS1_ERR_LIMIT;
-    const auto flags = PageFlags::User | PageFlags::NoExecute | PageFlags::SharedBacking |
-                       (r.writable ? PageFlags::Write : PageFlags::None);
-    uint32_t mapped = 0;
-    for(; mapped < b->page_count; ++mapped)
-        if(!vm.map_physical(address + mapped * kPageSize, b->pages[mapped], 1, flags))
-            break;
-    if(mapped != b->page_count)
-    {
-        vm.detach(address, mapped);
-        ipi_retire_tlb();
+    if(!map_alias(b, vm, address, r.writable != 0, false))
         return OS1_ERR_NO_MEMORY;
-    }
     *slot = {owner,
              owner->space_generation,
              t->address_space_cr3,

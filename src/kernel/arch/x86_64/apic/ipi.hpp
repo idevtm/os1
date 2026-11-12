@@ -18,3 +18,9 @@ void ipi_handle_tlb_shootdown();
 
 void ipi_poll_tlb_shootdown();
 void ipi_retire_tlb();
+
+// Power entry holds interrupts disabled from quiescence through resume.
+constexpr uint8_t kPowerParkVector = 0xF0;
+[[nodiscard]] bool ipi_quiesce_for_power();
+void ipi_resume_after_power();
+void ipi_handle_power_park();

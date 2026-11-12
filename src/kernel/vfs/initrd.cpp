@@ -444,7 +444,10 @@ long vfs_context_open(DescriptorTable& table,
                               -1,
                               request.descendant_rights);
 }
-long vfs_move_at(DescriptorTable& table, int source_fd, const os1_move_request& request)
+long vfs_move_at(DescriptorTable& table,
+                 int source_fd,
+                 const os1_move_request& request,
+                 uint64_t source_id)
 {
     DescriptorEntry source{}, destination{};
     long r =
@@ -471,7 +474,8 @@ long vfs_move_at(DescriptorTable& table, int source_fd, const os1_move_request& 
                                   to,
                                   request.destination,
                                   request.destination_bytes,
-                                  request.replace);
+                                  request.replace,
+                                  source_id);
 }
 long vfs_same_object(DescriptorTable& table, int left, int right)
 {

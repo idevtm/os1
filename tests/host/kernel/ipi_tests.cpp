@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
 #include "arch/x86_64/apic/ipi.hpp"
+#include "arch/x86_64/cpu/cpu.hpp"
 #include "support/lapic_stub.hpp"
 #include "sync/smp.hpp"
 
 extern void (*host_ipi_destination_written)();
+extern void (*host_power_park_wait)();
 namespace
 {
 unsigned interrupted;
@@ -51,5 +53,48 @@ TEST(Ipi, NestedInterruptMaskRemainsDisabled)
         EXPECT_FALSE(host_interrupts_enabled);
     }
     EXPECT_TRUE(host_interrupts_enabled);
+}
+
+TEST(Ipi, PowerParkRequiresEveryOnlinePeerAndClearsTimedOutRequest)
+{
+    cpu* saved_boot = g_cpu_boot;
+    cpu* saved_current = g_cpu_host_current;
+    cpu boot{}, peer{}, offline{};
+    boot.id = 4;
+    peer.id = 9;
+    offline.id = 12;
+    boot.next = &peer;
+    peer.next = &offline;
+    peer.booted = static_cast<uint32_t>(ApStartupState::Online);
+    offline.booted = static_cast<uint32_t>(ApStartupState::TimedOut);
+    g_cpu_boot = &boot;
+    g_cpu_host_current = &peer;
+    lapic_stub_reset();
+
+    {
+        IrqGuard irq;
+        EXPECT_FALSE(ipi_quiesce_for_power());
+        EXPECT_EQ(kPowerParkVector, lapic_stub_last_icr_low() & 0xffu);
+        g_cpu_host_current = &boot;
+        ipi_handle_power_park();
+        EXPECT_EQ(0u, boot.power_park_ack);
+        g_cpu_host_current = &peer;
+
+        host_power_park_wait = [] {
+            auto* owner = g_cpu_host_current;
+            g_cpu_host_current = g_cpu_boot;
+            ipi_handle_power_park();
+            g_cpu_host_current = owner;
+        };
+        EXPECT_TRUE(ipi_quiesce_for_power());
+        host_power_park_wait = nullptr;
+        EXPECT_NE(0u, boot.power_park_ack);
+        EXPECT_EQ(0u, peer.power_park_ack);
+        EXPECT_EQ(0u, offline.power_park_ack);
+        ipi_resume_after_power();
+        EXPECT_FALSE(ipi_quiesce_for_power());
+    }
+    g_cpu_boot = saved_boot;
+    g_cpu_host_current = saved_current;
 }
 }  // namespace

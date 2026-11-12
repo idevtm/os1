@@ -1,4 +1,5 @@
 #pragma once
+#include <os1/context.hpp>
 #include <os1/file_tools.hpp>
 namespace os1::user::files
 {
@@ -14,6 +15,85 @@ inline bool decimal(const char* text, size_t& n)
         n = n * 10 + (*text++ - '0');
     }
     return n <= 65537;
+}
+inline long edit_tree_step(int directory, os1_tree_step& step)
+{
+    step.version = OS1_TREE_SCOPED_VERSION;
+    step.size = sizeof(step);
+    step.excluded_fd = -1;
+    return os1_syscall3(
+        os1_sys_resource, directory, OS1_RESOURCE_TREE_STEP, reinterpret_cast<uint64_t>(&step));
+}
+inline bool remove_edit_temporary(int directory, const os1_tree_step& created)
+{
+    for(unsigned attempt = 0; attempt < 32; ++attempt)
+    {
+        os1_tree_step check{};
+        check.action = OS1_TREE_CHECK;
+        long status = edit_tree_step(directory, check);
+        if(status >= 0)
+        {
+            os1_tree_step remove{};
+            remove.action = OS1_TREE_REMOVE;
+            remove.kind = OS1_OBJECT_FILE;
+            remove.generation = check.generation;
+            remove.object_id = created.metadata.object_id;
+            remove.name_bytes = created.name_bytes;
+            for(unsigned i = 0; i < remove.name_bytes; ++i)
+                remove.name[i] = created.name[i];
+            status = edit_tree_step(directory, remove);
+        }
+        if(status >= 0)
+            return true;
+        if(status != OS1_ERR_WOULD_BLOCK && status != OS1_ERR_CHANGED)
+            break;
+        os1::user::yield();
+    }
+    message("edit: could not confirm cleanup of temporary sibling ");
+    message(created.name);
+    message("\n");
+    return false;
+}
+inline bool save_edit(const char* path, const shell::TextBuffer& buffer)
+{
+    constexpr uint32_t rights = OS1_RIGHT_LOOKUP | OS1_RIGHT_CREATE | OS1_RIGHT_REMOVE |
+                                OS1_RIGHT_RENAME | OS1_RIGHT_INSPECT;
+    char leaf[64]{};
+    Handle directory(parent_resource(path, leaf, rights, OS1_RIGHT_WRITE));
+    if(directory.fd < 0)
+        return false;
+    char name[48];
+    for(unsigned attempt = 0; attempt < 16; ++attempt)
+    {
+        temporary_name(name);
+        if(shell::equal(name, leaf))
+            continue;
+        os1_tree_step created{};
+        created.action = OS1_TREE_CHECK;
+        long status = edit_tree_step(directory.fd, created);
+        if(status < 0)
+            return false;
+        created.action = OS1_TREE_CREATE;
+        created.kind = OS1_OBJECT_FILE;
+        created.rights = OS1_RIGHT_WRITE;
+        created.metadata = {};
+        created.name_bytes = length(name);
+        for(unsigned i = 0; i < created.name_bytes; ++i)
+            created.name[i] = name[i];
+        Handle file(edit_tree_step(directory.fd, created));
+        if(file.fd == OS1_ERR_EXISTS || file.fd == OS1_ERR_CHANGED)
+            continue;
+        const bool written = file.fd >= 0 && put(file.fd, buffer.data, buffer.size);
+        file.reset();
+        if(written &&
+           context::move(
+               directory.fd, name, directory.fd, leaf, true, created.metadata.object_id) >= 0)
+            return true;
+        if(created.metadata.object_id)
+            remove_edit_temporary(directory.fd, created);
+        return false;
+    }
+    return false;
 }
 inline bool edit(size_t argc, char** argv)
 {
@@ -117,10 +197,9 @@ inline bool edit(size_t argc, char** argv)
                 message("edit: invalid arguments\n");
                 continue;
             }
-            Handle file(open_file(argv[1], Mode::Replace));
-            if(file.fd < 0 || !put(file.fd, buffer.data, buffer.size))
+            if(!save_edit(argv[1], buffer))
             {
-                message("edit: save failed; file may be partial, edit buffer retained\n");
+                message("edit: save failed, edit buffer retained\n");
                 buffer.dirty = true;
                 continue;
             }

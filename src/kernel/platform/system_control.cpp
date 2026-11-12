@@ -3,15 +3,23 @@
 #include <os1/system.h>
 #include <os1/tmpfs.h>
 
+#include "arch/x86_64/apic/ipi.hpp"
 #include "console/console.hpp"
+#include "debug/log.hpp"
 #include "debug/log_export.hpp"
 #include "drivers/usb/stall_trace.hpp"
 #include "freestanding/string.hpp"
+#include "ipc/channel.hpp"
 #include "platform/acpica_diagnostics.hpp"
 #include "platform/system_power.hpp"
+#include "proc/thread.hpp"
 #include "sync/atomic.hpp"
 #include "sync/smp.hpp"
 #include "vfs/ext2.hpp"
+#ifdef OS1_HOST_TEST
+void (*system_transition_wait_hook)();
+#endif
+
 namespace
 {
 volatile bool transitioning;
@@ -26,6 +34,33 @@ void report_failure(unsigned member, const PowerDiagnostic& diagnostic)
     freestanding::append_string(line, sizeof(line), diagnostic.detail);
     freestanding::append_string(line, sizeof(line), "\n");
     write_console_bytes(line, freestanding::string_length(line));
+}
+long sync_for_transition(PowerDiagnostic& diagnostic)
+{
+    constexpr uint64_t retry_ns = 1'000'000;
+    constexpr uint64_t timeout_ns = 250'000'000;
+    const uint64_t start = diagnostic_log::monotonic();
+    log_export::FinalDrainGuard drain;
+    bool acquired = drain.try_acquire();
+    for(unsigned waits = 0; !acquired && waits < timeout_ns / retry_ns; ++waits)
+    {
+#ifdef OS1_HOST_TEST
+        if(system_transition_wait_hook)
+            system_transition_wait_hook();
+#else
+        kernel_sleep_for(current_thread(), retry_ns);
+#endif
+        if(diagnostic_log::monotonic() - start > timeout_ns)
+            break;
+        acquired = drain.try_acquire();
+    }
+    if(!acquired)
+    {
+        diagnostic = {"log-drain-admission", "busy"};
+        return OS1_ERR_WOULD_BLOCK;
+    }
+    drain.drain();
+    return ext2_system_sync(true);
 }
 }  // namespace
 long system_control(unsigned member, unsigned argument)
@@ -46,9 +81,7 @@ long system_control(unsigned member, unsigned argument)
     }
     AcpicaDiagnosticCapture acpi_output(member == OS1_SYSTEM_SHUTDOWN);
     PowerDiagnostic diagnostic{"storage-sync", "failed"};
-    if(transition)
-        log_export::final_drain();
-    long result = ext2_system_sync(transition);
+    long result = transition ? sync_for_transition(diagnostic) : ext2_system_sync(false);
     if(result == 0 && transition)
     {
         if(member == OS1_SYSTEM_SHUTDOWN && !acpica_prepare_shutdown(diagnostic))
@@ -56,12 +89,22 @@ long system_control(unsigned member, unsigned argument)
         else
         {
             IrqGuard interrupts;
-            const bool accepted = member == OS1_SYSTEM_SHUTDOWN ? acpica_enter_shutdown(diagnostic)
-                                                                : acpica_reset_system(diagnostic);
-            if(accepted)
-                diagnostic = {"power-entry", "returned-without-transition"};
-            // A successful platform transition does not return to this kernel.
-            result = OS1_ERR_IO;
+            if(!ipi_quiesce_for_power())
+            {
+                diagnostic = {"cpu-quiescence", "timeout-or-unavailable"};
+                result = OS1_ERR_WOULD_BLOCK;
+            }
+            else
+            {
+                const bool accepted = member == OS1_SYSTEM_SHUTDOWN
+                                          ? acpica_enter_shutdown(diagnostic)
+                                          : platform_reset_system(diagnostic);
+                // A successful platform transition does not return to this kernel.
+                ipi_resume_after_power();
+                if(accepted)
+                    diagnostic = {"power-entry", "returned-without-transition"};
+                result = OS1_ERR_IO;
+            }
         }
         ext2_system_thaw();
     }

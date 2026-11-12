@@ -176,6 +176,68 @@ TEST_F(BufferMemory, InvalidBatchLeavesEveryAliasOwned)
     input = attachment(fd, OS1_BUFFER_MOVE);
     EXPECT_EQ(OS1_ERR_INVALID, buffer_prepare_loans(frames, &a, input, loans));
 }
+TEST_F(BufferMemory, FailedLoanRestoreReleasesReservationWhenPageTablesAreMissing)
+{
+    const int fd = create(a, 2 * kPageSize);
+    ASSERT_GE(fd, 0);
+    const auto address = map(a, fd);
+    BufferLoanBatch* loans = nullptr;
+    ASSERT_EQ(buffer_prepare_loans(frames, &a, attachment(fd), loans), 0);
+
+    // Force a missing reservation table without advancing the address-space generation.
+    VirtualMemory vm(frames, a.address_space_cr3);
+    ASSERT_EQ(address >> 39, control >> 39);
+    ASSERT_TRUE(vm.destroy_user_slot(control >> 39));
+    ASSERT_TRUE(vm.allocate_and_map(control, 1, PageFlags::User | PageFlags::Write));
+    std::vector<uint64_t> held;
+    while(frames.free_page_count())
+    {
+        uint64_t page = 0;
+        ASSERT_TRUE(frames.allocate(page));
+        held.push_back(page);
+    }
+
+    buffer_finish_loans(loans);
+    EXPECT_EQ(frames.free_page_count(), 0u);
+    EXPECT_FALSE(readable(a, address));
+    EXPECT_FALSE(readable(a, address + kPageSize));
+    EXPECT_EQ(info(a, fd).owned, 1u);
+    buffer_release_loans(loans);
+    for(auto page : held)
+        frames.free(page);
+    EXPECT_EQ(map(a, fd), address);
+}
+
+TEST_F(BufferMemory, FailedLoanRestoreRemovesPartialAliasWithoutOverwritingConflict)
+{
+    const int fd = create(a, 2 * kPageSize);
+    ASSERT_GE(fd, 0);
+    const auto address = map(a, fd);
+    const uint8_t buffer_value = 0x71;
+    ASSERT_TRUE(copy_to_user(frames, &a, address, &buffer_value, 1));
+    BufferLoanBatch* loans = nullptr;
+    ASSERT_EQ(buffer_prepare_loans(frames, &a, attachment(fd), loans), 0);
+
+    // Force a conflict on the second page after the first page can be restored.
+    VirtualMemory vm(frames, a.address_space_cr3);
+    const auto conflict = address + kPageSize;
+    ASSERT_TRUE(vm.allocate_and_map(conflict, 1, PageFlags::User | PageFlags::Write));
+    const uint8_t conflict_value = 0xa5;
+    ASSERT_TRUE(copy_to_user(frames, &a, conflict, &conflict_value, 1));
+
+    buffer_finish_loans(loans);
+    EXPECT_FALSE(readable(a, address));
+    uint8_t actual = 0;
+    ASSERT_TRUE(copy_from_user(frames, &a, conflict, &actual, 1));
+    EXPECT_EQ(actual, conflict_value);
+    EXPECT_EQ(info(a, fd).owned, 1u);
+    buffer_release_loans(loans);
+    ASSERT_TRUE(vm.free(conflict, 1));
+    ASSERT_EQ(map(a, fd), address);
+    ASSERT_TRUE(copy_from_user(frames, &a, address, &actual, 1));
+    EXPECT_EQ(actual, buffer_value);
+}
+
 TEST_F(BufferMemory, ExplicitUnmapDiscardsReservationAndDescriptorCloseKeepsMap)
 {
     int fd = create(a);

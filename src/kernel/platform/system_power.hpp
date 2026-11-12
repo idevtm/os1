@@ -8,4 +8,4 @@ struct PowerDiagnostic
 };
 bool acpica_prepare_shutdown(PowerDiagnostic& diagnostic);
 bool acpica_enter_shutdown(PowerDiagnostic& diagnostic);
-bool acpica_reset_system(PowerDiagnostic& diagnostic);
+bool platform_reset_system(PowerDiagnostic& diagnostic);

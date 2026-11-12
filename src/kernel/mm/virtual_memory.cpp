@@ -11,9 +11,7 @@ namespace
 {
 constexpr uint64_t kPageMask = ~(kPageSize - 1);
 constexpr uint64_t kLargePageSize2MiB = 0x200000ull;
-constexpr uint64_t kLargePageMask2MiB = ~(kLargePageSize2MiB - 1);
 constexpr uint64_t kLargePageOffsetMask2MiB = kLargePageSize2MiB - 1;
-constexpr uint64_t kEntryLargePage = 1ull << 7;
 // Long-mode page-table entries carry the NX bit in the high flag range, so the
 // physical-address mask must exclude it explicitly instead of just clearing the
 // low page-offset bits.
@@ -109,6 +107,11 @@ bool VirtualMemory::ensure_table_entry(uint64_t& entry, bool user_visible)
         return true;
     }
 
+    if((entry & (PAGE_PRESENT | PAGE_LARGE)) != PAGE_PRESENT)
+    {
+        return false;
+    }
+
     if(user_visible)
     {
         entry |= static_cast<uint64_t>(PageFlags::User);
@@ -131,6 +134,8 @@ bool VirtualMemory::walk_to_leaf(uint64_t virtual_address,
     uint64_t* pml3 = nullptr;
     uint64_t* pml2 = nullptr;
     uint64_t* pml1 = nullptr;
+    const uint64_t required = user_visible ? table_entry_flags(true) : PAGE_PRESENT;
+    const uint64_t table_mask = required | PAGE_LARGE;
 
     uint64_t& pml4e = pml4[page_index(virtual_address, 39)];
     if(create)
@@ -140,7 +145,7 @@ bool VirtualMemory::walk_to_leaf(uint64_t virtual_address,
             return false;
         }
     }
-    else if(0 == pml4e)
+    else if((pml4e & table_mask) != required)
     {
         return false;
     }
@@ -154,7 +159,7 @@ bool VirtualMemory::walk_to_leaf(uint64_t virtual_address,
             return false;
         }
     }
-    else if(0 == pml3e)
+    else if((pml3e & table_mask) != required)
     {
         return false;
     }
@@ -168,7 +173,7 @@ bool VirtualMemory::walk_to_leaf(uint64_t virtual_address,
             return false;
         }
     }
-    else if(0 == pml2e)
+    else if((pml2e & table_mask) != required)
     {
         return false;
     }
@@ -201,6 +206,21 @@ bool VirtualMemory::map_physical(uint64_t virtual_address,
                       flags_to_entry(flags | PageFlags::Present);
     }
 
+    return true;
+}
+
+bool VirtualMemory::map_reserved_user_page(uint64_t virtual_address,
+                                           uint64_t physical_address,
+                                           PageFlags flags)
+{
+    if(!initialized_ || ((virtual_address | physical_address) & (kPageSize - 1)))
+        return false;
+
+    uint64_t* leaf = nullptr;
+    if(!walk_to_leaf(virtual_address, false, true, &leaf) || *leaf)
+        return false;
+    *leaf = (physical_address & kEntryAddressMask) |
+            flags_to_entry(flags | PageFlags::Present | PageFlags::User);
     return true;
 }
 
@@ -242,8 +262,12 @@ bool VirtualMemory::map_physical_2m(uint64_t virtual_address,
 
         uint64_t* pml2 = kernel_physical_pointer<uint64_t>(pml3e & kEntryAddressMask);
         uint64_t& pml2e = pml2[page_index(current_virtual, 21)];
+        if(pml2e && (pml2e & (PAGE_PRESENT | PAGE_LARGE)) != (PAGE_PRESENT | PAGE_LARGE))
+        {
+            return false;
+        }
         pml2e = (current_physical & kLargePageAddressMask2MiB) |
-                flags_to_entry(flags | PageFlags::Present) | kEntryLargePage;
+                flags_to_entry(flags | PageFlags::Present) | PAGE_LARGE;
     }
 
     return true;
@@ -337,13 +361,13 @@ bool VirtualMemory::translate(uint64_t virtual_address,
 
     const uint64_t* pml4 = kernel_physical_pointer<const uint64_t>(root_);
     const uint64_t pml4e = pml4[page_index(virtual_address, 39)];
-    if(0 == (pml4e & PAGE_PRESENT))
+    if((pml4e & (PAGE_PRESENT | PAGE_LARGE)) != PAGE_PRESENT)
     {
         return false;
     }
     const uint64_t* pml3 = kernel_physical_pointer<const uint64_t>(pml4e & kEntryAddressMask);
     const uint64_t pml3e = pml3[page_index(virtual_address, 30)];
-    if(0 == (pml3e & PAGE_PRESENT))
+    if((pml3e & (PAGE_PRESENT | PAGE_LARGE)) != PAGE_PRESENT)
     {
         return false;
     }
@@ -353,7 +377,7 @@ bool VirtualMemory::translate(uint64_t virtual_address,
     {
         return false;
     }
-    if(0 != (pml2e & kEntryLargePage))
+    if(0 != (pml2e & PAGE_LARGE))
     {
         flags = pml2e & ~kLargePageAddressMask2MiB;
         physical_address =
@@ -391,8 +415,10 @@ bool VirtualMemory::clone_kernel_mappings(uint64_t source_root)
 
 void VirtualMemory::destroy_table(uint64_t& entry, int level, bool free_leaf_pages)
 {
-    if(0 == entry)
+    if((entry & (PAGE_PRESENT | PAGE_LARGE)) != PAGE_PRESENT)
     {
+        // Large aliases refer to caller-owned physical ranges.
+        entry = 0;
         return;
     }
 

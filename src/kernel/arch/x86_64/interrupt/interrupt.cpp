@@ -194,6 +194,8 @@ void Interrupts::load()
 
 void Interrupts::set_vector_handler(uint8_t vector, InterruptHandler pFunction, void* data)
 {
+    if(vector == kLapicSpuriousVector)
+        return;
     irq_handler_function[vector] = pFunction;
     irq_handler_data[vector] = data;
 }

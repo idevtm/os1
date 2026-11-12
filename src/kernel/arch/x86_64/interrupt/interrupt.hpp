@@ -36,9 +36,9 @@
 #define IRQ_TIMER 0
 #define IRQ_KBD 1
 #define IRQ_SERIAL 4
-#define IRQ_SPURIOUS 7
 #define IRQ_IDE 14
 
+constexpr uint8_t kLapicSpuriousVector = 0xFF;
 constexpr uint8_t kDynamicIrqVectorBase = 0x50;
 constexpr uint8_t kDynamicIrqVectorLimit = 0xEF;
 
@@ -87,9 +87,10 @@ void dispatch_irq_hook(int number);
 // Run the registered exception callback for one CPU exception vector.
 void dispatch_exception_handler(int number, TrapFrame* frame);
 
+// Return true for vectors available to ordinary external IRQ dispatch.
 [[nodiscard]] inline bool interrupt_vector_is_external(uint8_t vector)
 {
-    return (vector >= T_IRQ0) && (vector != T_SYSCALL);
+    return vector >= T_IRQ0 && vector != T_SYSCALL && vector != kLapicSpuriousVector;
 }
 
 [[nodiscard]] inline bool interrupt_vector_is_legacy_irq(uint8_t vector)

@@ -4,6 +4,7 @@
 
 #include "platform/acpica_ec.hpp"
 #include "platform/acpica_integration.hpp"
+#include "platform/state.hpp"
 extern "C"
 {
 #include "acpi.h"
@@ -12,6 +13,36 @@ namespace
 {
 ACPI_GENERIC_ADDRESS control_a{}, control_b{};
 UINT8 type_a{}, type_b{};
+constexpr UINT32 kPowerEntryWaitUs = 100'000;
+
+bool cf9_reset_supported()
+{
+    for(size_t i = 0; i < g_platform.device_count; ++i)
+    {
+        const auto& device = g_platform.devices[i];
+        if(device.vendor_id == 0x8086 && device.class_code == 6 && device.subclass == 1 &&
+           (device.device_id == 0x2918 || device.device_id == 0x1c49 || device.device_id == 0x8c5c))
+            return true;
+    }
+    return false;
+}
+
+bool reset_via_8042()
+{
+    if(!g_platform.acpi_fixed.present ||
+       !(g_platform.acpi_fixed.boot_architecture_flags & ACPI_FADT_8042))
+        return false;
+    for(unsigned attempt = 0; attempt < 100; ++attempt)
+    {
+        UINT32 status = 0;
+        if(ACPI_FAILURE(AcpiOsReadPort(0x64, &status, 8)) || status == 0xff)
+            return false;
+        if(!(status & 2))
+            return ACPI_SUCCESS(AcpiOsWritePort(0x64, 0xfe, 8));
+        AcpiOsStall(100);
+    }
+    return false;
+}
 
 bool control_register(const ACPI_TABLE_FADT& table, bool second, ACPI_GENERIC_ADDRESS& out)
 {
@@ -118,13 +149,33 @@ bool acpica_enter_shutdown(PowerDiagnostic& diagnostic)
         return false;
     if(!checked(diagnostic, "pm1a-enable-write", AcpiWrite(a | (UINT64(1) << 13), &control_a)))
         return false;
-    return !control_b.Address ||
-           checked(diagnostic, "pm1b-enable-write", AcpiWrite(b | (UINT64(1) << 13), &control_b));
+    const bool enabled =
+        !control_b.Address ||
+        checked(diagnostic, "pm1b-enable-write", AcpiWrite(b | (UINT64(1) << 13), &control_b));
+    // PM1a accepted SLP_EN. Wait even if the PM1b write reports an error.
+    AcpiOsStall(kPowerEntryWaitUs);
+    return enabled;
 }
-bool acpica_reset_system(PowerDiagnostic& diagnostic)
+bool platform_reset_system(PowerDiagnostic& diagnostic)
 {
     diagnostic = {};
-    if(!acpica_tables_initialized())
-        return failure(diagnostic, "acpi-tables", "not-initialized");
-    return checked(diagnostic, "reset-register", AcpiReset());
+    bool accepted = acpica_tables_initialized()
+                        ? checked(diagnostic, "reset-register", AcpiReset())
+                        : failure(diagnostic, "acpi-tables", "not-initialized");
+    if(accepted)
+        AcpiOsStall(kPowerEntryWaitUs);
+
+    // ICH9, HM65, and H81 LPC reset control. Select host reset before triggering it.
+    if(cf9_reset_supported() && ACPI_SUCCESS(AcpiOsWritePort(0xcf9, 0x02, 8)) &&
+       ACPI_SUCCESS(AcpiOsWritePort(0xcf9, 0x06, 8)))
+    {
+        accepted = true;
+        AcpiOsStall(kPowerEntryWaitUs);
+    }
+    if(reset_via_8042())
+    {
+        accepted = true;
+        AcpiOsStall(kPowerEntryWaitUs);
+    }
+    return accepted;
 }

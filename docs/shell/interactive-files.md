@@ -83,11 +83,14 @@ With no argument, it prints one newline. Quoted spaces and parentheses remain pa
 For example, `echo "f(x)" > /tmp/result` writes `f(x)` and a newline to the file.
 See [Typed context and basic commands](typed-context.md) for the `echo` binding.
 
-Here-document collection prints no additional prompt; console input echo remains active.
+Collection prints no additional prompt. Console input echo stays active.
+If the console rejects a command before collection, it discards the body through the recognized delimiter.
 Content has no variable expansion, dot termination, or special operator interpretation.
 The shell collects it in an unlinked `/tmp` file before opening the output file.
 Premature EOF or collection failure prevents output creation or truncation.
 After an overlong line or storage failure, collection drains to the marker or EOF.
+If parsing fails, the console discards the body when it can identify the delimiter.
+A here-document operator inside a typed expression stays part of the expression.
 Temporary storage is released when the command finishes or preparation fails.
 
 Commands permit 1023 bytes; legacy commands retain the 16-argument limit.
@@ -133,9 +136,16 @@ wq
 
 The editor holds at most 64 KiB of text and a separate 64 KiB insertion buffer.
 These buffers occupy shell BSS; they do not add 128 KiB to the initrd file.
-Saving truncates the destination before writing.
-A failed save can leave a partial file; the editor retains its dirty buffer for another save attempt.
-There is no atomic replacement or concurrent-edit conflict detection.
+The editor writes a temporary file in the destination directory.
+After the write succeeds, it closes the file and renames it over the destination.
+The move checks the identity of the temporary file before it replaces the destination.
+If the temporary write fails, the original stays in place.
+The editor removes its own temporary file on failure and reports its name if cleanup cannot be confirmed.
+A save error leaves the edit buffer dirty.
+Ext2 refuses to replace an open destination, including a destination used as the editor input stream.
+Replacement follows the filesystem durability contract.
+The directory must permit lookup, inspection, creation, removal, and rename.
+Concurrent edits use the last successful replacement.
 
 At the editor command prompt, console Ctrl-D follows the guarded `q` rule.
 Finite redirected input cannot provide another command after EOF.
