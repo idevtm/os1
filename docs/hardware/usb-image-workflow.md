@@ -4,9 +4,9 @@ The USB menu creates a bootable BIOS/UEFI disk with a preformatted ext2 data par
 Separate update actions preserve the existing data layout and files.
 
 ```text
-Create: build boot image + ext2 + programs -> select USB -> confirm disk ID -> write -> verify -> eject
+Create: build boot image + ext2 + programs -> select disk marked Erase and write -> write -> verify -> eject
 Update: build -> select USB -> snapshot and backup -> stage and validate
-        -> confirm disk ID -> apply selected regions -> verify -> eject
+        -> select Apply -> write selected regions -> verify -> eject
 ```
 
 ## Initial creation
@@ -14,12 +14,10 @@ Update: build -> select USB -> snapshot and backup -> stage and validate
 1. Run `./os1.sh` without sudo.
 2. Select **USB > Build and write USB stick**.
 3. Select **Create boot + ext2 data image (erase USB)**.
-4. Move from **Cancel** to the target disk after the build completes.
-5. Press Enter to select the disk.
-6. Type the displayed disk identifier, such as `disk13`.
-7. Press Enter to confirm.
-8. Enter your macOS password if sudo requests it.
-9. Wait for readback verification and ejection.
+4. After the build, move from **Cancel** to the target disk marked **Erase and write**.
+5. Press Enter to start the write.
+6. If sudo requests your macOS password, enter it.
+7. Wait for readback verification and ejection.
 
 A full-image write replaces the selected disk's partition layout and contents.
 The tool removes an old backup GPT outside the generated image.
@@ -27,12 +25,9 @@ It does not securely erase unused sectors.
 
 The USB menus discard queued input and start on **Cancel**.
 Press `q` or Escape to cancel a menu.
-The confirmation prompt discards queued input again.
-Press Enter with a blank line to cancel confirmation.
-An incorrect identifier cancels the write.
 The tool records the macOS I/O Registry entry ID for the selected disk attachment.
-It checks that ID and the disk metadata again after confirmation and before writing.
-A replacement disk must pass a new selection and confirmation.
+It checks that ID and the disk metadata again after selection and before writing.
+Select a replacement disk in a new operation.
 
 The generated file is `build/usb-write/artifacts/os1-usb-data.img` by default.
 It contains the BIOS payload, a 32 MiB FAT16 EFI System Partition, and a 128 MiB ext2 partition.
@@ -76,18 +71,16 @@ USB menu -> diagnostic image -> automatic boot -> try keys
 
 1. Run `./os1.sh usb` without sudo.
 2. Select **Create keyboard diagnostic image (erase USB)**.
-3. Select the target USB disk after the build completes.
-4. Type the selected disk identifier.
-5. Press Enter to confirm.
-6. Enter your password if the writer requests it.
-7. Wait for verification and ejection.
-8. Boot the target computer from the UEFI USB entry.
-9. Wait for the USB diagnostic summary and shell.
-10. Press a few ordinary keys.
-11. Wait for a warm restart and the **previous boot log saved** message.
-12. Power off after that message.
-13. Connect the stick to the development computer.
-14. Copy the `os1logs` folder from the **OS1 EFI** volume.
+3. After the build, select the target USB disk marked **Erase and write**.
+4. If the writer requests your password, enter it.
+5. Wait for verification and ejection.
+6. Boot the target computer from the UEFI USB entry.
+7. Wait for the USB diagnostic summary and shell.
+8. Press a few ordinary keys.
+9. Wait for a warm restart and the **previous boot log saved** message.
+10. Power off after that message.
+11. Connect the stick to the development computer.
+12. Copy the `os1logs` folder from the **OS1 EFI** volume.
 
 The image starts diagnostics without a boot-menu key press or shell command.
 It replaces USB contents and contains no ext2 data partition.
@@ -175,8 +168,8 @@ Backups remain in `build/usb-write/artifacts/usb-backups/` after success, cancel
 Retain them until the updated stick passes your boot and file checks.
 
 Staging and e2fsprogs run as your normal user.
-After staging succeeds, type the displayed disk identifier.
-Press Enter to confirm the update.
+After staging succeeds, move from **Cancel** to **Apply** for the displayed disk.
+Press Enter to apply the update.
 The tool checks the device identity and complete original managed-region hash again before writing.
 A changed disk, changed layout, or changed content stops the operation before any update write.
 It verifies readback after cache synchronization and then ejects the stick.

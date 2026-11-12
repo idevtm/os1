@@ -296,9 +296,12 @@ def menu_frame(title, items, selected, detail, columns, rows):
 
 
 def choose_menu(title, options, detail="", cancel_label="Cancel", descriptions=None, *,
-                require_selection=False):
+                require_selection=False, action_min_columns=0):
     """Arrow-key menu; Enter selects, q/Escape cancels. Restore the terminal on exit."""
     fd = sys.stdin.fileno()
+    if action_min_columns and not sys.stderr.isatty():
+        raise ValueError("display the USB menu on a terminal")
+    display_fd = sys.stderr.fileno() if action_min_columns else fd
     saved = termios.tcgetattr(fd)
     handlers = {}
     selected = 0
@@ -313,17 +316,23 @@ def choose_menu(title, options, detail="", cancel_label="Cancel", descriptions=N
         tty.setcbreak(fd, termios.TCSAFLUSH if require_selection else termios.TCSANOW)
         sys.stderr.write("\x1b[?1049h\x1b[?25l")
         while True:
-            columns, rows = os.get_terminal_size(fd)
+            columns, rows = os.get_terminal_size(display_fd)
+            if columns < action_min_columns:
+                raise ValueError("widen the terminal to display the USB disk and action")
             selected_detail = descriptions.get(items[selected][0], detail) if descriptions else detail
             sys.stderr.write(menu_frame(title, items, selected, selected_detail, columns, rows))
             sys.stderr.flush()
             key = menu_key(fd)
-            if key in (b"\x1b[A", b"\x1bOA", b"k"):
+            if key in (b"\x1b[A", b"\x1bOA") or (not action_min_columns and key == b"k"):
                 selected = (selected - 1) % len(items)
-            elif key in (b"\x1b[B", b"\x1bOB", b"j"):
+            elif key in (b"\x1b[B", b"\x1bOB") or (not action_min_columns and key == b"j"):
                 selected = (selected + 1) % len(items)
             elif key in (b"\r", b"\n"):
-                return items[selected][0]
+                choice = items[selected][0]
+                if choice is not None and action_min_columns:
+                    if os.get_terminal_size(display_fd).columns < action_min_columns:
+                        raise ValueError("widen the terminal to display the USB disk and action")
+                return choice
             elif key in (b"q", b"Q", b"\x1b", b"\x1b[D", b"\x1bOD", b""):
                 return None
     finally:
@@ -381,21 +390,10 @@ def sudo_terminal():
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
-def confirm_device(selected, action):
-    disk = selected["DeviceIdentifier"]
-    label = menu_text(selected.get("MediaName", ""))
-    capacity = selected["TotalSize"] / 1_000_000_000
-    with sudo_terminal():
-        termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
-        print(f"\n{action} /dev/{disk} — {label} ({capacity:.1f} GB).\n"
-              f"Type {disk} and press Enter to confirm. Press Enter alone to cancel: ",
-              end="", file=sys.stderr, flush=True)
-        if sys.stdin.readline() != disk + "\n":
-            return False
-    current = disk_info(disk)
+def validate_selected_device(selected):
+    current = disk_info(selected["DeviceIdentifier"])
     if not eligible(current, 0) or identity(current) != identity(selected):
         raise ValueError("USB identity changed after selection; refusing to write")
-    return True
 
 
 def sudo_step(command, purpose, **kwargs):
@@ -414,11 +412,13 @@ def update_interactive(args, mode):
     disks = list_disks(usb_data_image.DATA_START + 4 * 1024 * 1024)
     if not disks:
         raise ValueError("no eligible USB disk is available")
-    options = [(i, f"Update {info['DeviceIdentifier']} — {info.get('MediaName', '')} "
+    options = [(i, f"{info['DeviceIdentifier']}: Update — {info.get('MediaName', '')} "
                    f"({info['TotalSize'] / 1_000_000_000:.1f} GB)") for i, info in enumerate(disks)]
     choice = choose_menu("Select USB to update", options,
                          "Only recognized os1 boot/data layouts are accepted. A backup is retained before changes.",
-                         require_selection=True)
+                         require_selection=True,
+                         action_min_columns=max(len(info["DeviceIdentifier"]) for info in disks)
+                         + len(": Update") + 3)
     if choice is None:
         return
     selected = disks[choice]
@@ -451,9 +451,15 @@ def update_interactive(args, mode):
         with staged.open('rb') as source:
             after = usb_data_image.digest(source, 0, staged.stat().st_size)
         print(f"Prepared {mode} update. Backup: {backup}", flush=True)
-        if not confirm_device(selected, f"Apply {mode} update to"):
+        label = menu_text(selected.get("MediaName", ""))
+        action = f"{disk}: Apply {mode} update"
+        if choose_menu("Apply staged USB update",
+                       [("apply", f"{action} — {label}")],
+                       f"Backup: {backup}", require_selection=True,
+                       action_min_columns=len(action) + 3) is None:
             print(f"Cancelled; USB disk unchanged. Backup: {backup}")
             return
+        validate_selected_device(selected)
         sudo_step(["--update", str(staged), "--mode", mode, "--before-sha256", before,
                    "--sha256", after, *device_args], f"write verified {mode} regions on /dev/{disk}")
     print(f"Pre-update backup retained: {backup}")
@@ -547,19 +553,20 @@ def interactive(args):
     disks = list_disks(size)
     if not disks:
         raise ValueError("no writable external physical USB disk with 512-byte sectors is available; image is ready")
-    options = [(index, f"Write to {info['DeviceIdentifier']} — {info.get('MediaName', '')} "
+    action = ": Erase and write"
+    options = [(index, f"{info['DeviceIdentifier']}{action} — {info.get('MediaName', '')} "
                        f"({info['TotalSize'] / 1_000_000_000:.1f} GB)")
                for index, info in enumerate(disks)]
-    choice = choose_menu("Write image to USB", options,
-                         f"{image.name} — writing the image replaces the selected disk's contents.",
-                         require_selection=True)
+    choice = choose_menu("Erase USB and write image", options,
+                         f"Enter on a disk writes {image.name} in place of its contents.",
+                         require_selection=True,
+                         action_min_columns=max(len(info["DeviceIdentifier"]) for info in disks)
+                         + len(action) + 3)
     if choice is None:
         print("Cancelled; USB disk unchanged.")
         return
     selected = disks[choice]
-    if not confirm_device(selected, "Replace the contents of"):
-        print("Cancelled; USB disk unchanged.")
-        return
+    validate_selected_device(selected)
     disk = selected["DeviceIdentifier"]
     command = [sys.executable, "-I", str(Path(__file__).resolve()), "--write", str(image),
                "--disk", disk, "--identity", json.dumps(identity(selected)), "--sha256", checksum]
