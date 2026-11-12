@@ -73,6 +73,7 @@ target_compile_options(os1_acpica PRIVATE -O2 -w)
 
 add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/core/wall_clock.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/core/trap_dispatch.cpp"
   "${OS1_REPO_ROOT}/src/kernel/buffer/buffer.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/channel.cpp"
   "${OS1_REPO_ROOT}/src/kernel/ipc/kernel_provider.cpp"
@@ -208,6 +209,7 @@ add_executable(os1_host_tests
   kernel/pci_msi_tests.cpp
   kernel/pci_resource_tests.cpp
   kernel/virtio_pci_transport_tests.cpp
+  kernel/trap_dispatch_tests.cpp
   kernel/wait_queue_tests.cpp
   kernel/arp_cache_tests.cpp
   kernel/ehci_tests.cpp

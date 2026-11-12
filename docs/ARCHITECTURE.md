@@ -1161,6 +1161,10 @@ The C++ dispatcher receives the same frame layout on each path.
 Interrupts and scheduler switches restore the full frame through `IRETQ`.
 An eligible same-thread syscall return uses the `SYSRET` fast path.
 
+The local APIC uses vector `0xFF` for spurious interrupts.
+The dispatcher returns to the interrupted thread without calling an IRQ handler or sending an end-of-interrupt signal.
+Device routes and callbacks cannot use this vector.
+
 Direct kernel handoffs mask interrupts before selecting or publishing the next thread.
 Assembly entry also masks interrupts before changing the stack, CR3, current-thread pointer, or saved-register state.
 Only the destination frame restores the interrupt-enable flag through `iretq`.
