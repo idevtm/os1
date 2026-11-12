@@ -118,7 +118,7 @@ DiskNode* node(DiskFs& fs,
     auto* n = static_cast<DiskNode*>(kmalloc(sizeof(DiskNode), KmallocFlags::Zero));
     if(!n)
         return nullptr;
-    ++fs.references;
+    __atomic_add_fetch(&fs.references, 1u, __ATOMIC_RELAXED);
     __atomic_add_fetch(&fs.nodes, 1u, __ATOMIC_RELAXED);
     if(!fs.identity)
         fs.identity = vfs_identity();
