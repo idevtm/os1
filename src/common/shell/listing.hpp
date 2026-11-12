@@ -1,5 +1,5 @@
 #pragma once
-#include <stdint.h>
+#include "shell/utc.hpp"
 
 namespace os1::shell
 {
@@ -29,47 +29,7 @@ struct LongListingRow
             return;
         }
 
-        constexpr unsigned seconds_per_day = 86400;
-        const uint64_t seconds = modified_ns / 1000000000ull;
-        const unsigned day_seconds = seconds % seconds_per_day;
-        unsigned days = seconds / seconds_per_day;
-        unsigned year = 1970;
-        // A uint64_t nanosecond timestamp spans fewer than 585 calendar years.
-        for(; days >= 365 + leap(year); ++year)
-            days -= 365 + leap(year);
-        constexpr unsigned month_days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-        unsigned month = 0;
-        for(; month < 11; ++month)
-        {
-            unsigned count = month_days[month] + (month == 1 && leap(year));
-            if(days < count)
-                break;
-            days -= count;
-        }
-
-        digits(time, year, 4);
-        time[4] = time[7] = '-';
-        digits(time + 5, month + 1, 2);
-        digits(time + 8, days + 1, 2);
-        digits(time + 11, day_seconds / 3600, 2);
-        time[13] = time[16] = ':';
-        digits(time + 14, day_seconds / 60 % 60, 2);
-        digits(time + 17, day_seconds % 60, 2);
-    }
-
-private:
-    static unsigned leap(unsigned year)
-    {
-        return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    }
-
-    static void digits(char* output, unsigned value, unsigned width)
-    {
-        while(width)
-        {
-            output[--width] = char('0' + value % 10);
-            value /= 10;
-        }
+        format_utc(time, utc_time(modified_ns));
     }
 };
 }  // namespace os1::shell

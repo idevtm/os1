@@ -1,5 +1,6 @@
 #pragma once
 
+#include <os1/clock.hpp>
 #include <os1/context.hpp>
 #include <os1/file_tools.hpp>
 #include <os1/pager.hpp>
@@ -49,7 +50,8 @@ enum class Method
     Diagnostic,
     Log,
     SystemControl,
-    Pid
+    Pid,
+    ClockPrint
 };
 struct Binding
 {
@@ -88,7 +90,8 @@ constexpr Binding bindings[] = {{"pager.show", Method::Pager},
                                 {"text.cat", Method::Copy},
                                 {"os.system.log.print", Method::Log},
                                 {"process.shell.history.print", Method::Log},
-                                {"process.pid", Method::Pid}};
+                                {"process.pid", Method::Pid},
+                                {"os.system.clock.print", Method::ClockPrint}};
 inline constexpr char diagnostic_prefix[] = "os.system.diagnostics.";
 inline int diagnostic_kind(const char* name)
 {
@@ -334,6 +337,8 @@ inline const char* boolean_parameter(Method method)
             return "list";
         case Method::Usage:
             return "logical";
+        case Method::ClockPrint:
+            return "iso";
         case Method::Copy:
         case Method::Remove:
         case Method::RemoveDirectory:
@@ -379,7 +384,7 @@ struct Call
     Data values{};
     int nodes[4]{-1, -1, -1, -1}, streams[4]{-1, -1, -1, -1};
     bool strict = false, cat = false, recursive = false, logical = false, detailed_list = false;
-    bool pid_label = false;
+    bool pid_label = false, iso_clock = false;
     const char* error = nullptr;
     char target[128]{};
     long status = 0;
@@ -516,6 +521,12 @@ struct Call
             boolean_slot = 1;
             count = 2;
         }
+        if(method == Method::ClockPrint)
+        {
+            parameters[0] = {"iso", false, false, alias ? alias->option : char(0)};
+            boolean_slot = 0;
+            count = 1;
+        }
         int slots[4]{};
         size_t starts[4]{};
         if(!shell::bind_arguments(
@@ -640,6 +651,8 @@ struct Call
                         logical = value;
                     else if(method == Method::List)
                         detailed_list = value;
+                    else if(method == Method::ClockPrint)
+                        iso_clock = value;
                     else
                         recursive = value;
                     continue;
@@ -1293,6 +1306,19 @@ inline long execute(Call& call)
 {
     if(text_method(call.method))
         return run_text(call);
+    if(call.method == Method::ClockPrint)
+    {
+        uint64_t ns = 0;
+        long status = clock::now(ns);
+        if(status < 0)
+        {
+            files::message("wall clock unavailable\n");
+            return status;
+        }
+        char text[24];
+        clock::format(text, ns, call.iso_clock);
+        return files::put(1, text, files::length(text)) && files::put(1, "\n", 1) ? 0 : OS1_ERR_IO;
+    }
     char a[256]{}, b[256]{};
     if(call.method != Method::SetEnvironment &&
        (!call.string(0, a, sizeof(a)) ||

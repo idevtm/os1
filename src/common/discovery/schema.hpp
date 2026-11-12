@@ -150,6 +150,18 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
             d.add("assignment", T::Record);
         return d;
     }
+    if(!interface && member == clock_snapshot_format)
+    {
+        d.add("style", T::Enum, "utc", "utc|iso8601");
+        return d;
+    }
+    if(same(path, "os.system.clock.now"))
+        return d;
+    if(same(path, "os.system.clock.print"))
+    {
+        d.add("iso", T::Boolean, "false");
+        return d;
+    }
     if(starts(path, "os.system.diagnostics.") || same(path, "process.pid"))
         return d;
     if(same(path, "process.shell.bindings.remove"))

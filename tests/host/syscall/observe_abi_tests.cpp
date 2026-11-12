@@ -18,6 +18,7 @@ TEST(ObserveAbi, ConstantsAreStable)
     EXPECT_EQ(11, OS1_OBSERVE_ACPI);
     EXPECT_EQ(12, OS1_OBSERVE_USB);
     EXPECT_EQ(14, OS1_OBSERVE_USB_INPUT_FAILURES);
+    EXPECT_EQ(16, OS1_OBSERVE_WALL_CLOCK);
     EXPECT_EQ(256, OS1_OBSERVE_EVENT_RING_CAPACITY);
     EXPECT_EQ(32, OS1_OBSERVE_DRIVER_NAME_BYTES);
     EXPECT_EQ(32, OS1_OBSERVE_KMEM_NAME_BYTES);
@@ -134,6 +135,7 @@ TEST(ObserveAbi, UsbInputFailureLayout)
 #include <thread>
 #include <vector>
 
+#include "core/wall_clock.hpp"
 #include "debug/event_ring.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/usb/diagnostics.hpp"
@@ -175,6 +177,31 @@ protected:
         usb::diagnostics::reset_for_test();
     }
 };
+TEST_F(UsbInputObserve, ReadsWallClockWithoutLogAuthority)
+{
+    const ObserveContext context{.frames = &frames};
+    struct Reset
+    {
+        ~Reset()
+        {
+            wall_clock_initialize(0);
+        }
+    } reset;
+    Os1ObserveWallClock sample{};
+    const auto read = [&](uint64_t address, size_t bytes = sizeof(sample)) {
+        return sys_observe(context, OS1_OBSERVE_WALL_CLOCK, address, bytes);
+    };
+    wall_clock_initialize(0);
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, read(kUserImageBase));
+    constexpr uint64_t instant = 1794096000123456789ull;
+    wall_clock_initialize(instant);
+    EXPECT_EQ(OS1_ERR_INVALID, read(kUserImageBase, sizeof(sample) - 1));
+    EXPECT_EQ(OS1_ERR_FAULT, read(kUserImageBase + 4096));
+    EXPECT_EQ(sizeof(sample), read(kUserImageBase));
+    ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase, &sample, sizeof(sample)));
+    EXPECT_EQ(instant, sample.unix_ns);
+}
+
 TEST_F(UsbInputObserve, CopiesRetainedFailureAndRejectsShortOrUnmappedBuffers)
 {
     const ObserveContext context{.frames = &frames};

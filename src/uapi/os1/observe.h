@@ -20,6 +20,7 @@ enum
     OS1_OBSERVE_HARDWARE = 13,
     OS1_OBSERVE_USB_INPUT_FAILURES = 14,
     OS1_OBSERVE_EHCI_STALL_TRACE = 15,
+    OS1_OBSERVE_WALL_CLOCK = 16,
     OS1_USB_INPUT_TRANSFER = 1,
     OS1_USB_INPUT_CONTROLLER = 2,
     OS1_USB_INPUT_ROOT_CHANGE = 3,
@@ -311,3 +312,9 @@ struct Os1ObserveEhciStallTrace
 static_assert(sizeof(Os1EhciStallEvent) == 56);
 static_assert(sizeof(Os1ObserveEhciStallTrace) == 2856);
 #endif
+
+/* OS1_OBSERVE_WALL_CLOCK returns exactly this record on success. */
+typedef struct Os1ObserveWallClock
+{
+    uint64_t unix_ns;
+} Os1ObserveWallClock;

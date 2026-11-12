@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from test_ext2_persistence import boot
 
@@ -30,6 +31,26 @@ def main():
         return result
 
     def first(run, expect):
+        run('inspect .os.system.clock', b'now [property] UtcTime')
+        run('snapshot = os.system.clock.now')
+        original = int(re.search(rb'\n(\d+)\n', run('snapshot.unix_ns'))[1])
+        utc = datetime.fromtimestamp(original // 1_000_000_000, timezone.utc)
+        for field in ('year', 'month', 'day', 'hour', 'minute', 'second', 'nanosecond'):
+            value = original % 1_000_000_000 if field == 'nanosecond' else getattr(utc, field)
+            run(f'snapshot.{field}', f'\n{value}\n'.encode())
+        run('os.system.clock.now.year', b'\n2026\n')
+        run('copied = snapshot')
+        run('snapshot.format(style:"iso8601")', utc.strftime('%Y-%m-%dT%H:%M:%SZ').encode())
+        run('copied.format()', utc.strftime('%Y-%m-%d %H:%M:%S UTC').encode())
+        for command in ('date', 'date -u'):
+            output = run(command)
+            assert re.search(rb'\n2026-11-08 \d{2}:\d{2}:\d{2} UTC\n', output), output
+        output = run('now')
+        assert re.search(rb'\n2026-11-08T\d{2}:\d{2}:\d{2}Z\n', output), output
+        run('date > "/tmp/date.txt"')
+        output = run('cat "/tmp/date.txt"')
+        assert re.search(rb'\n2026-11-08 \d{2}:\d{2}:\d{2} UTC\n', output), output
+        run('snapshot.unix_ns', f'\n{original}\n'.encode())
         run('/bin/vfscheck "times"', b'time authority ok')
         for root in ('/tmp', '/'):
             path = root + '/timed'

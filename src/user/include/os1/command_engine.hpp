@@ -31,7 +31,7 @@ struct Value
     Data data{};
     int fd = -1;
     char object[os1::discovery::path_limit]{};
-    bool exclusive = false;
+    bool exclusive = false, clock_snapshot = false;
     Value() = default;
     Value(const Value&) = delete;
     Value& operator=(const Value&) = delete;
@@ -53,7 +53,7 @@ struct Value
         }
         fd = -1;
         object[0] = 0;
-        exclusive = false;
+        exclusive = clock_snapshot = false;
         os1::context::init(data);
     }
     void take(Value& v)
@@ -64,8 +64,9 @@ struct Value
         v.object[0] = 0;
         fd = v.fd;
         exclusive = v.exclusive;
+        clock_snapshot = v.clock_snapshot;
         v.fd = -1;
-        v.exclusive = false;
+        v.exclusive = v.clock_snapshot = false;
     }
     bool string(const char* s, unsigned bytes)
     {
@@ -288,6 +289,18 @@ inline bool extend(os1::discovery::View& v)
                 v.nodes[at].type = value.data.nodes[1].kind;
                 if(!add_data(v, at, value.data, 1, i))
                     return false;
+                if(value.clock_snapshot)
+                {
+                    const unsigned format = v.add(at,
+                                                  "format",
+                                                  os1::discovery::Kind::Method,
+                                                  "style:ClockStyle=utc -> String",
+                                                  0,
+                                                  0,
+                                                  os1::discovery::clock_snapshot_format,
+                                                  os1::discovery::Local);
+                    v.nodes[format].value = i;
+                }
                 continue;
             }
             if(!describe_handle(v, at, value))
@@ -310,6 +323,7 @@ inline bool clone(const Value& from, Value& to)
 {
     to.clear();
     to.data = from.data;
+    to.clock_snapshot = from.clock_snapshot;
     __builtin_memcpy(to.object, from.object, sizeof(to.object));
     if(from.exclusive)
         return fail("exclusive reference cannot escape its scope");
@@ -980,6 +994,52 @@ inline bool alias_call(const char* operation, Frame& f)
         int list = os1::context::child(environment_data, 0, "path");
         return list >= 0 &&
                os1::shell::copy_value(environment_data, list, out.data, 0, "value", 5) >= 0;
+    }
+    if(same(canonical, "os.system.clock.now"))
+    {
+        uint64_t ns = 0;
+        const long status = clock::now(ns);
+        if(status < 0)
+            return fail("wall clock unavailable", status);
+        if(ns > INT64_MAX)
+            return fail("wall clock outside shell Integer range");
+        const auto utc = shell::utc_time(ns);
+        const int64_t values[] = {utc.year,
+                                  utc.month,
+                                  utc.day,
+                                  utc.hour,
+                                  utc.minute,
+                                  utc.second,
+                                  utc.nanosecond,
+                                  static_cast<int64_t>(ns)};
+        const int root = os1::context::add(out.data, 0, "value", 5, OS1_VALUE_RECORD);
+        if(root < 0)
+            return fail("clock snapshot exceeds value limit");
+        for(unsigned i = 0; i < sizeof(values) / sizeof(*values); ++i)
+        {
+            const char* name = shell::utc_fields[i];
+            if(os1::context::add(out.data,
+                                 root,
+                                 name,
+                                 files::length(name),
+                                 OS1_VALUE_INTEGER,
+                                 nullptr,
+                                 0,
+                                 values[i]) < 0)
+                return fail("clock snapshot exceeds value limit");
+        }
+        out.clock_snapshot = true;
+        return true;
+    }
+    if(member.member == os1::discovery::clock_snapshot_format)
+    {
+        const auto& snapshot = bindings[member.value].value;
+        const int ns = os1::context::child(snapshot.data, 1, "unix_ns");
+        char style[8]{}, text[24];
+        if(!snapshot.clock_snapshot || ns < 0 || !f.string(0, style, sizeof(style)))
+            return fail("clock snapshot unavailable");
+        clock::format(text, snapshot.data.nodes[ns].integer, same(style, "iso8601"));
+        return out.string(text, files::length(text));
     }
     if(same(canonical, "process.pid"))
     {
