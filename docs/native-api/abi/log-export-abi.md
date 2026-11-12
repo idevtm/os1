@@ -107,8 +107,10 @@ Three consecutive disk-export failures suspend automatic export.
 Explicit retry or a changed mount clears suspension.
 A retired ext2 backend still requires a healthy mount; retry does not repair it.
 Temporary export failures do not reset disk suspension.
-Shutdown and reboot attempt a final drain before filesystem synchronization.
-A log-export error does not prevent the system's final filesystem synchronization attempt.
+Shutdown and reboot use a 250 ms scheduler-time deadline for exclusive export admission.
+If admission is busy at the limit, the power request returns WOULD_BLOCK.
+The system holds admission through the final drain and filesystem synchronization.
+A disk-export error does not prevent the final filesystem synchronization attempt.
 
 File operations use the existing 256-byte backend write limit.
 Each export frame can therefore require several writes.

@@ -17,7 +17,20 @@ void poll();
 long run(unsigned target);
 // False means admission deferred before any export effect. Other results are final.
 bool try_run(unsigned target, long& result);
-void final_drain();
+// Hold export admission through the final drain and storage freeze.
+class FinalDrainGuard
+{
+public:
+    FinalDrainGuard() = default;
+    ~FinalDrainGuard();
+    FinalDrainGuard(const FinalDrainGuard&) = delete;
+    FinalDrainGuard& operator=(const FinalDrainGuard&) = delete;
+    bool try_acquire();
+    void drain();
+
+private:
+    bool held_ = false;
+};
 os1_log_export_info info();
 #ifdef OS1_HOST_TEST
 void test_reset();

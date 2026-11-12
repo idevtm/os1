@@ -2,6 +2,7 @@
 #include <os1/input.h>
 #include <os1/observe.h>
 #include <os1/syscall_numbers.h>
+#include <os1/system.h>
 
 #include <algorithm>
 #include <array>
@@ -9,6 +10,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -22,6 +24,7 @@
 #include "log/frame.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
+#include "platform/system_control.hpp"
 #include "proc/startup.hpp"
 #include "proc/user_program.hpp"
 #include "storage/block_device.hpp"
@@ -33,6 +36,8 @@
 #ifdef assert
 #undef assert
 #endif
+extern void (*system_transition_wait_hook)();
+
 namespace log_export
 {
 extern void (*before_remove)(VfsNode*, const char*);
@@ -87,6 +92,9 @@ protected:
     Thread* thread = nullptr;
     uint64_t read_bytes = 0, write_bytes = 0, flushes = 0;
     bool fail_flush = false;
+    bool check_exclusive_flush = false;
+    std::optional<log_export::ForegroundGuard> foreground_to_release;
+    unsigned transition_waits = 0;
     int writes = -1;
     static bool submit(BlockDevice& device, BlockRequest& request)
     {
@@ -97,7 +105,14 @@ protected:
         if(request.operation == BlockOperation::Write)
             self.write_bytes += bytes;
         if(request.operation == BlockOperation::Flush)
+        {
             ++self.flushes;
+            if(self.check_exclusive_flush)
+            {
+                log_export::ForegroundGuard foreground;
+                EXPECT_FALSE(foreground.held);
+            }
+        }
         bool ok = at <= self.disk.size() && bytes <= self.disk.size() - at;
         if(ok && request.operation == BlockOperation::Read)
             std::memcpy(request.buffer, self.disk.data() + at, bytes);
@@ -138,6 +153,8 @@ protected:
     }
     void TearDown() override
     {
+        system_transition_wait_hook = nullptr;
+        foreground_to_release.reset();
         if(thread)
         {
             diagnostic_log::cleanup(thread->process);
@@ -588,13 +605,85 @@ TEST_F(LogExport, DiskFramesSurviveRemountAndBootNumbersIncrease)
     EXPECT_EQ(previous + 1, log_export::info().boot_id);
     EXPECT_EQ(bytes, read((std::string("/disk/log/") + name).c_str()));
 }
+TEST_F(LogExport, ShutdownReportsBusyBeforeStorageSyncWhenAdmissionStaysHeld)
+{
+    mount();
+    events(10);
+    const auto before = flushes;
+    system_transition_wait_hook = [] {
+        auto& test =
+            static_cast<LogExport_ShutdownReportsBusyBeforeStorageSyncWhenAdmissionStaysHeld_Test&>(
+                *active);
+        ++test.transition_waits;
+    };
+    {
+        log_export::ForegroundGuard foreground;
+        ASSERT_TRUE(foreground.held);
+        EXPECT_EQ(OS1_ERR_WOULD_BLOCK, system_control(OS1_SYSTEM_SHUTDOWN));
+        EXPECT_EQ(before, flushes);
+        EXPECT_EQ(250u, transition_waits);
+    }
+    EXPECT_EQ(0, system_control(OS1_SYSTEM_SYNC));
+}
+
+TEST_F(LogExport, ShutdownDrainsAfterAdmissionClearsAndKeepsItThroughStorageFreeze)
+{
+    mount();
+    events(10);
+    foreground_to_release.emplace();
+    ASSERT_TRUE(foreground_to_release->held);
+    system_transition_wait_hook = [] {
+        auto& test = static_cast<
+            LogExport_ShutdownDrainsAfterAdmissionClearsAndKeepsItThroughStorageFreeze_Test&>(
+            *active);
+        if(++test.transition_waits == 3)
+            test.foreground_to_release.reset();
+        diagnostic_log::tick(1'000'000);
+    };
+    check_exclusive_flush = true;
+    EXPECT_EQ(OS1_ERR_UNSUPPORTED, system_control(OS1_SYSTEM_SHUTDOWN));
+    check_exclusive_flush = false;
+    EXPECT_EQ(3u, transition_waits);
+    EXPECT_GT(log_export::info().kernel_cursor, 0u);
+    EXPECT_GT(flushes, 0u);
+    log_export::ForegroundGuard foreground;
+    EXPECT_TRUE(foreground.held);
+    EXPECT_EQ(0, system_control(OS1_SYSTEM_SYNC));
+}
+
+TEST_F(LogExport, RebootWaitsForActiveExportBeforeStorageSync)
+{
+    mount();
+    events(10);
+    system_transition_wait_hook = [] {
+        auto& test =
+            static_cast<LogExport_RebootWaitsForActiveExportBeforeStorageSync_Test&>(*active);
+        ++test.transition_waits;
+        diagnostic_log::tick(251'000'000);
+    };
+    log_export::after_history_snapshot = [] {
+        auto& test =
+            static_cast<LogExport_RebootWaitsForActiveExportBeforeStorageSync_Test&>(*active);
+        const auto before = test.flushes;
+        EXPECT_EQ(OS1_ERR_WOULD_BLOCK, system_control(OS1_SYSTEM_REBOOT));
+        EXPECT_EQ(before, test.flushes);
+    };
+    EXPECT_EQ(0, log_export::run(OS1_LOG_EXPORT_TMP));
+    EXPECT_EQ(1u, transition_waits);
+    EXPECT_EQ(0, system_control(OS1_SYSTEM_SYNC));
+}
+
 TEST_F(LogExport, AutomaticExportSkipsReadOnlyMount)
 {
     mount(OS1_EXT2_FIXTURE, true);
     events(100);
     diagnostic_log::tick(2'000'000'000);
     log_export::poll();
-    log_export::final_drain();
+    {
+        log_export::FinalDrainGuard drain;
+        ASSERT_TRUE(drain.try_acquire());
+        drain.drain();
+    }
     EXPECT_EQ(0u, log_export::info().failures);
     EXPECT_EQ(0u, write_bytes);
     EXPECT_EQ(0u, flushes);

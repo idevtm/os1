@@ -1895,12 +1895,14 @@ No new kernel service, syscall, IPC layout, or process is required.
 The [SystemControl provider](native-api/abi/system-control-abi.md) uses the native kernel adapter for synchronization, shutdown, and reboot.
 
 ```text
-shell -> SystemControl capability -> ext2 freeze and sync -> explicit firmware transition
+shell -> SystemControl capability -> exclusive log drain -> ext2 sync and freeze -> firmware transition
 init -> shell child -> wait and reap -> fresh shell
 ```
 
 Only the bootstrap root grant contains the new system-control right. Child launch can attenuate that right.
-Shutdown freezes ext2 admission before the final flush. Failed transitions reopen admission and report failure.
+Power requests use a 250 ms scheduler-time deadline for exclusive log-export admission.
+The request holds this admission through the final log drain and ext2 synchronization.
+Ext2 freezes the volume before it releases the volume guard. Failed transitions reopen admission and report failure.
 Shell command completion synchronizes possible writes. Reads leave ext2 timestamps unchanged under the existing noatime policy.
 Init stays alive to supervise the primary shell. Nested shells retain ordinary child-process behavior.
 
@@ -1952,7 +1954,7 @@ Its retained Operation waits for admission, with one-millisecond dispatch backof
 Other ready requests can proceed while export waits.
 After admission, export executes once; storage errors complete the Operation without automatic replay.
 Filesystem failures suspend automatic export without disabling memory capture.
-Shutdown and reboot attempt a final drain before filesystem synchronization.
+Shutdown and reboot attempt a final drain after they acquire exclusive export admission.
 See the [export plan](archive/native-api/2026-11-09-log-export.md) for resource changes and validation limits.
 
 ## Passive hardware reflection

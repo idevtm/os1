@@ -5,7 +5,7 @@ SystemControl synchronizes persistent storage, requests power transitions, and c
 ```text
 bootstrap root grant: SYSTEM_CONTROL
     -> bind SystemControl -> copied empty request -> serialized transition
-    -> freeze ext2 -> synchronize -> explicit ACPI power operation
+    -> exclusive log drain -> ext2 sync and freeze -> explicit ACPI power operation
 ```
 
 ## Authority and methods
@@ -20,8 +20,8 @@ This bootstrap policy grants system control to ordinary children of the administ
 | ID | Method | Input | Result |
 | ---: | --- | --- | --- |
 | 1 | `sync` | Empty | Synchronize a dirty persistent volume. A clean volume requires no extra flush. |
-| 2 | `shutdown` | Empty | Freeze and synchronize storage, then request ACPI S5. |
-| 3 | `reboot` | Empty | Freeze and synchronize storage, then use the ACPI reset register. |
+| 2 | `shutdown` | Empty | Synchronize and freeze storage, then request ACPI S5. |
+| 3 | `reboot` | Empty | Synchronize and freeze storage, then use the ACPI reset register. |
 | 4 | `ehci_trace_start` | u32 input identity | Start an [EHCI stall trace](input-abi.md#ehci-stall-trace) and return a positive ticket as application status. |
 | 5 | `ehci_trace_stop` | u32 ticket | Stop the matching trace. |
 
@@ -37,8 +37,11 @@ An accepted asynchronous request can continue after its Operation descriptor clo
 
 ## Ordering and platform limits
 
-One admission flag serializes synchronization and power requests. Trace controls use separate admission. The ext2 admission guard rejects a busy volume.
-Successful admission excludes concurrent filesystem operations.
+One admission flag serializes synchronization and power requests. Trace controls use separate admission.
+A power request uses a 250 ms scheduler-time deadline for exclusive log-export admission.
+If this wait expires, the request returns WOULD_BLOCK before storage synchronization.
+The request holds export admission through the final log drain and storage synchronization.
+The ext2 admission guard rejects a busy volume.
 Successful final synchronization freezes new filesystem operations until the machine stops or transition failure reopens admission.
 This prevents a concurrent process from making the volume dirty after the final sync.
 This interface does not provide general process termination, service shutdown callbacks, or driver unload.
@@ -83,6 +86,7 @@ shell: system command failed: shutdown status=-5; machine remains running
 | Stage | Meaning |
 | --- | --- |
 | `transition-admission` | Another system request is active. |
+| `log-drain-admission` | The wait for exclusive log-export admission expired. |
 | `storage-sync` | Storage synchronization or filesystem admission failed. |
 | `acpi-tables`, `fadt-lookup`, `fadt-length`, `fadt-profile` | ACPI tables are unavailable, invalid, or unsupported. |
 | `pm1a-control`, `pm1b-control` | A control register description is invalid. |
