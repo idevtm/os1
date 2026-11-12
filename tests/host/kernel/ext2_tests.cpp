@@ -32,6 +32,8 @@ struct Disk
     bool fail_read = false, fail_flush = false;
     unsigned flushes = 0, total_writes = 0;
     uint32_t unreadable_block = UINT32_MAX;
+    uint32_t counted_block = UINT32_MAX;
+    unsigned counted_reads = 0;
     Disk()
     {
         std::ifstream file(OS1_EXT2_FIXTURE, std::ios::binary);
@@ -43,6 +45,8 @@ struct Disk
         size_t at = start + size_t(block) * 4096;
         if(d.fail_read || block == d.unreadable_block || at + 4096 > d.bytes.size())
             return false;
+        if(block == d.counted_block)
+            ++d.counted_reads;
         std::memcpy(out, d.bytes.data() + at, 4096);
         return true;
     }
@@ -126,6 +130,27 @@ TEST_F(Ext2, CreateIndirectSparseTruncateAndReload)
     EXPECT_EQ(reboot->write(number, file, ext2::max_file_bytes, "x", 1), OS1_ERR_RANGE);
     EXPECT_EQ(reboot->sync(), 0);
 }
+TEST_F(Ext2, IndirectMappingIsReadOncePerMultiBlockRead)
+{
+    uint32_t number = 0;
+    ext2::Inode file{};
+    ASSERT_EQ(fs->create(2, root, "cached", 6, false, number, file), 0);
+    constexpr size_t first_indirect = 12 * ext2::block_bytes;
+    std::vector<uint8_t> data(3 * ext2::block_bytes, 0x6d);
+    ASSERT_EQ(data.size(), fs->write(number, file, first_indirect, data.data(), data.size()));
+    disk.counted_block = ext2::u32(file.bytes + 88);
+    ASSERT_NE(0u, disk.counted_block);
+
+    std::vector<uint8_t> actual(data.size());
+    ASSERT_EQ(data.size(), fs->read(file, first_indirect, actual.data(), actual.size()));
+    EXPECT_EQ(data, actual);
+    EXPECT_EQ(1u, disk.counted_reads);
+
+    ASSERT_EQ(data.size(), fs->read(file, first_indirect, actual.data(), actual.size()));
+    EXPECT_EQ(data, actual);
+    EXPECT_EQ(2u, disk.counted_reads);
+}
+
 TEST_F(Ext2, AlignedFullBlockOverwriteDoesNotReadOldData)
 {
     uint32_t number = 0;

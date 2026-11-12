@@ -105,6 +105,7 @@ Native copied transfers retain the 256-byte limit.
 Descriptor I/O and log export can transfer up to one ext2 block per backend call.
 A full aligned write replaces the data block without reading it first.
 A partial write preserves the bytes outside the written range.
+Each backend read loads the file's indirect block at most once.
 File `info` reports cached size and diagnostic counts; ext2 does not expose a tmpfs page quota.
 Its `data_pages` and `open_instances` fields are zero, and `max_pages` reports filesystem blocks.
 Counts are individual observations rather than a transaction snapshot.
