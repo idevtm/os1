@@ -26,6 +26,7 @@
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "platform/system_control.hpp"
+#include "proc/process.hpp"
 #include "proc/startup.hpp"
 #include "proc/user_program.hpp"
 #include "storage/block_device.hpp"
@@ -1139,6 +1140,51 @@ TEST(LogExportAuthority, RequiresControlForExportButNotStatus)
     EXPECT_EQ(sizeof(os1_log_export_info), result.payload_bytes);
 }
 }  // namespace
+
+TEST_F(LogExport, VfsTickWakesWorkerWithoutReadingStorage)
+{
+    mount();
+    shell();
+    Process* kernel = create_kernel_process(0);
+    ASSERT_NE(nullptr, kernel);
+    ASSERT_TRUE(start_vfs_worker(kernel, frames));
+    Thread* worker = first_thread();
+    while(worker && worker->process != kernel)
+        worker = next_thread(worker);
+    ASSERT_NE(nullptr, worker);
+    ASSERT_EQ(ThreadState::Blocked, worker->state);
+
+    auto* disk_root = static_cast<VfsNode*>(open("/disk"));
+    ASSERT_NE(nullptr, disk_root);
+    OpenInstance* opened = nullptr;
+    ASSERT_EQ(0, disk_root->operations->create(disk_root, "test", 4, OS1_OBJECT_FILE, opened));
+    InstanceRef file(opened);
+    auto* node = static_cast<VfsNode*>(opened->object);
+    ASSERT_EQ(1, node->operations->write(node, 0, "x", 1, false, nullptr));
+
+    atomic_store_release(&opened->cursor_busy, true);
+    ASSERT_EQ(kVfsBlocked, vfs_read_or_block(frames, thread, opened, kUserImageBase, 1));
+    atomic_store_release(&opened->cursor_busy, false);
+    read_bytes = 0;
+    worker->wait.reason = ThreadWaitReason::BlockIo;
+    wake_vfs_worker_on_tick();
+    EXPECT_EQ(ThreadState::Blocked, worker->state);
+    EXPECT_EQ(ThreadWaitReason::BlockIo, worker->wait.reason);
+    worker->wait.reason = ThreadWaitReason::VfsWorker;
+    wake_vfs_worker_on_tick();
+    EXPECT_EQ(ThreadState::Ready, worker->state);
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    EXPECT_EQ(0u, read_bytes);
+
+    service_vfs_waiters(frames);
+    EXPECT_EQ(ThreadState::Ready, thread->state);
+    EXPECT_EQ(1u, thread->frame.rax);
+    EXPECT_EQ(4096u, read_bytes);
+    char result = 0;
+    EXPECT_TRUE(copy_from_user(frames, thread, kUserImageBase, &result, sizeof(result)));
+    EXPECT_EQ('x', result);
+    object_release(disk_root);
+}
 
 TEST_F(LogExport, ConsoleWriteContinuesWhileFileIoDefers)
 {

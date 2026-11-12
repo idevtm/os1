@@ -151,7 +151,7 @@ Final resource release occurs outside filesystem, descriptor, and IPC locks.
 
 File cursor operations and directory enumeration reserve their shared open instance.
 Native calls return application status WOULD_BLOCK if a compatibility syscall holds that reservation.
-Compatibility calls wait through the existing VFS wait queue and IRQ retry path.
+Compatibility calls wait on the VFS queue. A kernel worker retries them.
 The kernel worker never sleeps while waiting for a cursor.
 Operations on different open instances share file contents, with independent cursors.
 

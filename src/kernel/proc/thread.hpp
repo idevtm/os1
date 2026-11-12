@@ -40,6 +40,7 @@ enum class ThreadWaitReason : uint32_t
     BlockIo = 3,
     VfsIo = 4,
     Ipc = 5,
+    VfsWorker = 6,
 };
 
 struct IpcWaitState

@@ -343,10 +343,10 @@ TEST_F(Vfs, CursorContentionSleepsAndRetainsAcceptedFileAcrossReuse)
     ASSERT_EQ(0, descriptor_close(table(), file));
     ASSERT_EQ(file, duplicate(1, OS1_RIGHT_WRITE, 0, file));
     atomic_store_release(&instance->cursor_busy, false);
-    wake_vfs_waiters(frames);
+    service_vfs_waiters(frames);
     EXPECT_EQ(ThreadState::Blocked, thread->state);  // still current
     set_current_thread(nullptr);
-    wake_vfs_waiters(frames);
+    service_vfs_waiters(frames);
     EXPECT_EQ(ThreadState::Ready, thread->state);
     EXPECT_EQ(5u, thread->frame.rax);
     EXPECT_EQ("hello", bytes(5));
@@ -526,7 +526,7 @@ TEST_F(Vfs, CursorWaitCancellationReleasesItsRetainedReference)
     EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
     atomic_store_release(&instance->cursor_busy, false);
     set_current_thread(nullptr);
-    wake_vfs_waiters(frames);
+    service_vfs_waiters(frames);
     EXPECT_EQ(1u, instance->references);
 }
 TEST_F(Vfs, NativeLaunchValidatesEnvelopesAndRejectsBadImagesWithoutChangingParent)
@@ -1247,7 +1247,7 @@ TEST_F(TmpfsContract, CompatibilityFaultAndCursorContentionRetainExactInstance)
     EXPECT_EQ(0, remove("file"));
     instance->cursor_busy = false;
     set_current_thread(nullptr);
-    wake_vfs_waiters(frames);
+    service_vfs_waiters(frames);
     EXPECT_EQ(ThreadState::Ready, thread->state);
     set_current_thread(thread);
     EXPECT_EQ(3u, thread->frame.rax);

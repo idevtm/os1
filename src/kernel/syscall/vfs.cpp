@@ -1,5 +1,6 @@
 #include "syscall/vfs.hpp"
 
+#include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "debug/log_export.hpp"
 #include "handoff/memory_layout.h"
@@ -13,6 +14,29 @@
 namespace
 {
 WaitQueue waiters{"vfs-cursor"};
+bool vfs_wait_pending = false;
+Thread* vfs_worker_thread = nullptr;
+PageFrameContainer* vfs_worker_frames = nullptr;
+
+void vfs_worker()
+{
+#ifndef OS1_HOST_TEST
+    Thread* thread = current_thread();
+    for(;;)
+    {
+        service_vfs_waiters(*vfs_worker_frames);
+        IrqGuard irq;
+        thread->wait.reason = ThreadWaitReason::VfsWorker;
+        thread->state = ThreadState::Blocked;
+        while(thread->state == ThreadState::Blocked)
+        {
+            (void)ipi_send_reschedule(cpu_cur());
+            asm volatile("sti; hlt; cli" ::: "memory");
+        }
+    }
+#endif
+}
+
 constexpr long kCursorBusy = -4097;
 struct CursorReservation
 {
@@ -250,8 +274,8 @@ long perform_or_block(PageFrameContainer& frames, Thread* thread, const VfsIoWai
     const long result = perform(frames, thread, request);
     if(result != kCursorBusy)
         return result;
-    // The BSP retries registered cursor operations on every IRQ. Registration
-    // after a release cannot lose a notification: readiness is checked again.
+    // The BSP tick wakes the VFS worker while cursor operations remain queued.
+    // Registration after a cursor release still receives a retry.
     IrqSpinGuard process_guard(g_process_table_lock);
     IrqSpinGuard queue_guard(waiters.lock);
     instance_retain(request.instance);
@@ -262,6 +286,7 @@ long perform_or_block(PageFrameContainer& frames, Thread* thread, const VfsIoWai
     thread->state = ThreadState::Blocked;
     thread->process->state = ProcessState::Ready;
     wait_queue_enqueue_locked(waiters, thread);
+    atomic_store_release(&vfs_wait_pending, true);
     return kVfsBlocked;
 }
 }  // namespace
@@ -515,6 +540,24 @@ long sys_vfs(
         thread,
         {entry.instance, 0, 0, 0, request.offset, OS1_RESOURCE_SEEK, request.origin});
 }
+bool start_vfs_worker(Process* process, PageFrameContainer& frames)
+{
+    vfs_worker_frames = &frames;
+    vfs_worker_thread = create_kernel_thread(process, vfs_worker, frames, g_cpu_boot, false);
+    if(!vfs_worker_thread)
+        return false;
+    vfs_worker_thread->wait.reason = ThreadWaitReason::VfsWorker;
+    return true;
+}
+
+void wake_vfs_worker_on_tick()
+{
+    if(atomic_load_acquire(&vfs_wait_pending) && vfs_worker_thread &&
+       vfs_worker_thread->state == ThreadState::Blocked &&
+       vfs_worker_thread->wait.reason == ThreadWaitReason::VfsWorker)
+        wake_blocked_thread(vfs_worker_thread, g_cpu_boot);
+}
+
 void cancel_vfs_wait(Thread* thread)
 {
     if(!thread)
@@ -532,6 +575,8 @@ void cancel_vfs_wait(Thread* thread)
         {
             *link = thread->wait_link;
             thread->wait_link = nullptr;
+            if(!waiters.head)
+                atomic_store_release(&vfs_wait_pending, false);
         }
         if(!atomic_load_acquire(&thread->io_pins))
         {
@@ -541,7 +586,7 @@ void cancel_vfs_wait(Thread* thread)
     }
     instance_release(released);
 }
-void wake_vfs_waiters(PageFrameContainer& frames)
+void service_vfs_waiters(PageFrameContainer& frames)
 {
     log_export::ForegroundGuard foreground;
     if(!foreground.held)
@@ -565,6 +610,8 @@ void wake_vfs_waiters(PageFrameContainer& frames)
             if(current || thread->state == ThreadState::Dying)
                 return;
             (void)wait_queue_dequeue_locked(waiters);
+            if(!waiters.head)
+                atomic_store_release(&vfs_wait_pending, false);
             (void)atomic_fetch_add(&thread->io_pins, 1u);
             request = thread->wait.vfs;
         }
@@ -583,7 +630,10 @@ void wake_vfs_waiters(PageFrameContainer& frames)
                     thread->frame.rax = static_cast<uint64_t>(result);
             }
             else
+            {
                 wait_queue_enqueue_locked(waiters, thread);
+                atomic_store_release(&vfs_wait_pending, true);
+            }
         }
         instance_release(released);
         if(wake)

@@ -111,6 +111,8 @@ Unaccepted Busy block requests retry after a one-millisecond scheduler timer whe
 The shared IPC timer wait supplies an explicit reschedule and wakeup, including on BIOS APs without periodic ticks.
 Interrupt handlers, early boot, and user syscall frames poll instead of halting without a wake source.
 User syscall frames cannot park through the kernel-thread scheduling path.
+The BSP scheduler tick wakes the VFS worker while cursor requests remain queued.
+The worker executes retained descriptor requests in thread context.
 Read, write, and flush requests share this rule; accepted requests retain completion-based waiting.
 EHCI and xHCI defer scheduling while they own a synchronous controller resource.
 IRQ service continues, but scheduling and deferred filesystem work wait until ownership ends.
@@ -1968,7 +1970,7 @@ A separate I/O provider worker checks export deadlines at bounded intervals.
 Export reserves admission against filesystem operations, file providers, and deferred descriptor I/O.
 A descriptor read or write checks admission after it retains a file.
 Conflicting syscalls yield before side effects. They rewind the saved instruction pointer by two bytes to retry.
-Queued file operations wait for a later interrupt.
+The BSP scheduler tick wakes the VFS worker to retry queued file operations.
 This avoids foreground failures from the current nonblocking ext2 guard.
 Filesystem calls can wait during export. Console I/O, input IPC, clock calls, descriptor cleanup, and memory queries remain available.
 A locked snapshot publishes completed export status without exposing concurrent writer fields.

@@ -51,6 +51,7 @@
 #include "sched/idle.hpp"
 #include "sched/scheduler.hpp"
 #include "sync/smp.hpp"
+#include "syscall/vfs.hpp"
 #include "util/align.hpp"
 #include "util/memory.h"
 
@@ -777,7 +778,7 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         return;
     }
     if(!create_idle_threads_for_discovered_cpus(kernel_process) ||
-       !start_reaper(kernel_process, page_frames))
+       !start_reaper(kernel_process, page_frames) || !start_vfs_worker(kernel_process, page_frames))
     {
         return;
     }

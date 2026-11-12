@@ -72,7 +72,7 @@ Export requires exclusive admission against filesystem operations, file provider
 Read and write check admission after they retain a file descriptor.
 Console I/O, process exit, and Buffer operations can proceed during export.
 A conflicting syscall yields before side effects. It rewinds the saved instruction pointer by two bytes to retry.
-Deferred descriptor operations remain queued until admission is available.
+The VFS worker retries deferred descriptor operations when admission is available.
 An active foreground entry causes automatic export to defer without counting a storage failure.
 Native explicit export retains its Operation when foreground entries prevent admission.
 A deferred request has no export effects and does not emit an IPC completion record.
