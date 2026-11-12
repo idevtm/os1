@@ -65,11 +65,12 @@ bool wait_for_mask(volatile uint8_t* operational,
                    size_t offset,
                    uint32_t mask,
                    uint32_t expected,
-                   uint32_t timeout_spins,
+                   PollLimits limits,
                    PollHook poll_hook,
                    void* poll_context)
 {
-    for(uint32_t iteration = 0; iteration < timeout_spins; ++iteration)
+    PollDeadline deadline(limits.clock, limits.duration, limits.stalled_polls);
+    for(uint32_t iteration = 0;; ++iteration)
     {
         if(nullptr != poll_hook)
         {
@@ -79,10 +80,10 @@ bool wait_for_mask(volatile uint8_t* operational,
         {
             return true;
         }
+        if(deadline.expired())
+            return false;
         cpu_pause();
     }
-
-    return (read32(operational, offset) & mask) == expected;
 }
 }  // namespace
 
@@ -665,6 +666,44 @@ bool port_reset_recovered(const PortStatus& status, uint8_t speed, bool connecti
            status.enabled && !status.reset && status.speed == speed;
 }
 
+void RuntimePortReset::start(uint64_t now)
+{
+    deadline_ = now + 10'000'000;  // One second for reset completion.
+    previous_time_ = now;
+    remaining_polls_ = kStalledPollLimit;
+    recovering_ = false;
+}
+
+PortResetResult RuntimePortReset::poll(const PortStatus& status, uint64_t now)
+{
+    if(!status.connected || (status.raw & kPortScConnectStatusChange))
+        return PortResetResult::Failed;
+    if(now > previous_time_)
+    {
+        previous_time_ = now;
+        remaining_polls_ = kStalledPollLimit;
+    }
+    else if(!remaining_polls_ || --remaining_polls_ == 0)
+        return PortResetResult::Failed;
+    if(recovering_)
+    {
+        if(!port_reset_recovered(status, speed_, false))
+            return PortResetResult::Failed;
+        return now >= deadline_ ? PortResetResult::Ready : PortResetResult::Pending;
+    }
+    if(now >= deadline_)
+        return PortResetResult::Failed;
+    if(status.enabled && !status.reset)
+    {
+        speed_ = status.speed;
+        recovering_ = true;
+        remaining_polls_ = kStalledPollLimit;
+        // A backward sample cannot shorten the recovery interval.
+        deadline_ = previous_time_ + 100'000;
+    }
+    return PortResetResult::Pending;
+}
+
 bool read_port_status(const ControllerLayout& controller, uint8_t port_id, PortStatus& out)
 {
     out = {};
@@ -725,8 +764,21 @@ bool power_on_port(const ControllerLayout& controller, uint8_t port_id)
     return true;
 }
 
+void request_controller_stop(const ControllerLayout& controller)
+{
+    if(!controller.operational)
+        return;
+    const uint32_t command = read32(controller.operational, kOperationalUsbcmd);
+    if(0 != (command & kUsbcmdRunStop))
+    {
+        write32(controller.operational,
+                kOperationalUsbcmd,
+                static_cast<uint32_t>(command & ~kUsbcmdRunStop));
+    }
+}
+
 bool controller_stop(const ControllerLayout& controller,
-                     uint32_t timeout_spins,
+                     PollLimits limits,
                      PollHook poll_hook,
                      void* poll_context)
 {
@@ -735,29 +787,23 @@ bool controller_stop(const ControllerLayout& controller,
         return false;
     }
 
-    const uint32_t command = read32(controller.operational, kOperationalUsbcmd);
-    if(0 != (command & kUsbcmdRunStop))
-    {
-        write32(controller.operational,
-                kOperationalUsbcmd,
-                static_cast<uint32_t>(command & ~kUsbcmdRunStop));
-    }
+    request_controller_stop(controller);
     return wait_for_mask(controller.operational,
                          kOperationalUsbsts,
                          kUsbstsHalted,
                          kUsbstsHalted,
-                         timeout_spins,
+                         limits,
                          poll_hook,
                          poll_context);
 }
 
 bool controller_reset(const ControllerLayout& controller,
-                      uint32_t timeout_spins,
+                      PollLimits limits,
                       PollHook poll_hook,
                       void* poll_context,
                       void (*intel_reset_delay)(uint32_t, void*))
 {
-    if(!controller_stop(controller, timeout_spins, poll_hook, poll_context))
+    if(!controller_stop(controller, limits, poll_hook, poll_context))
     {
         return false;
     }
@@ -773,7 +819,7 @@ bool controller_reset(const ControllerLayout& controller,
                       kOperationalUsbcmd,
                       kUsbcmdHostControllerReset,
                       0u,
-                      timeout_spins,
+                      limits,
                       poll_hook,
                       poll_context))
     {
@@ -784,7 +830,7 @@ bool controller_reset(const ControllerLayout& controller,
                          kOperationalUsbsts,
                          kUsbstsControllerNotReady,
                          0u,
-                         timeout_spins,
+                         limits,
                          poll_hook,
                          poll_context);
 }
@@ -862,7 +908,7 @@ bool controller_program(const ControllerLayout& controller,
 }
 
 bool controller_run(const ControllerLayout& controller,
-                    uint32_t timeout_spins,
+                    PollLimits limits,
                     PollHook poll_hook,
                     void* poll_context)
 {
@@ -875,7 +921,7 @@ bool controller_run(const ControllerLayout& controller,
                       kOperationalUsbsts,
                       kUsbstsControllerNotReady,
                       0u,
-                      timeout_spins,
+                      limits,
                       poll_hook,
                       poll_context))
     {
@@ -890,7 +936,7 @@ bool controller_run(const ControllerLayout& controller,
                          kOperationalUsbsts,
                          kUsbstsHalted,
                          0u,
-                         timeout_spins,
+                         limits,
                          poll_hook,
                          poll_context);
 }

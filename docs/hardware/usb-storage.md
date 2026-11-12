@@ -72,8 +72,17 @@ It reads the event payload only after the cycle bit matches the consumer cycle s
 The driver checks each xHCI DMA range against the controller's AC64 capability before publication.
 A controller without AC64 accepts only ranges below 4 GiB.
 The driver requires a calibrated clock for xHCI reset timing.
+Each register wait during xHCI controller stop, reset, or run has a one-second elapsed-time limit.
+One million consecutive polls without clock progress also end the wait.
+Reset can perform three register waits. Run can perform two.
 After writing HCRST on Intel xHCI, the driver waits 1 ms before the next register access.
 After an xHCI port reset, the driver waits 10 ms and checks the port again before enumeration.
+At runtime, the USB worker checks reset and recovery progress on later polls.
+It releases the scheduling guard between polls.
+Two hundred consecutive polls without clock progress end either phase.
+If slot disable fails during runtime retirement, the worker requests controller stop without waiting for halt.
+It masks the controller interrupt before it releases the handler.
+It clears bus mastering and keeps the published DMA buffers quarantined.
 EHCI periodic queue heads use a zero NAK reload value.
 The USB worker defers reconnect debounce to later polls.
 Runtime EHCI hubs defer downstream discovery until the port power delay ends.
@@ -98,7 +107,7 @@ Topology and controller-wide retirement require both gates. Register changes use
 EHCI schedule and transfer waits check elapsed time and iteration limits.
 
 A disconnect fails subsequent disk operations. The shell remains available through initrd and `/tmp`.
-The driver does not enumerate replacement devices after boot.
+The worker can enumerate a replacement as a new attachment.
 Reconnect cannot restore an old filesystem handle or reuse its authority.
 After contexts become visible to hardware, failed initialization retains all device DMA until reboot.
 Published devices also retain DMA and object addresses after failure.

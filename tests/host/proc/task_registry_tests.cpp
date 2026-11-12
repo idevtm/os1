@@ -6,8 +6,8 @@
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "mm/virtual_memory.hpp"
-#include "proc/process.hpp"
 #include "proc/kernel_stack.hpp"
+#include "proc/process.hpp"
 #include "proc/thread.hpp"
 #include "sched/scheduler.hpp"
 #include "support/lapic_stub.hpp"
@@ -388,6 +388,34 @@ TEST(TaskRegistry, WaitpidBlocksBeforeChildExitCanBeWoken)
     parent->state = ProcessState::Dying;
     reap_dead_threads(frames);
     EXPECT_EQ(nullptr, first_process());
+}
+
+TEST(TaskRegistry, RemoteCompletionKeepsCurrentThreadOnItsOwner)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    PageFrameContainer frames = initialized_frames();
+    kmem_init(frames);
+    HostApCpuScope cpus;
+    ASSERT_TRUE(init_tasks(frames));
+    auto* process = create_user_process("waiter", 0);
+    ASSERT_NE(nullptr, process);
+    auto* waiter = create_user_thread(process, 0x1000, 0x2000, frames, false);
+    ASSERT_NE(nullptr, waiter);
+
+    Completion completion;
+    g_cpu_host_current = &cpus.ap;
+    set_current_thread(waiter);
+    block_current_thread_on_block_io(&completion);
+    ASSERT_EQ(ThreadState::Blocked, waiter->state);
+    g_cpu_host_current = g_cpu_boot;
+    EXPECT_EQ(1u, wait_queue_wake_one(completion.waiters, g_cpu_boot));
+    EXPECT_EQ(waiter, cpus.ap.current_thread);
+    EXPECT_EQ(&cpus.ap, waiter->run_queue_cpu);
+    EXPECT_EQ(nullptr, next_runnable_thread(nullptr));
+    g_cpu_host_current = &cpus.ap;
+    EXPECT_EQ(waiter, next_runnable_thread(nullptr));
+    set_current_thread(nullptr);
+    g_cpu_host_current = g_cpu_boot;
 }
 
 TEST(TaskRegistry, ReaperSkipsDyingThreadStillCurrentOnAnotherCpu)

@@ -36,6 +36,10 @@ The synchronization declarations live in [smp.hpp](../../src/kernel/sync/smp.hpp
 [wait_queue.hpp](../../src/kernel/sync/wait_queue.hpp) support block-I/O, child-exit,
 and console-read blocking. Wake helpers detach waiters under the queue lock,
 then release it before making threads runnable.
+`thread_current_cpu` checks whether a CPU still owns a thread's saved frame and stack.
+A remote completion that only wakes a current thread queues it on its owning CPU.
+The balancer leaves that thread on its owner until the CPU finishes the switch.
+A remote completion that writes the saved frame waits for the switch before it writes the result.
 
 ## Current Ownership
 

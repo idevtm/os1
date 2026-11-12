@@ -66,6 +66,7 @@ bool Volume::write_block(uint32_t b, const void* in)
 }
 long Volume::mount(Io source)
 {
+    inode_write_block = 0;
     io = source;
     blocks = source.blocks;
     if(!io.read || !io.write || !io.flush || blocks < 128 || blocks > max_blocks)
@@ -129,10 +130,25 @@ long Volume::inode_write(uint32_t n, const Inode& inode)
 {
     if(!n || n > inodes)
         return OS1_ERR_BAD_IMAGE;
-    if(!read_block(table + (n - 1) / 32, meta))
+    if(failed)
         return OS1_ERR_IO;
-    memcpy(meta + ((n - 1) % 32) * 128, inode.bytes, 128);
-    return write_block(table + (n - 1) / 32, meta) ? 0 : OS1_ERR_IO;
+
+    const uint32_t block = table + (n - 1) / 32;
+    if(inode_write_block != block && !read_block(block, inode_write_data))
+    {
+        inode_write_block = 0;
+        return OS1_ERR_IO;
+    }
+
+    memcpy(inode_write_data + ((n - 1) % 32) * 128, inode.bytes, 128);
+    // Retain only the last successfully written table block.
+    if(!write_block(block, inode_write_data))
+    {
+        inode_write_block = 0;
+        return OS1_ERR_IO;
+    }
+    inode_write_block = block;
+    return 0;
 }
 long Volume::get_block(const Inode& inode, uint32_t index, uint32_t& b, bool* indirect_loaded)
 {
@@ -387,12 +403,16 @@ long Volume::write(uint32_t n, Inode& inode, uint64_t offset, const void* in, si
         return 0;
     // Reserve sufficient capacity before changing a bounded native write.
     uint32_t needed = 0;
-    for(uint32_t i = offset / 4096; i <= (offset + length - 1) / 4096; ++i)
+    uint32_t first_block = 0;
+    const uint32_t first_index = offset / block_bytes;
+    for(uint32_t i = first_index; i <= (offset + length - 1) / block_bytes; ++i)
     {
         uint32_t b = 0;
         long r = get_block(inode, i, b);
         if(r < 0)
             return r;
+        if(i == first_index)
+            first_block = b;
         if(!b)
             ++needed;
     }
@@ -410,10 +430,13 @@ long Volume::write(uint32_t n, Inode& inode, uint64_t offset, const void* in, si
     size_t done = 0;
     while(done < length)
     {
-        uint32_t b = 0;
-        r = ensure_block(n, inode, (offset + done) / 4096, b);
-        if(r < 0)
-            return r;
+        uint32_t b = done == 0 ? first_block : 0;
+        if(!b)
+        {
+            r = ensure_block(n, inode, (offset + done) / 4096, b);
+            if(r < 0)
+                return r;
+        }
         size_t at = (offset + done) % 4096, chunk = 4096 - at;
         if(chunk > length - done)
             chunk = length - done;
