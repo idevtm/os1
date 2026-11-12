@@ -151,14 +151,17 @@ void revoke(Buffer* b, Budget* from, bool discard, bool borrowed_only = false)
 {
     {
         UserCopyGuard copy_guard(from->process);
+        bool had_present_alias = false;
         for(auto& m : b->maps)
             if(m.budget == from && (!borrowed_only || m.borrowed) && m.present)
             {
                 VirtualMemory vm(*b->frames, m.cr3);
                 vm.detach(m.address, b->page_count);
                 m.present = false;
+                had_present_alias = true;
             }
-        ipi_retire_tlb();
+        if(had_present_alias)
+            ipi_retire_tlb();
     }
     if(discard)
         for(auto& m : b->maps)

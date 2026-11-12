@@ -69,7 +69,9 @@ Copies in other address spaces can continue during retirement.
 A nested user copy can reuse the same address-space gate.
 An interrupt guard prevents migration while the CPU holds a gate.
 
-Retirement clears revoked leaves before publishing a global request sequence.
+Revocation requests retirement after it clears a present alias.
+A Buffer without a present matching alias needs no retirement.
+The module clears revoked leaves before it publishes a global request sequence.
 Every online CPU reloads its actual hardware CR3 before acknowledging that sequence.
 Reading hardware CR3 avoids dependence on scheduler thread publication order.
 The protocol assumes the current kernel configuration without PCID or global user mappings.

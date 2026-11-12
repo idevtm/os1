@@ -432,6 +432,57 @@ TEST_F(BufferMemory, AnUnrelatedAddressSpaceCanCopyBeforeRetirementAcknowledgmen
     buffer_cancel_loans(loans);
 }
 
+TEST_F(BufferMemory, ProcessRevocationRetiresOnlyPresentMatchingAliases)
+{
+    const int mapped = create(a);
+    const int unmapped = create(a);
+    const int unrelated = create(b);
+    ASSERT_GE(mapped, 0);
+    ASSERT_GE(unmapped, 0);
+    ASSERT_GE(unrelated, 0);
+    const auto first = map(a, mapped);
+    const auto second = map(a, mapped);
+    const auto other = map(b, unrelated);
+    ASSERT_NE(first, second);
+    ASSERT_TRUE(readable(a, first));
+    ASSERT_TRUE(readable(a, second));
+    ASSERT_TRUE(readable(b, other));
+    ASSERT_TRUE(ipi_initialize());
+
+    constexpr uint8_t target_id = 210;
+    cpu target{};
+    target.id = target_id;
+    target.booted = static_cast<uint32_t>(ApStartupState::Online);
+    target.next = g_cpu_boot->next;
+    g_cpu_boot->next = &target;
+    auto previous_wait = host_tlb_retirement_wait;
+    static unsigned acknowledgments;
+    acknowledgments = 0;
+    host_tlb_retirement_wait = [](cpu* waiting_for) {
+        if(waiting_for->id == target_id)
+            ++acknowledgments;
+        auto* previous = g_cpu_host_current;
+        g_cpu_host_current = waiting_for;
+        ipi_poll_tlb_shootdown();
+        g_cpu_host_current = previous;
+    };
+
+    buffer_process_exec(frames, &caller);
+    EXPECT_EQ(1u, acknowledgments);
+    EXPECT_FALSE(readable(a, first));
+    EXPECT_FALSE(readable(a, second));
+    EXPECT_TRUE(readable(b, other));
+
+    buffer_process_cleanup(frames, &caller);
+    EXPECT_EQ(1u, acknowledgments);
+    buffer_process_cleanup(frames, &provider);
+    EXPECT_EQ(2u, acknowledgments);
+    EXPECT_FALSE(readable(b, other));
+
+    host_tlb_retirement_wait = previous_wait;
+    g_cpu_boot->next = target.next;
+}
+
 TEST_F(BufferMemory, StringCopiesStopAtNulBeforeCheckingTheNextPage)
 {
     const uint64_t end = control + kPageSize;
