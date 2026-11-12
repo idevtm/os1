@@ -594,6 +594,17 @@ Thread* current_thread(void)
     return cpu_cur()->current_thread;
 }
 
+cpu* thread_current_cpu(const Thread* thread)
+{
+    if(!thread)
+        return nullptr;
+
+    for(cpu* owner = g_cpu_boot; owner; owner = owner->next)
+        if(__atomic_load_n(&owner->current_thread, __ATOMIC_ACQUIRE) == thread)
+            return owner;
+    return nullptr;
+}
+
 Thread* idle_thread(void)
 {
     return idle_thread_for_cpu(cpu_cur());
@@ -706,6 +717,7 @@ void wake_blocked_thread(Thread* thread, cpu* target)
         return;
     }
 
+    IrqGuard irq;
     clear_thread_wait(thread);
     if(thread == current_thread())
     {
@@ -714,7 +726,10 @@ void wake_blocked_thread(Thread* thread, cpu* target)
         return;
     }
 
-    mark_thread_ready(thread, target);
+    // Only the owning CPU may resume a frame that has not finished parking.
+    // The balancer excludes that CPU's current thread from migration.
+    cpu* owner = thread_current_cpu(thread);
+    mark_thread_ready(thread, owner ? owner : target);
 }
 
 Thread* first_blocked_thread(ThreadWaitReason reason)

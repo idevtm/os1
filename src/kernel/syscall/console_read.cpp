@@ -160,9 +160,8 @@ void wake_console_readers(PageFrameContainer& frames)
                 return;
             // A blocked syscall must finish switching away before another CPU
             // writes its saved frame or makes it runnable. Never publish it twice.
-            for(cpu* owner = g_cpu_boot; owner; owner = owner->next)
-                if(__atomic_load_n(&owner->current_thread, __ATOMIC_ACQUIRE) == thread)
-                    return;
+            if(thread_current_cpu(thread))
+                return;
             if(thread->state == ThreadState::Dying)
                 return;  // Reaper detaches it.
             (void)wait_queue_dequeue_locked(queue);
