@@ -67,7 +67,7 @@ kernel_load_start	resq	1
 kernel_load_end		resq	1
 
 section .bss.boot_memory_map start=BOOT_MEMORY_REGION_BUFFER_ADDRESS
-boot_memory_map: times boot_memory_region_struct_size * BOOT_MEMORY_REGION_CAPACITY db 0
+boot_memory_map: times boot_memory_region_struct_size * (BOOT_MEMORY_REGION_CAPACITY + 1) db 0
 
 section .bss.boot_modules start=BOOT_MODULE_INFO_BUFFER_ADDRESS
 boot_modules: times boot_module_info_struct_size * 2 db 0
@@ -244,6 +244,13 @@ loader_full_main16:
 	hlt
 	jmp $			; can't detect memory. die here
 .l3:
+    cmp byte [do_e820.truncated], 0
+    je .map_ready
+    push bp
+    mov si, str_e820_truncated
+    call print16
+    pop bp
+.map_ready:
 	; e820 success
 	xor eax, eax
 	mov ax, bp
@@ -354,6 +361,7 @@ newline			db 10, 0
 space		   	db " ", 0
 str_loader16_hello   	db "[loader16] hello", 13, 10, 0
 str_no_long_mode   		db "[loader16] 64bit mode not available", 13, 10, 0
+str_e820_truncated      db "[loader16] Memory map capacity reached; extra ranges omitted", 13, 10, 0
 str_e820_failed			db "[loader16] Memory detection failed", 13, 10, 0
 str_elf_fail_disk    	db "[loader16] ELF load disk error", 13, 10, 0
 str_elf_fail_check    	db "[loader16] ELF check failed", 13, 10, 0

@@ -438,6 +438,12 @@ The shim stops with a serial message if a check fails.
 Limine marks its executable, modules, and page tables as occupied memory.
 See the [Limine protocol memory map](https://github.com/limine-bootloader/limine-protocol/blob/trunk/PROTOCOL.md#memory-map-feature).
 
+Both boot paths combine consecutive descriptors when the ranges touch and have equal type and attributes.
+They combine ranges in either direction and preserve firmware order.
+If more than 128 ranges remain, the boot path reports that it omitted ranges.
+It keeps disjoint usable ranges and removes overlaps with retained and omitted non-usable ranges.
+If an omitted range splits a usable range, the boot path keeps its lower part.
+
 The shim translates the framebuffer, RSDP, SMBIOS, and initrd pointers into physical addresses.
 It copies the normalized map and builds `LowHandoffBootInfoStorage` after the loaded kernel image.
 The BIOS loader builds the same `BootInfo` ABI from E820, EDD, CMOS, and the RSDP scan.
@@ -876,6 +882,9 @@ It is no longer the default workflow.
 `kernel_main()` in [../src/kernel/core/kernel_main.cpp](../src/kernel/core/kernel_main.cpp) is the shared kernel entry for both paths. It is now high-level boot orchestration only: trap routing lives in `core/trap_dispatch.cpp`, IRQ flow in `core/irq_dispatch.cpp`, fault policy in `core/fault.cpp`, syscall dispatch in `syscall/dispatch.cpp`, scheduler handoff in `sched/scheduler.cpp`, platform sequencing in `platform/init.cpp`, and device-specific behavior under `drivers/`.
 
 The sequence is detailed in [Phase 3](#phase-3--kernel-bring-up-kernel_main). After copying `BootInfo`, the kernel initializes physical allocation, builds its higher-half and direct-map mappings with narrow bootstrap identity exceptions, and switches `CR3`. Platform discovery, interrupt setup, and driver probing precede process registries and per-CPU idle threads. Scheduler timer preparation and AP startup follow those thread allocations; the boot-sequence thread then loads the first user process. `os1.nosmp` can leave APs offline.
+MADT discovery retains up to 64 enabled CPUs and keeps the boot CPU when firmware lists it later.
+PCI enumeration retains the first 256 functions in scan order.
+Discovery reports when it omits entries from either inventory.
 
 `own_boot_info()` removes dependence on frontend-owned metadata; the later `kvm.activate()` transition installs kernel-owned page tables. After those handoffs, both boot paths use the same runtime subsystems.
 

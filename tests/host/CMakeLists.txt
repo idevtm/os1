@@ -143,6 +143,7 @@ add_library(os1_host_support
   "${OS1_REPO_ROOT}/src/kernel/platform/irq_registry.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/power.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/pci_capability.cpp"
+  "${OS1_REPO_ROOT}/src/kernel/platform/pci.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/pci_config.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/pci_msi.cpp"
   "${OS1_REPO_ROOT}/src/kernel/platform/state.cpp"

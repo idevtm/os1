@@ -8,7 +8,6 @@
 #include "mm/boot_mapping.hpp"
 #include "mm/virtual_memory.hpp"
 #include "platform/pci_config.hpp"
-#include "util/string.h"
 
 namespace
 {
@@ -106,22 +105,16 @@ void size_pci_bars(PciDevice& device)
     pci_config_write16(device, 0x04, command);
 }
 
-[[nodiscard]] bool record_pci_device(const PciEcamRegion& region,
-                                     PciDevice* devices,
-                                     size_t& device_count,
-                                     uint8_t bus,
-                                     uint8_t slot,
-                                     uint8_t function,
-                                     uint64_t config_physical)
+void record_pci_device(const PciEcamRegion& region,
+                       PciDevice* devices,
+                       size_t& device_count,
+                       uint8_t bus,
+                       uint8_t slot,
+                       uint8_t function,
+                       uint64_t config_physical)
 {
-    if(device_count >= kPlatformMaxPciDevices)
-    {
-        debug("pci: device table full")();
-        return false;
-    }
-
     PciDevice& device = devices[device_count++];
-    memset(&device, 0, sizeof(device));
+    device = {};
     device.segment_group = region.segment_group;
     device.bus = bus;
     device.slot = slot;
@@ -146,7 +139,6 @@ void size_pci_bars(PciDevice& device)
     }
 
     size_pci_bars(device);
-    return true;
 }
 }  // namespace
 
@@ -195,16 +187,18 @@ bool enumerate_pci(VirtualMemory& kernel_vm,
                     {
                         continue;
                     }
-                    if(!record_pci_device(region,
-                                          devices,
-                                          device_count,
-                                          static_cast<uint8_t>(bus),
-                                          slot,
-                                          function,
-                                          config_physical))
+                    if(device_count == kPlatformMaxPciDevices)
                     {
-                        return false;
+                        debug("pci: device table capacity reached; extra functions omitted")();
+                        return true;
                     }
+                    record_pci_device(region,
+                                      devices,
+                                      device_count,
+                                      static_cast<uint8_t>(bus),
+                                      slot,
+                                      function,
+                                      config_physical);
                 }
             }
         }

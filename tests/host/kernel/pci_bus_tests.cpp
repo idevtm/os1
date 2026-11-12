@@ -16,6 +16,7 @@
 #include "mm/virtual_memory.hpp"
 #include "platform/hardware.hpp"
 #include "platform/irq_registry.hpp"
+#include "platform/pci.hpp"
 #include "platform/state.hpp"
 #include "support/physical_memory.hpp"
 
@@ -463,4 +464,31 @@ TEST(PciBus, AdmissionAllocationFailureRecordsFailedHardwareWithoutCallingDriver
     for(auto physical : held)
         EXPECT_TRUE(frames.free(physical));
     platform_reset_state();
+}
+
+TEST(PciEnumeration, CapsDiscoveredFunctionsAndKeepsInventory)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    constexpr uint64_t ecam = 0x400000;
+    constexpr uint64_t ecam_bytes = 9u << 20;
+    ASSERT_TRUE(frames.reserve_range(ecam, ecam_bytes));
+    std::memset(arena.data() + ecam, 0xff, ecam_bytes);
+    for(size_t index = 0; index <= kPlatformMaxPciDevices; ++index)
+    {
+        auto* config = arena.data() + ecam + (index << 15);
+        config[0] = 0x34;
+        config[1] = 0x12;
+        config[0x0e] = 2;  // Single function and no BAR sizing.
+    }
+
+    VirtualMemory vm(frames);
+    const PciEcamRegion region{ecam, 0, 0, 8};
+    std::array<PciDevice, kPlatformMaxPciDevices> devices{};
+    size_t count = 0;
+    ASSERT_TRUE(enumerate_pci(vm, &region, 1, devices.data(), count));
+    ASSERT_EQ(kPlatformMaxPciDevices, count);
+    EXPECT_EQ(0x1234u, devices.back().vendor_id);
+    EXPECT_EQ(7u, devices.back().bus);
+    EXPECT_EQ(31u, devices.back().slot);
 }

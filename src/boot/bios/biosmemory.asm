@@ -1,56 +1,198 @@
 [bits 16]
-; use the INT 0x15, eax= 0xE820 BIOS function to get a memory map
-; inputs: es:di -> destination buffer for 24 byte entries
-; outputs: bp = entry count, trashes all registers except esi
+; Collect valid E820 entries into ES:DI. The caller supplies one scratch
+; entry after BOOT_MEMORY_REGION_CAPACITY. Return the retained count in BP.
 do_e820:
-	xor ebx, ebx		; ebx must be 0 to start
-	xor bp, bp		; keep an entry count in bp
-	mov edx, 0x0534D4150	; Place "SMAP" into edx
-	mov eax, 0xe820
-	mov [es:di + 20], dword 1	; force a valid ACPI 3.X entry
-	mov ecx, 24		; ask for 24 bytes
-	int 0x15
-	jc .failed	; carry set on first call means "unsupported function"
-	mov edx, 0x0534D4150	; Some BIOSes apparently trash this register?
-	cmp eax, edx		; on success, eax must have been reset to "SMAP"
-	jne .failed
-	test ebx, ebx		; ebx = 0 implies list is only 1 entry long (worthless)
-	je .failed
-	jmp .jmpin
-.e820lp:
-	mov eax, 0xe820		; eax, ecx get trashed on every int 0x15 call
-	mov [es:di + 20], dword 1	; force a valid ACPI 3.X entry
-	mov ecx, 24		; ask for 24 bytes again
-	int 0x15
-	jc .e820f		; carry set means "end of list already reached"
-	mov edx, 0x0534D4150	; repair potentially trashed register
-.jmpin:
-	jcxz .skipent		; skip any 0 length entries
-	cmp cl, 20		; got a 24 byte ACPI 3.X response?
-	jbe .notext
-	test byte [es:di + 20], 1	; if so: is the "ignore this data" bit clear?
-	je .skipent
-.notext:
-	mov ecx, [es:di + 8]	; get lower uint32_t of memory region length
-	or ecx, [es:di + 12]	; "or" it with upper uint32_t to test for zero
-	jz .skipent		; if length uint64_t is 0, skip entry
-	inc bp			; got a good entry: ++count, move to next storage spot
+    xor ebx, ebx
+    xor bp, bp
+    mov [cs:.map_start], di
+    mov word [cs:.calls_left], 4096
+    mov byte [cs:.truncated], 0
+.next:
+    sub word [cs:.calls_left], 1
+    jc .failed
+    mov edx, 0x534D4150
+    mov eax, 0xe820
+    mov dword [es:di + 20], 1
+    mov ecx, 24
+    int 0x15
+    jc .finish
+    cmp eax, 0x534D4150
+    jne .failed
+    cmp cx, 20
+    jb .continue
+    cmp cx, 24
+    jb .length
+    test byte [es:di + 20], 1
+    jz .continue
+.length:
+    mov eax, [es:di + 8]
+    or eax, [es:di + 12]
+    jz .continue
+    mov eax, [es:di]
+    mov edx, [es:di + 4]
+    add eax, [es:di + 8]
+    adc edx, [es:di + 12]
+    jc .failed
 
-	add di, 24
-	cmp bp, BOOT_MEMORY_REGION_CAPACITY
-	jb .skipent
-	test ebx, ebx
-	jne .failed
-	jmp .e820f
-.skipent:
-	test ebx, ebx		; if ebx resets to 0, list is complete
-	jne .e820lp
-.e820f:
-	clc			; there is "jc" on end of list to this point, so the carry must be cleared
-	ret
+    ; Stop coalescing after an omission so a later entry cannot restore
+    ; a part of RAM excluded by an earlier omitted reservation.
+    cmp byte [cs:.truncated], 0
+    jne .append
+    test bp, bp
+    jz .append
+    mov eax, [es:di - 8]
+    cmp eax, [es:di + 16]
+    jne .append
+    mov eax, [es:di - 4]
+    cmp eax, [es:di + 20]
+    jne .append
+    mov eax, [es:di - 24]
+    mov edx, [es:di - 20]
+    add eax, [es:di - 16]
+    adc edx, [es:di - 12]
+    cmp edx, [es:di + 4]
+    jne .reverse
+    cmp eax, [es:di]
+    je .merge
+.reverse:
+    mov eax, [es:di]
+    mov edx, [es:di + 4]
+    add eax, [es:di + 8]
+    adc edx, [es:di + 12]
+    cmp edx, [es:di - 20]
+    jne .append
+    cmp eax, [es:di - 24]
+    jne .append
+    mov eax, [es:di]
+    mov edx, [es:di + 4]
+    mov [es:di - 24], eax
+    mov [es:di - 20], edx
+.merge:
+    mov eax, [es:di + 8]
+    mov edx, [es:di + 12]
+    add [es:di - 16], eax
+    adc [es:di - 12], edx
+    jmp .continue
+
+.append:
+    cmp bp, BOOT_MEMORY_REGION_CAPACITY
+    jb .retain
+    cmp byte [cs:.truncated], 0
+    jne .omitted
+    mov byte [cs:.truncated], 1
+    ; Firmware can supply overlaps within the retained E820 records too.
+    push di
+    mov di, [cs:.map_start]
+    mov cx, bp
+.retained:
+    cmp dword [es:di + 16], 1
+    je .retained_next
+    call .exclude_reserved
+.retained_next:
+    add di, 24
+    loop .retained
+    pop di
+.omitted:
+    cmp dword [es:di + 16], 1
+    je .continue
+    call .exclude_reserved
+    jmp .continue
+
+    ; ES:DI names a reserved record, retained or omitted.
+.exclude_reserved:
+    push ebx
+    push cx
+    push si
+    push di
+    mov si, di
+    mov eax, [es:si]
+    mov edx, [es:si + 4]
+    add eax, [es:si + 8]
+    adc edx, [es:si + 12]
+    mov [cs:.reserved_end], eax
+    mov [cs:.reserved_end + 4], edx
+    mov di, [cs:.map_start]
+    mov cx, bp
+.clip:
+    cmp dword [es:di + 16], 1
+    jne .advance
+
+    mov eax, [es:di]
+    mov edx, [es:di + 4]
+    cmp edx, [cs:.reserved_end + 4]
+    ja .advance
+    jb .check_end
+    cmp eax, [cs:.reserved_end]
+    jae .advance
+.check_end:
+    add eax, [es:di + 8]
+    adc edx, [es:di + 12]
+    cmp edx, [es:si + 4]
+    jb .advance
+    ja .overlap
+    cmp eax, [es:si]
+    jbe .advance
+.overlap:
+    mov ebx, [es:di + 4]
+    cmp ebx, [es:si + 4]
+    jb .keep_prefix
+    ja .try_suffix
+    mov ebx, [es:di]
+    cmp ebx, [es:si]
+    jb .keep_prefix
+.try_suffix:
+    sub eax, [cs:.reserved_end]
+    sbb edx, [cs:.reserved_end + 4]
+    jc .reserve
+    mov ebx, eax
+    or ebx, edx
+    jz .reserve
+    mov [es:di + 8], eax
+    mov [es:di + 12], edx
+    mov eax, [cs:.reserved_end]
+    mov edx, [cs:.reserved_end + 4]
+    mov [es:di], eax
+    mov [es:di + 4], edx
+    jmp .advance
+.keep_prefix:
+    mov eax, [es:si]
+    mov edx, [es:si + 4]
+    sub eax, [es:di]
+    sbb edx, [es:di + 4]
+    mov [es:di + 8], eax
+    mov [es:di + 12], edx
+    jmp .advance
+.reserve:
+    mov dword [es:di + 16], 2
+.advance:
+    add di, 24
+    dec cx
+    jnz .clip
+    pop di
+    pop si
+    pop cx
+    pop ebx
+    ret
+.retain:
+    inc bp
+    add di, 24
+.continue:
+    test ebx, ebx
+    jnz .next
+.finish:
+    test bp, bp
+    jz .failed
+.success:
+    clc
+    ret
 .failed:
-	stc			; "function unsupported" error exit
-	ret
+    stc
+    ret
+
+.map_start: dw 0
+.calls_left: dw 0
+.truncated: db 0
+.reserved_end: dq 0
 
 ; Function: check_a20
 ;

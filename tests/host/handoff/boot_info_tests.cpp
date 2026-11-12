@@ -1,4 +1,5 @@
 #include "handoff/boot_info.hpp"
+#include "handoff/memory_map.hpp"
 
 #include <gtest/gtest.h>
 
@@ -185,4 +186,106 @@ TEST(BootInfo, UsableDestinationRejectsOccupiedAndOverflowingRanges)
 
     const BootMemoryRegion overflowing[] = {{UINT64_MAX - 4, 8, BootMemoryType::Usable, 0}};
     EXPECT_FALSE(boot_memory_range_is_usable(overflowing, UINT64_MAX - 4, 4));
+}
+
+TEST(BootMemoryMap, CoalescesOnlyAdjacentRangesWithEqualTypeAndAttributes)
+{
+    BootMemoryRegion storage[kBootInfoMaxMemoryRegions]{};
+    BootMemoryMap map(storage);
+    for(size_t index = 0; index <= kBootInfoMaxMemoryRegions; ++index)
+        ASSERT_TRUE(map.add({index * 0x1000, 0x1000, BootMemoryType::Usable, 1}));
+    const uint64_t end = (kBootInfoMaxMemoryRegions + 1) * 0x1000;
+    ASSERT_TRUE(map.add({end, 0x1000, BootMemoryType::Usable, 0}));
+    ASSERT_TRUE(map.add({end + 0x1000, 0x1000, BootMemoryType::Reserved, 0}));
+    ASSERT_TRUE(map.add({end + 0x3000, 0x1000, BootMemoryType::Reserved, 0}));
+    const auto ranges = map.finish();
+    ASSERT_EQ(4u, ranges.size());
+    EXPECT_EQ(end, ranges[0].length);
+    EXPECT_FALSE(map.truncated());
+}
+
+TEST(BootMemoryMap, CoalescesConsecutiveDescendingRanges)
+{
+    BootMemoryRegion storage[kBootInfoMaxMemoryRegions]{};
+    BootMemoryMap map(storage);
+    for(size_t index = kBootInfoMaxMemoryRegions + 1; index; --index)
+        ASSERT_TRUE(map.add({index * 0x1000, 0x1000, BootMemoryType::Usable, 1}));
+    const auto ranges = map.finish();
+    ASSERT_EQ(1u, ranges.size());
+    EXPECT_EQ(0x1000u, ranges[0].physical_start);
+    EXPECT_EQ((kBootInfoMaxMemoryRegions + 1) * 0x1000, ranges[0].length);
+    EXPECT_FALSE(map.truncated());
+}
+
+TEST(BootMemoryMap, TruncationExcludesOnlyOverlappingReservedRanges)
+{
+    BootMemoryRegion storage[kBootInfoMaxMemoryRegions]{};
+    BootMemoryMap map(storage);
+    ASSERT_TRUE(map.add({0x100000, 0x200000, BootMemoryType::Usable, 0}));
+    ASSERT_TRUE(map.add({0x900000, 0x1000, BootMemoryType::Usable, 0}));
+    for(size_t index = 2; index < kBootInfoMaxMemoryRegions; ++index)
+        ASSERT_TRUE(map.add({0x1000000 + index * 0x2000, 0x1000, BootMemoryType::Reserved, 0}));
+    EXPECT_FALSE(map.truncated());
+    ASSERT_TRUE(map.add({0x180000, 0x1000, BootMemoryType::Reserved, 0}));
+
+    const auto ranges = map.finish();
+    ASSERT_EQ(kBootInfoMaxMemoryRegions, ranges.size());
+    EXPECT_TRUE(map.truncated());
+    EXPECT_EQ(0x80000u, ranges[0].length);
+    EXPECT_TRUE(boot_memory_region_is_usable(ranges[0]));
+    EXPECT_TRUE(boot_memory_region_is_usable(ranges[1]));
+    EXPECT_EQ(0x1000u, ranges[1].length);
+    EXPECT_FALSE(boot_memory_range_is_usable(ranges, 0x180000, 0x1000));
+}
+
+TEST(BootMemoryMap, KeepsDisjointRamWhenLowRangesAreOmitted)
+{
+    BootMemoryRegion storage[2]{};
+    BootMemoryMap map(storage);
+    ASSERT_TRUE(map.add({0x100000, 0x200000, BootMemoryType::Usable, 1}));
+    ASSERT_TRUE(map.add({0x400000, 0x1000, BootMemoryType::Reserved, 1}));
+    ASSERT_TRUE(map.add({0, 0xa0000, BootMemoryType::Usable, 1}));
+    ASSERT_TRUE(map.add({0xa0000, 0x60000, BootMemoryType::Reserved, 1}));
+    const auto ranges = map.finish();
+    ASSERT_EQ(2u, ranges.size());
+    EXPECT_TRUE(map.truncated());
+    EXPECT_TRUE(boot_memory_range_is_usable(ranges, 0x100000, 0x200000));
+}
+
+TEST(BootMemoryMap, KeepsSafeSuffixAndDoesNotMergeAcrossOmittedReservation)
+{
+    BootMemoryRegion storage[1]{};
+    BootMemoryMap map(storage);
+    ASSERT_TRUE(map.add({0x1000, 0x5000, BootMemoryType::Usable, 1}));
+    ASSERT_TRUE(map.add({0x0800, 0x1800, BootMemoryType::Reserved, 1}));
+    ASSERT_TRUE(map.add({0x1000, 0x1000, BootMemoryType::Usable, 1}));
+    const auto ranges = map.finish();
+    ASSERT_EQ(1u, ranges.size());
+    EXPECT_EQ(0x2000u, ranges[0].physical_start);
+    EXPECT_EQ(0x4000u, ranges[0].length);
+    EXPECT_TRUE(boot_memory_region_is_usable(ranges[0]));
+}
+
+TEST(BootMemoryMap, RejectsOverflowAndSkipsEmptyRanges)
+{
+    BootMemoryRegion storage[1]{};
+    BootMemoryMap map(storage);
+    EXPECT_FALSE(map.add({UINT64_MAX - 2, 4, BootMemoryType::Usable, 0}));
+    EXPECT_TRUE(map.add({0x1000, 0, BootMemoryType::Reserved, 0}));
+    EXPECT_TRUE(map.finish().empty());
+}
+
+TEST(BootMemoryMap, TruncationRemovesOverlapsWithRetainedReservations)
+{
+    BootMemoryRegion storage[2]{};
+    BootMemoryMap map(storage);
+    ASSERT_TRUE(map.add({0x100000, 0x200000, BootMemoryType::Usable, 1}));
+    ASSERT_TRUE(map.add({0x180000, 0x1000, BootMemoryType::Reserved, 1}));
+    ASSERT_TRUE(map.add({0xa0000, 0x60000, BootMemoryType::Reserved, 1}));
+    const auto ranges = map.finish();
+    ASSERT_EQ(2u, ranges.size());
+    EXPECT_TRUE(map.truncated());
+    EXPECT_TRUE(boot_memory_region_is_usable(ranges[0]));
+    EXPECT_EQ(0x80000u, ranges[0].length);
+    EXPECT_EQ(BootMemoryType::Reserved, ranges[1].type);
 }

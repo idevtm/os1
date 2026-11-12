@@ -42,7 +42,7 @@ class VirtualMemory;
     return (0u == size_mask) ? 0u : (~size_mask + 1u);
 }
 
-// Enumerate all PCI functions reachable through the supplied ECAM regions.
+// Retain up to kPlatformMaxPciDevices functions in ECAM scan order.
 bool enumerate_pci(VirtualMemory& kernel_vm,
                    const PciEcamRegion* regions,
                    size_t region_count,

@@ -1278,6 +1278,26 @@ bool acpica_discover_tables(uint64_t& madt_physical,
     return true;
 }
 
+namespace
+{
+size_t madt_entry_minimum(uint8_t type)
+{
+    switch(type)
+    {
+        case ACPI_MADT_TYPE_LOCAL_APIC:
+            return sizeof(ACPI_MADT_LOCAL_APIC);
+        case ACPI_MADT_TYPE_IO_APIC:
+            return sizeof(ACPI_MADT_IO_APIC);
+        case ACPI_MADT_TYPE_INTERRUPT_OVERRIDE:
+            return sizeof(ACPI_MADT_INTERRUPT_OVERRIDE);
+        case ACPI_MADT_TYPE_LOCAL_APIC_OVERRIDE:
+            return sizeof(ACPI_MADT_LOCAL_APIC_OVERRIDE);
+        default:
+            return sizeof(ACPI_SUBTABLE_HEADER);
+    }
+}
+}  // namespace
+
 bool acpica_parse_madt(uint64_t& lapic_base,
                        CpuInfo* cpus,
                        size_t& cpu_count,
@@ -1312,19 +1332,23 @@ bool acpica_parse_madt(uint64_t& lapic_base,
     cpu_count = 0;
     ioapic_count = 0;
     override_count = 0;
+    const uint8_t bsp_apic_id = current_apic_id();
+    bool found_bsp = false;
+    bool cpu_truncated = false;
 
     const auto* cursor = reinterpret_cast<const uint8_t*>(madt) + sizeof(ACPI_TABLE_MADT);
     const auto* end = reinterpret_cast<const uint8_t*>(madt) + madt->Header.Length;
     while(cursor < end)
     {
-        if((cursor + sizeof(ACPI_SUBTABLE_HEADER)) > end)
+        const auto remaining = static_cast<size_t>(end - cursor);
+        if(remaining < sizeof(ACPI_SUBTABLE_HEADER))
         {
             AcpiPutTable(reinterpret_cast<ACPI_TABLE_HEADER*>(madt));
             return set_status_error(AE_BAD_HEADER, "acpica: MADT truncated");
         }
 
         const auto* subtable = reinterpret_cast<const ACPI_SUBTABLE_HEADER*>(cursor);
-        if((subtable->Length < sizeof(ACPI_SUBTABLE_HEADER)) || ((cursor + subtable->Length) > end))
+        if(subtable->Length < madt_entry_minimum(subtable->Type) || subtable->Length > remaining)
         {
             AcpiPutTable(reinterpret_cast<ACPI_TABLE_HEADER*>(madt));
             return set_status_error(AE_BAD_HEADER, "acpica: MADT entry length invalid");
@@ -1336,17 +1360,18 @@ bool acpica_parse_madt(uint64_t& lapic_base,
                 const auto* entry = reinterpret_cast<const ACPI_MADT_LOCAL_APIC*>(subtable);
                 if(entry->LapicFlags & ACPI_MADT_ENABLED)
                 {
-                    if(cpu_count >= kPlatformMaxCpus)
+                    const bool is_bsp = !found_bsp && entry->Id == bsp_apic_id;
+                    if(cpu_count == kPlatformMaxCpus)
                     {
-                        AcpiPutTable(reinterpret_cast<ACPI_TABLE_HEADER*>(madt));
-                        g_acpica_state.last_status = AcpiFormatException(AE_LIMIT);
-                        debug("acpica: CPU table full")();
-                        return false;
+                        cpu_truncated = true;
+                        if(!is_bsp)
+                            break;
+                        // Keep the running CPU even if firmware lists it after the limit.
+                        cpus[cpu_count - 1] = {entry->Id, true, true};
                     }
-                    CpuInfo& cpu = cpus[cpu_count++];
-                    cpu.apic_id = entry->Id;
-                    cpu.enabled = true;
-                    cpu.is_bsp = false;
+                    else
+                        cpus[cpu_count++] = {entry->Id, true, is_bsp};
+                    found_bsp |= is_bsp;
                 }
                 break;
             }
@@ -1402,17 +1427,8 @@ bool acpica_parse_madt(uint64_t& lapic_base,
         return set_status_error(AE_NOT_FOUND, "acpica: MADT missing required topology");
     }
 
-    const uint8_t bsp_apic_id = current_apic_id();
-    bool found_bsp = false;
-    for(size_t index = 0; index < cpu_count; ++index)
-    {
-        if(cpus[index].apic_id == bsp_apic_id)
-        {
-            cpus[index].is_bsp = true;
-            found_bsp = true;
-            break;
-        }
-    }
+    if(cpu_truncated)
+        debug("acpica: CPU table capacity reached; extra CPUs omitted")();
     if(!found_bsp)
     {
         return set_status_error(AE_NOT_FOUND, "acpica: BSP APIC ID not found in MADT");
