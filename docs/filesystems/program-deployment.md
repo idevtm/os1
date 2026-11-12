@@ -89,7 +89,10 @@ Kernel drivers remain built into the kernel. Moving programs does not change sto
 The default manifest installs the full shell and bundled programs under `/bin`.
 Use `/bin/diskutil` to synchronize storage.
 Initrd contains only `init` and `rescue`.
-The manifest installs missing defaults for `/etc/motd`, `/etc/readme`, and `/etc/shell/init.sh`.
+The manifest installs missing defaults for `/etc/motd`, `/etc/readme`, and `/etc/shell/init.script`.
+If the new startup profile is absent, an upgrade copies the contents of an existing `/etc/shell/init.sh`.
+The updater preserves the legacy file and any existing `init.script`.
+An existing disk can retain the retired `/bin/intf` executable. New disks ship only the shell inspector.
 Deployment preserves existing copies. It also preserves unlisted files, including old copies at `/diskutil` and `/readme`.
 The default shell profile adds `/bin` to the search list.
 Names containing `/` bypass search. Providers in verification programs use explicit `/bin` paths.

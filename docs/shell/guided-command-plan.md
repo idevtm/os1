@@ -15,7 +15,7 @@ exclusive result -> scope/foreground activity -> release -> prompt
 
 Tab inserts a single match immediately. It opens a list when several matches are available.
 Tab can enter an object and show its children.
-The `intf` command offers file and directory paths for its image operand.
+The `inspect` command offers file and directory paths for its image operand.
 Method selection expands all parameters, including defaults and explicit missing values.
 Tab and Shift-Tab move between parameter values when no list is open.
 An open list takes precedence; Tab accepts its choice without advancing another parameter.

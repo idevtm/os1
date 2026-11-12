@@ -60,7 +60,7 @@ The host suite checks both languages and the IPC envelope layouts.
 | Kernel-hosted writable `/tmp`, mutation rights, resource results, quotas | [Temporary filesystem ABI](abi/tmpfs-abi.md) |
 | Descriptors, rights, lifetime, console | [Console descriptor ABI](abi/console-descriptor-abi.md) |
 | Immutable files/directories, launch grants, argv/environment | [Initrd VFS and startup ABI](abi/initrd-vfs-abi.md) |
-| Sync/async copied calls, retained Operations, TextProcessor, offline `intf` | [Copied IPC ABI](abi/copied-ipc-abi.md) |
+| Sync/async copied calls, retained Operations, TextProcessor, offline `inspect` | [Copied IPC ABI](abi/copied-ipc-abi.md) |
 | Properties, volatile broadcast events, unsubscribe, typed Counter construction, deadlines | [Counter and events ABI](abi/counter-events-abi.md) |
 | Capability transfer and scoped class-controlled singleton activation | [Shared activation ABI](abi/shared-activation-abi.md) |
 | Independent session authority, admission budgets, wait-many | [Client sessions ABI](abi/client-sessions-abi.md) |

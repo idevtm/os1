@@ -181,7 +181,7 @@ description: "Limits this response; it does not change the directory contents."
 ```
 
 The canonical extractor must preserve text, examples, constraints, case meanings,
-and constructor documentation. `intf`/help, generated C++ documentation, and future
+and constructor documentation. `inspect`/help, generated C++ documentation, and future
 automated callers should consume the same description records. Text-only changes
 do not change wire compatibility; an artifact/documentation digest may change
 independently of a semantic schema fingerprint.

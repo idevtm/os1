@@ -134,11 +134,6 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
         path += 3;
     if(starts(path, "process.path."))
         path += 8;
-    if(same(path, "process.context.list"))
-    {
-        d.add("path", T::String, "\"\"");
-        return d;
-    }
     if(starts(path, "process.shell.aliases."))
     {
         const char* operation = path + sizeof("process.shell.aliases.") - 1;

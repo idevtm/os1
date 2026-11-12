@@ -67,7 +67,7 @@ The default UEFI launch updates the disk programs before boot. It preserves data
 For an existing managed USB stick, select **Update boot and programs (preserve data)**.
 See the [deployment guide](docs/filesystems/program-deployment.md).
 
-`intf /bin/textprocessor` prints interface records from the binary without running it.
+`inspect /bin/textprocessor` prints interface records from the binary without running it.
 The [Counter/events phase](docs/native-api/abi/counter-events-abi.md) adds `/bin/counter`, typed
 constructor arguments and CLI conversion, volatile subscriptions, timed waits,
 and parent-owned private-provider supervision. The [shared activation phase](docs/native-api/abi/shared-activation-abi.md) adds
@@ -79,7 +79,7 @@ network stack remain future work.
 The [session and rich-parameter implementation](docs/archive/native-api/2026-11-05-client-sessions-and-parameters.md)
 adds independent budgeted Counter sessions, observer/mutable activation grants,
 and shared constructor/method codecs with typed defaults, descriptions and dot-based
-CLI conversion. Try `intf /bin/paramdemo`, `paramcheck`, and `activationcheck`.
+CLI conversion. Try `inspect /bin/paramdemo`, `paramcheck`, and `activationcheck`.
 The [exclusive Buffer ABI](docs/native-api/abi/buffer-loans-abi.md) adds Operation-scoped loans and distinct reply outputs.
 `buffercheck` exercises both TextProcessor paths. See the [implementation record](docs/archive/native-api/2026-11-05-exclusive-buffer-implementation.md) for validation and limits.
 Inline control payloads remain bounded to 256 bytes. Live readers and shared read/write remain deferred.
@@ -613,13 +613,13 @@ Default summaries show readable device names, conventional bus IDs, and readable
 Unsupported connected EHCI devices can appear with unknown identity; this does not enable device transfers.
 
 ```text
-context os.system.platform
-context os.system.platform.cpu
-context os.system.platform.memory
+inspect os.system.platform
+inspect os.system.platform.cpu
+inspect os.system.platform.memory
 lsblk -v
 lsusb -t
-context os.storage.devices
-context os.fs.mounts.mount_0.backing
+inspect os.storage.devices
+inspect os.fs.mounts.mount_0.backing
 ```
 
 Platform views describe boot observations. Supported USB attachment and dependent storage records update after removal or reconnection.
@@ -637,8 +637,8 @@ os.input.keyboardN / mouseN -> open -> get_state / subscribe -> try_read / unsub
 ```
 
 ```text
-context os.input
-context os.input.keyboard1
+inspect os.input
+inspect os.input.keyboard1
 keyboard = os.input.keyboard1.open
 keys = keyboard.subscribe
 keys.try_read
@@ -648,7 +648,7 @@ drop keys
 drop keyboard
 ```
 
-Select a connected child from `context os.input`; its `name` field identifies the device.
+Select a connected child from `inspect os.input`; its `name` field identifies the device.
 Press Tab after `os.input.` to explore connected devices.
 Removed names disappear and are not reused during the boot.
 Press Tab after `keyboard.` or `keys.` to explore callable methods.

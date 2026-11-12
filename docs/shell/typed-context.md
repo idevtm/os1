@@ -42,19 +42,64 @@ Record members can be enumerated through the bag representation; this is not gen
 Search retains the first executable candidate and launches that same object.
 Only NOT_FOUND advances to the next directory. Explicit paths bypass search and aliases.
 
+## Name resolution and inspection
+
+The shell selects aliases, live bindings, and filesystem entries by position and spelling.
+An explicit spelling keeps its meaning when names collide.
+
+```text
+ls    -> command alias
+.ls   -> live binding
+./ls  -> file in the current directory
+```
+
+A bare command name selects an active alias first. The shell then checks live bindings and searches for a program.
+A leading dot selects the live context. Enter on `.` lists its roots and bindings.
+Enter on an object lists its immediate members. A property or field displays its value.
+An object listing can write to a redirected output. Typed calls use their existing redirection rules.
+A bare method uses its supplied arguments and defaults. If a required input is missing, the shell reports its name.
+
+A slash selects a filesystem path. Quotes select a literal path in a file operand.
+A file operand of `.` selects the current directory.
+An unquoted dotted name selects a live member if its first segment names a live binding.
+If that member is absent, the shell reports an error.
+A method used to compute a path requires an explicit call with parentheses.
+Use `./report.txt`, `"report.txt"`, or `'report.txt'` to select a colliding file.
+In a path or stream operand, `process.streams.input` selects the live stream.
+
+| Command | Result |
+| --- | --- |
+| `inspect`, `inspect .` | List live roots and bindings. |
+| `inspect .os.fs.list` | Show the method definition and its defaults. |
+| `inspect /bin/textprocessor` | Read the image interface metadata. |
+| `inspect /bin/sh` | Show the constructor and its optional `init_script` String. |
+| `help ls` | Show the alias and its settings. |
+
+Inspection reads descriptions and image metadata without invoking methods or starting programs.
+The live context listing contains roots and bindings.
+Live objects and image classes use the same `name [kind] details` listing style.
+Use `inspect` in scripts that used the retired `context` or `intf` commands.
+
+Tab browses the applicable domains at the cursor.
+After `.`, it offers live roots. After `./`, it offers filesystem entries.
+After `inspect `, it offers live references and paths.
+Tab inserts a sole match and opens a menu for several matches.
+A selected spelling preserves the target when you press Enter.
+
 ## Startup configuration
 
-Init passes the optional String constructor argument `init_script:"/etc/shell/init.sh"`.
+Init passes the optional String constructor argument `init_script:"/etc/shell/init.script"`.
 The shell applies the profile before the first prompt.
 The profile configures the command search list and the alias table.
 
 ```text
-/sbin/init -> /bin/sh constructor -> /etc/shell/init.sh -> search list + aliases
+/sbin/init -> /bin/sh constructor -> /etc/shell/init.script -> search list + aliases
 ```
 
 The profile accepts literal calls to `process.path.add`, `process.path.remove`, and the alias mutation methods.
 If a statement fails, the shell reports its file and line and restores the previous configuration.
 A missing file leaves the initial configuration in place.
+During disk deployment, the updater copies a legacy `/etc/shell/init.sh` profile if the new file is absent.
 Child shells can load aliases from the inherited profile path. They keep their inherited search list.
 
 ```text
@@ -91,8 +136,10 @@ Explicit paths bypass the alias table.
 | `rmdir` | `fs.remove_directory` | Required String `path`, slot 1; empty directories only |
 
 `os.fs.list` uses the current directory when you omit `path`.
-With `list:true`, it prints the file type, size in bytes, modification time in nanoseconds, and name.
-The shell prints `modify_ns:unsupported` when the file has no modification time.
+With `list:true`, it prints a table with the file type, exact size in bytes, modification time in UTC, and name.
+The size column aligns to the right. Directory names end with `/`.
+The shell formats the time as `YYYY-MM-DD HH:MM:SS`. It prints `-` when the time is unavailable.
+Use `stat` or `fs.info` to read the raw timestamp in nanoseconds.
 The detailed format requires lookup and inspect access for directory entries.
 
 ```text
@@ -122,10 +169,10 @@ startup profile -> short alias -> os.system.diagnostics method -> report
 | `irqs` | `interrupts` |
 
 The methods print the existing reports and use the current observation permissions.
-Run `context os.system.diagnostics` to see the methods.
+Run `inspect os.system.diagnostics` to see the methods.
 Call `os.system.diagnostics.summary()` to print the system report without an alias.
 Existing disk profiles keep their contents during deployment.
-To add these aliases to an existing profile, copy the new declarations from the [default profile](../../src/user/data/shell-init.sh).
+To add these aliases to an existing profile, copy the new declarations from the [default profile](../../src/user/data/shell-init.script).
 
 ## Process, logs, and power
 
@@ -205,7 +252,7 @@ Failed getters and type conversions report errors.
 `sh "script"` reads commands from a separate file handle and preserves the child's input stream.
 `sh < "script"` also remains available.
 Unhandled command failure stops the script; an interactive session continues after reporting it.
-Bare property expressions display results only interactively. Listing, content commands, and explicit output work in both modes.
+Bare property expressions display results interactively. An explicit live reference such as `.process.pid` also displays its value in scripts.
 
 Legacy executables receive String arguments or serialized Integer/Boolean values through argv.
 Native constructor parameter tails use the versioned metadata parser.

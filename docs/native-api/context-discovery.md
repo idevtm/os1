@@ -1,7 +1,7 @@
 # Live runtime context discovery
 
 The shared user runtime describes inspectable bindings and copied environment data without activation.
-The shell uses these descriptions for `context`, `help`, and Tab completion.
+The shell uses these descriptions for `inspect`, `context`, `help`, and Tab completion.
 
 ```text
 existing resource grants + typed environment
@@ -10,7 +10,7 @@ existing resource grants + typed environment
                      |
        resolve -> enumerate -> describe
                      |
-          context command / help / Tab list
+          inspect / context / help / Tab list
 ```
 
 | Topic | Definition |
@@ -42,7 +42,6 @@ Refresh performs no filesystem writes and starts no processes.
 | `process.path`, alias `path` | Local path operations; search additionally requires lookup and execute authority |
 | `process.streams` | Present standard descriptors; Console descriptions follow each descriptor's rights |
 | `process.streams.output.print`, alias `out.print` | Shell output helper when output has WRITE authority |
-| `process.context.list`, alias `context` | Bounded structural inspection |
 | `process.shell.history` | Current shell history description; absent from ordinary process views |
 | `process.shell.bindings` | Shell-local named results and explicit removal |
 | User binding names | Retained data or object references; absent from child environments |
@@ -71,6 +70,7 @@ This support does not imply general invocation of arbitrary discovered provider 
 `Member.value` indexes the copied environment when the member describes environment data.
 List children use decimal indices, such as `process.environment.path.0`.
 The text inspector prints member kinds and signatures.
+The [shell name rules](../shell/typed-context.md#name-resolution-and-inspection) define how `inspect` selects a live object or an image file.
 For hardware fields, it also prints the value from the copied boot observation.
 It does not invoke methods or arbitrary property getters.
 An empty collection prints `(no children)` after its heading.
@@ -135,7 +135,7 @@ The menu marks these entries with `[command]`.
 Select a command to insert its name.
 Press Enter again to run it.
 At a file operand or redirection, Tab offers authorized filesystem names.
-For example, press Tab after `intf /b` to complete the directory prefix for an image path.
+For example, press Tab after `inspect /b` to complete the directory prefix for an image path.
 The shell quotes a name that needs quotes.
 At a command word, the shell checks the executable search list.
 It uses the execution resolver to check executable candidates.
@@ -146,9 +146,9 @@ See [guided commands](../shell/guided-command-plan.md) for ownership, bounds, an
 
 ```text
 context
-context os.system
-context process.environment
-process.context.list path:"process.environment.path"
+inspect os.system
+inspect process.environment
+inspect process.environment.path
 os.fs.list "/tmp"
 echo os.fs.cwd
 process.path.list

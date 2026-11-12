@@ -18,7 +18,7 @@ Descriptor read/write/seek/enumeration use the same nodes and open instances.
 Bindings use the 24-byte `os1_ipc_kernel_binding` record and `OS1_IPC_BIND_KERNEL` from the [kernel adapter](kernel-console-abi.md#binding-and-authority).
 Interface IDs are `Directory = 0x4449523030303031` and `File = 0x46494c4530303031`; both use version 1.
 Both tmpfs and [ext2](../../filesystems/ext2.md) resources support these bindings. Initrd resources continue to use descriptor operations.
-Kernel interface descriptions are compiled contracts; no separate filesystem ELF class exists for `intf` inspection.
+Kernel interface descriptions are compiled contracts; no separate filesystem ELF class exists for inspection with `inspect`.
 
 | Resource | Supported direct rights |
 | --- | --- |

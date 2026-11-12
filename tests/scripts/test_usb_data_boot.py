@@ -38,7 +38,7 @@ def main():
     boot(args, disk, 'initial', [
         ('probe', b'deployed program version 1'),
         ('counter --initial 7 --ceiling 20', b'counter initial=7 ceiling=20'),
-        ('intf /bin/textprocessor', b'interface TextProcessor'),
+        ('inspect /bin/textprocessor', b'TextProcessor [interface]'),
         ('/bin/diskutil seed', b'diskutil seed ok'),
         ('echo retained-usb-data > /note', None),
         ('/bin/diskutil sync', b'diskutil sync ok')])

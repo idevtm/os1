@@ -33,6 +33,14 @@ TEST_F(Discovery, LiveRightsExcludeUnavailableServicesAndStreamMethods)
     ASSERT_GE(input, 0);
     EXPECT_EQ(OS1_HARDWARE_INPUT_ROOT, view.nodes[input].target);
     EXPECT_EQ(discovery::Alias, view.nodes[input].flags);
+    EXPECT_EQ(view.resolve(".os"), view.resolve("os"));
+    EXPECT_EQ(view.resolve("."), 0);
+    EXPECT_TRUE(view.claims(".", 1));
+    EXPECT_FALSE(view.claims_path(".", 1));
+    EXPECT_TRUE(view.claims("os.missing", 10));
+    EXPECT_TRUE(view.claims(".missing", 8));
+    EXPECT_FALSE(view.claims("./os.missing", 12));
+    EXPECT_FALSE(view.claims("report.txt", 10));
     int pid = view.resolve("process.pid");
     ASSERT_GE(pid, 0);
     EXPECT_EQ(discovery::Kind::Property, view.member(pid).kind);

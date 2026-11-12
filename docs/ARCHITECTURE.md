@@ -1408,7 +1408,7 @@ The [deployment guide](filesystems/program-deployment.md#boot-and-recovery) defi
 | --- | --- |
 | Initrd `/sbin` | `init` and `rescue` |
 | Ext2 `/etc` | Default `motd`, `readme`, and shell startup script |
-| Ext2 `/bin` | Full shell, file utilities, verification programs, providers, examples, `intf`, and `diskutil` |
+| Ext2 `/bin` | Full shell, file utilities, verification programs, providers, examples, and `diskutil` |
 
 The full shell requires ext2. Rescue remains available without storage.
 The kernel initializes storage and its namespace before it starts init.
@@ -1427,7 +1427,7 @@ Current user programs:
 - `/bin/balancecheck` — user-visible run-queue balance verifier built from [`src/user/programs/balancecheck.cpp`](../src/user/programs/balancecheck.cpp)
 - `/bin/smpcheck` — observe-driven SMP state verifier built from [`src/user/programs/smpcheck.cpp`](../src/user/programs/smpcheck.cpp)
 - `/bin/fault` — deliberate page-fault probe built from [`src/user/programs/fault.cpp`](../src/user/programs/fault.cpp)
-- `/bin/textprocessor`, `/bin/ipccheck`, and `/bin/intf` provide private copied IPC, retained Operations, methods/properties, and offline interface inspection. See [the concrete ABI](native-api/abi/copied-ipc-abi.md).
+- `/bin/textprocessor` and `/bin/ipccheck` exercise private copied IPC, retained Operations, methods, and properties. The shell inspects ELF metadata with `inspect`. See [the concrete ABI](native-api/abi/copied-ipc-abi.md).
 - `/bin/buffercheck` exercises exclusive loans, same-buffer processing, distinct outputs, and recovery. See [the Buffer ABI](native-api/abi/buffer-loans-abi.md).
 - `/bin/activation` and `/bin/activationcheck` — explicitly registered Counter activation, copied capability transfer, class-controlled singleton construction, and independent clients. See [the shared activation ABI](native-api/abi/shared-activation-abi.md).
 - `/bin/counter` and `/bin/countercheck` — a second IPC protocol, typed constructor metadata/CLI conversion, event broadcast/overflow/unsubscribe, deadline waits, and restricted provider supervision. See [the phase ABI](native-api/abi/counter-events-abi.md).
@@ -1460,7 +1460,7 @@ Mutable `/tmp` files cannot execute. There is no `fork`.
 User programs use small-model position-relative code, a static GOT, size optimization, and link-time optimization.
 They remain fixed-address static `ET_EXEC` images; no dynamic linker or runtime relocation step is added.
 Disabling PLT calls and linker relaxation preserves high-address references and optional weak startup symbols.
-Initrd packaging removes symbols and the nonallocated compiler `.comment` section; allocated interface metadata remains available to `intf`.
+Initrd packaging removes symbols and the nonallocated compiler `.comment` section; allocated interface metadata remains available to `inspect`.
 Non-reflective initrd programs omit unused section tables. Disk deployment copies complete ELF files, including class metadata sections.
 
 ### Persistent QEMU storage
@@ -2037,12 +2037,13 @@ The [catalog plan](native-api/hardware-catalog-plan.md) records scope, validatio
 ## Live context exploration
 
 The [runtime discovery profile](native-api/context-discovery.md) exposes fixed bindings and copied environment data without activation.
-The shell uses this profile for `context`, `help`, and Tab completion.
-The prompt also offers configured aliases, shell commands, executable names, and file paths.
+The shell uses this profile for `inspect`, `context`, `help`, and Tab completion.
+The prompt offers live members, configured aliases, executable names, and file paths.
+The shell uses the same name rules for the prompt and execution.
 The disk startup profile configures aliases and executable search directories before the first prompt.
 
 ```text
-resource metadata + environment + shell bindings -> bounded View -> context / help / completion
+resource metadata + environment + shell bindings -> bounded View -> inspect / help / completion
 parameter definitions -> guided values -> expression evaluator -> local helper / native IPC
 Console input session -> prompt editing -> explicit release -> canonical command input
 ```

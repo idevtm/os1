@@ -46,7 +46,7 @@ The console output lock also serializes pixel writes, keyboard echo, and termina
 When the session ends, the kernel redraws the active terminal and clears pixels outside its grid.
 The full text redraw holds the console output lock with local interrupts disabled.
 
-Inspect `context os.display` to read availability and capabilities.
+Run `inspect os.display` to read availability and capabilities.
 This operation reads the published display binding. A failed restoration withdraws its mode list.
 The service reports the boot geometry and the number of modes. It reports `bochs-display` when runtime switching is available.
 BIOS VGA text exposes no graphics mode.

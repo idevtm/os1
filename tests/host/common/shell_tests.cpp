@@ -2,9 +2,11 @@
 
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include "input/ps2_modifiers.hpp"
 #include "shell/command.hpp"
+#include "shell/listing.hpp"
 #include "shell/program_path.hpp"
 #include "shell/text_buffer.hpp"
 using namespace os1::shell;
@@ -293,4 +295,18 @@ TEST(FilePatterns, WildcardsAreBoundedAndCaseSensitive)
     EXPECT_FALSE(name_matches("?", ""));
     EXPECT_FALSE(name_matches("a*b*c", "abbd"));
     EXPECT_TRUE(name_matches("a[b]", "a[b]"));
+}
+
+TEST(ShellListing, FormatsUtcAcrossCalendarBoundaries)
+{
+    for(const auto& [ns, timestamp] : {std::pair<uint64_t, const char*>{0, "1970-01-01 00:00:00"},
+                                       {999999999, "1970-01-01 00:00:00"},
+                                       {951782400000000000ull, "2000-02-29 00:00:00"},
+                                       {4107542400000000000ull, "2100-03-01 00:00:00"},
+                                       {UINT64_MAX, "2554-07-21 23:34:33"}})
+    {
+        const LongListingRow row(false, UINT64_MAX, true, ns);
+        EXPECT_EQ(std::string("-     18446744073709551615  ") + timestamp + "  ",
+                  std::string(row.prefix, sizeof(row.prefix)));
+    }
 }

@@ -7,6 +7,7 @@
 #include <os1/tree.hpp>
 
 #include "discovery/view.hpp"
+#include "shell/listing.hpp"
 #include "shell/values.hpp"
 namespace os1::user::shell_runtime
 {
@@ -104,14 +105,12 @@ struct Builtin
     const char* name;
     const char* usage;
 };
-inline constexpr Builtin builtins[] = {
-    {"context", "context [object.path]"},
-    {"process.context.list", "process.context.list [object.path]"},
-    {"write", "write [--append|--replace] path"},
-    {"edit", "edit path"},
-    {"help", "help [command|object.path]"},
-    {"exec", "exec image [arguments]"},
-    {"exit", "exit"}};
+inline constexpr Builtin builtins[] = {{"write", "write [--append|--replace] path"},
+                                       {"edit", "edit path"},
+                                       {"help", "help [command|object.path]"},
+                                       {"inspect", "inspect [object.path|image]"},
+                                       {"exec", "exec image [arguments]"},
+                                       {"exit", "exit"}};
 
 inline bool prefix(const char* text, const char* head)
 {
@@ -212,6 +211,11 @@ inline shell::Resolution resolve(
 }
 inline int stream(const char* token, size_t size)
 {
+    if(size > 1 && token[0] == '.')
+    {
+        ++token;
+        --size;
+    }
     if(os1::context::same(token, size, "out", 3) ||
        os1::context::same(token, size, "process.streams.output", 22))
         return 1;
@@ -288,6 +292,13 @@ inline Alias* find_alias(const char* name)
             return &alias;
     return nullptr;
 }
+inline bool is_builtin(const char* name)
+{
+    for(const auto& builtin : builtins)
+        if(shell::equal(name, builtin.name))
+            return true;
+    return false;
+}
 inline bool valid_alias_name(const char* name)
 {
     if(!*name || *name == '-' || (*name >= '0' && *name <= '9'))
@@ -296,10 +307,7 @@ inline bool valid_alias_name(const char* name)
         if(!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') ||
              *p == '_' || *p == '-'))
             return false;
-    for(const auto& builtin : builtins)
-        if(shell::equal(name, builtin.name))
-            return false;
-    return !shell::equal(name, "drop") && !shell::equal(name, "with");
+    return !is_builtin(name) && !shell::equal(name, "drop") && !shell::equal(name, "with");
 }
 inline Method method_for(const char* name)
 {
@@ -363,6 +371,8 @@ inline bool path_operand(Method method, unsigned slot)
             return false;
     }
 }
+// The shell installs its live expression resolver. Unclaimed spellings stay literal paths.
+inline int (*resolve_path_value)(const char*, unsigned, Data&, const char*, int*) = nullptr;
 struct Call
 {
     Method method = Method::Unknown;
@@ -539,6 +549,25 @@ struct Call
                             command.raw[starts[p]] != '\'' &&
                             stream(command.raw + starts[p], command.end[i] - starts[p]) < 0)
                     {
+                        const int live = resolve_path_value
+                                             ? resolve_path_value(command.raw + starts[p],
+                                                                  command.end[i] - starts[p],
+                                                                  values,
+                                                                  parameters[p].name,
+                                                                  &streams[p])
+                                             : 0;
+                        if(live < 0)
+                        {
+                            error = "unknown member or expected String path";
+                            return false;
+                        }
+                        if(streams[p] >= 0)
+                            continue;
+                        if(live > 0)
+                        {
+                            nodes[p] = live;
+                            continue;
+                        }
                         const char* arg = command.argv[i];
                         if(starts[p] != command.begin[i])
                         {
@@ -804,6 +833,16 @@ inline bool redirect_value(char* raw, char* name, bool strict)
         return true;
     static Data value;
     os1::context::init(value);
+    if(*raw != '"' && *raw != '\'' && resolve_path_value)
+    {
+        const int live = resolve_path_value(raw, files::length(raw), value, "value", nullptr);
+        if(live == 0)
+            return true;  // The lexer already decoded the literal path into name.
+        if(live > 0 && os1::context::string(value, live, name, shell::line_capacity))
+            return true;
+        diagnostic("redirection requires a String path from a live member");
+        return false;
+    }
     shell::ValueParser parser{raw, files::length(raw), 0, strict, resolve, warning};
     if(!parser.parse(value, 0, "value", 5))
     {
@@ -905,6 +944,9 @@ inline long list(const char* path, bool detailed)
     Handle directory(open(path, rights, detailed ? OS1_RIGHT_INSPECT : 0));
     if(directory.fd < 0)
         return directory.fd;
+    if(detailed &&
+       !files::put(1, shell::long_listing_header, sizeof(shell::long_listing_header) - 1))
+        return OS1_ERR_IO;
     alignas(8) uint8_t data[1024]{};
     for(;;)
     {
@@ -938,13 +980,11 @@ inline long list(const char* path, bool detailed)
                 if(status < 0)
                     return status;
                 is_directory = metadata.kind == OS1_OBJECT_DIRECTORY;
-                const char kind = is_directory ? 'd' : '-';
-                constexpr char no_time[] = " modify_ns:unsupported";
-                if(!files::put(1, &kind, 1) || !tree::field(" bytes:", metadata.logical_bytes) ||
-                   !((times.valid & OS1_TIME_MODIFY)
-                         ? tree::field(" modify_ns:", times.modify_ns)
-                         : files::put(1, no_time, sizeof(no_time) - 1)) ||
-                   !files::put(1, " ", 1))
+                const shell::LongListingRow row(is_directory,
+                                                metadata.logical_bytes,
+                                                times.valid & OS1_TIME_MODIFY,
+                                                times.modify_ns);
+                if(!files::put(1, row.prefix, sizeof(row.prefix)))
                     return OS1_ERR_IO;
             }
             for(unsigned i = 0; i < record->name_bytes; ++i)

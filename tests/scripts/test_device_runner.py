@@ -114,9 +114,9 @@ def main():
             expect(b'\n', timeout=15)
             deadline = time.monotonic() + 15
             while True:
-                listing = run('context os.input')
+                listing = run('inspect os.input')
                 children = re.findall(rb'^(mouse[0-9]+) \[object\]', listing, re.MULTILINE)
-                if any(b'USB pointer' in run('context os.input.' + child.decode())
+                if any(b'USB pointer' in run('inspect os.input.' + child.decode())
                        for child in children):
                     break
                 assert time.monotonic() < deadline, listing

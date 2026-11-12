@@ -199,8 +199,8 @@ QEMU results do not establish that acceptance.
 ## Shell example
 
 ```text
-context os.input
-context os.input.mouse1
+inspect os.input
+inspect os.input.mouse1
 pointer = os.input.mouse1.open
 pointer.get_state
 motion = pointer.subscribe

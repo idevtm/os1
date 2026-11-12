@@ -36,13 +36,20 @@ def main():
                     code=args.code if firmware == 'uefi' else None,
                     vars=args.vars if firmware == 'uefi' else None,
                     log=str(stem.with_suffix('.log')))
-                commands = [('sys', b'sys boot='), ('kmem', b'kmem complete')]
-                commands += [('context os.devices.inventory.pci.pci_0', b'vendor_id [field] Integer')] * 20
-                commands += [('sys', b'sys boot='), ('kmem', b'kmem complete')]
+                def exercise(command, _expect):
+                    # Old measurement images still expose the historical command.
+                    inspector = 'inspect' if b'\ninspect [' in command('help') else 'context'
+                    command('sys', b'sys boot=')
+                    command('kmem', b'kmem complete')
+                    for _ in range(20):
+                        command(f'{inspector} os.devices.inventory.pci.pci_0', b'vendor_id [field] Integer')
+                    command('sys', b'sys boot=')
+                    command('kmem', b'kmem complete')
+
                 capture = io.StringIO()
                 before = resource.getrusage(resource.RUSAGE_CHILDREN)
                 with contextlib.redirect_stdout(capture):
-                    boot(run, disk, 'measure', commands=commands)
+                    boot(run, disk, 'measure', exercise=exercise)
                 after = resource.getrusage(resource.RUSAGE_CHILDREN)
                 match = re.search(r'boot_seconds=([\d.]+) workload_seconds=([\d.]+)', capture.getvalue())
                 if not match:

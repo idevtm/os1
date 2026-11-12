@@ -149,14 +149,14 @@ Object nodes are inspection targets; this slice does not return retained device-
 Use direct evaluation for numeric fields.
 
 ```text
-context os.devices
-context os.devices.topology
-context os.devices.inventory.pci.pci_0
+inspect os.devices
+inspect os.devices.topology
+inspect os.devices.inventory.pci.pci_0
 os.devices.inventory.pci.pci_0.vendor_id
 vendor = os.devices.inventory.pci.pci_0.vendor_id
 vendor
-context os.firmware.acpi
-context os.system.processors
+inspect os.firmware.acpi
+inspect os.system.processors
 ```
 
 Type `os.devices.` to open its children.
@@ -300,8 +300,8 @@ lspci -v
 lsusb -t
 lsblk -v
 lshw > /tmp/hardware
-context os.storage.devices
-context os.fs.mounts.mount_0.backing
+inspect os.storage.devices
+inspect os.fs.mounts.mount_0.backing
 os.storage.devices.block_0.sector_size
 ```
 

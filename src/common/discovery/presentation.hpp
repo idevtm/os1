@@ -2,6 +2,11 @@
 #include "discovery/completion.hpp"
 namespace os1::discovery
 {
+template<class Emit>
+bool listing_kind(Emit emit, const char* kind, const char* qualifier = nullptr)
+{
+    return emit(" [") && emit(kind) && (!qualifier || (emit(", ") && emit(qualifier))) && emit("]");
+}
 struct Row
 {
     char bytes[OS1_CONSOLE_REDRAW_MAX + 1]{};
@@ -73,10 +78,21 @@ struct Presentation
                         else if(const char* command = state.command_name(index))
                         {
                             line.append(command);
-                            line.append(state.path_choices ? " [path]" : " [command]");
+                            line.append(state.command_label(index));
                         }
                         else
-                            line.member(view.member(state.ids[index]));
+                        {
+                            const auto member = view.member(state.ids[index]);
+                            if(state.qualified(member))
+                                line.append(".");
+                            if(state.stream_choice(view, member))
+                            {
+                                line.append(member.name);
+                                line.append(" [stream]");
+                            }
+                            else
+                                line.member(member);
+                        }
                     }
                 }
             }

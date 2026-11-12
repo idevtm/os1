@@ -3,6 +3,7 @@
 import argparse
 import re
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from test_ext2_persistence import boot
 
@@ -25,13 +26,24 @@ def exercise(run, expect):
     ok('cat "parentheses.txt"', b'f(x)\n(\n')
     ok('mkdir "details"')
     short = ok('ls "."', b'a.txt\n')
-    assert b'modify_ns:' not in short, short
-    modified = re.search(rb' modify_ns:(\d+)', ok('stat "a.txt"'))[1]
+    header = b'TYPE                 BYTES  MODIFIED (UTC)       NAME'
+    assert header not in short, short
+    modified = int(re.search(rb' modify_ns:(\d+)', ok('stat "a.txt"'))[1])
+    utc = datetime.fromtimestamp(modified // 1_000_000_000, timezone.utc)
+    row = f"{'-':6}{8:20}  {utc:%Y-%m-%d %H:%M:%S}  a.txt"
     for command in ('ls -l "."', 'll "."', 'os.fs.list(path:".", list:true)'):
-        listing = ok(command, b'- bytes:8 modify_ns:' + modified + b' a.txt\n')
-        assert re.search(rb'^d bytes:\d+ modify_ns:\d+ details/\n', listing, re.MULTILINE), listing
-    ok('ls -l /sbin', b' modify_ns:unsupported init\n')
-    assert b'modify_ns:' not in ok('ll "." list:false', b'a.txt\n')
+        listing = ok(command, row.encode() + b'\n')
+        assert header + b'\n' in listing, listing
+        assert re.search(rb'^d {5} *\d+  \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}  details/\n',
+                         listing, re.MULTILINE), listing
+    recovery = ok('ls -l /sbin', header)
+    assert re.search(rb'^- {5} *\d+  - {20}init\n', recovery, re.MULTILINE), recovery
+    assert header not in ok('ll "." list:false', b'a.txt\n')
+    ok('ls -l "." > "/tmp/details.txt"')
+    ok('cat "/tmp/details.txt"', row.encode() + b'\n')
+    ok('mkdir "empty"')
+    empty = ok('ls -l "empty"', header)
+    assert header + b'\nos1> ' in empty, empty
     failed = run('os.fs.list(path:".", list:1)', allow_errors=True)
     assert b'Boolean' in failed, failed
     ok('process.shell.aliases.show(name:"ls")', b'-l -> list:true')
@@ -87,7 +99,7 @@ def exercise(run, expect):
     ok('grep "process.pid [property] Integer" "help-output"', b'\nprocess.pid [property] Integer\n')
     ok('process.shell.aliases.remove(name:"check_help")')
     assert b'check_help ->' not in ok('help'), 'help lists a removed alias'
-    ok('context os.system.diagnostics', b'memory [method]')
+    ok('inspect os.system.diagnostics', b'memory [method]')
     ok('os.system.diagnostics.summary()', b'sys boot=')
     ok('os.system.diagnostics.summary > "system-report"')
     ok('cat "system-report"', b'sys boot=')

@@ -85,9 +85,9 @@ The full ASD-STE100 dictionary is unavailable; new prose receives manual technic
 Use these commands to inspect the current input collections:
 
 ```lua
-context os.input.keyboards
+inspect os.input.keyboards
 os.input.keyboards.count
-context os.input.pointers
+inspect os.input.pointers
 p = os.input.pointers[0].open
 p.get_state
 s = p.subscribe

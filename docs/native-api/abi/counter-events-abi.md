@@ -10,7 +10,7 @@ This is an experimental ABI; rebuild user binaries for the current startup versi
 
 ```text
 counter --initial 10 --ceiling 100
-intf /bin/counter
+inspect /bin/counter
 countercheck
 ```
 
@@ -142,7 +142,7 @@ capability arguments, or multiple overloaded constructors.
 The caller reads metadata from the same retained executable it launches. CLI
 syntax is `--name value`; decimal values must fit the field, and unknown,
 duplicate, missing, signed, or overflowing values are rejected. Defaults fill
-omitted fields. `intf` displays the constructor schema and mappings alongside
+omitted fields. `inspect` displays the constructor schema and mappings alongside
 interface members. Conversion never executes the binary.
 
 Startup version 2 introduced a 272-byte constructor envelope:

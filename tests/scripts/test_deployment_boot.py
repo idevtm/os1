@@ -60,7 +60,7 @@ def main():
         ('exec absent_provider', b'exec failed: absent_provider'),
         ('./bin/probe', b'deployed program version 1'),
         ('counter --initial 7 --ceiling 20', b'counter initial=7 ceiling=20'),
-        ('intf /bin/textprocessor', b'interface TextProcessor'),
+        ('inspect /bin/textprocessor', b'TextProcessor [interface]'),
         ('/bin/diskutil seed', b'diskutil seed ok'),
         ('echo "my file survives deployment" > /bin/note', None),
         ('echo appended >> /bin/note', None),
@@ -70,13 +70,13 @@ def main():
     if upgrade_shell:
         # An older shell uses the argv entry and cannot accept init's constructor.
         # Install it only after the first boot has written data to preserve.
-        profile = log.with_suffix('.startup.sh')
+        profile = log.with_suffix('.startup.script')
         profile.write_text('process.path.add(path:"/bin")\n'
                            'process.shell.aliases.add(name:"ls", target:"os.fs.list")\n'
                            'process.shell.aliases.add(name:"cat", target:"text.cat")\n'
                            'process.shell.aliases.add(name:"boot_custom", target:"out.print")\n')
         before_profile = inspect()
-        subprocess.run([tool('debugfs'), '-w', '-R', 'rm /etc/shell/init.sh', str(part)],
+        subprocess.run([tool('debugfs'), '-w', '-R', 'rm /etc/shell/init.script', str(part)],
                        check=True, capture_output=True)
         subprocess.run([tool('debugfs'), '-w', '-R',
                         f'write "{profile}" /etc/shell/init.sh', str(part)],
@@ -88,7 +88,8 @@ def main():
             {'source': str(Path(args.version1).resolve()), 'destination': '/bin/sh'}]}))
         deploy(disk, manifest)
         before = inspect()
-        assert before['/etc/shell/init.sh'] != before_profile['/etc/shell/init.sh']
+        assert '/etc/shell/init.sh' in before and '/etc/shell/init.sh' not in before_profile
+        assert '/etc/shell/init.script' not in before
         args.rescue = True
         try:
             boot(args, disk, 'old-shell', exercise=lambda run, expect: run('help', b'log_export'))
@@ -104,11 +105,16 @@ def main():
         current['programs'].append({'source': str(Path(args.version2).resolve()),
                                     'destination': '/bin/probe'})
         manifest.write_text(json.dumps(current))
-        subprocess.run([sys.executable, str(ROOT / 'cmake/scripts/create_ext2_image.py'),
-                        '--output', str(disk), '--utility', args.utility,
-                        '--manifest', str(manifest), '--update-existing'], check=True)
+        upgrade = subprocess.run(
+            [sys.executable, str(ROOT / 'cmake/scripts/create_ext2_image.py'),
+             '--output', str(disk), '--utility', args.utility,
+             '--manifest', str(manifest), '--update-existing'],
+            check=True, stdout=subprocess.PIPE, text=True)
+        print(upgrade.stdout, end='')
+        assert f"Deployed /etc/shell/init.script sha256={before['/etc/shell/init.sh'][1]}" in upgrade.stdout
         after = inspect()
         assert after['/bin/sh'][1] != before['/bin/sh'][1]
+        assert after['/etc/shell/init.script'][1] == before['/etc/shell/init.sh'][1]
     else:
         before = inspect()
         prefix = disk.read_bytes()[:2048*512]
