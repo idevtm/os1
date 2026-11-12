@@ -1584,6 +1584,10 @@ On the default `q35` targets, both boot paths now discover four CPUs from ACPI a
 
 The runtime now boots APs into pre-created idle threads with IF=1, installs the shared IDT on each AP, starts per-CPU LAPIC timers when the LAPIC source is active, uses per-CPU run queues plus reschedule IPIs, and periodically load-balances runnable threads. Device interrupt affinity is still intentionally conservative: ISA IRQs remain BSP-routed, and PCI device IRQs are not yet steered to specific APs.
 
+The BSP registers and records the LAPIC scheduler vector before it starts the APs.
+IRQ dispatch compares incoming vectors with that recorded vector.
+The PIT fallback uses the legacy timer vector.
+
 ## Test And CI Architecture
 
 The test ladder is now:
