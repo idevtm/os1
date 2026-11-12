@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <os1/command_engine.hpp>
+#include <os1/image_inspection.hpp>
 #include <os1/line_editor.hpp>
 #include <os1/log.hpp>
 #include <os1/parameter_client.hpp>
@@ -1585,6 +1586,7 @@ static int shell_main(int argc_main, char** argv_main)
     ShellLifetime lifetime;
     os1::user::commands::initialize();
     os1::user::discovery::extend = os1::user::commands::extend;
+    os1::user::shell_runtime::resolve_path_value = os1::user::commands::resolve_path_value;
     os1::user::commands::extra_call = [](const char* name, const char* text) -> long {
         const int report = os1::user::shell_runtime::diagnostic_kind(name);
         if(report >= 0)
@@ -1807,7 +1809,8 @@ static int shell_main(int argc_main, char** argv_main)
             continue;
         }
         using Method = os1::user::shell_runtime::Method;
-        const bool inspection = strings_equal(tokens[0], "help") ||
+        const bool inspect_command = strings_equal(tokens[0], "inspect");
+        const bool inspection = inspect_command || strings_equal(tokens[0], "help") ||
                                 strings_equal(tokens[0], "context") ||
                                 strings_equal(tokens[0], "process.context.list");
         bool external = call.method == os1::user::shell_runtime::Method::Unknown;
@@ -1817,7 +1820,8 @@ static int shell_main(int argc_main, char** argv_main)
         os1::user::files::Handle executable;
         char executable_path[OS1_PATH_MAX]{};
         os1_constructor_args constructor{};
-        if(external)
+        const bool redirected_expression = external && os1::user::commands::handles(raw);
+        if(external && !redirected_expression)
         {
             executable.reset(
                 resolve_command_path(tokens[0], executable_path, sizeof(executable_path)));
@@ -1900,6 +1904,67 @@ static int shell_main(int argc_main, char** argv_main)
                 return 1;
             continue;
         }
+        os1::user::files::Handle inspect_input;
+        int live_inspection = -1;
+        const char* inspection_path = argc == 2 ? tokens[1] : ".";
+        if(inspect_command || redirected_expression)
+        {
+            auto& view = os1::user::prompt::view;
+            if(!os1::user::discovery::refresh(view, true))
+            {
+                os1::user::shell_runtime::diagnostic("inspection context unavailable");
+                if(!console_input)
+                    return 1;
+                continue;
+            }
+            if(redirected_expression)
+            {
+                inspection_path = tokens[0];
+                live_inspection = view.resolve(inspection_path);
+                if(argc != 1 || live_inspection < 0 ||
+                   view.member(live_inspection).kind != os1::discovery::Kind::Object)
+                {
+                    os1::user::shell_runtime::diagnostic(
+                        "unsupported redirection on typed expression");
+                    if(!console_input)
+                        return 1;
+                    continue;
+                }
+            }
+            else if(argc > 2)
+            {
+                os1::user::files::message("usage: inspect [object.path|image]\n");
+                if(!console_input)
+                    return 1;
+                continue;
+            }
+            else if(argc == 1 ||
+                    view.claims(raw + parsed.begin[1], parsed.end[1] - parsed.begin[1]))
+            {
+                live_inspection = view.resolve(inspection_path);
+                if(live_inspection < 0)
+                {
+                    os1::user::files::message("inspect: unknown or unavailable member\n");
+                    if(!console_input)
+                        return 1;
+                    continue;
+                }
+            }
+            else
+            {
+                inspect_input.reset(
+                    os1::user::open(inspection_path, os1::user::image_inspection::image_rights));
+                if(inspect_input.fd < 0)
+                {
+                    os1::user::files::message("inspect: cannot open image\n");
+                    if(!console_input)
+                        return 1;
+                    continue;
+                }
+                // Compare image and destination before truncating the output.
+                copy_source = inspect_input.fd;
+            }
+        }
         CommandSync command_sync((may_write(call.method) && !inspection) || parsed.output_name[0]);
         os1::user::files::Streams streams;
         if(!streams.apply(parsed, here, copy_source, call.recursive))
@@ -1913,7 +1978,18 @@ static int shell_main(int argc_main, char** argv_main)
         if(copy_source == 1 && streams.active[1])
             call.streams[os1::user::shell_runtime::source_slot(call.method)] = streams.saved[1].fd;
         command_record.executed = true;
-        if(strings_equal(tokens[0], "context") || strings_equal(tokens[0], "process.context.list"))
+        if(live_inspection >= 0)
+        {
+            if(os1::user::prompt::inspect_node(inspection_path, live_inspection, output_fd) < 0)
+            {
+                os1::user::shell_runtime::diagnostic("object inspection failed");
+                command_failed = true;
+            }
+        }
+        else if(inspect_input.fd >= 0)
+            command_failed = os1::user::image_inspection::inspect_handle(inspect_input.fd) != 0;
+        else if(strings_equal(tokens[0], "context") ||
+                strings_equal(tokens[0], "process.context.list"))
         {
             const char* path = argc == 2 ? tokens[1] : "";
             if(os1::user::shell_runtime::prefix(path, "path:"))

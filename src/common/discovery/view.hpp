@@ -225,39 +225,66 @@ struct View
                 return i;
         return -1;
     }
-    int resolve(const char* path) const
+    bool claims(const char* text, unsigned length) const
+    {
+        if(!length || text[0] == '"' || text[0] == '\'')
+            return false;
+        for(unsigned i = 0; i < length; ++i)
+            if(text[i] == '/')
+                return false;
+        if(text[0] == '.')
+            return length == 1 || text[1] != '.';
+        unsigned root = 0;
+        while(root < length && text[root] != '.' && text[root] != '[')
+            ++root;
+        return child(0, text, root) >= 0;
+    }
+    bool claims_path(const char* text, unsigned length) const
+    {
+        return !(length == 1 && text[0] == '.') && claims(text, length);
+    }
+    static bool normalize(const char* path, char (&normalized)[path_limit])
     {
         if(!path)
-            return -1;
-        char normalized[path_limit]{};
+            return false;
+        if(path[0] == '.' && path[1] != '.' && path[1] != '/')
+            ++path;
         unsigned used = 0;
         for(unsigned i = 0;; ++i)
         {
             if(i >= path_limit || used + 1 >= path_limit)
-                return -1;
+                return false;
             if(!path[i])
                 break;
             if(path[i] == ']')
-                return -1;
+                return false;
             if(path[i] != '[')
             {
                 normalized[used++] = path[i];
                 continue;
             }
             if(!used || normalized[used - 1] == '.')
-                return -1;
+                return false;
             normalized[used++] = '.';
             unsigned begin = ++i;
             while(i < path_limit && path[i] >= '0' && path[i] <= '9')
             {
                 if(used + 1 >= path_limit)
-                    return -1;
+                    return false;
                 normalized[used++] = path[i++];
             }
             if(i == begin || i + 1 >= path_limit || path[i] != ']' ||
                (path[i + 1] && path[i + 1] != '.' && path[i + 1] != '['))
-                return -1;
+                return false;
         }
+        normalized[used] = 0;
+        return true;
+    }
+    int resolve(const char* path) const
+    {
+        char normalized[path_limit];
+        if(!normalize(path, normalized))
+            return -1;
         path = normalized;
         unsigned current = 0, start = 0, depth = 0;
         for(unsigned i = 0; i < path_limit; ++i)

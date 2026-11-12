@@ -42,6 +42,48 @@ Record members can be enumerated through the bag representation; this is not gen
 Search retains the first executable candidate and launches that same object.
 Only NOT_FOUND advances to the next directory. Explicit paths bypass search and aliases.
 
+## Name resolution and inspection
+
+The shell selects aliases, live bindings, and filesystem entries by position and spelling.
+An explicit spelling keeps its meaning when names collide.
+
+```text
+ls    -> command alias
+.ls   -> live binding
+./ls  -> file in the current directory
+```
+
+A bare command name selects an active alias first. The shell then checks live bindings and searches for a program.
+A leading dot selects the live context. Enter on `.` lists its roots and bindings.
+Enter on an object lists its immediate members. A property or field displays its value.
+An object listing can write to a redirected output. Typed calls use their existing redirection rules.
+A bare method uses its supplied arguments and defaults. If a required input is missing, the shell reports its name.
+
+A slash selects a filesystem path. Quotes select a literal path in a file operand.
+A file operand of `.` selects the current directory.
+An unquoted dotted name selects a live member if its first segment names a live binding.
+If that member is absent, the shell reports an error.
+A method used to compute a path requires an explicit call with parentheses.
+Use `./report.txt`, `"report.txt"`, or `'report.txt'` to select a colliding file.
+In a path or stream operand, `process.streams.input` selects the live stream.
+
+| Command | Result |
+| --- | --- |
+| `inspect`, `inspect .` | List live roots and bindings. |
+| `inspect .os.fs.list` | Show the method definition and its defaults. |
+| `inspect /bin/textprocessor` | Read the image interface and constructor metadata. |
+| `help ls` | Show the alias and its settings. |
+
+Inspection reads descriptions and image metadata without invoking methods or starting programs.
+The live context listing contains roots and bindings.
+Existing `context` and `intf` commands remain available for scripts.
+
+Tab browses the applicable domains at the cursor.
+After `.`, it offers live roots. After `./`, it offers filesystem entries.
+After `inspect `, it offers live references and paths.
+Tab inserts a sole match and opens a menu for several matches.
+A selected spelling preserves the target when you press Enter.
+
 ## Startup configuration
 
 Init passes the optional String constructor argument `init_script:"/etc/shell/init.sh"`.
@@ -205,7 +247,7 @@ Failed getters and type conversions report errors.
 `sh "script"` reads commands from a separate file handle and preserves the child's input stream.
 `sh < "script"` also remains available.
 Unhandled command failure stops the script; an interactive session continues after reporting it.
-Bare property expressions display results only interactively. Listing, content commands, and explicit output work in both modes.
+Bare property expressions display results interactively. An explicit live reference such as `.process.pid` also displays its value in scripts.
 
 Legacy executables receive String arguments or serialized Integer/Boolean values through argv.
 Native constructor parameter tails use the versioned metadata parser.

@@ -1,7 +1,7 @@
 # Live runtime context discovery
 
 The shared user runtime describes inspectable bindings and copied environment data without activation.
-The shell uses these descriptions for `context`, `help`, and Tab completion.
+The shell uses these descriptions for `inspect`, `context`, `help`, and Tab completion.
 
 ```text
 existing resource grants + typed environment
@@ -10,7 +10,7 @@ existing resource grants + typed environment
                      |
        resolve -> enumerate -> describe
                      |
-          context command / help / Tab list
+          inspect / context / help / Tab list
 ```
 
 | Topic | Definition |
@@ -71,6 +71,7 @@ This support does not imply general invocation of arbitrary discovered provider 
 `Member.value` indexes the copied environment when the member describes environment data.
 List children use decimal indices, such as `process.environment.path.0`.
 The text inspector prints member kinds and signatures.
+The [shell name rules](../shell/typed-context.md#name-resolution-and-inspection) define how `inspect` selects a live object or an image file.
 For hardware fields, it also prints the value from the copied boot observation.
 It does not invoke methods or arbitrary property getters.
 An empty collection prints `(no children)` after its heading.

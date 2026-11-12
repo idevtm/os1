@@ -30,6 +30,7 @@ struct Value
 {
     Data data{};
     int fd = -1;
+    char object[os1::discovery::path_limit]{};
     bool exclusive = false;
     Value() = default;
     Value(const Value&) = delete;
@@ -51,6 +52,7 @@ struct Value
             close(fd);
         }
         fd = -1;
+        object[0] = 0;
         exclusive = false;
         os1::context::init(data);
     }
@@ -58,6 +60,8 @@ struct Value
     {
         clear();
         data = v.data;
+        __builtin_memcpy(object, v.object, sizeof(object));
+        v.object[0] = 0;
         fd = v.fd;
         exclusive = v.exclusive;
         v.fd = -1;
@@ -148,6 +152,91 @@ inline bool add_data(
         }
     return !v.failed;
 }
+inline bool describe_handle(os1::discovery::View& v, unsigned at, const Value& value)
+{
+    os1_resource_info info{};
+    if(query(value.fd, &info) < 0)
+        return true;
+    if(info.kind == OS1_OBJECT_INPUT_DEVICE || info.kind == OS1_OBJECT_POINTER ||
+       info.kind == OS1_OBJECT_INPUT_SUBSCRIPTION)
+    {
+        bool subscription = info.kind == OS1_OBJECT_INPUT_SUBSCRIPTION;
+        uint64_t interface = subscription                      ? OS1_INPUT_SUBSCRIPTION_INTERFACE_ID
+                             : info.kind == OS1_OBJECT_POINTER ? OS1_POINTER_INTERFACE_ID
+                                                               : OS1_KEYBOARD_INTERFACE_ID;
+        v.add(at,
+              subscription ? "try_read" : "get_state",
+              os1::discovery::Kind::Method,
+              subscription ? "() -> InputEvent" : "() -> InputState",
+              OS1_RIGHT_INPUT_READ,
+              interface,
+              1,
+              os1::discovery::Native);
+        v.add(at,
+              subscription ? "unsubscribe" : "subscribe",
+              os1::discovery::Kind::Method,
+              subscription ? "()" : "() -> InputSubscription",
+              OS1_RIGHT_INPUT_READ,
+              interface,
+              2,
+              os1::discovery::Native);
+    }
+    else if(value.exclusive)
+    {
+        v.add(at,
+              "try_read_key",
+              os1::discovery::Kind::Method,
+              "() -> Integer",
+              OS1_RIGHT_READ,
+              OS1_CONSOLE_INPUT_INTERFACE_ID,
+              OS1_CONSOLE_INPUT_TRY_READ_KEY,
+              os1::discovery::Native | os1::discovery::Shell);
+        v.add(at,
+              "release",
+              os1::discovery::Kind::Method,
+              "()",
+              OS1_RIGHT_READ,
+              OS1_CONSOLE_INPUT_INTERFACE_ID,
+              OS1_CONSOLE_INPUT_RELEASE,
+              os1::discovery::Native | os1::discovery::Shell);
+    }
+    else if(info.kind == OS1_OBJECT_CONSOLE)
+    {
+        // Reuse the same descriptions and rights filtering as standard streams.
+        os1::discovery::Grants grants{};
+        grants.streams[1] = info;
+        static Storage<os1::discovery::View, 1> scratch_storage;
+        auto& scratch = *scratch_storage.initialize();
+        Data empty{};
+        os1::context::init(empty);
+        scratch.build(grants, empty, 1);
+        int stream = scratch.resolve("process.streams.output");
+        unsigned mapped[os1::discovery::node_limit]{};
+        if(stream < 0)
+            return false;
+        mapped[stream] = at;
+        for(unsigned j = 1; j < scratch.count; ++j)
+            if(mapped[scratch.nodes[j].parent] &&
+               ((scratch.nodes[j].flags & os1::discovery::Native) ||
+                scratch.nodes[j].kind == os1::discovery::Kind::Field))
+            {
+                const auto& m = scratch.nodes[j];
+                unsigned child = v.add(mapped[m.parent],
+                                       m.name,
+                                       m.kind,
+                                       m.signature,
+                                       m.rights,
+                                       m.interface_id,
+                                       m.member,
+                                       m.flags | os1::discovery::Shell);
+                if(v.failed)
+                    return false;
+                v.nodes[child].type = m.type;
+                mapped[j] = child;
+            }
+    }
+    return !v.failed;
+}
 inline bool extend(os1::discovery::View& v)
 {
     int shell = v.resolve("process.shell");
@@ -178,6 +267,15 @@ inline bool extend(os1::discovery::View& v)
         if(bindings[i].name[0])
         {
             auto& value = bindings[i].value;
+            if(value.object[0])
+            {
+                const int target = v.resolve(value.object);
+                if(target >= 0)
+                    v.alias(bindings[i].name, target);
+                else
+                    v.add(0, bindings[i].name);
+                continue;
+            }
             unsigned at = v.add(
                 0,
                 bindings[i].name,
@@ -192,87 +290,8 @@ inline bool extend(os1::discovery::View& v)
                     return false;
                 continue;
             }
-            os1_resource_info info{};
-            if(query(value.fd, &info) < 0)
-                continue;
-            if(info.kind == OS1_OBJECT_INPUT_DEVICE || info.kind == OS1_OBJECT_POINTER ||
-               info.kind == OS1_OBJECT_INPUT_SUBSCRIPTION)
-            {
-                bool subscription = info.kind == OS1_OBJECT_INPUT_SUBSCRIPTION;
-                uint64_t interface = subscription ? OS1_INPUT_SUBSCRIPTION_INTERFACE_ID
-                                     : info.kind == OS1_OBJECT_POINTER ? OS1_POINTER_INTERFACE_ID
-                                                                       : OS1_KEYBOARD_INTERFACE_ID;
-                v.add(at,
-                      subscription ? "try_read" : "get_state",
-                      os1::discovery::Kind::Method,
-                      subscription ? "() -> InputEvent" : "() -> InputState",
-                      OS1_RIGHT_INPUT_READ,
-                      interface,
-                      1,
-                      os1::discovery::Native);
-                v.add(at,
-                      subscription ? "unsubscribe" : "subscribe",
-                      os1::discovery::Kind::Method,
-                      subscription ? "()" : "() -> InputSubscription",
-                      OS1_RIGHT_INPUT_READ,
-                      interface,
-                      2,
-                      os1::discovery::Native);
-            }
-            else if(value.exclusive)
-            {
-                v.add(at,
-                      "try_read_key",
-                      os1::discovery::Kind::Method,
-                      "() -> Integer",
-                      OS1_RIGHT_READ,
-                      OS1_CONSOLE_INPUT_INTERFACE_ID,
-                      OS1_CONSOLE_INPUT_TRY_READ_KEY,
-                      os1::discovery::Native | os1::discovery::Shell);
-                v.add(at,
-                      "release",
-                      os1::discovery::Kind::Method,
-                      "()",
-                      OS1_RIGHT_READ,
-                      OS1_CONSOLE_INPUT_INTERFACE_ID,
-                      OS1_CONSOLE_INPUT_RELEASE,
-                      os1::discovery::Native | os1::discovery::Shell);
-            }
-            else if(info.kind == OS1_OBJECT_CONSOLE)
-            {
-                // Reuse the same descriptions and rights filtering as standard streams.
-                os1::discovery::Grants grants{};
-                grants.streams[1] = info;
-                static Storage<os1::discovery::View, 1> scratch_storage;
-                auto& scratch = *scratch_storage.initialize();
-                Data empty{};
-                os1::context::init(empty);
-                scratch.build(grants, empty, 1);
-                int stream = scratch.resolve("process.streams.output");
-                unsigned mapped[os1::discovery::node_limit]{};
-                if(stream < 0)
-                    return false;
-                mapped[stream] = at;
-                for(unsigned j = 1; j < scratch.count; ++j)
-                    if(mapped[scratch.nodes[j].parent] &&
-                       ((scratch.nodes[j].flags & os1::discovery::Native) ||
-                        scratch.nodes[j].kind == os1::discovery::Kind::Field))
-                    {
-                        const auto& m = scratch.nodes[j];
-                        unsigned child = v.add(mapped[m.parent],
-                                               m.name,
-                                               m.kind,
-                                               m.signature,
-                                               m.rights,
-                                               m.interface_id,
-                                               m.member,
-                                               m.flags | os1::discovery::Shell);
-                        if(v.failed)
-                            return false;
-                        v.nodes[child].type = m.type;
-                        mapped[j] = child;
-                    }
-            }
+            if(!describe_handle(v, at, value))
+                return false;
         }
     return !v.failed;
 }
@@ -291,6 +310,7 @@ inline bool clone(const Value& from, Value& to)
 {
     to.clear();
     to.data = from.data;
+    __builtin_memcpy(to.object, from.object, sizeof(to.object));
     if(from.exclusive)
         return fail("exclusive reference cannot escape its scope");
     if(from.fd >= 0)
@@ -422,7 +442,7 @@ inline void initialize()
     frames = frame_storage.initialize();
     temporaries = temporary_storage.initialize();
 }
-inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false);
+inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false, bool = true);
 [[gnu::noinline]] inline bool native(
     const char* path, const os1::discovery::Member& m, Frame& f, Value& out, bool scoped)
 {
@@ -919,8 +939,7 @@ inline bool alias_call(const char* operation, Frame& f)
     alias->option_value = value;
     return true;
 }
-[[gnu::noinline]] inline bool execute_prepared(const char* path,
-                                               const char* canonical,
+[[gnu::noinline]] inline bool execute_prepared(const char* canonical,
                                                const os1::discovery::Member& member,
                                                const os1::discovery::Definition& spec,
                                                Frame& f,
@@ -928,7 +947,7 @@ inline bool alias_call(const char* operation, Frame& f)
                                                bool scoped)
 {
     if(member.interface_id)
-        return native(path, member, f, out, scoped);
+        return native(canonical, member, f, out, scoped);
     if(os1::discovery::starts(canonical, "process.shell.aliases."))
         return alias_call(canonical + sizeof("process.shell.aliases.") - 1, f);
     if(same(canonical, "process.shell.bindings.remove"))
@@ -1056,7 +1075,8 @@ inline bool alias_call(const char* operation, Frame& f)
         return fail("method failed", status);
     return true;
 }
-inline bool invoke(const Tree& tree, unsigned id, Value& out, unsigned depth, bool scoped)
+inline bool invoke(
+    const Tree& tree, unsigned id, Value& out, unsigned depth, bool scoped, bool bare_methods)
 {
     const auto& node = tree.nodes[id];
     char path[256]{};
@@ -1066,6 +1086,9 @@ inline bool invoke(const Tree& tree, unsigned id, Value& out, unsigned depth, bo
     if(!refresh())
         return fail("context unavailable");
     int method = (*view_pointer).resolve(path);
+    if(method < 0)
+        return fail("method unavailable");
+    method = (*view_pointer).effective(method);
     if(method < 0)
         return fail("method unavailable");
     auto member = (*view_pointer).member(method);
@@ -1138,7 +1161,13 @@ inline bool invoke(const Tree& tree, unsigned id, Value& out, unsigned depth, bo
     }
     for(unsigned p = 0; p < spec.count; ++p)
         if(!mapped[p] && same(spec.parameters[p].initial, "<?>"))
-            return fail("missing required argument");
+        {
+            Text message;
+            message.add("missing required argument: ");
+            message.add(spec.parameters[p].name);
+            os1::discovery::copy(f.token, sizeof(f.token), message.bytes);
+            return fail(f.token);
+        }
     auto argument = [&](unsigned p, unsigned child) -> bool {
         Value& v = temporaries[depth + 1];
         v.clear();
@@ -1151,6 +1180,10 @@ inline bool invoke(const Tree& tree, unsigned id, Value& out, unsigned depth, bo
             }
         } temporary_cleanup{v};
         const auto& param = spec.parameters[p];
+        const bool path_operand =
+            param.type == os1::discovery::InputType::PathOrStream ||
+            shell_runtime::path_operand(shell_runtime::method_for(canonical), p);
+        const bool bare_argument_methods = bare_methods && !path_operand;
         if(child)
         {
             const auto& n = tree.nodes[child];
@@ -1197,7 +1230,13 @@ inline bool invoke(const Tree& tree, unsigned id, Value& out, unsigned depth, bo
                 if(!v.string(tree.text + n.begin, n.end - n.begin))
                     return fail("enum value too long");
             }
-            else if(!evaluate(tree, child, v, depth + 1))
+            else if(path_operand && n.kind == Kind::Reference &&
+                    !(*view_pointer).claims_path(tree.text + n.begin, n.end - n.begin))
+            {
+                if(!v.string(tree.text + n.begin, n.end - n.begin))
+                    return fail("path too long");
+            }
+            else if(!evaluate(tree, child, v, depth + 1, false, bare_argument_methods))
                 return false;
         }
         else
@@ -1210,7 +1249,7 @@ inline bool invoke(const Tree& tree, unsigned id, Value& out, unsigned depth, bo
             {
                 Tree& defaults = frames[depth].defaults_tree;
                 if(!defaults.parse(param.initial, false) ||
-                   !evaluate(defaults, defaults.root, v, depth + 1))
+                   !evaluate(defaults, defaults.root, v, depth + 1, false, bare_argument_methods))
                     return false;
             }
         }
@@ -1268,20 +1307,35 @@ inline bool invoke(const Tree& tree, unsigned id, Value& out, unsigned depth, bo
     for(unsigned p = 0; p < spec.count; ++p)
         if(!mapped[p] && !argument(p, 0))
             return false;
-    return execute_prepared(path, canonical, member, spec, f, out, scoped);
+    return execute_prepared(canonical, member, spec, f, out, scoped);
 }
 
-inline bool evaluate(const Tree& tree, unsigned id, Value& out, unsigned depth, bool scoped)
+inline int standard_stream(const os1::discovery::View& view, int member)
+{
+    if(member < 0)
+        return -1;
+    const auto object = view.member(member);
+    if(static_cast<int>(object.parent) != view.resolve("process.streams"))
+        return -1;
+    if(same(object.name, "input"))
+        return 0;
+    if(same(object.name, "output"))
+        return 1;
+    return same(object.name, "error") ? 2 : -1;
+}
+
+inline bool evaluate(
+    const Tree& tree, unsigned id, Value& out, unsigned depth, bool scoped, bool bare_methods)
 {
     if(depth > os1::shell::expression::depth_limit)
         return fail("expression nesting limit");
     out.clear();
     const auto n = tree.nodes[id];
     if(n.kind == Kind::Call)
-        return invoke(tree, id, out, depth, scoped);
+        return invoke(tree, id, out, depth, scoped, bare_methods);
     if(n.kind == Kind::Access)
     {
-        if(!evaluate(tree, n.first, out, depth + 1, scoped))
+        if(!evaluate(tree, n.first, out, depth + 1, scoped, bare_methods))
             return false;
         char name[64]{};
         if(n.end - n.begin >= sizeof(name))
@@ -1306,7 +1360,7 @@ inline bool evaluate(const Tree& tree, unsigned id, Value& out, unsigned depth, 
                     value.clear();
                 }
             } temporary_cleanup{v};
-            if(!evaluate(tree, child, v, depth + 1))
+            if(!evaluate(tree, child, v, depth + 1, false, bare_methods))
                 return false;
             if(v.fd >= 0)
             {
@@ -1328,14 +1382,35 @@ inline bool evaluate(const Tree& tree, unsigned id, Value& out, unsigned depth, 
     __builtin_memcpy(token, tree.text + n.begin, bytes);
     if(same(token, "<?>"))
         return fail("missing required value");
+    bool claimed = false;
     if(n.kind == Kind::Reference)
     {
         if(!refresh())
             return fail("context unavailable");
-        int member = (*view_pointer).resolve(token);
-        if(member >= 0 && ((*view_pointer).member(member).kind == os1::discovery::Kind::Property ||
-                           (*view_pointer).member(member).kind == os1::discovery::Kind::Method))
-            return invoke(tree, id, out, depth, scoped);
+        const auto& view = *view_pointer;
+        claimed = view.claims(token, bytes);
+        int member = view.resolve(token);
+        if(member >= 0)
+            member = view.effective(member);
+        if(member >= 0 && (view.member(member).kind == os1::discovery::Kind::Property ||
+                           view.member(member).kind == os1::discovery::Kind::Method))
+        {
+            if(!bare_methods && view.member(member).kind == os1::discovery::Kind::Method)
+                return fail("method call requires parentheses in a path operand");
+            return invoke(tree, id, out, depth, scoped, bare_methods);
+        }
+        const int stream_fd = standard_stream(view, member);
+        if(member >= 0 && stream_fd < 0 && view.member(member).kind == os1::discovery::Kind::Object)
+        {
+            const char* binding_name = token[0] == '.' ? token + 1 : token;
+            const int binding = find(binding_name);
+            if(binding >= 0 && bindings[binding].value.fd >= 0)
+                return clone(bindings[binding].value, out);
+            if(member == 0)
+                return os1::discovery::copy(out.object, sizeof(out.object), ".");
+            return os1::discovery::member_path(view, member, out.object, sizeof(out.object)) ||
+                   fail("object path too long");
+        }
         if(member >= 0 && ((*view_pointer).member(member).flags & os1::discovery::External))
         {
             Os1HardwareNode value{};
@@ -1353,6 +1428,20 @@ inline bool evaluate(const Tree& tree, unsigned id, Value& out, unsigned depth, 
                 value.type == OS1_HARDWARE_STRING ? os1::context::length(value.text) : 0,
                 value.integer);
             return added >= 0 || fail("hardware value budget exceeded");
+        }
+        if(member >= 0 && view.member(member).kind == os1::discovery::Kind::Field &&
+           view.member(member).value < environment_data.count)
+        {
+            if(!os1::discovery::member_path(view, member, token, 1024))
+                return fail("member path too long");
+        }
+        if(claimed)
+        {
+            char normalized[os1::discovery::path_limit];
+            if(!os1::discovery::View::normalize(token, normalized))
+                return fail("invalid live path");
+            bytes = files::length(normalized);
+            __builtin_memcpy(token, normalized, bytes + 1);
         }
         unsigned first = 0;
         while(token[first] && token[first] != '.')
@@ -1374,7 +1463,7 @@ inline bool evaluate(const Tree& tree, unsigned id, Value& out, unsigned depth, 
                 {
                     Tree& getter = frames[depth].getter_tree;
                     if(!getter.parse(parent, false) ||
-                       !evaluate(getter, getter.root, out, depth + 1))
+                       !evaluate(getter, getter.root, out, depth + 1, false, bare_methods))
                         return false;
                     return field(out, token + cut);
                 }
@@ -1386,7 +1475,7 @@ inline bool evaluate(const Tree& tree, unsigned id, Value& out, unsigned depth, 
                 return false;
             return token[first] ? field(out, token + first + 1) : true;
         }
-        int fd = shell_runtime::stream(token, bytes);
+        const int fd = stream_fd >= 0 ? stream_fd : shell_runtime::stream(token, bytes);
         if(fd >= 0)
         {
             os1_resource_info info{};
@@ -1394,22 +1483,73 @@ inline bool evaluate(const Tree& tree, unsigned id, Value& out, unsigned depth, 
             if(r < 0)
                 return fail("stream unavailable", r);
             out.fd = duplicate(fd, info.rights);
-            return out.fd >= 0 || fail("cannot retain stream", out.fd);
+            if(out.fd < 0)
+                return fail("cannot retain stream", out.fd);
+            if(!depth && member >= 0)
+                return os1::discovery::copy(out.object, sizeof(out.object), token);
+            return true;
         }
     }
     os1::shell::ValueParser parser{
         token, bytes, 0, !interactive, shell_runtime::resolve, shell_runtime::warning};
+    if(claimed)
+    {
+        const auto resolved = shell_runtime::resolve(token, bytes, out.data, 0, "value", 5);
+        return resolved == os1::shell::Resolution::Found || fail("unknown or unavailable member");
+    }
     if(!parser.parse(out.data, 0, "value", 5))
         return fail(parser.error ? parser.error : "invalid value");
     return true;
 }
+inline int resolve_path_value(
+    const char* text, unsigned length, Data& data, const char* name, int* stream)
+{
+    for(unsigned i = 0; i < length; ++i)
+        if(text[i] == '/')
+            return 0;
+    if(!refresh())
+        return -1;
+    if(!(*view_pointer).claims_path(text, length))
+        return 0;
+    static Tree tree;
+    char path[os1::discovery::path_limit]{};
+    if(length >= sizeof(path))
+        return -1;
+    __builtin_memcpy(path, text, length);
+    const int member = (*view_pointer).resolve(path);
+    if(stream)
+    {
+        if(member >= 0)
+        {
+            const int fd = standard_stream(*view_pointer, (*view_pointer).effective(member));
+            if(fd >= 0)
+            {
+                *stream = fd;
+                return 0;
+            }
+        }
+    }
+    if(!tree.parse(path, false))
+        return -1;
+    Value value;
+    const bool ok = evaluate(tree, tree.root, value, 0, false, false) && value.data.count > 1 &&
+                    value.data.nodes[1].kind == OS1_VALUE_STRING;
+    const int node =
+        ok ? os1::shell::copy_value(value.data, 1, data, 0, name, files::length(name)) : -1;
+    value.clear();
+    return node < 0 ? -1 : node;
+}
 inline bool display(const Value& value)
 {
+    if(value.object[0])
+        return prompt::inspect(value.object, 1) >= 0 || fail("object inspection failed");
     if(value.fd >= 0)
     {
-        files::put(
-            1, value.exclusive ? "<exclusive session>\n" : "<object>\n", value.exclusive ? 20 : 9);
-        return true;
+        auto& view = prompt::view;
+        if(!discovery::refresh(view, true))
+            return fail("object inspection unavailable");
+        const auto id = view.add(0, "result");
+        return describe_handle(view, id, value) && prompt::inspect_node("result", id, 1) >= 0;
     }
     if(value.data.count > 1 && value.data.nodes[1].kind == OS1_VALUE_LIST)
     {
@@ -1591,7 +1731,15 @@ inline bool run(const char* input, bool terminal, unsigned nesting, bool scope_r
         return scope(input, terminal, nesting);
     char* line = run_frames[nesting].line;
     __builtin_memset(line, 0, 1024);
+    const char* echo_operand = input;
     if(os1::discovery::starts(input, "echo "))
+    {
+        echo_operand += 5;
+        while(os1::shell::space(*echo_operand))
+            ++echo_operand;
+    }
+    if(echo_operand != input && *echo_operand != '=' &&
+       shell_runtime::method_for("echo") == shell_runtime::Method::Print)
     {
         Text converted;
         converted.add("out.print ");
@@ -1685,15 +1833,15 @@ inline bool run(const char* input, bool terminal, unsigned nesting, bool scope_r
         {
             __builtin_memcpy(path, tree.text + n.begin, n.end - n.begin);
             int id = (*view_pointer).resolve(path);
-            method_result =
-                id >= 0 && (*view_pointer).member(id).kind == os1::discovery::Kind::Method;
+            method_result = id >= 0 && (path[0] == '.' || (*view_pointer).member(id).kind ==
+                                                              os1::discovery::Kind::Method);
         }
     }
     if(!evaluate(tree, tree.root, result, 0, scope_result))
         return false;
     if(assignment)
     {
-        if(result.data.count < 2 && result.fd < 0)
+        if(result.data.count < 2 && result.fd < 0 && !result.object[0])
             return fail("method returned no value");
         if(result.exclusive && !scope_result)
             return fail("exclusive result requires a with scope");
@@ -1701,6 +1849,8 @@ inline bool run(const char* input, bool terminal, unsigned nesting, bool scope_r
         previous.take(bindings[slot].value);
         char previous_name[64];
         __builtin_memcpy(previous_name, bindings[slot].name, sizeof(previous_name));
+        if(result.fd >= 0)
+            result.object[0] = 0;
         bindings[slot].value.take(result);
         os1::discovery::copy(bindings[slot].name, sizeof(bindings[slot].name), name);
         if(!refresh())
@@ -1714,7 +1864,7 @@ inline bool run(const char* input, bool terminal, unsigned nesting, bool scope_r
         bindings[slot].scope_owned = scope_result;
         return true;
     }
-    return (!terminal && !method_result) || display(result);
+    return (!terminal && !method_result && !result.object[0]) || display(result);
 }
 inline bool handles(const char* line)
 {
@@ -1745,7 +1895,8 @@ inline bool handles(const char* line)
             return true;
     }
     unsigned n = 0;
-    while(line[n] && !os1::shell::space(line[n]) && line[n] != '(' && line[n] != '=')
+    while(line[n] && !os1::shell::space(line[n]) && line[n] != '(' && line[n] != '=' &&
+          line[n] != '<' && line[n] != '>')
         ++n;
     char name[256]{};
     if(n >= sizeof(name))
@@ -1757,12 +1908,11 @@ inline bool handles(const char* line)
     if(line[next] == '=' && !os1::discovery::starts(name, "process.environment") &&
        !same(name, "fs.cwd"))
         return true;
-    if(!refresh())
+    if(shell_runtime::is_builtin(name) && !same(name, "process.context.list"))
         return false;
-    int id = (*view_pointer).resolve(name);
-    if(id < 0)
+    if(shell_runtime::find_alias(name) || !refresh())
         return false;
-    return !os1::shell::has_top_level_command_operator(line + n);
+    return (*view_pointer).claims(name, n) && !os1::shell::has_top_level_command_operator(line + n);
 }
 
 }  // namespace os1::user::commands

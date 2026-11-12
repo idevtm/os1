@@ -12,6 +12,10 @@ struct Completion
     unsigned ids[2048]{};
     // Command names are borrowed from static dispatch tables.
     const char* commands[64]{};
+    const char* command_labels[64]{};
+    unsigned command_begin[64]{}, command_end[64]{};
+    bool (*qualify_root)(const char*) = nullptr;
+    bool inspect_choices = false, stream_choices = false, path_references = false;
     unsigned command_count = 0;
     bool path_choices = false;
     const char* command_name(unsigned index) const
@@ -20,12 +24,43 @@ struct Completion
                    ? commands[index - (matches - command_count)]
                    : nullptr;
     }
-    void add_command(const char* name)
+    const char* command_label(unsigned index) const
+    {
+        const auto* label = command_labels[index - (matches - command_count)];
+        return label ? label : path_choices ? " [path]" : " [command]";
+    }
+    bool qualified(const Member& member) const
+    {
+        return prefix == start && !member.parent && qualify_root && qualify_root(member.name);
+    }
+    static bool is_stream(const View& view, const Member& member)
+    {
+        const int streams = view.resolve("process.streams");
+        if(streams < 0)
+            return false;
+        if(member.flags & Alias)
+        {
+            const int target = view.effective(member.target);
+            return target >= 0 && view.member(target).parent == static_cast<unsigned>(streams);
+        }
+        return member.parent == static_cast<unsigned>(streams);
+    }
+    bool stream_choice(const View& view, const Member& member) const
+    {
+        return stream_choices && is_stream(view, member);
+    }
+    void add_command(const char* name,
+                     const char* label = nullptr,
+                     unsigned begin = ~0u,
+                     unsigned end = ~0u)
     {
         if(command_count == sizeof(commands) / sizeof(commands[0]) ||
            matches == sizeof(ids) / sizeof(ids[0]))
             return;
-        commands[command_count++] = name;
+        commands[command_count] = name;
+        command_labels[command_count] = label;
+        command_begin[command_count] = begin;
+        command_end[command_count++] = end;
         ++matches;
         open = true;
     }
@@ -462,9 +497,16 @@ struct Completion
             for(unsigned j = 0; j < page.count; ++j)
             {
                 unsigned id = page.ids[j];
-                if(os1::context::length(view.member(id).name) >= cursor - prefix &&
-                   os1::context::same(
-                       view.member(id).name, cursor - prefix, line + prefix, cursor - prefix))
+                const auto member = view.member(id);
+                if(path_references &&
+                   (member.kind == Kind::Method || (!stream_choices && is_stream(view, member)) ||
+                    (member.kind == Kind::Field && member.type != OS1_VALUE_STRING &&
+                     !view.container(id)) ||
+                    (member.kind == Kind::Property &&
+                     (same(member.signature, "Integer") || same(member.signature, "Boolean")))))
+                    continue;
+                if(os1::context::length(member.name) >= cursor - prefix &&
+                   os1::context::same(member.name, cursor - prefix, line + prefix, cursor - prefix))
                 {
                     if(matches == 2048)
                         return false;
@@ -575,7 +617,11 @@ struct Completion
         }
         if(const char* name = command_name(selected))
         {
-            bool accepted = replace(prefix, replace_end, name, os1::context::length(name));
+            const auto slot = selected - (matches - command_count);
+            bool accepted = replace(command_begin[slot] == ~0u ? prefix : command_begin[slot],
+                                    command_end[slot] == ~0u ? replace_end : command_end[slot],
+                                    name,
+                                    os1::context::length(name));
             cancel();
             if(accepted)
             {
@@ -585,8 +631,10 @@ struct Completion
             return accepted;
         }
         unsigned id = ids[selected];
-        bool object = view.container(id) && view.member(id).kind != Kind::Method &&
-                      view.member(id).kind != Kind::Property;
+        const auto selected_member = view.member(id);
+        const bool object = view.container(id) && selected_member.kind != Kind::Method &&
+                            selected_member.kind != Kind::Property &&
+                            !stream_choice(view, selected_member);
         char replacement[1024]{};
         unsigned length = 0;
         auto append = [&](const char* s) {
@@ -595,7 +643,6 @@ struct Completion
             return !*s;
         };
         unsigned first = prefix;
-        const auto selected_member = view.member(id);
         bool indexed = index_name(selected_member.name);
         if(indexed)
         {
@@ -603,13 +650,15 @@ struct Completion
                 --first;
             append("[");
         }
+        if(qualified(selected_member))
+            append(".");
         if(!append(selected_member.name))
             return false;
         if(indexed)
             append("]");
         if(descend && object)
             append(".");
-        bool method = view.member(id).kind == Kind::Method;
+        bool method = !inspect_choices && !stream_choices && view.member(id).kind == Kind::Method;
         bool nested =
             start > 0 && line[start - 1] != '=' && !(start >= 2 && line[start - 2] == '=');
         unsigned arguments_begin = first + length;
