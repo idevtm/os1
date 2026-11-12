@@ -4,6 +4,7 @@
 
 #include "arch/x86_64/apic/ipi.hpp"
 #include "handoff/memory_layout.h"
+#include "mm/boot_mapping.hpp"
 #include "mm/virtual_memory.hpp"
 #include "support/lapic_stub.hpp"
 #include "support/physical_memory.hpp"
@@ -214,4 +215,92 @@ TEST(VirtualMemory, InheritsHighPciMappingsWithoutSharingUserSlot)
     auto* top = kernel_physical_pointer<const uint64_t>(target.root());
     EXPECT_EQ(top[(virtual_bar >> 39) & 511] & uint64_t(PageFlags::User), 0u);
     EXPECT_FALSE(target.translate(kUserImageBase, physical, flags));
+}
+
+TEST(VirtualMemory, SmallPageOperationsRejectLargeLeaves)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames(arena);
+    VirtualMemory vm(frames);
+    constexpr uint64_t backing = 0x800000;
+    constexpr uint64_t unrelated = 0xc00000;
+    const auto flags = PageFlags::User | PageFlags::Write;
+    ASSERT_TRUE(vm.map_physical_2m(kUserImageBase, backing, 1, flags));
+    auto* payload = kernel_physical_pointer<uint64_t>(backing);
+    constexpr uint64_t sentinel = unrelated | 3;
+    const auto before = frames.free_page_count();
+    *payload = sentinel;
+    EXPECT_FALSE(vm.map_physical(kUserImageBase, unrelated, 1, flags));
+    EXPECT_EQ(*payload, sentinel);
+    *payload = sentinel;
+    EXPECT_FALSE(vm.protect(kUserImageBase, 1, flags | PageFlags::NoExecute));
+    EXPECT_EQ(*payload, sentinel);
+    *payload = sentinel;
+    EXPECT_FALSE(vm.detach(kUserImageBase, 1));
+    EXPECT_EQ(*payload, sentinel);
+    *payload = sentinel;
+    EXPECT_FALSE(vm.free(kUserImageBase, 1));
+    EXPECT_EQ(*payload, sentinel);
+    EXPECT_EQ(frames.free_page_count(), before);
+    uint64_t physical = 0, leaf_flags = 0;
+    ASSERT_TRUE(vm.translate(kUserImageBase + 0x1ff123, physical, leaf_flags));
+    EXPECT_EQ(physical, backing + 0x1ff123);
+}
+
+TEST(VirtualMemory, TeardownDropsLargeAliasesWithoutReleasingBacking)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames(arena);
+    constexpr uint64_t backing = 0x800000;
+    ASSERT_TRUE(frames.reserve_range(backing, 0x200000));
+    VirtualMemory vm(frames);
+    uint64_t unrelated = 0;
+    ASSERT_TRUE(frames.allocate(unrelated));
+    const auto before = frames.free_page_count();
+    ASSERT_TRUE(vm.map_physical_2m(kUserImageBase, backing, 1, PageFlags::User));
+    auto* payload = kernel_physical_pointer<uint64_t>(backing);
+    const uint64_t sentinel = unrelated | 3;
+    *payload = sentinel;
+    ASSERT_TRUE(vm.destroy_user_slot(kUserPml4Index));
+    ASSERT_TRUE(frames.free(vm.root()));
+    EXPECT_EQ(*payload, sentinel);
+    EXPECT_EQ(frames.free_page_count(), before);
+}
+
+TEST(VirtualMemory, LargeMappingPreservesExistingSmallPageTable)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames(arena);
+    VirtualMemory vm(frames);
+    constexpr uint64_t small = 0x500000;
+    const auto flags = PageFlags::User | PageFlags::Write;
+    ASSERT_TRUE(vm.map_physical(kUserImageBase + kPageSize, small, 1, flags));
+    EXPECT_FALSE(vm.map_physical_2m(kUserImageBase, 0x800000, 1, flags));
+    uint64_t physical = 0, leaf_flags = 0;
+    EXPECT_FALSE(vm.translate(kUserImageBase, physical, leaf_flags));
+    ASSERT_TRUE(vm.translate(kUserImageBase + kPageSize, physical, leaf_flags));
+    EXPECT_EQ(physical, small);
+}
+
+TEST(VirtualMemory, DirectMappingFillsHolesInExistingSmallPageTable)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames(arena);
+    VirtualMemory vm(frames);
+    constexpr uint64_t base = 0x800000;
+    constexpr uint64_t bytes = 0x200000;
+    constexpr auto flags = PageFlags::Write | PageFlags::NoExecute;
+    ASSERT_TRUE(vm.map_physical(phys_to_virt(base), base, 1, flags));
+    const uint64_t last = base + bytes - kPageSize;
+    ASSERT_TRUE(vm.map_physical(phys_to_virt(last), last, 1, flags));
+    const auto before = frames.free_page_count();
+    ASSERT_TRUE(map_direct_range(vm, base, bytes));
+    EXPECT_EQ(frames.free_page_count(), before);
+    for(uint64_t page = base; page < base + bytes; page += kPageSize)
+    {
+        uint64_t physical = 0, leaf_flags = 0;
+        ASSERT_TRUE(vm.translate(phys_to_virt(page), physical, leaf_flags));
+        EXPECT_EQ(physical, page);
+        EXPECT_EQ(leaf_flags, uint64_t(flags | PageFlags::Present));
+    }
 }

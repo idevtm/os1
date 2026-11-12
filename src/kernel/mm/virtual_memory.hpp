@@ -38,6 +38,7 @@ class VirtualMemory
 public:
     static const uint64_t PAGE_PRESENT = 1ull << 0;
     static const uint64_t PAGE_WRITE = 1ull << 1;
+    static const uint64_t PAGE_LARGE = 1ull << 7;
 
     // Construct a manager around a new or existing PML4 root.
     VirtualMemory(PageFrameContainer& frames, uint64_t existing_root = ~0ull);
@@ -53,7 +54,7 @@ public:
     bool map_reserved_user_page(uint64_t virtual_address,
                                 uint64_t physical_address,
                                 PageFlags flags);
-    // Map existing physical memory with 2 MiB leaves for early large ranges.
+    // Map caller-owned physical memory with 2 MiB leaves. Keep existing small-page tables.
     bool map_physical_2m(uint64_t virtual_address,
                          uint64_t physical_address,
                          uint64_t num_pages,

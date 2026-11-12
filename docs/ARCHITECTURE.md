@@ -1036,6 +1036,10 @@ Supported operations include:
 
 `allocate_and_map()` now frees a data frame when page-table allocation fails before linking it; a forced-exhaustion regression covers the leak from [review R5](archive/reviews/2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame). Earlier successfully linked pages remain owned by the address space and are reclaimed by failed-image teardown.
 
+A 4 KiB page operation stops at a large leaf. A 2 MiB mapping preserves an existing small-page table.
+The direct mapper fills holes in that table with 4 KiB mappings.
+Address-space teardown removes large aliases and releases the page tables. The caller keeps the physical backing for each large alias.
+
 Generic `VirtualMemory::free` and `destroy_user_slot` still free frames before an asynchronous TLB shootdown.
 The Buffer retirement barrier does not correct those general VM paths.
 Their broader shared-address-space reclamation limitation remains current.
