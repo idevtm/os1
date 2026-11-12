@@ -53,6 +53,7 @@ struct Device
     DmaBuffer input_dma{};
     unsigned phase{}, period{};
     bool input_armed{};
+    unsigned input_qtd = 0;
     ehci::InputRecovery recovery{};
 
     bool hub{}, failed{}, published{}, in_toggle{}, out_toggle{};
@@ -532,16 +533,27 @@ bool periodic_schedule(Controller& c, bool enabled)
 {
     return change_schedule(c, ehci::Schedule::Periodic, enabled);
 }
+constexpr size_t input_qtd_offset = 128;
+constexpr size_t input_report_offset = 256;
+static_assert(input_qtd_offset + 2 * sizeof(ehci::Qtd) <= input_report_offset);
+
+ehci::Qtd* input_qtds(Device& d)
+{
+    return reinterpret_cast<ehci::Qtd*>(static_cast<uint8_t*>(d.input_dma.virtual_address) +
+                                        input_qtd_offset);
+}
+
 bool arm_input(Device& d)
 {
     auto& c = *d.controller;
     auto* qh = static_cast<ehci::QueueHead*>(d.input_dma.virtual_address);
-    auto* td =
-        reinterpret_cast<ehci::Qtd*>(static_cast<uint8_t*>(d.input_dma.virtual_address) + 128);
-    bool toggle = d.input_armed ? (qh->token >> 31) != 0 : false;
+    auto* td = input_qtds(d);
+    const bool toggle = d.input_armed && (qh->token >> 31);
+    const auto first = d.input_dma.physical_address + input_qtd_offset;
+    const auto tail = static_cast<uint32_t>(first + sizeof(ehci::Qtd));
     if(!ehci::prepare_head(*qh,
                            d.input_dma.physical_address,
-                           d.input_dma.physical_address + 128,
+                           first,
                            d.address,
                            d.hid.endpoint & 15,
                            d.hid.packet,
@@ -549,9 +561,19 @@ bool arm_input(Device& d)
                            d.tt_address,
                            d.tt_port,
                            true) ||
-       !ehci::prepare_qtd(*td, d.input_dma.physical_address + 256, d.hid.packet, 1, toggle))
+       !ehci::prepare_qtd(td[0],
+                          d.input_dma.physical_address + input_report_offset,
+                          d.hid.packet,
+                          1,
+                          false,
+                          tail,
+                          tail))
         return false;
+    ehci::prepare_input_tail(td[1]);
+    d.input_qtd = 0;
     qh->next = ehci::terminate;
+    qh->endpoint &= ~(1u << 14);  // Keep the data toggle in the controller-owned overlay.
+    qh->token = uint32_t(toggle) << 31;
     dma_sync_for_device(d.input_dma);
     auto* list = static_cast<uint32_t*>(c.periodic.virtual_address);
     for(unsigned i = d.phase; i < 1024; i += d.period)
@@ -559,6 +581,13 @@ bool arm_input(Device& d)
     dma_sync_for_device(c.periodic);
     d.input_armed = true;
     return true;
+}
+bool input_overlay_stopped(const ehci::QueueHead& qh)
+{
+    const auto token = __atomic_load_n(&qh.token, __ATOMIC_ACQUIRE);
+    return !(token & ehci::active) &&
+           ((token & ehci::halted) ||
+            (__atomic_load_n(&qh.qtd_next, __ATOMIC_ACQUIRE) & ehci::terminate));
 }
 bool start_input(Device& d)
 {
@@ -674,41 +703,63 @@ void poll_input(Controller& c, bool can_check_hub)
                 return;
             continue;
         }
+        auto* qh = static_cast<ehci::QueueHead*>(d.input_dma.virtual_address);
+        auto* td = input_qtds(d);
+        uint32_t token = __atomic_load_n(&td[d.input_qtd].token, __ATOMIC_ACQUIRE);
+        bool stopped = false;
+        if(token & ehci::active)
+        {
+            // Some controllers copy an inactive tail into the overlay. Stop
+            // before rebuilding it, and recheck after hardware ownership ends.
+            if(!input_overlay_stopped(*qh))
+                continue;
+            if(!periodic_schedule(c, false))
+                return;
+            stopped = true;
+            dma_sync_for_cpu(d.input_dma);
+            token = __atomic_load_n(&td[d.input_qtd].token, __ATOMIC_ACQUIRE);
+            if(token & ehci::active)
+            {
+                if(input_overlay_stopped(*qh) && !arm_input(d))
+                {
+                    retire(c);
+                    return;
+                }
+                if(!periodic_schedule(c, true))
+                    return;
+                continue;
+            }
+        }
         dma_sync_for_cpu(d.input_dma);
-        auto* td =
-            reinterpret_cast<ehci::Qtd*>(static_cast<uint8_t*>(d.input_dma.virtual_address) + 128);
-        if(td->token & ehci::active)
-            continue;
         const uint64_t completed =
             pointer && usb::stall_trace::enabled() ? usb::stall_trace::now() : 0;
-        if(!periodic_schedule(c, false))
-            return;
-        dma_sync_for_cpu(d.input_dma);
         unsigned bytes = d.hid.packet;
-        if((td->token & ehci::errors) || ehci::remaining(td->token) > bytes)
+        if((token & ehci::errors) || ehci::remaining(token) > bytes)
         {
+            if(!stopped && !periodic_schedule(c, false))
+                return;
             if(pointer)
                 usb::stall_trace::sample(
-                    OS1_EHCI_TRACE_ERROR, c.owner.index, d.input_identity, 0, td->token);
-            if(d.recovery.schedule(td->token, bytes, d.speed, diagnostic_log::monotonic()))
+                    OS1_EHCI_TRACE_ERROR, c.owner.index, d.input_identity, 0, token);
+            if(d.recovery.schedule(token, bytes, d.speed, diagnostic_log::monotonic()))
             {
                 if(pointer)
                     usb::stall_trace::sample(
-                        OS1_EHCI_TRACE_RETRY, c.owner.index, d.input_identity, 0, td->token);
+                        OS1_EHCI_TRACE_RETRY, c.owner.index, d.input_identity, 0, token);
                 // The halted QH keeps its frame slots reserved during backoff.
                 // Other endpoints continue; descriptor reuse waits for PSS to clear.
                 if(!periodic_schedule(c, true))
                     return;
                 continue;
             }
-            input_failure(d, OS1_USB_INPUT_TRANSFER, td->token, bytes, c.op[1]);
+            input_failure(d, OS1_USB_INPUT_TRANSFER, token, bytes, c.op[1]);
             d.failed = true;
             stop_input(d);
             hardware_catalog::unavailable(d.catalog_id);
             continue;
         }
-        auto* report = static_cast<uint8_t*>(d.input_dma.virtual_address) + 256;
-        unsigned actual = bytes - ehci::remaining(td->token);
+        auto* report = static_cast<uint8_t*>(d.input_dma.virtual_address) + input_report_offset;
+        unsigned actual = bytes - ehci::remaining(token);
         if(d.hid.protocol == 1)
         {
             native_input::boot_keyboard(d.input_identity, report, actual);
@@ -728,13 +779,32 @@ void poll_input(Controller& c, bool can_check_hub)
                 usb::stall_trace::sample(
                     OS1_EHCI_TRACE_PUBLISH, c.owner.index, d.input_identity, completed);
         }
-        if(!arm_input(d))
+        if(stopped)
         {
-            retire(c);
-            return;
+            if(!arm_input(d))
+            {
+                retire(c);
+                return;
+            }
+            if(!periodic_schedule(c, true))
+                return;
         }
-        if(!periodic_schedule(c, true))
-            return;
+        else
+        {
+            const unsigned next = d.input_qtd ^ 1u;
+            const uint64_t completed_physical =
+                d.input_dma.physical_address + input_qtd_offset + d.input_qtd * sizeof(ehci::Qtd);
+            if(!ehci::append_input_qtd(td[d.input_qtd],
+                                       td[next],
+                                       completed_physical,
+                                       d.input_dma.physical_address + input_report_offset,
+                                       d.hid.packet))
+            {
+                retire(c);
+                return;
+            }
+            d.input_qtd = next;
+        }
     }
 }
 bool enumerate(Controller& c, uint8_t root, Device* parent, uint8_t port)

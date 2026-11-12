@@ -587,3 +587,53 @@ TEST(Ehci, SplitInputRecoveryIsBoundedAndRejectsOtherFailures)
     ehci::InputRecovery high_speed{};
     EXPECT_FALSE(high_speed.schedule(observed, 4, 2, now));
 }
+
+TEST(Ehci, PeriodicInputAlternatesTransfersAndLinksShortReportsToTheTail)
+{
+    ehci::Qtd descriptors[2]{};
+    constexpr uint32_t physical[] = {0x1080, 0x10c0};
+    ASSERT_TRUE(ehci::prepare_qtd(descriptors[0], 0x1100, 8, 1, false, physical[1], physical[1]));
+    ehci::prepare_input_tail(descriptors[1]);
+
+    for(unsigned i = 0; i < 4; ++i)
+    {
+        unsigned current = i % 2;
+        unsigned next = current ^ 1u;
+        EXPECT_EQ(physical[next], descriptors[current].next);
+        EXPECT_EQ(physical[next], descriptors[current].alternate);
+        EXPECT_EQ(ehci::active, descriptors[current].token & ehci::active);
+        descriptors[current].token = (i % 2) << 16;
+        ASSERT_TRUE(ehci::append_input_qtd(
+            descriptors[current], descriptors[next], physical[current], 0x1100, 8));
+        EXPECT_EQ(ehci::halted, descriptors[current].token);
+        EXPECT_EQ(ehci::terminate, descriptors[current].next);
+        EXPECT_EQ(ehci::terminate, descriptors[current].alternate);
+        EXPECT_EQ(ehci::active, descriptors[next].token & ehci::active);
+        EXPECT_EQ(8u, ehci::remaining(descriptors[next].token));
+        EXPECT_EQ(0x1100u, descriptors[next].buffer[0]);
+    }
+}
+
+TEST(Ehci, PeriodicInputRejectsOwnedOrInvalidDescriptorsBeforeMutation)
+{
+    ehci::Qtd completed{}, tail{};
+    ehci::prepare_input_tail(tail);
+    for(uint32_t address : {0u, 1u, 0x1081u})
+        EXPECT_FALSE(ehci::append_input_qtd(completed, tail, address, 0x1100, 8));
+    EXPECT_FALSE(ehci::append_input_qtd(completed, completed, 0x1080, 0x1100, 8));
+    EXPECT_FALSE(ehci::append_input_qtd(completed, tail, 0x1080, 1ull << 32, 8));
+    EXPECT_EQ(0u, completed.token);
+    EXPECT_EQ(ehci::halted, tail.token);
+    for(uint32_t token : {ehci::active, ehci::halted})
+    {
+        completed.token = token;
+        EXPECT_FALSE(ehci::append_input_qtd(completed, tail, 0x1080, 0x1100, 8));
+        EXPECT_EQ(token, completed.token);
+        EXPECT_EQ(ehci::halted, tail.token);
+    }
+    completed.token = 0;
+    tail.token = ehci::active;
+    EXPECT_FALSE(ehci::append_input_qtd(completed, tail, 0x1080, 0x1100, 8));
+    EXPECT_EQ(0u, completed.token);
+    EXPECT_EQ(ehci::active, tail.token);
+}

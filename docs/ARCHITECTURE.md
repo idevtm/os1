@@ -1830,6 +1830,12 @@ Both controllers reuse the SCSI and Bulk-Only Transport implementation.
 EHCI serializes bulk commands and hub control through asynchronous schedule ownership.
 A separate periodic gate lets the worker service mouse reports while storage is active.
 A storage wait can also service the periodic schedule if it acquires that gate.
+Each input endpoint alternates two transfer descriptors in one DMA page.
+After a successful report, the worker can publish a new transfer while the schedule runs.
+The controller keeps the data toggle in its queue-head overlay.
+The worker stops the schedule before it rebuilds a halted queue head or changes the frame list.
+Some controllers copy the inactive transfer into the overlay and halt the queue head.
+The worker stops the schedule to recover from this controller behavior.
 Topology changes and retirement of all attached devices require both gates.
 A short register lock serializes schedule changes with controller shutdown.
 Hardware drivers remain in the kernel; the native File/Directory contract does not change.

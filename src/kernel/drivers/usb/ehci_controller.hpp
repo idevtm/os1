@@ -29,6 +29,12 @@ bool prepare_qtd(Qtd&,
                  bool toggle,
                  uint32_t next = terminate,
                  uint32_t alternate = terminate);
+void prepare_input_tail(Qtd&);
+bool append_input_qtd(Qtd& completed,
+                      Qtd& tail,
+                      uint64_t completed_physical,
+                      uint64_t report_physical,
+                      uint16_t packet);
 bool prepare_head(QueueHead&,
                   uint64_t self,
                   uint64_t first,
