@@ -12,8 +12,45 @@
 #include <os1/system.hpp>
 #include <os1/vfs.hpp>
 
-#include "interface/parameter_demo.hpp"
+#include "interface/parameter_fixture.hpp"
+#include "interface/shell_startup.hpp"
 #include "shell/program_path.hpp"
+
+namespace
+{
+namespace p = os1::parameters;
+constexpr p::Metadata shell_parameters()
+{
+    using namespace p::fixture;
+    p::Metadata m{};
+    m.magic = p::metadata_magic;
+    m.version = m.schema_version = 1;
+    m.size = sizeof(m);
+    m.schema_id = os1::shell_startup::schema_id;
+    m.type_count = 3;
+    m.entry_count = 1;
+    m.types[0] = compound(m, 1, p::Kind::Record, 0, 1, "ShellStartup");
+    m.types[1] = compound(m, 2, p::Kind::Optional, 0, 0, "OptionalScript");
+    m.types[1].element = 2;
+    m.types[2] = scalar(m, 3, p::Kind::String, 0, 0, 0, "ScriptPath");
+    m.types[2].bound = 240;
+    m.entries[0] = entry(m, os1::shell_startup::field_id, 1, "init_script");
+    return m;
+}
+[[gnu::used, gnu::section(".os.parameters")]]
+constinit const p::Metadata startup_parameters = shell_parameters();
+[[gnu::used, gnu::section(".os.parameter-bindings")]]
+const p::Binding startup_parameter_binding{p::binding_magic,
+                                           1,
+                                           sizeof(p::Binding),
+                                           os1::shell_startup::schema_id,
+                                           1,
+                                           1,
+                                           os1::shell_startup::schema_id,
+                                           1,
+                                           0,
+                                           {}};
+}  // namespace
 
 namespace
 {
@@ -451,36 +488,6 @@ bool observe(uint32_t kind, const Record*& records, uint32_t& record_count)
     record_count = header->record_count;
     records = reinterpret_cast<const Record*>(g_observe_buffer + sizeof(Os1ObserveHeader));
     return true;
-}
-
-void run_help()
-{
-    write_string("context [object.path]; Tab explores, Up/Down selects, Enter accepts\n");
-    write_string("files: touch path; write [--append|--replace] path; edit path\n");
-    write_string(
-        "text: head source lines:10; tail source lines:10; grep pattern source; wc source; file "
-        "path\n");
-    write_string("pager: less path; space/enter/f next page, b previous page, q quit\n");
-    write_string("streams: < file, > file, >> file, << delimiter; Ctrl-D ends input\n");
-    write_string(
-        "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit sync "
-        "shutdown reboot\n");
-    write_string(
-        "call <image> <method> [field:value | field.case | field:{...}]\nintf <image>: offline "
-        "constructor/method parameter help\n");
-}
-
-void run_pid()
-{
-    write_string("pid: ");
-    const long pid = os1::user::getpid();
-    if(pid < 0)
-    {
-        write_string("error\n");
-        return;
-    }
-    write_unsigned(static_cast<uint64_t>(pid));
-    write_char('\n');
 }
 
 void run_sys()
@@ -959,6 +966,51 @@ void run_events()
     write_string("events complete\n");
 }
 
+long run_diagnostic(int report)
+{
+    switch(report)
+    {
+        case OS1_OBSERVE_SYSTEM:
+            run_sys();
+            break;
+        case OS1_OBSERVE_PROCESSES:
+            run_ps();
+            break;
+        case OS1_OBSERVE_CPUS:
+            run_cpu();
+            break;
+        case OS1_OBSERVE_PCI:
+            run_pci();
+            break;
+        case OS1_OBSERVE_INITRD:
+            run_initrd();
+            break;
+        case OS1_OBSERVE_DEVICES:
+            run_devices();
+            break;
+        case OS1_OBSERVE_USB:
+            run_usb();
+            break;
+        case OS1_OBSERVE_RESOURCES:
+            run_resources();
+            break;
+        case OS1_OBSERVE_KMEM:
+            run_kmem();
+            break;
+        case OS1_OBSERVE_EVENTS:
+            run_events();
+            break;
+        case OS1_OBSERVE_IRQS:
+            run_irqs();
+            break;
+        default:
+            return OS1_ERR_INVALID;
+    }
+    if(output_failed)
+        return OS1_ERR_IO;
+    return command_failed ? OS1_ERR_INVALID : 0;
+}
+
 void run_unknown(const char* command)
 {
     command_failed = true;
@@ -1057,84 +1109,6 @@ const char* raw_tail(const char* raw, unsigned words)
         ++raw;
     return raw;
 }
-void run_call(size_t argc, char** argv, const char* raw)
-{
-    command_failed = true;
-    DiagnosticOutput diagnostic_output;
-    if(argc < 3)
-    {
-        write_string("usage: call <image> <method> [raw named parameters]\n");
-        return;
-    }
-    char path[OS1_PATH_MAX];
-    long image = resolve_command_path(argv[1], path, sizeof(path));
-    if(image < 0)
-    {
-        write_string("call: cannot open image\n");
-        return;
-    }
-    static os1::parameters::Metadata schema, scratch;
-    os1::parameters::Diagnostic d{};
-    os1_constructor_args args{};
-    if(os1::user::parameter_metadata(image, schema, scratch) != 1)
-    {
-        os1::user::close(image);
-        write_string("call: invalid or absent rich metadata\n");
-        return;
-    }
-    if(!os1::user::parameter_arguments(schema, raw_tail(raw, 3), args, d))
-    {
-        os1::user::close(image);
-        parameter_diagnostic(d);
-        return;
-    }
-    os1::user::ParameterClient client;
-    long status = client.start(image, schema, d);
-    os1::user::close(image);
-    unsigned member = 0;
-    if(status >= 0)
-        for(unsigned i = 0; i < client.interface.member_count; ++i)
-        {
-            const auto& m = client.interface.members[i];
-            if(m.kind == os1::interface::Method && m.flags && strings_equal(m.name, argv[2]))
-                member = m.id;
-        }
-    os1_ipc_result result{};
-    if(status >= 0)
-        status =
-            member ? client.call(member, args.payload, args.size, result) : OS1_ERR_UNSUPPORTED;
-    client.stop();
-    if(status < 0 || result.transport_status || result.application_status)
-    {
-        write_string("call failed status=");
-        write_signed(status < 0                ? status
-                     : result.transport_status ? result.transport_status
-                                               : result.application_status);
-        write_char('\n');
-        return;
-    }
-    command_failed = false;
-    output_fd = diagnostic_output.saved;
-    if(client.interface.interface_id == os1::parameter_demo::interface_id &&
-       member == os1::parameter_demo::Render && result.payload_bytes >= 8)
-    {
-        write_string("parameter method count=");
-        write_unsigned(os1::constructor::decode(result.payload, 8));
-        write_string(" text=");
-        write_bytes(reinterpret_cast<const char*>(result.payload + 8), result.payload_bytes - 8);
-        write_char('\n');
-    }
-    else
-    {
-        write_string("call result bytes=");
-        write_unsigned(result.payload_bytes);
-        write_string(" hex=");
-        for(unsigned i = 0; i < result.payload_bytes; ++i)
-            write_hex(result.payload[i], 2);
-        write_char('\n');
-    }
-}
-
 void run_external(size_t argc,
                   char** argv,
                   const char* raw,
@@ -1482,21 +1456,154 @@ bool may_write(os1::user::shell_runtime::Method method)
             return false;
     }
 }
+bool load_shell_profile()
+{
+    namespace u = os1::user;
+    namespace files = u::files;
+    using namespace u::shell_runtime;
+    char path[256]{};
+    bool supplied = false;
+    if(u::startup_record && u::startup_record->constructor.schema_id)
+    {
+        const auto& args = u::startup_record->constructor;
+        static p::Value value;
+        p::Diagnostic diagnostic{};
+        if(args.schema_id != startup_parameters.schema_id || args.version != 1 ||
+           !p::decode(startup_parameters, args.payload, args.size, value, diagnostic))
+            return false;
+        const auto field = p::child_key(value, 0, os1::shell_startup::field_id);
+        if(field != p::no_index && value.nodes[field].number)
+        {
+            const auto& data = value.nodes[value.nodes[field].first];
+            __builtin_memcpy(path, value.strings + data.begin, data.size);
+            if(files::length(path) != data.size || path[0] != '/')
+                return false;
+            supplied = true;
+        }
+    }
+    if(!supplied)
+    {
+        int inherited = os1::context::child(u::environment_data, 0, "shell_init_script");
+        if(inherited < 0 ||
+           !os1::context::string(u::environment_data, inherited, path, sizeof(path)))
+            return true;
+    }
+    files::Handle profile(files::open_file(path, files::Mode::Existing));
+    if(profile.fd == OS1_ERR_NOT_FOUND)
+        return true;
+    static os1::context::Data saved_environment;
+    static decltype(aliases) saved_aliases;
+    saved_environment = u::environment_data;
+    __builtin_memcpy(saved_aliases, aliases, sizeof(aliases));
+    files::Reader reader;
+    reader.fd = profile.fd;
+    reader.read_ahead = true;
+    unsigned number = 0;
+    for(; profile.fd >= 0 && number < 128;)
+    {
+        files::Line line;
+        ++number;
+        if(reader.line(line) < 0)
+            break;
+        if(line.eof && !line.size)
+        {
+            if(!supplied)
+                return true;
+            int inherited = os1::context::child(u::environment_data, 0, "shell_init_script");
+            static os1::context::Data updated;
+            if(inherited < 0)
+                updated = u::environment_data;
+            if((inherited < 0 || os1::context::without(u::environment_data, inherited, updated)) &&
+               os1::context::add(updated,
+                                 0,
+                                 "shell_init_script",
+                                 17,
+                                 OS1_VALUE_STRING,
+                                 path,
+                                 files::length(path)) >= 0)
+            {
+                u::environment_data = updated;
+                return true;
+            }
+            break;
+        }
+        bool nul = false;
+        for(unsigned i = 0; i < line.size; ++i)
+            nul |= line.bytes[i] == 0;
+        if(nul)
+            break;
+        normalize_line(line.bytes, line.size);
+        const char* statement = line.bytes;
+        while(os1::shell::space(*statement))
+            ++statement;
+        if(!*statement || *statement == '#')
+            continue;
+        const bool path_command =
+            prefix(statement, "process.path.add(") || prefix(statement, "process.path.remove(");
+        const bool alias_command = prefix(statement, "process.shell.aliases.add(") ||
+                                   prefix(statement, "process.shell.aliases.remove(") ||
+                                   prefix(statement, "process.shell.aliases.add_switch(") ||
+                                   prefix(statement, "process.shell.aliases.remove_switch(");
+        if(!path_command && !alias_command)
+            break;
+        static os1::shell::expression::Tree tree;
+        using K = os1::shell::expression::Kind;
+        if(!tree.parse(statement) || tree.nodes[tree.root].kind != K::Call)
+            break;
+        bool literal = true;
+        for(unsigned i = 1; i < tree.count; ++i)
+        {
+            const auto& node = tree.nodes[i];
+            const bool boolean =
+                node.kind == K::Reference &&
+                (os1::context::same(tree.text + node.begin, node.end - node.begin, "true", 4) ||
+                 os1::context::same(tree.text + node.begin, node.end - node.begin, "false", 5));
+            if(i != tree.root && node.kind != K::Literal && node.kind != K::Record && !boolean)
+                literal = false;
+        }
+        if(!literal || ((!path_command || supplied) && !u::commands::run(statement, false)))
+            break;
+    }
+    u::environment_data = saved_environment;
+    __builtin_memcpy(aliases, saved_aliases, sizeof(aliases));
+    files::put(2, path, files::length(path));
+    files::put(2, ":", 1);
+    files::number(2, number);
+    files::message(": invalid shell startup configuration");
+    if(u::commands::error)
+    {
+        files::message(": ");
+        files::message(u::commands::error);
+    }
+    files::message("\n");
+    return true;
+}
 }  // namespace
 
-int main(int argc_main, char** argv_main)
+static int shell_main(int argc_main, char** argv_main)
 {
     ShellLifetime lifetime;
     os1::user::commands::initialize();
     os1::user::discovery::extend = os1::user::commands::extend;
     os1::user::commands::extra_call = [](const char* name, const char* text) -> long {
+        const int report = os1::user::shell_runtime::diagnostic_kind(name);
+        if(report >= 0)
+            return run_diagnostic(report);
         static os1::shell::Command command;
         if(!os1::shell::parse(text, command))
             return OS1_ERR_INVALID;
         run_log(
             os1::discovery::same(name, "process.shell.history.print"), command.argc, command.argv);
+        if(output_failed)
+            return OS1_ERR_IO;
         return command_failed ? OS1_ERR_INVALID : 0;
     };
+    if(!load_shell_profile())
+        os1::user::files::message("shell: invalid startup constructor\n");
+    if(argc_main >= 2 && os1::user::startup_record &&
+       os1::user::startup_record->constructor.schema_id == os1::shell_startup::schema_id &&
+       os1::user::shell_runtime::prefix(argv_main[1], "init_script:"))
+        argc_main = 1;
     if(os1::user::logs::context(OS1_LOG_CONTEXT_OPEN) < 0)
         os1::user::files::message("shell: history capture unavailable\n");
     if(argc_main == 2 && os1::discovery::same(argv_main[1], "--boot"))
@@ -1680,12 +1787,6 @@ int main(int argc_main, char** argv_main)
         {
             continue;
         }
-        // These are existing system-control commands under their discovery paths.
-        if(os1::user::shell_runtime::prefix(tokens[0], "os.system.") &&
-           (strings_equal(tokens[0] + 10, "sync") || strings_equal(tokens[0] + 10, "shutdown") ||
-            strings_equal(tokens[0] + 10, "reboot")))
-            tokens[0] += 10;
-
         static os1::user::shell_runtime::Call call;
         if(!call.prepare(parsed, !console_input))
         {
@@ -1705,15 +1806,13 @@ int main(int argc_main, char** argv_main)
                 return 1;
             continue;
         }
-        const bool log_command = strings_equal(tokens[0], "dmesg") ||
-                                 strings_equal(tokens[0], "context") ||
-                                 strings_equal(tokens[0], "process.context.list") ||
-                                 strings_equal(tokens[0], "os.system.log.print") ||
-                                 strings_equal(tokens[0], "history") ||
-                                 strings_equal(tokens[0], "process.shell.history.print");
+        using Method = os1::user::shell_runtime::Method;
+        const bool inspection = strings_equal(tokens[0], "help") ||
+                                strings_equal(tokens[0], "context") ||
+                                strings_equal(tokens[0], "process.context.list");
         bool external = call.method == os1::user::shell_runtime::Method::Unknown;
-        for(const char* builtin : os1::user::shell_runtime::builtins)
-            if(strings_equal(tokens[0], builtin))
+        for(const auto& builtin : os1::user::shell_runtime::builtins)
+            if(strings_equal(tokens[0], builtin.name))
                 external = false;
         os1::user::files::Handle executable;
         char executable_path[OS1_PATH_MAX]{};
@@ -1801,7 +1900,7 @@ int main(int argc_main, char** argv_main)
                 return 1;
             continue;
         }
-        CommandSync command_sync((may_write(call.method) && !log_command) || parsed.output_name[0]);
+        CommandSync command_sync((may_write(call.method) && !inspection) || parsed.output_name[0]);
         os1::user::files::Streams streams;
         if(!streams.apply(parsed, here, copy_source, call.recursive))
         {
@@ -1830,14 +1929,26 @@ int main(int argc_main, char** argv_main)
                 command_failed = true;
             }
         }
-        else if(strings_equal(tokens[0], "dmesg") ||
-                strings_equal(tokens[0], "os.system.log.print") ||
-                strings_equal(tokens[0], "history") ||
-                strings_equal(tokens[0], "process.shell.history.print"))
-            run_log(strings_equal(tokens[0], "history") ||
-                        strings_equal(tokens[0], "process.shell.history.print"),
-                    argc,
-                    tokens);
+        else if(call.method == Method::Log)
+            run_log(strings_equal(call.target, "process.shell.history.print"), argc, tokens);
+        else if(call.method == Method::SystemControl)
+        {
+            const unsigned member = os1::user::shell_runtime::system_member(call.target);
+            const long status = argc == 1 ? os1::user::system_control(member) : OS1_ERR_INVALID;
+            if(status < 0)
+            {
+                os1::user::files::message("shell: system command failed: ");
+                os1::user::files::message(tokens[0]);
+                os1::user::files::message(" status=-");
+                os1::user::files::number(2, uint64_t(0) - static_cast<uint64_t>(status));
+                os1::user::files::message("; machine remains running\n");
+                command_failed = true;
+            }
+        }
+        else if(call.method == os1::user::shell_runtime::Method::Diagnostic)
+        {
+            run_diagnostic(os1::user::shell_runtime::diagnostic_kind(call.target));
+        }
         else if(call.method != os1::user::shell_runtime::Method::Unknown)
         {
             long result = os1::user::shell_runtime::execute(call);
@@ -1876,57 +1987,11 @@ int main(int argc_main, char** argv_main)
         }
         else if(strings_equal(tokens[0], "help"))
         {
-            run_help();
-        }
-        else if(strings_equal(tokens[0], "pid"))
-        {
-            run_pid();
-        }
-        else if(strings_equal(tokens[0], "sys"))
-        {
-            run_sys();
-        }
-        else if(strings_equal(tokens[0], "ps"))
-        {
-            run_ps();
-        }
-        else if(strings_equal(tokens[0], "cpu"))
-        {
-            run_cpu();
-        }
-        else if(strings_equal(tokens[0], "pci"))
-        {
-            run_pci();
-        }
-        else if(strings_equal(tokens[0], "initrd"))
-        {
-            run_initrd();
-        }
-        else if(strings_equal(tokens[0], "usb"))
-            run_usb();
-        else if(strings_equal(tokens[0], "devices"))
-        {
-            run_devices();
-        }
-        else if(strings_equal(tokens[0], "irqs"))
-        {
-            run_irqs();
-        }
-        else if(strings_equal(tokens[0], "resources"))
-        {
-            run_resources();
-        }
-        else if(strings_equal(tokens[0], "kmem"))
-        {
-            run_kmem();
-        }
-        else if(strings_equal(tokens[0], "events"))
-        {
-            run_events();
-        }
-        else if(strings_equal(tokens[0], "call"))
-        {
-            run_call(argc, tokens, raw);
+            if(argc > 2 || os1::user::prompt::help(argc == 2 ? tokens[1] : "", output_fd) < 0)
+            {
+                os1::user::files::message("help: unavailable or invalid path\n");
+                command_failed = true;
+            }
         }
         else if(strings_equal(tokens[0], "exec"))
         {
@@ -1934,28 +1999,6 @@ int main(int argc_main, char** argv_main)
                 run_exec(argc, tokens, raw);
             else
                 command_failed = true;
-        }
-        else if(strings_equal(tokens[0], "sync") || strings_equal(tokens[0], "system.sync") ||
-                strings_equal(tokens[0], "shutdown") ||
-                strings_equal(tokens[0], "system.shutdown") || strings_equal(tokens[0], "reboot") ||
-                strings_equal(tokens[0], "system.reboot"))
-        {
-            unsigned member =
-                strings_equal(tokens[0], "shutdown") || strings_equal(tokens[0], "system.shutdown")
-                    ? OS1_SYSTEM_SHUTDOWN
-                : strings_equal(tokens[0], "reboot") || strings_equal(tokens[0], "system.reboot")
-                    ? OS1_SYSTEM_REBOOT
-                    : OS1_SYSTEM_SYNC;
-            long status = argc == 1 ? os1::user::system_control(member) : OS1_ERR_INVALID;
-            if(status < 0)
-            {
-                os1::user::files::message("shell: system command failed: ");
-                os1::user::files::message(tokens[0]);
-                os1::user::files::message(" status=-");
-                os1::user::files::number(2, uint64_t(0) - static_cast<uint64_t>(status));
-                os1::user::files::message("; machine remains running\n");
-                command_failed = true;
-            }
         }
         else if(strings_equal(tokens[0], "exit"))
         {
@@ -1970,4 +2013,12 @@ int main(int argc_main, char** argv_main)
         if(!console_input && (command_failed || output_failed))
             return 1;
     }
+}
+
+extern "C" int os1_typed_entry(const os1_startup_record* startup)
+{
+    char* argv[OS1_ARGUMENT_LIMIT + 1]{};
+    for(unsigned i = 0; i < startup->argc; ++i)
+        argv[i] = const_cast<char*>(startup->strings + startup->argv[i]);
+    return shell_main(startup->argc, argv);
 }

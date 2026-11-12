@@ -20,10 +20,16 @@ def put16(data, at, value):
 def put32(data, at, value):
     struct.pack_into('<I', data, at, value)
 
-def create(output, utility, mib=32, reset=False, manifest=None):
+def create(output, utility, mib=32, reset=False, manifest=None, *, update_existing=False):
     output = Path(output)
+    if update_existing and (reset or manifest is None):
+        raise ValueError('updating requires a manifest and cannot reset the image')
     if output.exists() and not reset:
-        print(f'Keeping persistent disk: {output}')
+        if update_existing:
+            from deploy_storage import deploy
+            deploy(output, manifest)
+        else:
+            print(f'Keeping persistent disk: {output}')
         return
     if not 4 <= mib <= 128:
         raise ValueError('size must be 4..128 MiB')
@@ -71,20 +77,27 @@ def create(output, utility, mib=32, reset=False, manifest=None):
         table[(number - 1) * 128:number * 128] = record
         inode_map[(number - 1) // 8] |= 1 << ((number - 1) % 8)
 
-    directory = bytearray(BLOCK)
-    entries = [(2, '.', 2), (2, '..', 2), (11, 'diskutil', 1), (12, 'readme', 1)]
-    offset = 0
-    for i, (number, name, kind) in enumerate(entries):
-        encoded = name.encode()
-        length = BLOCK - offset if i == len(entries) - 1 else (8 + len(encoded) + 3) & ~3
-        struct.pack_into('<IHBB', directory, offset, number, length, len(encoded), kind)
-        directory[offset + 8:offset + 8 + len(encoded)] = encoded
-        offset += length
-    inode(2, 0o40755, directory, 2)
+    def directory(number, parent, children):
+        content = bytearray(BLOCK)
+        entries = [(number, '.', 2), (parent, '..', 2), *children]
+        offset = 0
+        for i, (child, name, kind) in enumerate(entries):
+            encoded = name.encode()
+            length = BLOCK - offset if i == len(entries) - 1 else (8 + len(encoded) + 3) & ~3
+            struct.pack_into('<IHBB', content, offset, child, length, len(encoded), kind)
+            content[offset + 8:offset + 8 + len(encoded)] = encoded
+            offset += length
+        inode(number, 0o40755, content, 2 + sum(kind == 2 for _, _, kind in children))
+
+    directory(2, 2, [(13, 'bin', 2), (14, 'etc', 2)])
+    directory(13, 2, [(11, 'diskutil', 1)])
+    directory(14, 2, [(12, 'readme', 1)])
     inode(11, 0o100755, Path(utility).read_bytes())
-    inode(12, 0o100644, b'Persistent ext2 storage. Run /diskutil sync before stopping QEMU.\n')
+    readme = Path(__file__).resolve().parents[2] / 'src/user/data/readme'
+    inode(12, 0o100644, readme.read_bytes())
+    free_inodes = inodes - 14  # Reserved inodes and the four seed entries.
     superblock = bytearray(1024)
-    for offset, value in {0: inodes, 4: blocks, 12: blocks - next_block, 16: inodes - 12,
+    for offset, value in {0: inodes, 4: blocks, 12: blocks - next_block, 16: free_inodes,
                           24: 2, 28: 2, 32: 32768, 36: 32768, 40: inodes,
                           76: 1, 84: 11, 96: 2}.items():
         put32(superblock, offset, value)
@@ -95,7 +108,7 @@ def create(output, utility, mib=32, reset=False, manifest=None):
     group = bytearray(BLOCK)
     for offset, value in {0: 2, 4: 3, 8: 4}.items():
         put32(group, offset, value)
-    for offset, value in {12: blocks - next_block, 14: inodes - 12, 16: 1}.items():
+    for offset, value in {12: blocks - next_block, 14: free_inodes, 16: 3}.items():
         put16(group, offset, value)
     mbr = bytearray(512)
     mbr[450] = 0x83
@@ -146,7 +159,9 @@ if __name__ == '__main__':
     p.add_argument('--output', required=True, type=Path)
     p.add_argument('--utility', required=True, type=Path)
     p.add_argument('--size-mib', type=int, default=32)
-    p.add_argument('--manifest', type=Path, help='seed programs only when creating an image')
+    p.add_argument('--manifest', type=Path, help='programs and resource defaults to install')
     p.add_argument('--reset', action='store_true', help='replace this image and all of its files')
+    p.add_argument('--update-existing', action='store_true', help='update programs on an existing image')
     args = p.parse_args()
-    create(args.output, args.utility, args.size_mib, args.reset, args.manifest)
+    create(args.output, args.utility, args.size_mib, args.reset, args.manifest,
+           update_existing=args.update_existing)

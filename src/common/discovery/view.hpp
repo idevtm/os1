@@ -3,6 +3,7 @@
 #include <os1/hardware.h>
 #include <os1/input.h>
 #include <os1/log.h>
+#include <os1/observe.h>
 #include <os1/system.h>
 #include <os1/vfs.h>
 
@@ -10,6 +11,22 @@
 namespace os1::discovery
 {
 constexpr unsigned node_limit = 256, page_limit = 8, path_limit = 256;
+struct DiagnosticBinding
+{
+    const char* name;
+    int kind;
+};
+inline constexpr DiagnosticBinding diagnostic_reports[] = {{"summary", OS1_OBSERVE_SYSTEM},
+                                                           {"processes", OS1_OBSERVE_PROCESSES},
+                                                           {"processors", OS1_OBSERVE_CPUS},
+                                                           {"pci", OS1_OBSERVE_PCI},
+                                                           {"initrd", OS1_OBSERVE_INITRD},
+                                                           {"devices", OS1_OBSERVE_DEVICES},
+                                                           {"usb", OS1_OBSERVE_USB},
+                                                           {"resources", OS1_OBSERVE_RESOURCES},
+                                                           {"memory", OS1_OBSERVE_KMEM},
+                                                           {"events", OS1_OBSERVE_EVENTS},
+                                                           {"interrupts", OS1_OBSERVE_IRQS}};
 enum class Kind : uint8_t
 {
     Object,
@@ -341,6 +358,7 @@ struct View
         add(context, "list", Kind::Method, "path:String=\"\"", 0, 0, 0, Local | Shell);
         if(g.shell)
         {
+            add(process, "pid", Kind::Property, "Integer", 0, 0, 0, Local | Shell);
             unsigned shell = add(process, "shell", Kind::Object, "Shell");
             unsigned history = add(shell, "history", Kind::Object, "CommandHistory");
             add(history,
@@ -365,7 +383,7 @@ struct View
             const Entry entries[] = {
                 {"cwd", "String", OS1_RIGHT_INSPECT},
                 {"change_directory", "path:String", OS1_RIGHT_LOOKUP},
-                {"list", "path:String=\".\"", OS1_RIGHT_ENUMERATE},
+                {"list", "path:String=\".\" list:Boolean=false", OS1_RIGHT_ENUMERATE},
                 {"ensure_file", "path:String", OS1_RIGHT_CREATE},
                 {"create_file", "path:String", OS1_RIGHT_CREATE},
                 {"update_times", "path:String", OS1_RIGHT_SET_TIMES},
@@ -452,8 +470,21 @@ struct View
             nodes[input].target = OS1_HARDWARE_INPUT_ROOT;
         }
         unsigned system = 0;
-        if(g.root.rights & (OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL))
+        if(g.shell || (g.root.rights & (OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL)))
             system = add(os, "system");
+        if(g.shell)
+        {
+            const auto reports = add(system, "diagnostics");
+            for(const auto& report : diagnostic_reports)
+                add(reports,
+                    report.name,
+                    Kind::Method,
+                    "Diagnostic report",
+                    0,
+                    0,
+                    0,
+                    Local | Shell);
+        }
         if(g.root.rights & OS1_RIGHT_LOG_READ)
         {
             unsigned log = add(

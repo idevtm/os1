@@ -33,6 +33,11 @@ TEST_F(Discovery, LiveRightsExcludeUnavailableServicesAndStreamMethods)
     ASSERT_GE(input, 0);
     EXPECT_EQ(OS1_HARDWARE_INPUT_ROOT, view.nodes[input].target);
     EXPECT_EQ(discovery::Alias, view.nodes[input].flags);
+    int pid = view.resolve("process.pid");
+    ASSERT_GE(pid, 0);
+    EXPECT_EQ(discovery::Kind::Property, view.member(pid).kind);
+    EXPECT_STREQ("Integer", view.member(pid).signature);
+    EXPECT_GE(view.resolve("os.system.diagnostics.interrupts"), 0);
     EXPECT_GE(view.resolve("os.system.log.print"), 0);
     EXPECT_GE(view.resolve("process.streams.output.write"), 0);
     EXPECT_LT(view.resolve("process.streams.output.try_read"), 0);
@@ -42,7 +47,9 @@ TEST_F(Discovery, LiveRightsExcludeUnavailableServicesAndStreamMethods)
     g.ceiling = OS1_RIGHT_READ;
     ASSERT_TRUE(view.build(g, data, 2));
     EXPECT_LT(view.resolve("os.input"), 0);
-    EXPECT_LT(view.resolve("os.system"), 0);
+    EXPECT_GE(view.resolve("os.system.diagnostics.summary"), 0);
+    EXPECT_LT(view.resolve("os.system.log"), 0);
+    EXPECT_LT(view.resolve("os.system.shutdown"), 0);
     EXPECT_LT(view.resolve("fs.create_file"), 0);
     EXPECT_GE(view.resolve("fs.copy"), 0);
     EXPECT_LT(view.resolve("process.streams.input"), 0);
@@ -52,6 +59,11 @@ TEST_F(Discovery, LiveRightsExcludeUnavailableServicesAndStreamMethods)
     EXPECT_GE(view.resolve("path.list"), 0);
     EXPECT_LT(view.resolve("path.search"), 0);
     EXPECT_LT(view.resolve("os.fs"), 0);
+    EXPECT_GE(view.resolve("os.system.diagnostics.summary"), 0);
+    g.shell = false;
+    ASSERT_TRUE(view.build(g, data, 4));
+    EXPECT_LT(view.resolve("os.system.diagnostics"), 0);
+    EXPECT_LT(view.resolve("process.pid"), 0);
 }
 TEST_F(Discovery, EnvironmentListsNestedFieldsAndAliasesAreStructural)
 {
@@ -62,7 +74,8 @@ TEST_F(Discovery, EnvironmentListsNestedFieldsAndAliasesAreStructural)
     ASSERT_GE(n, 0);
     EXPECT_EQ(OS1_VALUE_BOOLEAN, view.nodes[n].type);
     EXPECT_EQ(1, view.environment.nodes[view.nodes[n].value].integer);
-    EXPECT_GE(view.resolve("process.environment.path.0"), 0);
+    EXPECT_GE(view.resolve("process.environment.path"), 0);
+    EXPECT_LT(view.resolve("process.environment.path.0"), 0);
     EXPECT_EQ(view.resolve("fs.copy"), view.resolve("os.fs.copy"));
     EXPECT_EQ(view.resolve("out.print"), view.resolve("process.streams.output.print"));
     EXPECT_LT(view.resolve("os..fs"), 0);

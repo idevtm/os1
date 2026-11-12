@@ -83,7 +83,7 @@ def exercise(run, expect):
         ok('cd "d"')
     ok('cd "/"')
     bad('find "/tmp/deep"', b'tree: stopped;')
-    ok('/diskutil sync', b'sync ok')
+    ok('/bin/diskutil sync', b'sync ok')
     ok('kmem', b'kmem complete')
 
 
@@ -115,7 +115,7 @@ def main():
         ('stat "/tree/sub/a.txt"', b'logical_bytes:8 allocated_bytes:4096'),
         ('du "/tree"', b'12288 bytes /tree'),
         ('rm -r "/tree"', None),
-        ('/diskutil sync', b'sync ok'),
+        ('/bin/diskutil sync', b'sync ok'),
     ])
     check('removed')
     print('metadata, traversal, recursive tools, and reboot checks passed')

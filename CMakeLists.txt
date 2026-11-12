@@ -410,6 +410,8 @@ add_custom_command(OUTPUT "${OS1_PROGRAM_TEST_DISK}"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/deploy_storage.py"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/ext2_inspect.py"
     "${PROJECT_SOURCE_DIR}/src/user/data/motd"
+    "${PROJECT_SOURCE_DIR}/src/user/data/readme"
+    "${PROJECT_SOURCE_DIR}/src/user/data/shell-init.sh"
   VERBATIM)
 add_custom_target(os1_program_test_disk DEPENDS "${OS1_PROGRAM_TEST_DISK}")
 
@@ -683,6 +685,11 @@ endif()
 # Keep the kernel-only target available for scripted use; interactive USB work uses usb.
 
 if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
+  add_custom_target(storage_prepare_uefi
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/create_ext2_image.py"
+      --output "${OS1_PERSISTENT_DISK}" --utility "${OS1_USER_DISKUTIL_ELF}"
+      --manifest "${OS1_STORAGE_MANIFEST}" --update-existing
+    DEPENDS user_programs USES_TERMINAL VERBATIM)
   add_custom_target(
     run
     BYPRODUCTS "${OS1_SERIAL_LOG}" "${OS1_OVMF_VARS_FILE}"
@@ -717,7 +724,7 @@ if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
       cpu_reset
       -d
       int
-    DEPENDS os1_image storage_create
+    DEPENDS os1_image storage_prepare_uefi
     USES_TERMINAL
     VERBATIM
   )
@@ -751,7 +758,7 @@ if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
       stdio
       -display
       none
-    DEPENDS os1_image storage_create
+    DEPENDS os1_image storage_prepare_uefi
     USES_TERMINAL
     VERBATIM
   )
@@ -763,7 +770,7 @@ endif()
 os1_register_menu_target(
   run
   "Default modern UEFI path"
-  "Boot OVMF on q35 with persistent ext2 storage and installed programs."
+  "Update disk programs, then boot OVMF on q35 with persistent ext2 storage."
 )
 os1_register_menu_target(
   run_serial
@@ -923,7 +930,7 @@ set(OS1_SMOKE_REJECT_MARKERS
 # Fully quoted echo arguments distinguish output markers from echoed input.
 set(OS1_SHELL_INPUT_EVENTS
   "shell prompt ready::help\\n"
-  "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit::echo 'shell-echo-ok'\\n"
+  "process.pid [property] Integer::echo 'shell-echo-ok'\\n"
   "\nshell-echo-ok\n::pid\\n"
 )
 
@@ -960,11 +967,11 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "[user/activationcheck] ok::counter --initial 10 --ceiling 100\\n"
   "counter initial=10 ceiling=100::intf /bin/counter\\n"
   "initial: u64 offset=0 default=0 cli=--initial::paramdemo initial:4 source.text:'Hi there' options.suffix:null\\n"
-  "parameter constructor count=12 text=Hi there::call paramdemo render mode.thorough source.text:\"hello world\" options:{limit:5,suffix:null}\\n"
-  "parameter method count=5 text=HELLO::call paramdemo render source.text:'a\"b' options.suffix:null\\n"
-  "parameter method count=3 text=a\"b::call paramdemo render label:null source.none\\n"
-  "parameter method count=1 text=!::paramdemo mode:bogus\\n"
-  "unknown enum name::call paramdemo render source.bogus\\n"
+  "parameter constructor count=12 text=Hi there::paramdemo mode.thorough source.text:\"hello world\" options:{limit:5,suffix:null}\\n"
+  "parameter constructor count=5 text=HELLO::paramdemo source.text:'a\"b' options.suffix:null\\n"
+  "parameter constructor count=3 text=a\"b::paramdemo label:null source.none\\n"
+  "parameter constructor count=1 text=!::paramdemo mode:bogus\\n"
+  "unknown enum name::paramdemo source.bogus\\n"
   "unknown field, enumerator or case::paramcheck\\n"
   "[user/paramcheck] ok::intf /bin/paramdemo\\n"
 )
@@ -1117,7 +1124,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "initrd module discovered"
     "starting first user process"
     "shell prompt ready"
-    "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit"
+    "process.pid [property] Integer"
     "\nshell-echo-ok\n"
     "pid: "
     "idle thread online"
@@ -1316,9 +1323,9 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "event changed id=5 input=2 output=0 implemented"
     "initial: u64 offset=0 default=0 cli=--initial"
     "parameter constructor count=12 text=Hi there"
-    "parameter method count=5 text=HELLO"
-    "parameter method count=3 text=a\"b"
-    "parameter method count=1 text=!"
+    "parameter constructor count=5 text=HELLO"
+    "parameter constructor count=3 text=a\"b"
+    "parameter constructor count=1 text=!"
     "parameter error code="
     "unknown enum name"
     "unknown field, enumerator or case"
@@ -1457,7 +1464,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "initrd module discovered"
     "starting first user process"
     "shell prompt ready"
-    "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit"
+    "process.pid [property] Integer"
     "\nshell-echo-ok\n"
     "pid: "
     "idle thread online"
@@ -1648,9 +1655,9 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "event changed id=5 input=2 output=0 implemented"
     "initial: u64 offset=0 default=0 cli=--initial"
     "parameter constructor count=12 text=Hi there"
-    "parameter method count=5 text=HELLO"
-    "parameter method count=3 text=a\"b"
-    "parameter method count=1 text=!"
+    "parameter constructor count=5 text=HELLO"
+    "parameter constructor count=3 text=a\"b"
+    "parameter constructor count=1 text=!"
     "parameter error code="
     "unknown enum name"
     "unknown field, enumerator or case"

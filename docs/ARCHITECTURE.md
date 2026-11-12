@@ -577,7 +577,8 @@ The shell runs a line-buffered REPL:
 2. `read(0, buf, N)` blocks on the typed console-read wait state until enter commits a line.
 3. The shell binds aliases and arguments, validates values, and prepares stream redirection.
    Local `path` and `fs` helpers use typed context and granted namespace resources.
-   Observer commands call `observe(kind, buf, len)` and render fixed-record tables.
+   Shell diagnostic aliases select methods under `os.system.diagnostics`.
+   These methods use `observe(kind, buf, len)` to render fixed-record tables.
    External commands search the inherited path list, initially `/bin`.
    Native launch receives a copied environment and explicit stream/root/cwd grants; the shell waits for the child.
    `exec` replaces the shell image instead of creating a child.
@@ -1298,7 +1299,9 @@ These events clear `OS1_KERNEL_EVENT_FLAG_USER`.
 At the shell prompt, `events` prints an event snapshot.
 Continuous event streaming and its cancellation remain deferred.
 
-The ring-3 shell consumes most records through built-ins such as `sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, and `irqs`; `/bin/acpiprobe` consumes the ACPICA snapshot. Keeping these paths explicit avoids turning observability into parsed boot logs.
+The shell uses reflected diagnostic methods to print observation records.
+The disk startup profile supplies short aliases such as `sys`, `ps`, and `irqs`.
+`/bin/acpiprobe` reads the ACPICA snapshot.
 
 ### Performance measurement clock
 
@@ -1404,9 +1407,8 @@ The [deployment guide](filesystems/program-deployment.md#boot-and-recovery) defi
 | Location | Contents |
 | --- | --- |
 | Initrd `/sbin` | `init` and `rescue` |
-| Ext2 `/etc` | Default `motd` resource |
+| Ext2 `/etc` | Default `motd`, `readme`, and shell startup script |
 | Ext2 `/bin` | Full shell, file utilities, verification programs, providers, examples, `intf`, and `diskutil` |
-| Ext2 `/diskutil` | Compatibility copy for existing synchronization commands |
 
 The full shell requires ext2. Rescue remains available without storage.
 The kernel initializes storage and its namespace before it starts init.
@@ -1632,7 +1634,10 @@ The main CMake targets are:
 - `smoke_exec_bios`
 - `smoke_all`
 
-`run` boots the default UEFI ISO under OVMF on `q35` and attaches the generated `virtio-blk` test disk. `run_serial` uses the same guest image but attaches the shell to serial stdio in the terminal. `run_bios` boots the raw image under BIOS on `q35` with the same secondary `virtio-blk` test disk attached, while `run_bios_serial` keeps that boot path but routes the guest shell through serial stdio.
+The `run` and `run_serial` targets prepare the persistent ext2 disk before they start QEMU.
+Preparation creates a missing image or deploys changed programs. It preserves existing data and startup profiles.
+Both targets boot the UEFI ISO under OVMF on `q35`. The `run_serial` target routes the guest shell to the terminal.
+The BIOS targets use the raw boot image and the persistent ext2 disk.
 
 The default build produces both `os1.iso` and `os1.raw`, so a normal
 `cmake --build build` followed by `ctest --test-dir build --output-on-failure`
@@ -1730,7 +1735,7 @@ The baseline smoke tests cover the common boot and shell transcript on each fron
   threaded completion paths)
 - `virtio-net` ARP probe over MSI-X-driven RX
 - initrd discovery and first user-process startup
-- stable shell built-ins such as `help`, `echo`, and `pid`
+- generated shell `help` and the `echo` and `pid` aliases
 
 The dedicated observe, balance, spawn, exec, and xHCI smokes then exercise the operator-facing behavior that Milestone 5, the 2026-04-30 platform pass, and the 2026-05-05 SMP enablement round added:
 
@@ -2032,11 +2037,12 @@ The [catalog plan](native-api/hardware-catalog-plan.md) records scope, validatio
 ## Live context exploration
 
 The [runtime discovery profile](native-api/context-discovery.md) exposes fixed bindings and copied environment data without activation.
-The shell shares this profile between `context` inspection and Tab completion.
-At the first command word, the prompt also offers short names from the shell dispatch tables.
+The shell uses this profile for `context`, `help`, and Tab completion.
+The prompt also offers configured aliases, shell commands, executable names, and file paths.
+The disk startup profile configures aliases and executable search directories before the first prompt.
 
 ```text
-resource metadata + environment + shell bindings -> bounded View -> context / completion
+resource metadata + environment + shell bindings -> bounded View -> context / help / completion
 parameter definitions -> guided values -> expression evaluator -> local helper / native IPC
 Console input session -> prompt editing -> explicit release -> canonical command input
 ```

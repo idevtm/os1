@@ -63,6 +63,17 @@ class Configuration(unittest.TestCase):
                 manifest = (build/'generated/target_menu.txt').read_text()
                 self.assertIn('storage_deploy|', manifest)
                 self.assertIn('os1_usb_data_image', result.stdout)
+                if mode == 'default':
+                    run = next(line for line in manifest.splitlines() if line.startswith('run|'))
+                    if not run.split('|')[3]:
+                        for target in ('run', 'run_serial'):
+                            commands = subprocess.check_output(
+                                ['ninja', '-C', str(build), '-t', 'commands', target], text=True)
+                            steps = commands.splitlines()
+                            launch = next(i for i, step in enumerate(steps)
+                                          if '-machine q35' in step and '-cdrom' in step)
+                            self.assertTrue(any('--update-existing' in step
+                                                for step in steps[:launch]), target)
                 if mode != 'off':
                     self.check_python_test_commands(build)
                 if mode == 'diagnostic':

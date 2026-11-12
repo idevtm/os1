@@ -68,7 +68,9 @@ A failed firmware request can have firmware side effects even when the command r
 
 ## Shell policy
 
-`sync`, `shutdown`, and `reboot` map to these methods. `system.sync`, `system.shutdown`, and `system.reboot` are equivalent names.
+The disk startup profile defines `sync`, `shutdown`, and `reboot` as aliases.
+Call `os.system.sync()`, `os.system.shutdown()`, or `os.system.reboot()` directly when no profile is loaded.
+The historical `system.*` spellings are retired.
 The commands accept no arguments. The shell reports transition failures and remains available.
 The shell synchronizes commands that can write, including external programs, editors, copies, namespace changes, timestamps, and output redirection.
 A successful `exec` first synchronizes prior shell changes. The replacing program owns its subsequent synchronization duties.

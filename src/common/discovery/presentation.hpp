@@ -73,7 +73,7 @@ struct Presentation
                         else if(const char* command = state.command_name(index))
                         {
                             line.append(command);
-                            line.append(" [command]");
+                            line.append(state.path_choices ? " [path]" : " [command]");
                         }
                         else
                             line.member(view.member(state.ids[index]));

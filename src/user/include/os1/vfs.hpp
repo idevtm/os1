@@ -8,6 +8,7 @@
 #include "interface/constructor.hpp"
 #include "interface/parameter_binding.hpp"
 #include "interface/parameters.hpp"
+#include "interface/shell_startup.hpp"
 namespace os1::user
 {
 extern const os1_startup_record* startup_record;
@@ -249,6 +250,19 @@ inline long prepare_constructor(int executable,
     parameters::Diagnostic local_diagnostic{};
     auto& d = diagnostic ? *diagnostic : local_diagnostic;
     int rich_found = parameter_metadata(executable, rich, scratch);
+    // Shell scripts remain ordinary argv operands. The shell constructor is opt-in.
+    if(rich_found == 1 && rich.schema_id == os1::shell_startup::schema_id)
+    {
+        const char* tail = raw_parameters ? raw_parameters : "";
+        while(*tail == ' ' || *tail == '\t')
+            ++tail;
+        constexpr char key[] = "init_script:";
+        unsigned at = 0;
+        while(key[at] && key[at] == tail[at])
+            ++at;
+        if(key[at])
+            rich_found = 0;
+    }
     bool valid = rich_found >= 0;
     if(is_rich)
         *is_rich = rich_found == 1;

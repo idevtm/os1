@@ -139,6 +139,24 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
         d.add("path", T::String, "\"\"");
         return d;
     }
+    if(starts(path, "process.shell.aliases."))
+    {
+        const char* operation = path + sizeof("process.shell.aliases.") - 1;
+        if(!same(operation, "list"))
+            d.add("name");
+        if(same(operation, "add"))
+        {
+            d.add("target");
+            d.add("assignment", T::Record, "unset");
+        }
+        if(same(operation, "add_switch") || same(operation, "remove_switch"))
+            d.add("spelling");
+        if(same(operation, "add_switch"))
+            d.add("assignment", T::Record);
+        return d;
+    }
+    if(starts(path, "os.system.diagnostics.") || same(path, "process.pid"))
+        return d;
     if(same(path, "process.shell.bindings.remove"))
     {
         d.add("name");
@@ -183,6 +201,8 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
         bool optional = same(path, "fs.list") || same(path, "fs.space") || same(path, "fs.find") ||
                         same(path, "fs.usage");
         d.add("path", T::String, optional ? "\".\"" : "<?>");
+        if(same(path, "fs.list"))
+            d.add("list", T::Boolean, "false", "false|true");
         if(same(path, "fs.find"))
         {
             d.add("name", T::String, "unset");

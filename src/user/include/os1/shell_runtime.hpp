@@ -1,10 +1,12 @@
 #pragma once
+
 #include <os1/context.hpp>
 #include <os1/file_tools.hpp>
 #include <os1/pager.hpp>
 #include <os1/text_tools.hpp>
 #include <os1/tree.hpp>
 
+#include "discovery/view.hpp"
 #include "shell/values.hpp"
 namespace os1::user::shell_runtime
 {
@@ -42,97 +44,91 @@ enum class Method
     Search,
     Count,
     Identify,
-    Pager
+    Pager,
+    Diagnostic,
+    Log,
+    SystemControl,
+    Pid
 };
 struct Binding
 {
     const char* name;
     Method method;
 };
-constexpr Binding bindings[] = {{"less", Method::Pager},
-                                {"pager.show", Method::Pager},
-                                {"head", Method::Head},
+constexpr Binding bindings[] = {{"pager.show", Method::Pager},
                                 {"text.head", Method::Head},
-                                {"tail", Method::Tail},
                                 {"text.tail", Method::Tail},
-                                {"grep", Method::Search},
                                 {"text.search", Method::Search},
-                                {"wc", Method::Count},
                                 {"text.count", Method::Count},
-                                {"file", Method::Identify},
                                 {"fs.identify", Method::Identify},
-                                {"stat", Method::Info},
                                 {"fs.info", Method::Info},
-                                {"df", Method::Space},
                                 {"fs.space", Method::Space},
-                                {"find", Method::Find},
                                 {"fs.find", Method::Find},
-                                {"du", Method::Usage},
                                 {"fs.usage", Method::Usage},
-                                {"echo", Method::Print},
                                 {"out.print", Method::Print},
                                 {"process.streams.output.print", Method::Print},
-                                {"pwd", Method::Cwd},
                                 {"fs.cwd", Method::Query},
-                                {"cd", Method::ChangeDirectory},
                                 {"fs.change_directory", Method::ChangeDirectory},
-                                {"ls", Method::List},
                                 {"fs.list", Method::List},
-                                {"touch", Method::Touch},
                                 {"fs.update_times", Method::UpdateTimes},
                                 {"fs.ensure_file", Method::Ensure},
                                 {"fs.create_file", Method::Create},
-                                {"cp", Method::Copy},
-                                {"cat", Method::Copy},
                                 {"fs.copy", Method::Copy},
-                                {"mv", Method::Move},
                                 {"fs.move", Method::Move},
-                                {"rm", Method::Remove},
                                 {"fs.remove_file", Method::Remove},
-                                {"mkdir", Method::MakeDirectory},
                                 {"fs.create_directory", Method::MakeDirectory},
-                                {"rmdir", Method::RemoveDirectory},
                                 {"fs.remove_directory", Method::RemoveDirectory},
                                 {"path.list", Method::PathList},
                                 {"path.add", Method::PathAdd},
                                 {"path.remove", Method::PathRemove},
-                                {"path.search", Method::PathSearch}};
-inline constexpr const char* builtins[] = {"context",
-                                           "process.context.list",
-                                           "write",
-                                           "edit",
-                                           "help",
-                                           "pid",
-                                           "sys",
-                                           "ps",
-                                           "cpu",
-                                           "pci",
-                                           "initrd",
-                                           "usb",
-                                           "devices",
-                                           "irqs",
-                                           "resources",
-                                           "kmem",
-                                           "events",
-                                           "call",
-                                           "sync",
-                                           "shutdown",
-                                           "reboot",
-                                           "system.sync",
-                                           "system.shutdown",
-                                           "system.reboot",
-                                           "exec",
-                                           "exit",
-                                           "dmesg",
-                                           "history",
-                                           "os.system.log.print",
-                                           "process.shell.history.print"};
+                                {"path.search", Method::PathSearch},
+                                {"fs.print_cwd", Method::Cwd},
+                                {"fs.touch", Method::Touch},
+                                {"text.cat", Method::Copy},
+                                {"os.system.log.print", Method::Log},
+                                {"process.shell.history.print", Method::Log},
+                                {"process.pid", Method::Pid}};
+inline constexpr char diagnostic_prefix[] = "os.system.diagnostics.";
+inline int diagnostic_kind(const char* name)
+{
+    for(const char* prefix = diagnostic_prefix; *prefix; ++prefix)
+        if(*name++ != *prefix)
+            return -1;
+    for(const auto& report : os1::discovery::diagnostic_reports)
+        if(shell::equal(name, report.name))
+            return report.kind;
+    return -1;
+}
+struct Builtin
+{
+    const char* name;
+    const char* usage;
+};
+inline constexpr Builtin builtins[] = {
+    {"context", "context [object.path]"},
+    {"process.context.list", "process.context.list [object.path]"},
+    {"write", "write [--append|--replace] path"},
+    {"edit", "edit path"},
+    {"help", "help [command|object.path]"},
+    {"exec", "exec image [arguments]"},
+    {"exit", "exit"}};
+
 inline bool prefix(const char* text, const char* head)
 {
     while(*head)
         if(*text++ != *head++)
             return false;
     return true;
+}
+inline unsigned system_member(const char* name)
+{
+    if(shell::equal(name, "os.system.sync"))
+        return OS1_SYSTEM_SYNC;
+    if(shell::equal(name, "os.system.shutdown"))
+        return OS1_SYSTEM_SHUTDOWN;
+    if(shell::equal(name, "os.system.reboot"))
+        return OS1_SYSTEM_REBOOT;
+    return 0;
 }
 inline void diagnostic(const char* message)
 {
@@ -276,12 +272,104 @@ inline unsigned source_slot(Method method)
 {
     return method == Method::Search ? 1 : 0;
 }
+struct Alias
+{
+    char name[64]{};
+    char target[96]{};
+    char option = 0;
+    bool option_value = true;
+    bool has_default = false, default_value = false;
+};
+inline Alias aliases[48]{};
+inline Alias* find_alias(const char* name)
+{
+    for(auto& alias : aliases)
+        if(alias.name[0] && shell::equal(alias.name, name))
+            return &alias;
+    return nullptr;
+}
+inline bool valid_alias_name(const char* name)
+{
+    if(!*name || *name == '-' || (*name >= '0' && *name <= '9'))
+        return false;
+    for(const char* p = name; *p; ++p)
+        if(!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') ||
+             *p == '_' || *p == '-'))
+            return false;
+    for(const auto& builtin : builtins)
+        if(shell::equal(name, builtin.name))
+            return false;
+    return !shell::equal(name, "drop") && !shell::equal(name, "with");
+}
+inline Method method_for(const char* name)
+{
+    if(auto* alias = find_alias(name))
+        name = alias->target;
+    if(prefix(name, "os.fs."))
+        name += 3;
+    else if(prefix(name, "process.path."))
+        name += 8;
+    if(diagnostic_kind(name) >= 0)
+        return Method::Diagnostic;
+    if(system_member(name))
+        return Method::SystemControl;
+    for(const auto& binding : bindings)
+        if(shell::equal(name, binding.name))
+            return binding.method;
+    return Method::Unknown;
+}
+inline const char* boolean_parameter(Method method)
+{
+    switch(method)
+    {
+        case Method::List:
+            return "list";
+        case Method::Usage:
+            return "logical";
+        case Method::Copy:
+        case Method::Remove:
+        case Method::RemoveDirectory:
+            return "recursive";
+        default:
+            return nullptr;
+    }
+}
+inline bool path_operand(Method method, unsigned slot)
+{
+    if(method == Method::Copy || method == Method::Move)
+        return slot < 2;
+    if(text_method(method))
+        return slot == source_slot(method);
+    switch(method)
+    {
+        case Method::List:
+        case Method::ChangeDirectory:
+        case Method::Touch:
+        case Method::UpdateTimes:
+        case Method::Ensure:
+        case Method::Create:
+        case Method::Remove:
+        case Method::MakeDirectory:
+        case Method::RemoveDirectory:
+        case Method::Info:
+        case Method::Space:
+        case Method::Find:
+        case Method::Usage:
+        case Method::Pager:
+        case Method::PathAdd:
+        case Method::PathRemove:
+            return slot == 0;
+        default:
+            return false;
+    }
+}
 struct Call
 {
     Method method = Method::Unknown;
     Data values{};
     int nodes[4]{-1, -1, -1, -1}, streams[4]{-1, -1, -1, -1};
-    bool strict = false, cat = false, recursive = false, logical = false;
+    bool strict = false, cat = false, recursive = false, logical = false, detailed_list = false;
+    bool pid_label = false;
     const char* error = nullptr;
     char target[128]{};
     long status = 0;
@@ -325,18 +413,15 @@ struct Call
         os1::context::init(values);
         if(!command.argc)
             return true;
-        const char* name = command.argv[0];
+        const Alias* alias = find_alias(command.argv[0]);
+        const char* name = alias ? alias->target : command.argv[0];
         if(prefix(name, "os.fs."))
             name += 3;
         else if(prefix(name, "process.path."))
             name += 8;
-        for(const auto& b : bindings)
-            if(shell::equal(name, b.name))
-            {
-                method = b.method;
-                break;
-            }
-        cat = shell::equal(name, "cat");
+        method = method_for(name);
+        pid_label = method == Method::Pid && alias && shell::equal(alias->name, "pid");
+        cat = shell::equal(name, "text.cat");
         bool assignment = command.argc > 1 && shell::equal(command.argv[1], "=");
         if(assignment && shell::equal(name, "fs.cwd"))
             method = Method::ChangeDirectory;
@@ -351,6 +436,8 @@ struct Call
         }
         for(size_t i = 0; name[i]; ++i)
             target[i] = name[i];
+        if(method == Method::Log || method == Method::SystemControl)
+            return true;
         Parameter parameters[4]{};
         size_t count = 0;
         if(method == Method::Print)
@@ -363,10 +450,11 @@ struct Call
             parameters[0] = {"source", true, !cat};
             parameters[1] = {"destination", true, method == Method::Move};
             parameters[2] = {"mode", false, false};
-            parameters[3] = {"recursive", false, false, shell::equal(name, "cp") ? 'r' : char(0)};
+            parameters[3] = {"recursive", false, false, alias ? alias->option : char(0)};
             count = method == Method::Copy ? 4 : 2;
         }
-        else if(method == Method::Query || method == Method::Cwd || method == Method::PathList)
+        else if(method == Method::Query || method == Method::Cwd || method == Method::PathList ||
+                method == Method::Diagnostic || method == Method::Pid)
             count = 0;
         else
         {
@@ -396,10 +484,12 @@ struct Call
         int boolean_slot = -1;
         if(method == Method::Copy)
             boolean_slot = 3;
-        if((method == Method::RemoveDirectory && !shell::equal(name, "rmdir")) ||
-           (method == Method::Remove && shell::equal(name, "rm")))
+        if((method == Method::RemoveDirectory &&
+            (!shell::equal(command.argv[0], "rmdir") ||
+             (alias && (alias->option || alias->has_default)))) ||
+           (method == Method::Remove && alias))
         {
-            parameters[1] = {"recursive", false, false, shell::equal(name, "rm") ? 'r' : char(0)};
+            parameters[1] = {"recursive", false, false, alias ? alias->option : char(0)};
             boolean_slot = 1;
             count = 2;
         }
@@ -409,9 +499,10 @@ struct Call
             parameters[2] = {"kind", false, false};
             count = 3;
         }
-        if(method == Method::Usage)
+        if(method == Method::Usage || method == Method::List)
         {
-            parameters[1] = {"logical", false, false};
+            parameters[1] = {
+                boolean_parameter(method), false, false, alias ? alias->option : char(0)};
             boolean_slot = 1;
             count = 2;
         }
@@ -427,8 +518,14 @@ struct Call
                 {
                     if(starts[p] == SIZE_MAX)
                     {
-                        nodes[p] =
-                            os1::context::add(values, 0, "option", 6, OS1_VALUE_BOOLEAN, "", 0, 1);
+                        nodes[p] = os1::context::add(values,
+                                                     0,
+                                                     "option",
+                                                     6,
+                                                     OS1_VALUE_BOOLEAN,
+                                                     "",
+                                                     0,
+                                                     alias && alias->option_value);
                         if(nodes[p] < 0)
                             return false;
                     }
@@ -438,6 +535,28 @@ struct Call
                             shell::equal(command.argv[i], "-") &&
                             command.raw[command.begin[i]] == '-')
                         streams[p] = 0;
+                    else if(path_operand(method, p) && command.raw[starts[p]] != '"' &&
+                            command.raw[starts[p]] != '\'' &&
+                            stream(command.raw + starts[p], command.end[i] - starts[p]) < 0)
+                    {
+                        const char* arg = command.argv[i];
+                        if(starts[p] != command.begin[i])
+                        {
+                            while(*arg && *arg != ':')
+                                ++arg;
+                            if(*arg)
+                                ++arg;
+                        }
+                        nodes[p] = os1::context::add(values,
+                                                     0,
+                                                     parameters[p].name,
+                                                     files::length(parameters[p].name),
+                                                     OS1_VALUE_STRING,
+                                                     arg,
+                                                     files::length(arg));
+                        if(nodes[p] < 0)
+                            return false;
+                    }
                     else if(!evaluate(command.raw + starts[p],
                                       command.end[i] - starts[p],
                                       p,
@@ -485,9 +604,13 @@ struct Call
                         error = "expected Boolean";
                         return false;
                     }
-                    bool value = nodes[p] >= 0 && values.nodes[nodes[p]].integer;
+                    const bool value = nodes[p] >= 0
+                                           ? values.nodes[nodes[p]].integer != 0
+                                           : alias && alias->has_default && alias->default_value;
                     if(method == Method::Usage)
                         logical = value;
+                    else if(method == Method::List)
+                        detailed_list = value;
                     else
                         recursive = value;
                     continue;
@@ -776,9 +899,10 @@ inline long mutation(const char* path, Method method)
     return fs::remove_typed(
         client.fd, leaf, method == Method::Remove ? OS1_OBJECT_FILE : OS1_OBJECT_DIRECTORY);
 }
-inline long list(const char* path)
+inline long list(const char* path, bool detailed)
 {
-    Handle directory(open(path, OS1_RIGHT_ENUMERATE));
+    const uint32_t rights = detailed ? OS1_RIGHT_LOOKUP | OS1_RIGHT_ENUMERATE : OS1_RIGHT_ENUMERATE;
+    Handle directory(open(path, rights, detailed ? OS1_RIGHT_INSPECT : 0));
     if(directory.fd < 0)
         return directory.fd;
     alignas(8) uint8_t data[1024]{};
@@ -791,10 +915,38 @@ inline long list(const char* path)
         while(at < static_cast<size_t>(n))
         {
             auto* record = reinterpret_cast<const os1_directory_record*>(data + at);
-            if(n - at < sizeof(*record) || !record->record_bytes || record->record_bytes > n - at ||
+            if(n - at < sizeof(*record) || record->record_bytes < sizeof(*record) ||
+               record->record_bytes > n - at ||
                record->name_bytes > record->record_bytes - sizeof(*record))
                 return OS1_ERR_INVALID;
             auto* name = reinterpret_cast<const char*>(record + 1);
+            bool is_directory = record->kind == OS1_OBJECT_DIRECTORY;
+            if(detailed)
+            {
+                Handle entry(open_at(directory.fd, name, record->name_bytes, OS1_RIGHT_INSPECT));
+                if(entry.fd < 0)
+                    return entry.fd;
+                os1_metadata metadata{};
+                long status = tree::metadata(entry.fd, metadata);
+                if(status < 0)
+                    return status;
+                os1_file_times times{};
+                status = os1_syscall3(os1_sys_resource,
+                                      entry.fd,
+                                      OS1_RESOURCE_TIMES,
+                                      reinterpret_cast<uint64_t>(&times));
+                if(status < 0)
+                    return status;
+                is_directory = metadata.kind == OS1_OBJECT_DIRECTORY;
+                const char kind = is_directory ? 'd' : '-';
+                constexpr char no_time[] = " modify_ns:unsupported";
+                if(!files::put(1, &kind, 1) || !tree::field(" bytes:", metadata.logical_bytes) ||
+                   !((times.valid & OS1_TIME_MODIFY)
+                         ? tree::field(" modify_ns:", times.modify_ns)
+                         : files::put(1, no_time, sizeof(no_time) - 1)) ||
+                   !files::put(1, " ", 1))
+                    return OS1_ERR_IO;
+            }
             for(unsigned i = 0; i < record->name_bytes; ++i)
             {
                 unsigned char c = name[i];
@@ -811,7 +963,7 @@ inline long list(const char* path)
                         return OS1_ERR_IO;
                 }
             }
-            if(record->kind == OS1_OBJECT_DIRECTORY && !files::put(1, "/", 1))
+            if(is_directory && !files::put(1, "/", 1))
                 return OS1_ERR_IO;
             if(!files::put(1, "\n", 1))
                 return OS1_ERR_IO;
@@ -1133,8 +1285,17 @@ inline long execute(Call& call)
             if(call.method == Method::RemoveDirectory && call.recursive)
                 return traverse(call);
             return mutation(a, call.method);
+        case Method::Pid: {
+            const long pid = getpid();
+            if(pid < 0)
+                return pid;
+            return (!call.pid_label || files::put(1, "pid: ", 5)) && tree::number(pid) &&
+                           files::put(1, "\n", 1)
+                       ? 0
+                       : OS1_ERR_IO;
+        }
         case Method::List:
-            return list(*a ? a : ".");
+            return list(*a ? a : ".", call.detailed_list);
         case Method::Info:
             return tree::info(a, false);
         case Method::Space:

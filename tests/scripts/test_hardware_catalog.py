@@ -119,7 +119,7 @@ def main():
             assert b'pci_' in context(block + '.backing')
         invalid = run('lsblk --invalid', allow_errors=True)
         assert b'status=2' in invalid, invalid
-        run('/diskutil sync')
+        run('/bin/diskutil sync')
 
     boot(args, disk, 'catalog', commands=[], exercise=exercise)
     print('hardware catalog checks passed')

@@ -146,8 +146,7 @@ foreach(program IN LISTS OS1_USER_PROGRAM_FILES)
     set(separator ",")
   endif()
 endforeach()
-# Retain the published path used by older images and deployment workflows.
-string(APPEND program_manifest ",{\"source\":\"${OS1_USER_DISKUTIL_ELF}\",\"destination\":\"/diskutil\"}],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/etc/motd\"}]}\n")
+string(APPEND program_manifest "],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/etc/motd\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/readme\",\"destination\":\"/etc/readme\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/shell-init.sh\",\"destination\":\"/etc/shell/init.sh\"}]}\n")
 file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs-base.json" CONTENT "${program_manifest}")
 add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json"
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"

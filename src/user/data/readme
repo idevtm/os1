@@ -1,0 +1,1 @@
+Persistent ext2 storage. Run /bin/diskutil sync before stopping QEMU.

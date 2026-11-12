@@ -1,7 +1,7 @@
 # Live runtime context discovery
 
 The shared user runtime describes inspectable bindings and copied environment data without activation.
-The shell uses these descriptions for `context` and Tab completion.
+The shell uses these descriptions for `context`, `help`, and Tab completion.
 
 ```text
 existing resource grants + typed environment
@@ -10,7 +10,7 @@ existing resource grants + typed environment
                      |
        resolve -> enumerate -> describe
                      |
-          context command / Tab list
+          context command / help / Tab list
 ```
 
 | Topic | Definition |
@@ -35,7 +35,9 @@ Refresh performs no filesystem writes and starts no processes.
 | `os.devices`, `os.firmware.acpi`, `os.system.processors` | Passive boot hardware descriptions under the existing observation disclosure policy |
 | `os.fs`, alias `fs` | Existing filesystem helpers, filtered by root lookup and descendant rights |
 | `os.system` | Existing synchronization and power methods when SYSTEM_CONTROL is granted |
+| `os.system.diagnostics` | Shell report methods under the existing observation disclosure policy |
 | `os.system.log` | Native log descriptions and shell printing when LOG_READ is granted |
+| `process.pid` | Current shell process ID as an Integer |
 | `process.environment` | Copied typed records, lists, strings, integers, and Booleans |
 | `process.path`, alias `path` | Local path operations; search additionally requires lookup and execute authority |
 | `process.streams` | Present standard descriptors; Console descriptions follow each descriptor's rights |
@@ -104,7 +106,7 @@ Each list page contains at most eight choices.
 
 | Key | Action |
 | --- | --- |
-| Tab | Open choices, accept a choice, or focus the next parameter |
+| Tab | Insert a single match, open multiple choices, accept the selected choice, or focus the next parameter |
 | Shift-Tab | Focus the previous parameter when choices are closed |
 | Dot | Open children outside quoted strings and numeric literals |
 | Up / Down | Select a choice; otherwise recall history outside parameter focus |
@@ -132,7 +134,14 @@ At the first command word, Tab also offers short names from the shell dispatch t
 The menu marks these entries with `[command]`.
 Select a command to insert its name.
 Press Enter again to run it.
-Filename completion, executable search directory enumeration, and arbitrary provider discovery remain separate work.
+At a file operand or redirection, Tab offers authorized filesystem names.
+For example, press Tab after `intf /b` to complete the directory prefix for an image path.
+The shell quotes a name that needs quotes.
+At a command word, the shell checks the executable search list.
+It uses the execution resolver to check executable candidates.
+For a rich constructor, Tab can show fields and cases from offline image metadata.
+Completion never activates the image.
+Arbitrary provider discovery remains separate work.
 See [guided commands](../shell/guided-command-plan.md) for ownership, bounds, and validation.
 
 ```text

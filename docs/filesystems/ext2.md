@@ -20,7 +20,8 @@ The same targets are available through `cmake --build build --target TARGET`.
 | Target | Action |
 | --- | --- |
 | `storage_create` | Create the data image if absent. Preserve an existing image. |
-| `run_persistent` | Boot UEFI with the persistent image attached. |
+| `run` / `run_serial` | Update disk programs before UEFI boot. Preserve data and the startup profile. |
+| `run_persistent` | Boot UEFI with the persistent image attached and skip the update. |
 | `run_persistent_bios` | Boot BIOS with the same persistent image. |
 | `run_usb_storage` / `run_usb_storage_bios` | Attach the same image through xHCI USB storage. |
 | `storage_deploy` | Install or update manifest programs. Preserve other existing files. |
@@ -33,7 +34,8 @@ The default partition size is 32 MiB. The image builder accepts sizes from 4 thr
 Host files can be sparse; the logical capacity does not require immediate allocation of every host block.
 
 Ordinary builds do not recreate or update the image.
-Use **Storage > Deploy programs** after rebuilding a utility.
+The default UEFI launch deploys rebuilt utilities.
+Use **Storage > Deploy programs** to update programs without booting.
 The [deployment guide](program-deployment.md) defines manifests, preservation checks, and offline updates.
 Use explicit reset only when the data is disposable.
 The builder rejects replacement while another process holds a conflicting image lock.
@@ -43,11 +45,11 @@ Do not mount the backing filesystem on the host while QEMU uses it.
 
 ```text
 ls /
-/diskutil seed
-/diskutil verify
+/bin/diskutil seed
+/bin/diskutil verify
 echo "persistent note" > /note
 cat /note
-/diskutil sync
+/bin/diskutil sync
 ```
 
 `seed` creates a deterministic 128 KiB file and synchronizes it.

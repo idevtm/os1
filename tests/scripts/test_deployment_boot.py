@@ -2,6 +2,7 @@
 """Execute two separately built program versions across offline deployment."""
 import argparse
 import json
+import subprocess
 from pathlib import Path
 import sys
 
@@ -55,35 +56,84 @@ def main():
 
     boot(args, disk, 'version1', [
         ('probe', b'deployed program version 1'),
-        ('cat /readme', b'Persistent ext2 storage.'),
-        ('call absent_provider render', b'call: cannot open image'),
+        ('cat /etc/readme', b'Persistent ext2 storage.'),
+        ('exec absent_provider', b'exec failed: absent_provider'),
         ('./bin/probe', b'deployed program version 1'),
         ('counter --initial 7 --ceiling 20', b'counter initial=7 ceiling=20'),
         ('intf /bin/textprocessor', b'interface TextProcessor'),
-        ('/diskutil seed', b'diskutil seed ok'),
+        ('/bin/diskutil seed', b'diskutil seed ok'),
         ('echo "my file survives deployment" > /bin/note', None),
         ('echo appended >> /bin/note', None),
         ('cat /bin/note', b'my file survives deployment\nappended\n'),
-        ('/diskutil sync', b'diskutil sync ok')], on_boot=active_image_is_locked)
-    before = inspect()
-    prefix = disk.read_bytes()[:2048*512]
-    install(args.version2)
-    after = inspect()
+        ('/bin/diskutil sync', b'diskutil sync ok')], on_boot=active_image_is_locked)
+    upgrade_shell = args.code and args.transport == 'virtio'
+    if upgrade_shell:
+        # An older shell uses the argv entry and cannot accept init's constructor.
+        # Install it only after the first boot has written data to preserve.
+        profile = log.with_suffix('.startup.sh')
+        profile.write_text('process.path.add(path:"/bin")\n'
+                           'process.shell.aliases.add(name:"ls", target:"os.fs.list")\n'
+                           'process.shell.aliases.add(name:"cat", target:"text.cat")\n'
+                           'process.shell.aliases.add(name:"boot_custom", target:"out.print")\n')
+        before_profile = inspect()
+        subprocess.run([tool('debugfs'), '-w', '-R', 'rm /etc/shell/init.sh', str(part)],
+                       check=True, capture_output=True)
+        subprocess.run([tool('debugfs'), '-w', '-R',
+                        f'write "{profile}" /etc/shell/init.sh', str(part)],
+                       check=True, capture_output=True)
+        with disk.open('r+b') as image:
+            image.seek(2048 * 512)
+            image.write(part.read_bytes())
+        manifest.write_text(json.dumps({'version': 3, 'programs': [
+            {'source': str(Path(args.version1).resolve()), 'destination': '/bin/sh'}]}))
+        deploy(disk, manifest)
+        before = inspect()
+        assert before['/etc/shell/init.sh'] != before_profile['/etc/shell/init.sh']
+        args.rescue = True
+        try:
+            boot(args, disk, 'old-shell', exercise=lambda run, expect: run('help', b'log_export'))
+        finally:
+            args.rescue = False
+        assert b'shell exit status=127' in log.with_suffix('.old-shell.log').read_bytes()
+        before = inspect()
+        prefix = disk.read_bytes()[:2048*512]
+        current = json.loads(Path(args.programs_manifest).read_text())
+        # The fixture manifest lives beside the test disk, so retain absolute source paths.
+        for entry in current['programs'] + current['resources']:
+            entry['source'] = str((Path(args.programs_manifest).parent / entry['source']).resolve())
+        current['programs'].append({'source': str(Path(args.version2).resolve()),
+                                    'destination': '/bin/probe'})
+        manifest.write_text(json.dumps(current))
+        subprocess.run([sys.executable, str(ROOT / 'cmake/scripts/create_ext2_image.py'),
+                        '--output', str(disk), '--utility', args.utility,
+                        '--manifest', str(manifest), '--update-existing'], check=True)
+        after = inspect()
+        assert after['/bin/sh'][1] != before['/bin/sh'][1]
+    else:
+        before = inspect()
+        prefix = disk.read_bytes()[:2048*512]
+        install(args.version2)
+        after = inspect()
+    replaced = {'/bin/probe'}
+    if upgrade_shell:
+        replaced.add('/bin/sh')
     for name, value in before.items():
-        if name != '/bin/probe':
+        if name not in replaced:
             assert after[name] == value, f'changed unrelated entry: {name}'
     assert after['/bin/probe'][1] != before['/bin/probe'][1]
     assert disk.read_bytes()[:2048*512] == prefix
     commands = [('probe', b'deployed program version 2'),
                 ('/bin/probe', b'deployed program version 2'),
                 ('counter --initial 8 --ceiling 20', b'counter initial=8 ceiling=20'),
-                ('/diskutil verify', b'diskutil verify ok'),
+                ('/bin/diskutil verify', b'diskutil verify ok'),
                 ('cat /bin/note', b'my file survives deployment\nappended\n')]
+    if upgrade_shell:
+        commands.append(('boot_custom "profile preserved"', b'profile preserved\n'))
     boot(args, disk, 'version2', commands)
     inspect()
     boot(args, disk, 'reboot', commands)
     inspect()
-    print('program update and existing files verified across three guest boots')
+    print('program update and existing files verified across guest boots')
 
 
 if __name__ == '__main__':

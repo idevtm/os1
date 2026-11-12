@@ -153,6 +153,17 @@ inline bool extend(os1::discovery::View& v)
     int shell = v.resolve("process.shell");
     if(shell >= 0)
     {
+        unsigned aliases = v.add(shell, "aliases");
+        const char* methods[] = {"add", "list", "show", "remove", "add_switch", "remove_switch"};
+        for(const char* name : methods)
+            v.add(aliases,
+                  name,
+                  os1::discovery::Kind::Method,
+                  "Shell alias management",
+                  0,
+                  0,
+                  0,
+                  os1::discovery::Local | os1::discovery::Shell);
         unsigned b = v.add(shell, "bindings");
         v.add(b,
               "remove",
@@ -820,6 +831,94 @@ inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false);
         return fail("unknown native member");
     return status < 0 ? fail("console method failed", status) : true;
 }
+inline bool boolean_assignment(Frame& f, unsigned slot, shell_runtime::Method method, bool& result)
+{
+    const char* expected = shell_runtime::boolean_parameter(method);
+    if(!expected || f.nodes[slot] < 0)
+        return false;
+    const int parameter = os1::context::child(f.data, f.nodes[slot], "parameter");
+    const int value = os1::context::child(f.data, f.nodes[slot], "value");
+    char field[64]{};
+    if(parameter < 0 || value < 0 || f.data.nodes[value].kind != OS1_VALUE_BOOLEAN ||
+       !os1::context::string(f.data, parameter, field, sizeof(field)) || !same(field, expected))
+        return false;
+    result = f.data.nodes[value].integer != 0;
+    return true;
+}
+inline bool alias_call(const char* operation, Frame& f)
+{
+    using namespace shell_runtime;
+    if(same(operation, "list"))
+    {
+        for(const auto& alias : aliases)
+            if(alias.name[0] && (!prompt::output(1, alias.name) || !prompt::output(1, "\n")))
+                return fail("alias output failed");
+        return true;
+    }
+    char name[64]{};
+    if(!f.string(0, name, sizeof(name)) || !valid_alias_name(name))
+        return fail("invalid alias name");
+    Alias* alias = find_alias(name);
+    if(same(operation, "add"))
+    {
+        char target[96]{};
+        if(!f.string(1, target, sizeof(target)))
+            return fail("invalid alias target");
+        bool qualified = false;
+        for(const char* c = target; *c; ++c)
+            qualified |= *c == '.';
+        const auto method = method_for(target);
+        if(!qualified || method == Method::Unknown)
+            return fail("invalid alias target");
+        bool default_value = false;
+        const bool has_default = f.nodes[2] >= 0;
+        if(has_default && !boolean_assignment(f, 2, method, default_value))
+            return fail("invalid Boolean default assignment");
+        if(!alias)
+            for(auto& entry : aliases)
+                if(!entry.name[0])
+                {
+                    alias = &entry;
+                    break;
+                }
+        if(!alias)
+            return fail("alias table is full");
+        *alias = {};
+        os1::discovery::copy(alias->name, sizeof(alias->name), name);
+        os1::discovery::copy(alias->target, sizeof(alias->target), target);
+        alias->has_default = has_default;
+        alias->default_value = default_value;
+        return true;
+    }
+    if(!alias)
+        return fail("alias not found");
+    if(same(operation, "remove"))
+    {
+        *alias = {};
+        return true;
+    }
+    if(same(operation, "show"))
+        return prompt::describe_alias(1, *alias) || fail("alias output failed");
+    char spelling[4]{};
+    if(!f.string(1, spelling, sizeof(spelling)) || spelling[0] != '-' || spelling[1] < 'a' ||
+       spelling[1] > 'z' || spelling[2])
+        return fail("invalid switch spelling");
+    if(same(operation, "remove_switch"))
+    {
+        if(alias->option != spelling[1])
+            return fail("switch not found");
+        alias->option = 0;
+        return true;
+    }
+    if(alias->option)
+        return fail("alias already has a switch");
+    bool value = false;
+    if(!boolean_assignment(f, 2, method_for(alias->target), value))
+        return fail("invalid Boolean switch assignment");
+    alias->option = spelling[1];
+    alias->option_value = value;
+    return true;
+}
 [[gnu::noinline]] inline bool execute_prepared(const char* path,
                                                const char* canonical,
                                                const os1::discovery::Member& member,
@@ -830,6 +929,8 @@ inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false);
 {
     if(member.interface_id)
         return native(path, member, f, out, scoped);
+    if(os1::discovery::starts(canonical, "process.shell.aliases."))
+        return alias_call(canonical + sizeof("process.shell.aliases.") - 1, f);
     if(same(canonical, "process.shell.bindings.remove"))
     {
         char name[64];
@@ -860,6 +961,11 @@ inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false);
         int list = os1::context::child(environment_data, 0, "path");
         return list >= 0 &&
                os1::shell::copy_value(environment_data, list, out.data, 0, "value", 5) >= 0;
+    }
+    if(same(canonical, "process.pid"))
+    {
+        const long pid = getpid();
+        return pid < 0 ? fail("process ID unavailable", pid) : out.integer(pid);
     }
     if(same(canonical, "os.fs.cwd"))
     {
@@ -895,6 +1001,11 @@ inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false);
         if(status < 0)
             return fail("context path unavailable", status);
         return true;
+    }
+    if(shell_runtime::diagnostic_kind(canonical) >= 0)
+    {
+        long status = extra_call ? extra_call(canonical, f.legacy.bytes) : OS1_ERR_UNSUPPORTED;
+        return status >= 0 || fail("diagnostic report failed", status);
     }
     if(same(canonical, "process.shell.history.print") || same(canonical, "os.system.log.print"))
     {
@@ -1611,7 +1722,8 @@ inline bool handles(const char* line)
         ++line;
     if(os1::discovery::starts(line, "with ") || os1::discovery::starts(line, "drop "))
         return true;
-    if(os1::discovery::starts(line, "echo "))
+    if(shell_runtime::method_for("echo") == shell_runtime::Method::Print &&
+       os1::discovery::starts(line, "echo "))
     {
         if(os1::shell::has_top_level_command_operator(line + 5))
             return false;

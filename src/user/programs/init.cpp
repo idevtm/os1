@@ -1,6 +1,8 @@
 #include <os1/file_tools.hpp>
 #include <os1/ipc.hpp>
 
+#include "interface/shell_startup.hpp"
+
 namespace
 {
 namespace u = os1::user;
@@ -80,20 +82,17 @@ int main(int, char**)
     for(;;)
     {
         const char* arguments[] = {"sh", "--boot"};
-        // The bootstrap shell takes argv, not a typed class constructor.
-        // Avoid repeated ELF metadata reads before the first interactive prompt.
-        const os1_constructor_args constructor{};
-        long child = first ? u::run_program("/bin/sh",
-                                            2,
-                                            arguments,
-                                            false,
-                                            0,
-                                            nullptr,
-                                            nullptr,
-                                            nullptr,
-                                            -1,
-                                            &constructor)
-                           : u::spawn("/bin/sh");
+        constexpr auto constructor = os1::shell_startup::boot_arguments();
+        long child = u::run_program("/bin/sh",
+                                    first ? 2 : 1,
+                                    arguments,
+                                    false,
+                                    0,
+                                    nullptr,
+                                    nullptr,
+                                    nullptr,
+                                    -1,
+                                    &constructor);
         first = false;
         const long started = child >= 0 ? u::ipc_clock() : -1;
         int status = 0;

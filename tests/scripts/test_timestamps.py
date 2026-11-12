@@ -71,7 +71,7 @@ def main():
         run('write "/tmp/times.sh"\ntouch "/tmp/script-file"\nfs.update_times "/tmp/script-file"\n.')
         run('sh "/tmp/times.sh"')
         times(run, '/tmp/script-file')
-        run('/diskutil sync', b'sync ok')
+        run('/bin/diskutil sync', b'sync ok')
 
     boot(args, disk, 'first', exercise=first)
     if args.e2fsck:
@@ -88,7 +88,7 @@ def main():
         run('cat "/timed"', b'preserved\n')
         assert times(run, '/timed') == saved['/']
         assert b'failed' in run('stat "/tmp/timed"', allow_errors=True)
-        run('/diskutil sync', b'sync ok')
+        run('/bin/diskutil sync', b'sync ok')
     boot(args, disk, 'reboot', exercise=reboot)
     print('timestamp shell, authority, noatime, and reboot checks passed')
 
