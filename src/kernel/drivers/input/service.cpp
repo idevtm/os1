@@ -3,6 +3,7 @@
 #include "debug/log.hpp"
 #include "freestanding/string.hpp"
 #include "fs/initrd.hpp"
+#include "input/hid_boot.hpp"
 #include "mm/kmem.hpp"
 #include "platform/platform.hpp"
 #include "util/memory.h"
@@ -305,19 +306,15 @@ void keyboard(uint64_t id, const uint8_t keys[32])
 }
 void boot_keyboard(uint64_t id, const uint8_t* report, unsigned bytes)
 {
-    if(!report || bytes != 8)
+    if(!report || bytes != 8 || os1::input::boot_keyboard_has_error(report))
         return;
     uint8_t keys[32]{};
     for(unsigned i = 0; i < 8; ++i)
         if(report[0] & (1u << i))
             keys[(224 + i) / 8] |= 1u << ((224 + i) % 8);
     for(unsigned i = 2; i < 8; ++i)
-    {
-        if(report[i] && report[i] <= 3)
-            return;  // Rollover: retain the last reliable state.
         if(report[i])
             keys[report[i] / 8] |= 1u << (report[i] % 8);
-    }
     keyboard(id, keys);
 }
 bool pointer(uint64_t id, unsigned buttons, int dx, int dy, int wheel)

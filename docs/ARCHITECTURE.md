@@ -438,6 +438,14 @@ The shim stops with a serial message if a check fails.
 Limine marks its executable, modules, and page tables as occupied memory.
 See the [Limine protocol memory map](https://github.com/limine-bootloader/limine-protocol/blob/trunk/PROTOCOL.md#memory-map-feature).
 
+Both boot paths combine consecutive descriptors when the ranges touch and have equal type and attributes.
+They combine ranges in either direction and preserve firmware order.
+If more than 128 ranges remain, the boot path reports that it omitted ranges.
+It keeps disjoint usable ranges and removes overlaps with retained and omitted non-usable ranges.
+If a non-usable range splits a usable range, the boot path keeps its lower part.
+After truncation, BIOS checks usable coverage of the temporary page tables before it writes them.
+It also checks the fixed kernel, bootstrap, and page-frame bitmap window.
+
 The shim translates the framebuffer, RSDP, SMBIOS, and initrd pointers into physical addresses.
 It copies the normalized map and builds `LowHandoffBootInfoStorage` after the loaded kernel image.
 The BIOS loader builds the same `BootInfo` ABI from E820, EDD, CMOS, and the RSDP scan.
@@ -523,11 +531,12 @@ BootInfo.rsdp_physical
         |-- pci_bus_probe_all
         |     |-- match modern virtio-blk PCI function
         |     |-- bind shared virtio PCI transport
-        |     |-- claim BARs used by virtio capabilities
+        |     |-- claim BARs and validate virtio capability ranges
         |     |-- negotiate VERSION_1
         |     |-- allocate DMA for queue and request buffer
         |     |-- enable MSI-X, MSI, or IOAPIC INTx fallback
-        |     |-- setup queue and publish BlockDevice
+        |     |-- validate queue notification address and enable queue
+        |     |-- publish BlockDevice
         v
  BlockDevice submit/read/write ---> read sector 0, verify prefix
         |                         read sector 1, verify prefix
@@ -535,6 +544,10 @@ BootInfo.rsdp_physical
         v                         -> "virtio-blk smoke ok"
  RunVirtioBlkSmoke
 ```
+
+The virtio PCI transport checks each supported capability range against its claimed BAR.
+The driver caches a checked notification register for each queue before it enables the queue.
+Queue submission uses that register without reading the device notification offset again.
 
 Missing or malformed ACPI tables are a hard error on both boot paths. BIOS remains supported as a boot frontend, but it now depends on the same ACPI-derived topology contract as Limine.
 
@@ -871,6 +884,9 @@ It is no longer the default workflow.
 `kernel_main()` in [../src/kernel/core/kernel_main.cpp](../src/kernel/core/kernel_main.cpp) is the shared kernel entry for both paths. It is now high-level boot orchestration only: trap routing lives in `core/trap_dispatch.cpp`, IRQ flow in `core/irq_dispatch.cpp`, fault policy in `core/fault.cpp`, syscall dispatch in `syscall/dispatch.cpp`, scheduler handoff in `sched/scheduler.cpp`, platform sequencing in `platform/init.cpp`, and device-specific behavior under `drivers/`.
 
 The sequence is detailed in [Phase 3](#phase-3--kernel-bring-up-kernel_main). After copying `BootInfo`, the kernel initializes physical allocation, builds its higher-half and direct-map mappings with narrow bootstrap identity exceptions, and switches `CR3`. Platform discovery, interrupt setup, and driver probing precede process registries and per-CPU idle threads. Scheduler timer preparation and AP startup follow those thread allocations; the boot-sequence thread then loads the first user process. `os1.nosmp` can leave APs offline.
+MADT discovery retains up to 64 enabled CPUs and keeps the boot CPU when firmware lists it later.
+PCI enumeration retains the first 256 functions in scan order.
+Discovery reports when it omits entries from either inventory.
 
 `own_boot_info()` removes dependence on frontend-owned metadata; the later `kvm.activate()` transition installs kernel-owned page tables. After those handoffs, both boot paths use the same runtime subsystems.
 
@@ -1031,6 +1047,10 @@ Supported operations include:
 
 `allocate_and_map()` now frees a data frame when page-table allocation fails before linking it; a forced-exhaustion regression covers the leak from [review R5](archive/reviews/2026-11-03-review.md#r5--p2-mapping-failure-leaks-an-allocated-data-frame). Earlier successfully linked pages remain owned by the address space and are reclaimed by failed-image teardown.
 
+A 4 KiB page operation stops at a large leaf. A 2 MiB mapping preserves an existing small-page table.
+The direct mapper fills holes in that table with 4 KiB mappings.
+Address-space teardown removes large aliases and releases the page tables. The caller keeps the physical backing for each large alias.
+
 Generic `VirtualMemory::free` and `destroy_user_slot` still free frames before an asynchronous TLB shootdown.
 The Buffer retirement barrier does not correct those general VM paths.
 Their broader shared-address-space reclamation limitation remains current.
@@ -1051,6 +1071,12 @@ Each CPU gets a dedicated `struct cpu` page containing:
 The BSP receives its initial `cpu` page from the boot frontend. Additional CPUs are allocated by the kernel.
 
 ### AP startup records
+
+The kernel requires xAPIC MMIO for local interrupts.
+If firmware leaves x2APIC active on the BSP, platform discovery stops before LAPIC MMIO access.
+An AP with active x2APIC stays offline.
+MADT discovery skips enabled x2APIC records when it finds the BSP in a Local APIC record.
+If the BSP has no Local APIC record, an enabled x2APIC record causes an unsupported-topology error.
 
 The AP trampoline selects a stack by xAPIC ID. A late AP can read only its own startup record.
 
@@ -1153,8 +1179,18 @@ The assembly trap entry code now builds a shared `TrapFrame` layout for:
 - scheduler return paths
 
 The C++ dispatcher receives the same frame layout on each path.
-Interrupts and scheduler switches restore the full frame through `IRETQ`.
+Interrupt entry copies the interrupted stack pointer and stack selector from the hardware frame at every privilege level.
+Kernel and user `IRETQ` returns use the same five stack words.
+
+```text
+IRETQ stack -> RIP | CS | RFLAGS | RSP | SS
+```
+
 An eligible same-thread syscall return uses the `SYSRET` fast path.
+
+The local APIC uses vector `0xFF` for spurious interrupts.
+The dispatcher returns to the interrupted thread without calling an IRQ handler or sending an end-of-interrupt signal.
+Device routes and callbacks cannot use this vector.
 
 Direct kernel handoffs mask interrupts before selecting or publishing the next thread.
 Assembly entry also masks interrupts before changing the stack, CR3, current-thread pointer, or saved-register state.
@@ -1249,6 +1285,9 @@ A separate authorized power diagnostic interface remains deferred pending driver
 
 The event ring currently stores 256 overwrite-on-full records with monotonic sequence numbers and direct `pid` / `tid` fields. Current event types cover traps, scheduler transitions, IRQs, block I/O, PCI binds, user-copy failures, smoke markers used by the observe smokes, the chosen scheduler timer source (PIT vs LAPIC), `kmem` corruption, NIC RX completions, AP-online / AP-tick events, reschedule / TLB-shootdown IPIs, kernel-thread ping markers, thread migration, and run-queue depth changes.
 
+Trap events for an NMI or a machine check use process and thread IDs of zero.
+These events clear `OS1_KERNEL_EVENT_FLAG_USER`.
+
 At the shell prompt, `events` prints an event snapshot.
 Continuous event streaming and its cancellation remain deferred.
 
@@ -1315,7 +1354,8 @@ General shared address spaces, copy-on-write, and user DMA pinning remain outsid
 ### Exclusive Buffer Ownership
 
 The Buffer module transfers exclusive access to dedicated pages through retained Operations.
-It preserves input identity and original mapping addresses across a completed loan.
+It preserves input identity and restores valid original mappings at their reserved addresses.
+If an alias cannot be restored, the module rolls it back and releases its reservation.
 
 ```text
 Buffer: pages + budget + mapping reservations
@@ -1468,18 +1508,24 @@ The high-address mapping regression and both persistence smokes cover this requi
 Canonical console / file -> bounded parser -> command and redirection specification
   -> save stream grants -> prepare input/output -> built-in or child -> restore grants
 Directory/File IPC -> create, truncate, append; descriptor I/O -> shared file cursor
+Editor buffer -> temporary sibling -> complete write -> identity-checked MOVE_AT
 ```
 
 The [shell guide](shell/interactive-files.md) defines `touch`, `write`, `edit`, redirection, and here-documents.
 [File helpers](../src/user/include/os1/file_tools.hpp) own temporary descriptors and restore streams through scoped cleanup.
 Here-documents use unlinked `/tmp` files and finish collection before opening an output target.
 [The editor](../src/user/include/os1/line_editor.hpp) uses a 64 KiB text buffer and a separate insertion buffer of equal size.
-It saves explicitly; failed saves retain the edit buffer and report possible partial file contents.
+It writes a temporary sibling before it publishes a replacement.
+The kernel checks the source object ID under namespace admission before the move.
+A temporary write failure leaves the original file in place.
+The editor retains unsaved text after a save failure.
 The [parser and text model](../src/common/shell) contain bounded logic shared with host tests.
 Native File `append` and descriptor APPEND commit each 256-byte unit under the filesystem lock.
 This preserves one descriptor table, existing grant authority, and shared open-instance state.
 
 ### Process Fault Handling And Teardown
+
+NMI and machine-check exceptions use the fatal kernel path at either privilege level.
 
 If a user process faults:
 
@@ -1521,6 +1567,7 @@ The kernel now:
 - claims PCI BARs through `drivers/bus/resource.*`
 - enables PCI interrupts through MSI-X first, MSI second, and IOAPIC INTx as a
   best-effort fallback
+- uses the boot CPU record for the destination of MSI-X, MSI, and IOAPIC interrupts
 - allocates coherent DMA buffers with explicit owner, virtual address, physical
   address, direction, page count, and active state
 - binds built-in and disk-loaded drivers through a bounded PCI registry and shared lifecycle admission
@@ -1865,12 +1912,18 @@ No new kernel service, syscall, IPC layout, or process is required.
 The [SystemControl provider](native-api/abi/system-control-abi.md) uses the native kernel adapter for synchronization, shutdown, and reboot.
 
 ```text
-shell -> SystemControl capability -> ext2 freeze and sync -> explicit firmware transition
+shell -> SystemControl capability -> exclusive log drain -> ext2 sync and freeze -> park peer CPUs -> power operation
 init -> shell child -> wait and reap -> fresh shell
 ```
 
 Only the bootstrap root grant contains the new system-control right. Child launch can attenuate that right.
-Shutdown freezes ext2 admission before the final flush. Failed transitions reopen admission and report failure.
+Power requests use a 250 ms scheduler-time deadline for exclusive log-export admission.
+The request holds this admission through the final log drain and ext2 synchronization.
+Ext2 freezes the volume before it releases the volume guard.
+After firmware preparation, a dedicated IPI parks the other online CPUs.
+The requesting CPU checks acknowledgments before power entry.
+If a CPU fails to acknowledge, or the power operation returns, the requesting CPU resumes its peers and thaws storage.
+The [SystemControl ABI](native-api/abi/system-control-abi.md) gives the reset fallback order.
 Shell command completion synchronizes possible writes. Reads leave ext2 timestamps unchanged under the existing noatime policy.
 Init stays alive to supervise the primary shell. Nested shells retain ordinary child-process behavior.
 
@@ -1922,7 +1975,7 @@ Its retained Operation waits for admission, with one-millisecond dispatch backof
 Other ready requests can proceed while export waits.
 After admission, export executes once; storage errors complete the Operation without automatic replay.
 Filesystem failures suspend automatic export without disabling memory capture.
-Shutdown and reboot attempt a final drain before filesystem synchronization.
+Shutdown and reboot attempt a final drain after they acquire exclusive export admission.
 See the [export plan](archive/native-api/2026-11-09-log-export.md) for resource changes and validation limits.
 
 ## Passive hardware reflection

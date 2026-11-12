@@ -11,7 +11,7 @@ void tick(uint64_t elapsed_ns);
 void test_reset();
 #endif
 void text(char c);
-void event(uint32_t type, uint32_t flags, uint64_t pid, uint64_t a, uint64_t b);
+void event(uint32_t type, uint32_t flags, uint64_t pid, uint64_t a, uint64_t b, Process* context);
 void append(os1_log_record record);
 os1_log_record origin(Process*, uint32_t kind);
 void inherit(Process* child, const Process* parent);

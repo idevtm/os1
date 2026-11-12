@@ -118,7 +118,7 @@ DiskNode* node(DiskFs& fs,
     auto* n = static_cast<DiskNode*>(kmalloc(sizeof(DiskNode), KmallocFlags::Zero));
     if(!n)
         return nullptr;
-    ++fs.references;
+    __atomic_add_fetch(&fs.references, 1u, __ATOMIC_RELAXED);
     __atomic_add_fetch(&fs.nodes, 1u, __ATOMIC_RELAXED);
     if(!fs.identity)
         fs.identity = vfs_identity();
@@ -374,7 +374,8 @@ long move(VfsNode* from,
           VfsNode* to,
           const char* destination,
           size_t b,
-          bool replace)
+          bool replace,
+          uint64_t source_id)
 {
     NamespaceGuard namespace_guard;
     if(!namespace_guard.held)
@@ -392,6 +393,8 @@ long move(VfsNode* from,
     if(!p->linked || !q->linked)
         return OS1_ERR_CLOSED;
     auto* child = static_cast<DiskNode*>(find(p, source, a));
+    if(source_id && (!child || child->object_id != source_id))
+        return OS1_ERR_CHANGED;
     auto* target = static_cast<DiskNode*>(find(q, destination, b));
     if(!child)
         return OS1_ERR_NOT_FOUND;

@@ -73,19 +73,21 @@ inline long move(int source_directory,
                  const char* source,
                  int destination_directory,
                  const char* destination,
-                 bool replace = true)
+                 bool replace = true,
+                 uint64_t source_id = 0)
 {
     size_t a = os1::context::length(source), b = os1::context::length(destination);
     if(!a || !b || a > 63 || b > 63)
         return OS1_ERR_INVALID;
-    os1_move_request request{OS1_VFS_ABI_VERSION,
-                             sizeof(request),
-                             destination_directory,
-                             replace ? 1u : 0u,
-                             static_cast<uint32_t>(a),
-                             static_cast<uint32_t>(b),
-                             {},
-                             {}};
+    os1_guarded_move_request guarded{};
+    auto& request = guarded.move;
+    request.version = source_id ? OS1_MOVE_GUARDED_VERSION : OS1_VFS_ABI_VERSION;
+    request.size = source_id ? sizeof(guarded) : sizeof(request);
+    request.destination_fd = destination_directory;
+    request.replace = replace;
+    request.source_bytes = a;
+    request.destination_bytes = b;
+    guarded.source_object_id = source_id;
     for(size_t i = 0; i < a; ++i)
         request.source[i] = source[i];
     for(size_t i = 0; i < b; ++i)
@@ -93,7 +95,7 @@ inline long move(int source_directory,
     return os1_syscall3(os1_sys_resource,
                         source_directory,
                         OS1_RESOURCE_MOVE_AT,
-                        reinterpret_cast<uint64_t>(&request));
+                        reinterpret_cast<uint64_t>(&guarded));
 }
 inline long search(const char* command, char* resolved, size_t capacity)
 {

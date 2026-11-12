@@ -61,37 +61,12 @@ restore_frame_ptr:
 	jnz .resume_user
 
 .kernel_return:
-	sub rsp, 16
-	cmp qword [r11 + TF_SS], 0
-	je .kernel_same_cpl_return
-
-	mov rax, [r11 + TF_RSP]
-	sub rax, 40
-	mov [rsp], rax
-
-	mov rdx, [r11 + TF_RIP]
-	mov [rax], rdx
-	mov rdx, [r11 + TF_CS]
-	mov [rax + 8], rdx
-	mov rdx, [r11 + TF_RFLAGS]
-	mov [rax + 16], rdx
-	mov rdx, [r11 + TF_RSP]
-	mov [rax + 24], rdx
-	mov rdx, [r11 + TF_SS]
-	mov [rax + 32], rdx
-	jmp .resume_kernel
-
-.kernel_same_cpl_return:
-	mov rax, [r11 + TF_RSP]
-	sub rax, 24
-	mov [rsp], rax
-
-	mov rdx, [r11 + TF_RIP]
-	mov [rax], rdx
-	mov rdx, [r11 + TF_CS]
-	mov [rax + 8], rdx
-	mov rdx, [r11 + TF_RFLAGS]
-	mov [rax + 16], rdx
+	; IRETQ restores SS:RSP even when it returns to ring 0.
+	push qword [r11 + TF_SS]
+	push qword [r11 + TF_RSP]
+	push qword [r11 + TF_RFLAGS]
+	push qword [r11 + TF_CS]
+	push qword [r11 + TF_RIP]
 	jmp .resume_kernel
 
 .resume_user:
@@ -126,9 +101,6 @@ restore_frame_ptr:
 	mov es, ax
 	mov ss, ax
 
-	mov rax, [r11 + TF_R11]
-	mov [rsp + 8], rax
-
 	mov r15, [r11 + TF_R15]
 	mov r14, [r11 + TF_R14]
 	mov r13, [r11 + TF_R13]
@@ -143,6 +115,5 @@ restore_frame_ptr:
 	mov rcx, [r11 + TF_RCX]
 	mov rbx, [r11 + TF_RBX]
 	mov rax, [r11 + TF_RAX]
-	mov r11, [rsp + 8]
-	mov rsp, [rsp]
+	mov r11, [r11 + TF_R11]
 	iretq

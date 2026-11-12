@@ -7,15 +7,26 @@
 #include "arch/x86_64/interrupt/vector_allocator.hpp"
 #include "core/kernel_state.hpp"
 #include "debug/event_ring.hpp"
+#include "drivers/timer/tsc_clock.hpp"
 #include "sync/smp.hpp"
 
 #if defined(OS1_HOST_TEST)
 void (*host_tlb_retirement_wait)(cpu*) = nullptr;
 void (*host_ipi_destination_written)() = nullptr;
+void (*host_power_park_wait)() = nullptr;
 #endif
 namespace
 {
 constexpr uint32_t kIpiAllButSelf = 0x000C0000u;
+static_assert(kPowerParkVector > kDynamicIrqVectorLimit && kPowerParkVector < kLapicSpuriousVector);
+uint64_t g_power_generation;
+uint64_t g_power_request;
+
+bool power_target(const cpu* target, const cpu* owner)
+{
+    return target != owner &&
+           (target == g_cpu_boot || cpu_ap_startup_state(target) == ApStartupState::Online);
+}
 
 volatile uint64_t g_tlb_requested = 0;
 volatile uint64_t g_tlb_acknowledged[256]{};
@@ -231,4 +242,63 @@ void ipi_retire_tlb()
 #endif
         }
     }
+}
+
+bool ipi_quiesce_for_power()
+{
+    auto* owner = cpu_cur();
+    if(!owner)
+        return true;
+    bool has_target = false;
+    for(cpu* target = g_cpu_boot; target; target = target->next)
+        has_target |= power_target(target, owner);
+    if(!has_target)
+        return true;
+    // This IPI cannot use the ordinary unbounded delivery-status wait.
+    if(!lapic || (lapic[ICRLO] & DELIVS))
+        return false;
+    const uint64_t request = (++g_power_generation << 8) | owner->id;
+    __atomic_store_n(&g_power_request, request, __ATOMIC_RELEASE);
+    lapic[ICRHI] = 0;
+    lapic[ICRLO] = kIpiAllButSelf | kPowerParkVector;
+    (void)lapic[ID];
+    for(unsigned attempt = 0; attempt < 1000; ++attempt)
+    {
+        bool all_parked = true;
+        for(cpu* target = g_cpu_boot; target; target = target->next)
+            if(power_target(target, owner) &&
+               __atomic_load_n(&target->power_park_ack, __ATOMIC_ACQUIRE) != request)
+                all_parked = false;
+        if(all_parked)
+            return true;
+#if defined(OS1_HOST_TEST)
+        if(host_power_park_wait)
+            host_power_park_wait();
+#else
+        tsc_clock_delay_us(100);
+#endif
+    }
+    ipi_resume_after_power();
+    return false;
+}
+
+void ipi_resume_after_power()
+{
+    __atomic_store_n(&g_power_request, 0, __ATOMIC_RELEASE);
+}
+
+void ipi_handle_power_park()
+{
+    const uint64_t request = __atomic_load_n(&g_power_request, __ATOMIC_ACQUIRE);
+    auto* target = cpu_cur();
+    if(!request || !target || target->id == static_cast<uint8_t>(request))
+        return;
+    __atomic_store_n(&target->power_park_ack, request, __ATOMIC_RELEASE);
+#if !defined(OS1_HOST_TEST)
+    while(__atomic_load_n(&g_power_request, __ATOMIC_ACQUIRE) == request)
+    {
+        ipi_poll_tlb_shootdown();
+        asm volatile("pause" ::: "memory");
+    }
+#endif
 }

@@ -1615,14 +1615,63 @@ int main(int argc_main, char** argv_main)
             continue;
         }
         static os1::shell::Command parsed;
-        if(!os1::shell::parse(line, parsed))
+        const char* error = os1::shell::parse(line, parsed) ? nullptr : parsed.error;
+        const char* recovery_marker = nullptr;
+        if(error || parsed.input == os1::shell::Input::Here)
         {
-            os1::user::files::message(parsed.error);
+            const char* legacy_here = os1::shell::find_top_level_command_operator(
+                line, os1::shell::CommandOperator::LegacyHereDocument);
+            const char* typed_here = os1::shell::find_top_level_command_operator(
+                line, os1::shell::CommandOperator::HereDocument);
+            if(legacy_here && legacy_here != typed_here)
+            {
+                const char* call = line;
+                while(os1::shell::space(*call))
+                    ++call;
+                while(os1::shell::expression::Tree::identifier(*call) || *call == '.')
+                    ++call;
+                const char* outer = os1::shell::find_top_level_command_operator(line);
+                // A legacy command may use bare parentheses as ordinary arguments.
+                if(*call == '(' && call < legacy_here && outer && outer > legacy_here &&
+                   *outer != '=')
+                {
+                    char& delimiter = line[outer - line];
+                    const char saved = delimiter;
+                    delimiter = 0;
+                    const bool typed_prefix = os1::user::commands::handles(line);
+                    delimiter = saved;
+                    if(typed_prefix)
+                    {
+                        parsed.input = os1::shell::Input::None;
+                        recovery_marker = typed_here;
+                        if(!error)
+                            error = "unsupported redirection on typed expression";
+                        legacy_here = nullptr;
+                    }
+                }
+            }
+            if(error && parsed.input != os1::shell::Input::Here && !recovery_marker)
+                recovery_marker = legacy_here;
+        }
+        if(error)
+        {
+            if(console_input)
+            {
+                if(recovery_marker)
+                    (void)os1::shell::parse(recovery_marker, parsed);
+                if(parsed.input == os1::shell::Input::Here)
+                    (void)os1::user::files::here_document(parsed.input_name, reader, true);
+            }
+            os1::user::files::message(error);
             os1::user::files::message("\n");
             if(!console_input)
                 return 1;
             continue;
         }
+        os1::user::files::PendingHereDocument here{
+            reader,
+            parsed.input == os1::shell::Input::Here ? parsed.input_name : nullptr,
+            console_input};
         const size_t argc = parsed.argc;
         char** tokens = parsed.argv;
         const char* raw = parsed.raw;
@@ -1783,7 +1832,7 @@ int main(int argc_main, char** argv_main)
         }
         CommandSync command_sync((may_write(call.method) && !log_command) || parsed.output_name[0]);
         os1::user::files::Streams streams;
-        if(!streams.apply(parsed, reader, copy_source, call.recursive))
+        if(!streams.apply(parsed, here, copy_source, call.recursive))
         {
             os1::user::files::message("shell: redirection failed\n");
             if(!console_input)

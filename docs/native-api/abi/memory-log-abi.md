@@ -64,6 +64,7 @@ A failed ring allocation leaves boot functional with zero log capacity.
 Kernel debug output becomes bounded text fragments; existing debug output has no structured severity and uses informational level.
 User console output bypasses this debug capture and cannot impersonate kernel messages.
 Structured capture covers traps, selected device/timer events, corruption, user-copy failures, process creation, and process exit.
+A structured NMI or machine-check event uses zero for the process, session, command, and parent command IDs.
 Scheduler and individual interrupt records remain in the existing observation ring, outside this capture profile.
 
 Normal syscall tracing records failures and resource/launch/exec/exit outcomes.

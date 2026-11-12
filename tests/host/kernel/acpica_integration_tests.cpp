@@ -536,6 +536,127 @@ TEST_F(AcpicaIntegration, ShutdownDiagnosticsDistinguishMissingTablesAndInvalidC
     EXPECT_STREQ("invalid-register", diagnostic.detail);
 }
 
+TEST_F(AcpicaIntegration, CapsMadtCpuInventoryAndKeepsLateBsp)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    AcpicaScopedReset cleanup;
+    build_tables(arena, true, false);
+    auto* madt = reinterpret_cast<TestMadt*>(arena.data() + kMadtPhysical);
+    auto* cursor = reinterpret_cast<uint8_t*>(madt + 1);
+    for(size_t index = 0; index <= kPlatformMaxCpus; ++index)
+    {
+        ACPI_MADT_LOCAL_APIC entry{};
+        entry.Header.Type = ACPI_MADT_TYPE_LOCAL_APIC;
+        entry.Header.Length = sizeof(entry);
+        entry.Id = index == kPlatformMaxCpus ? 0 : static_cast<uint8_t>(index + 1);
+        entry.LapicFlags = ACPI_MADT_ENABLED;
+        std::memcpy(cursor, &entry, sizeof(entry));
+        cursor += sizeof(entry);
+    }
+    ACPI_MADT_IO_APIC ioapic{};
+    ioapic.Header.Type = ACPI_MADT_TYPE_IO_APIC;
+    ioapic.Header.Length = sizeof(ioapic);
+    ioapic.Address = 0xfec00000;
+    std::memcpy(cursor, &ioapic, sizeof(ioapic));
+    cursor += sizeof(ioapic);
+    madt->header.length = cursor - reinterpret_cast<uint8_t*>(madt);
+    finalize_sdt(madt->header);
+
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    uint64_t lapic_base = 0;
+    size_t cpus = 0, ioapics = 0, overrides = 0;
+    std::array<CpuInfo, kPlatformMaxCpus> cpu_table{};
+    std::array<IoApicInfo, kPlatformMaxIoApics> ioapic_table{};
+    std::array<InterruptOverride, kPlatformMaxInterruptOverrides> override_table{};
+    ASSERT_TRUE(acpica_parse_madt(lapic_base,
+                                  cpu_table.data(),
+                                  cpus,
+                                  ioapic_table.data(),
+                                  ioapics,
+                                  override_table.data(),
+                                  overrides));
+    EXPECT_EQ(kPlatformMaxCpus, cpus);
+    EXPECT_EQ(1u, ioapics);
+    EXPECT_EQ(0u, cpu_table.back().apic_id);
+    EXPECT_TRUE(cpu_table.back().is_bsp);
+
+    acpica_reset_for_tests();
+    // A malformed record after the capacity boundary must still be rejected.
+    ACPI_SUBTABLE_HEADER short_cpu{ACPI_MADT_TYPE_LOCAL_APIC, sizeof(short_cpu)};
+    std::memcpy(cursor, &short_cpu, sizeof(short_cpu));
+    madt->header.length += sizeof(short_cpu);
+    finalize_sdt(madt->header);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    EXPECT_FALSE(acpica_parse_madt(lapic_base,
+                                   cpu_table.data(),
+                                   cpus,
+                                   ioapic_table.data(),
+                                   ioapics,
+                                   override_table.data(),
+                                   overrides));
+}
+
+TEST_F(AcpicaIntegration, MadtX2ApicRecordsRequireAnXapicBspEntry)
+{
+    for(bool legacy_bsp : {false, true})
+    {
+        os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+        auto frames = make_frames();
+        kmem_init(frames);
+        VirtualMemory vm(frames);
+        AcpicaScopedReset cleanup;
+        build_tables(arena, true, false);
+        auto* madt = reinterpret_cast<TestMadt*>(arena.data() + kMadtPhysical);
+        auto* cursor = reinterpret_cast<uint8_t*>(madt + 1);
+        ACPI_MADT_LOCAL_X2APIC x2apic{};
+        x2apic.Header = {ACPI_MADT_TYPE_LOCAL_X2APIC, sizeof(x2apic)};
+        x2apic.LocalApicId = 0x100;
+        x2apic.LapicFlags = ACPI_MADT_ENABLED;
+        std::memcpy(cursor, &x2apic, sizeof(x2apic));
+        cursor += sizeof(x2apic);
+        if(legacy_bsp)
+        {
+            ACPI_MADT_LOCAL_APIC bsp{};
+            bsp.Header = {ACPI_MADT_TYPE_LOCAL_APIC, sizeof(bsp)};
+            bsp.LapicFlags = ACPI_MADT_ENABLED;
+            std::memcpy(cursor, &bsp, sizeof(bsp));
+            cursor += sizeof(bsp);
+        }
+        ACPI_MADT_IO_APIC ioapic{};
+        ioapic.Header = {ACPI_MADT_TYPE_IO_APIC, sizeof(ioapic)};
+        ioapic.Address = 0xfec00000;
+        std::memcpy(cursor, &ioapic, sizeof(ioapic));
+        cursor += sizeof(ioapic);
+        madt->header.length = cursor - reinterpret_cast<uint8_t*>(madt);
+        finalize_sdt(madt->header);
+
+        ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+        uint64_t lapic_base = 0;
+        size_t cpus = 0, ioapics = 0, overrides = 0;
+        std::array<CpuInfo, kPlatformMaxCpus> cpu_table{};
+        std::array<IoApicInfo, kPlatformMaxIoApics> ioapic_table{};
+        std::array<InterruptOverride, kPlatformMaxInterruptOverrides> override_table{};
+        EXPECT_EQ(legacy_bsp,
+                  acpica_parse_madt(lapic_base,
+                                    cpu_table.data(),
+                                    cpus,
+                                    ioapic_table.data(),
+                                    ioapics,
+                                    override_table.data(),
+                                    overrides));
+        if(legacy_bsp)
+        {
+            EXPECT_EQ(1u, cpus);
+            EXPECT_TRUE(cpu_table[0].is_bsp);
+        }
+        else
+            EXPECT_STREQ("AE_SUPPORT", acpica_last_status());
+    }
+}
+
 TEST_F(AcpicaIntegration, ShutdownDiagnosticsPreserveMissingS5Exception)
 {
     os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
@@ -555,6 +676,50 @@ TEST_F(AcpicaIntegration, ShutdownDiagnosticsPreserveMissingS5Exception)
     EXPECT_FALSE(acpica_prepare_shutdown(diagnostic));
     EXPECT_STREQ("s5-types", diagnostic.stage);
     EXPECT_STREQ("AE_NOT_FOUND", diagnostic.detail);
+}
+
+extern bool (*host_acpica_memory_write_fault)(ACPI_PHYSICAL_ADDRESS, UINT64, UINT32);
+extern void (*host_acpica_stall_observer)(UINT32);
+
+TEST_F(AcpicaIntegration, WaitsAfterPm1aEnableEvenIfPm1bEnableFails)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    AcpicaScopedReset cleanup;
+    build_tables(arena, true, false);
+    auto* table = reinterpret_cast<ACPI_TABLE_FADT*>(arena.data() + kFadtPhysical);
+    table->Header.Length = sizeof(*table);
+    table->Pm1ControlLength = 2;
+    table->XPm1aControlBlock = {ACPI_ADR_SPACE_SYSTEM_MEMORY, 16, 0, 2, kOslMemoryPhysical};
+    table->XPm1bControlBlock = {ACPI_ADR_SPACE_SYSTEM_MEMORY, 16, 0, 2, kOslMemoryPhysical + 2};
+    *kernel_physical_pointer<uint16_t>(kOslMemoryPhysical) = 1;  // SCI_EN
+    finalize_sdt(*reinterpret_cast<TestSdtHeader*>(table));
+    const uint8_t s5[] = {0x08, '_', 'S', '5', '_', 0x12, 0x06, 0x02, 0x0A, 5, 0x0A, 5};
+    auto* dsdt = reinterpret_cast<TestSdtHeader*>(arena.data() + kDsdtPhysical);
+    dsdt->length = sizeof(*dsdt) + sizeof(s5);
+    std::memcpy(dsdt + 1, s5, sizeof(s5));
+    finalize_sdt(*dsdt);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    PowerDiagnostic diagnostic;
+    ASSERT_TRUE(acpica_prepare_shutdown(diagnostic)) << diagnostic.stage;
+    constexpr uint16_t sleep_enable = 1u << 13;
+    static UINT32 wait_us;
+    wait_us = 0;
+    host_acpica_memory_write_fault = [](ACPI_PHYSICAL_ADDRESS address, UINT64 value, UINT32) {
+        return address == kOslMemoryPhysical + 2 && (value & sleep_enable);
+    };
+    host_acpica_stall_observer = [](UINT32 microseconds) {
+        EXPECT_NE(0u, *kernel_physical_pointer<uint16_t>(kOslMemoryPhysical) & sleep_enable);
+        wait_us += microseconds;
+    };
+    EXPECT_FALSE(acpica_enter_shutdown(diagnostic));
+    host_acpica_memory_write_fault = nullptr;
+    host_acpica_stall_observer = nullptr;
+    EXPECT_STREQ("pm1b-enable-write", diagnostic.stage);
+    EXPECT_STREQ("AE_ERROR", diagnostic.detail);
+    EXPECT_EQ(100'000u, wait_us);
 }
 
 void host_console_output_clear();

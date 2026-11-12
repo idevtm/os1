@@ -5,6 +5,7 @@
 #include "bootlog.hpp"
 #include "freestanding/string.hpp"
 #include "handoff/memory_layout.h"
+#include "handoff/memory_map.hpp"
 #include "paging.hpp"
 #include "serial.hpp"
 #include "util/align.hpp"
@@ -276,21 +277,48 @@ void populate_firmware_pointers(const LimineBootResponses& responses, BootInfo& 
 }
 }  // namespace
 
+namespace
+{
+template<typename T>
+[[nodiscard]] bool memory_map_object_mapped(const T* object)
+{
+    static_assert(sizeof(T) <= kPageSize);
+    const auto first = reinterpret_cast<uintptr_t>(object);
+    if(!first || first % alignof(T) || first > UINTPTR_MAX - (sizeof(T) - 1))
+        return false;
+    const auto last = first + sizeof(T) - 1;
+    const auto high = first >> 47;
+    if((high != 0 && high != 0x1ffff) || (last >> 47) != high)
+        return false;
+    return limine_pointer_mapped(object) &&
+           ((first & kPageMask) == (last & kPageMask) ||
+            limine_pointer_mapped(reinterpret_cast<const uint8_t*>(last)));
+}
+}  // namespace
+
 [[nodiscard]] std::span<const BootMemoryRegion> read_memory_map(
     const limine_memmap_response* response, std::span<BootMemoryRegion> storage)
 {
-    if(!limine_pointer_mapped(response) || response->entry_count > storage.size() ||
-       !limine_pointer_mapped(response->entries))
+    if(!memory_map_object_mapped(response) || !memory_map_object_mapped(response->entries))
+        return {};
+    const auto entries_address = reinterpret_cast<uintptr_t>(response->entries);
+    if(response->entry_count > (UINTPTR_MAX - entries_address) / sizeof(*response->entries))
         return {};
 
+    BootMemoryMap map(storage);
     for(uint64_t i = 0; i < response->entry_count; ++i)
     {
-        const auto* entry = response->entries[i];
-        if(!limine_pointer_mapped(entry))
+        const auto* slot = response->entries + i;
+        if(!memory_map_object_mapped(slot))
             return {};
-        storage[i] = {entry->base, entry->length, translate_memory_type(entry->type), 0};
+        const auto* entry = *slot;
+        if(!memory_map_object_mapped(entry) ||
+           !map.add({entry->base, entry->length, translate_memory_type(entry->type), 0}))
+            return {};
     }
-    return {storage.data(), static_cast<size_t>(response->entry_count)};
+    if(map.truncated())
+        write_serial_ln("[limine-shim] memory map capacity reached; extra ranges omitted");
+    return map.finish();
 }
 
 [[nodiscard]] bool prepare_kernel_handoff(std::span<const BootMemoryRegion> memory_map,

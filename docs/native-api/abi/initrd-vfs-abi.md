@@ -209,6 +209,7 @@ The namespace extension adds rooted lookup and same-filesystem move operations.
 | `os1_context_open_request` | 40 | Version, size, cwd descriptor, path length/pointer, rights, ceiling, flags, reserved |
 | `os1_path_request` | 24 | Version, size, object descriptor, capacity, output pointer |
 | `os1_move_request` | 152 | Version, size, destination descriptor, replace flag, two lengths, two 64-byte names |
+| `os1_guarded_move_request` | 160 | Move request with version 2 and size 160, followed by a nonzero `u64` source object ID |
 
 Data version 1 supports Record, List, String, signed 64-bit Integer, and Boolean.
 Node zero is an unnamed Record. Every parent index precedes its children.
@@ -246,6 +247,9 @@ Contention returns WOULD_BLOCK; admission never spins while disk I/O runs.
 Old OPEN_AT and native Directory `rename` retain their previous contracts.
 MOVE_AT extends both writable backends with cross-directory moves and permitted replacement.
 It rejects cross-filesystem moves, subtree cycles, incompatible kinds, and nonempty directory replacement.
+Version 2 checks the source object ID under the namespace lock before it changes either directory.
+If the name is absent or has a different object ID, MOVE_AT returns CHANGED.
+Use the source ID from its metadata. The ID adds no rights.
 An identical source and destination succeeds without mutation.
 Successful publication preserves the source object identity and assigns a new enumeration cookie.
 Tmpfs retains replaced open files; ext2 rejects replacement while the target has external references.

@@ -89,19 +89,11 @@ trap_entry_common:
 	mov rdx, [rsp + 48]
 	mov [rax + TF_RFLAGS], rdx
 
-	mov rdx, [rax + TF_CS]
-	test dl, 3
-	jz .kernel_rsp
+	; A 64-bit IDT gate always saves the interrupted RSP and SS.
 	mov rdx, [rsp + 56]
 	mov [rax + TF_RSP], rdx
 	mov rdx, [rsp + 64]
 	mov [rax + TF_SS], rdx
-	jmp .dispatch
-
-.kernel_rsp:
-	lea rdx, [rsp + 56]
-	mov [rax + TF_RSP], rdx
-	mov qword [rax + TF_SS], 0
 
 .dispatch:
 	mov r12, rax

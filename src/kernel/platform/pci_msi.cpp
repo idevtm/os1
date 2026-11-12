@@ -1,6 +1,7 @@
 // PCI MSI/MSI-X programming and INTx fallback.
 #include "platform/pci_msi.hpp"
 
+#include "arch/x86_64/cpu/cpu.hpp"
 #include "platform/acpi_aml.hpp"
 #include "platform/pci_capability.hpp"
 #include "platform/pci_config.hpp"
@@ -13,7 +14,6 @@
 #include "mm/boot_mapping.hpp"
 #include "platform/irq_registry.hpp"
 #include "platform/platform.hpp"
-#include "platform/state.hpp"
 #include "util/align.hpp"
 #endif
 
@@ -35,6 +35,11 @@ void pci_build_msi_message(uint32_t destination_apic_id,
     data = vector;
 }
 
+void pci_build_bsp_msi_message(uint8_t vector, uint64_t& address, uint32_t& data)
+{
+    pci_build_msi_message(cpu_boot_apic_id(), vector, address, data);
+}
+
 void pci_msix_write_table_entry(volatile void* table_base,
                                 uint16_t entry_index,
                                 uint64_t address,
@@ -52,11 +57,6 @@ void pci_msix_write_table_entry(volatile void* table_base,
 #if !defined(OS1_HOST_TEST)
 namespace
 {
-[[nodiscard]] uint32_t bsp_apic_id()
-{
-    return (g_platform.cpu_count > 0) ? g_platform.cpus[0].apic_id : 0u;
-}
-
 void clear_vector_handler(uint8_t vector)
 {
     interrupts.set_vector_handler(vector, nullptr, nullptr);
@@ -137,7 +137,7 @@ bool pci_enable_msix_interrupt(VirtualMemory& kernel_vm,
 
     uint64_t address = 0;
     uint32_t data = 0;
-    pci_build_msi_message(bsp_apic_id(), vector, address, data);
+    pci_build_bsp_msi_message(vector, address, data);
 
     auto* table = kernel_physical_pointer<volatile void>(table_physical);
     uint16_t control = pci_config_read16(device, static_cast<uint16_t>(msix.offset + 2u));
@@ -189,7 +189,7 @@ bool pci_enable_msi_interrupt(DeviceId owner,
 
     uint64_t address = 0;
     uint32_t data = 0;
-    pci_build_msi_message(bsp_apic_id(), vector, address, data);
+    pci_build_bsp_msi_message(vector, address, data);
 
     pci_config_write32(device, static_cast<uint16_t>(msi.offset + 4u), static_cast<uint32_t>(address));
     uint16_t data_offset = static_cast<uint16_t>(msi.offset + 8u);

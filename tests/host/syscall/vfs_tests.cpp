@@ -1535,6 +1535,43 @@ TEST_F(TmpfsContract, CrossDirectoryMoveReplacesAtomicallyAndPreservesRetainedOb
     EXPECT_LT(vfs_move_at(table(), b, r), 0);  // Different immutable filesystem.
     EXPECT_EQ(to->children, source);
 }
+TEST_F(TmpfsContract, GuardedMoveRejectsReplacedSourceWithoutMutation)
+{
+    static_assert(sizeof(os1_move_request) == 152);
+    static_assert(sizeof(os1_guarded_move_request) == 160);
+    int scratch = create("scratch");
+    int target = create("target");
+    ASSERT_GE(scratch, 0);
+    ASSERT_GE(target, 0);
+    const auto identity = [&](int fd) {
+        return static_cast<VfsNode*>(table().entries[fd].instance->object)->object_id;
+    };
+    os1_guarded_move_request request{
+        {OS1_MOVE_GUARDED_VERSION, sizeof(request), directory, 1, 7, 6, "scratch", "target"},
+        identity(scratch)};
+    ASSERT_EQ(remove("scratch"), 0);
+    int substitute = create("scratch");
+    ASSERT_GE(substitute, 0);
+    EXPECT_EQ(call(directory, OS1_RESOURCE_MOVE_AT, request), OS1_ERR_CHANGED);
+    int current_target = open("tmp/target", OS1_RIGHT_INSPECT);
+    int current_source = open("tmp/scratch", OS1_RIGHT_INSPECT);
+    ASSERT_GE(current_target, 0);
+    ASSERT_GE(current_source, 0);
+    EXPECT_EQ(vfs_same_object(table(), current_target, target), 1);
+    EXPECT_EQ(vfs_same_object(table(), current_source, substitute), 1);
+
+    const uint64_t end = kRequest + 8192 - sizeof(request.move);
+    ASSERT_TRUE(copy_to_user(frames, thread, end, &request.move, sizeof(request.move)));
+    EXPECT_EQ(sys_resource(frames, thread, directory, OS1_RESOURCE_MOVE_AT, end), OS1_ERR_FAULT);
+    request.source_object_id = 0;
+    EXPECT_EQ(call(directory, OS1_RESOURCE_MOVE_AT, request), OS1_ERR_INVALID);
+    request.source_object_id = identity(substitute);
+    ASSERT_EQ(call(directory, OS1_RESOURCE_MOVE_AT, request), 0);
+    EXPECT_EQ(open("tmp/scratch", OS1_RIGHT_INSPECT), OS1_ERR_NOT_FOUND);
+    current_target = open("tmp/target", OS1_RIGHT_INSPECT);
+    ASSERT_GE(current_target, 0);
+    EXPECT_EQ(vfs_same_object(table(), current_target, substitute), 1);
+}
 TEST_F(TmpfsContract, TypedRemovalRejectsWrongKindWithoutMutation)
 {
     int d = create("dir", OS1_OBJECT_DIRECTORY, kTmpDirectoryRights, kNamespaceCeiling);

@@ -89,6 +89,13 @@ struct os1_move_request
     char source[64], destination[64];
 };
 
+#define OS1_MOVE_GUARDED_VERSION 2u
+struct os1_guarded_move_request
+{
+    struct os1_move_request move;
+    uint64_t source_object_id;
+};
+
 // Metadata and guarded traversal extension. Tokens are boot-local, never authority.
 #define OS1_RESOURCE_METADATA 24u
 #define OS1_RESOURCE_SPACE 25u

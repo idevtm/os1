@@ -320,6 +320,20 @@ void release_dma(PageFrameContainer& frames, DmaBuffer& buffer)
     }
 }
 
+bool allocate_controller_dma(PageFrameContainer& frames,
+                             const XhciControllerState& controller,
+                             size_t bytes,
+                             DmaBuffer& buffer)
+{
+    if(!dma_allocate_buffer(frames, controller.owner, bytes, DmaDirection::Bidirectional, buffer))
+        return false;
+    if(xhci::dma_range_supported(controller.controller.capability, buffer.physical_address, bytes))
+        return true;
+    release_dma(frames, buffer);
+    debug("xhci: DMA range exceeds controller address width")();
+    return false;
+}
+
 [[nodiscard]] bool device_has_resources(const XhciDeviceState& device)
 {
     for(const auto& input : device.inputs)
@@ -535,26 +549,13 @@ bool allocate_controller_buffers(PageFrameContainer& frames, XhciControllerState
 {
     const size_t dcbaa_bytes =
         static_cast<size_t>(controller.configured_slots + 1u) * sizeof(uint64_t);
-    if(!dma_allocate_buffer(frames,
-                            controller.owner,
-                            dcbaa_bytes,
-                            DmaDirection::Bidirectional,
-                            controller.dcbaa_dma) ||
-       !dma_allocate_buffer(frames,
-                            controller.owner,
-                            kXhciCommandRingBytes,
-                            DmaDirection::Bidirectional,
-                            controller.command_ring_dma) ||
-       !dma_allocate_buffer(frames,
-                            controller.owner,
-                            kXhciEventRingBytes,
-                            DmaDirection::Bidirectional,
-                            controller.event_ring_dma) ||
-       !dma_allocate_buffer(frames,
-                            controller.owner,
-                            sizeof(xhci::EventRingSegmentTableEntry),
-                            DmaDirection::Bidirectional,
-                            controller.erst_dma))
+    if(!allocate_controller_dma(frames, controller, dcbaa_bytes, controller.dcbaa_dma) ||
+       !allocate_controller_dma(
+           frames, controller, kXhciCommandRingBytes, controller.command_ring_dma) ||
+       !allocate_controller_dma(
+           frames, controller, kXhciEventRingBytes, controller.event_ring_dma) ||
+       !allocate_controller_dma(
+           frames, controller, sizeof(xhci::EventRingSegmentTableEntry), controller.erst_dma))
     {
         return false;
     }
@@ -584,16 +585,15 @@ bool allocate_controller_buffers(PageFrameContainer& frames, XhciControllerState
 
     if(0 != controller.scratchpad_count)
     {
-        if(!dma_allocate_buffer(frames,
-                                controller.owner,
-                                static_cast<size_t>(controller.scratchpad_count) * sizeof(uint64_t),
-                                DmaDirection::Bidirectional,
-                                controller.scratchpad_array_dma) ||
-           !dma_allocate_buffer(frames,
-                                controller.owner,
-                                static_cast<size_t>(controller.scratchpad_count) * kPageSize,
-                                DmaDirection::Bidirectional,
-                                controller.scratchpad_buffers_dma))
+        if(!allocate_controller_dma(
+               frames,
+               controller,
+               static_cast<size_t>(controller.scratchpad_count) * sizeof(uint64_t),
+               controller.scratchpad_array_dma) ||
+           !allocate_controller_dma(frames,
+                                    controller,
+                                    static_cast<size_t>(controller.scratchpad_count) * kPageSize,
+                                    controller.scratchpad_buffers_dma))
         {
             return false;
         }
@@ -634,26 +634,14 @@ bool allocate_device_resources(PageFrameContainer& frames,
                                XhciControllerState& controller,
                                XhciDeviceState& device)
 {
-    if(!dma_allocate_buffer(frames,
-                            controller.owner,
-                            input_context_bytes(controller),
-                            DmaDirection::Bidirectional,
-                            device.input_context_dma) ||
-       !dma_allocate_buffer(frames,
-                            controller.owner,
-                            device_context_bytes(controller),
-                            DmaDirection::Bidirectional,
-                            device.device_context_dma) ||
-       !dma_allocate_buffer(frames,
-                            controller.owner,
-                            kXhciTransferRingBytes,
-                            DmaDirection::Bidirectional,
-                            device.control_ring_dma) ||
-       !dma_allocate_buffer(frames,
-                            controller.owner,
-                            kXhciControlBufferBytes,
-                            DmaDirection::Bidirectional,
-                            device.control_buffer_dma))
+    if(!allocate_controller_dma(
+           frames, controller, input_context_bytes(controller), device.input_context_dma) ||
+       !allocate_controller_dma(
+           frames, controller, device_context_bytes(controller), device.device_context_dma) ||
+       !allocate_controller_dma(
+           frames, controller, kXhciTransferRingBytes, device.control_ring_dma) ||
+       !allocate_controller_dma(
+           frames, controller, kXhciControlBufferBytes, device.control_buffer_dma))
     {
         return false;
     }
@@ -849,6 +837,17 @@ void process_transfer_event(XhciControllerState& controller, const xhci::EventIn
     }
 }
 
+bool drain_controller_port_changes(XhciControllerState& controller, uint8_t port)
+{
+    return xhci::drain_port_changes(
+        [&](xhci::PortStatus& status) {
+            return xhci::read_port_status(controller.controller, port, status);
+        },
+        [&](uint32_t mask) {
+            (void)xhci::clear_port_change_bits(controller.controller, port, mask);
+        });
+}
+
 void service_events_locked(XhciControllerState& controller)
 {
     if(__atomic_load_n(&controller.failed, __ATOMIC_ACQUIRE))
@@ -874,17 +873,14 @@ void service_events_locked(XhciControllerState& controller)
                 process_transfer_event(controller, event);
                 break;
             case xhci::EventType::PortStatusChange: {
-                xhci::PortStatus status{};
-                if(xhci::read_port_status(controller.controller, event.port_id, status))
+                const auto port = event.port_id;
+                if(drain_controller_port_changes(controller, port))
                 {
-                    if(!status.connected || (status.raw & xhci::kPortScConnectStatusChange))
-                        controller.port_changed[event.port_id] = true;
+                    controller.port_changed[port] = true;
                     for(auto& device : controller.devices)
-                        if(device.present && device.port_id == event.port_id &&
-                           (!status.connected || (status.raw & xhci::kPortScConnectStatusChange)))
+                        if(device.present && device.port_id == port)
                             fail_device(device);
                 }
-                (void)xhci::clear_port_change_bits(controller.controller, event.port_id);
                 break;
             }
             default:
@@ -939,7 +935,8 @@ bool recover_command_ring(XhciControllerState& controller)
             return false;
         if(controller.command.complete)
             return true;
-        if(!xhci::request_command_abort(controller.controller, dma.physical_address))
+        if(!xhci::request_command_abort(
+               controller.controller, dma.physical_address, dma.size_bytes))
             return false;
     }
 
@@ -962,6 +959,7 @@ bool recover_command_ring(XhciControllerState& controller)
                 dma_sync_for_device(dma);
                 return xhci::program_command_ring(controller.controller,
                                                   dma.physical_address,
+                                                  dma.size_bytes,
                                                   controller.command_ring.cycle_state);
             }
             if(deadline.expired())
@@ -1226,37 +1224,36 @@ bool usb_set_boot_protocol(XhciControllerState& controller,
     return submit_control_transfer(controller, device, setup, nullptr, nullptr, 0u, actual_length);
 }
 
-bool reset_port(XhciControllerState& controller, uint8_t port_id)
+bool reset_port(XhciControllerState& controller, uint8_t port_id, xhci::PortStatus& status)
 {
-    xhci::PortStatus status{};
-    if(!xhci::read_port_status(controller.controller, port_id, status) || !status.connected)
     {
-        return false;
-    }
+        IrqSpinGuard guard(g_event_lock);
+        if(!xhci::read_port_status(controller.controller, port_id, status) || !status.connected ||
+           controller.port_changed[port_id] || (status.raw & xhci::kPortScConnectStatusChange))
+            return false;
 
-    if(!status.powered)
-    {
-        (void)xhci::power_on_port(controller.controller, port_id);
+        const size_t port_offset = xhci::kOperationalPortRegisterBase +
+                                   (static_cast<size_t>(port_id) - 1u) * xhci::kPortRegisterStride +
+                                   xhci::kPortSc;
+        *reinterpret_cast<volatile uint32_t*>(controller.controller.operational + port_offset) =
+            (status.raw & (xhci::kPortScPreservedBits | xhci::kPortScChangeBits)) |
+            xhci::kPortScPortPower | xhci::kPortScPortReset;
     }
-    (void)xhci::clear_port_change_bits(controller.controller, port_id);
-
-    const size_t port_offset = xhci::kOperationalPortRegisterBase +
-                               (static_cast<size_t>(port_id) - 1u) * xhci::kPortRegisterStride +
-                               xhci::kPortSc;
-    *reinterpret_cast<volatile uint32_t*>(controller.controller.operational + port_offset) =
-        (status.raw & xhci::kPortScPreservedBits) | xhci::kPortScPortPower | xhci::kPortScPortReset;
 
     auto deadline = operation_deadline(kXhciPortTimeout100ns);
     for(;;)
     {
-        if(!xhci::read_port_status(controller.controller, port_id, status))
+        if(!xhci::read_port_status(controller.controller, port_id, status) || !status.connected)
         {
             return false;
         }
         if(status.enabled && !status.reset)
         {
-            (void)xhci::clear_port_change_bits(controller.controller, port_id);
-            return true;
+            const auto speed = status.speed;
+            tsc_clock_delay_us(10'000);
+            IrqSpinGuard guard(g_event_lock);
+            return xhci::read_port_status(controller.controller, port_id, status) &&
+                   xhci::port_reset_recovered(status, speed, controller.port_changed[port_id]);
         }
         if(deadline.expired())
             return false;
@@ -1311,8 +1308,7 @@ bool update_control_packet(XhciControllerState& controller,
     command.control =
         (xhci::kTrbTypeEvaluateContextCommand << 10) | (uint32_t(device.slot_id) << 24);
     uint8_t completion = 0, slot = 0;
-    if(!submit_command(controller, command, completion, slot) ||
-       slot != device.slot_id)
+    if(!submit_command(controller, command, completion, slot) || slot != device.slot_id)
         return false;
     debug("xhci: control packet port=")(device.port_id)(" old=")(device.control_max_packet_size)(
         " new=")(packet)();
@@ -1601,12 +1597,9 @@ bool initialize_storage(PageFrameContainer& frames,
        (device.speed == 4 && (!interface.in_companion || !interface.out_companion)))
         return false;
     device.storage_interface = interface;
-    if(!dma_allocate_buffer(
-           frames, controller.owner, 4096, DmaDirection::Bidirectional, device.bulk_in_ring_dma) ||
-       !dma_allocate_buffer(
-           frames, controller.owner, 4096, DmaDirection::Bidirectional, device.bulk_out_ring_dma) ||
-       !dma_allocate_buffer(
-           frames, controller.owner, 4096, DmaDirection::Bidirectional, device.bulk_buffer_dma))
+    if(!allocate_controller_dma(frames, controller, 4096, device.bulk_in_ring_dma) ||
+       !allocate_controller_dma(frames, controller, 4096, device.bulk_out_ring_dma) ||
+       !allocate_controller_dma(frames, controller, 4096, device.bulk_buffer_dma))
         return false;
     if(!xhci::initialize_command_ring(device.bulk_in_ring_dma.virtual_address,
                                       4096,
@@ -1655,9 +1648,22 @@ bool initialize_port(PageFrameContainer& frames,
                      unsigned catalog_port)
 {
     xhci::PortStatus status{};
-    if(!xhci::read_port_status(controller.controller, port_id, status) || !status.connected)
     {
-        return false;
+        IrqSpinGuard guard(g_event_lock);
+        if(!xhci::read_port_status(controller.controller, port_id, status) || !status.connected)
+            return false;
+
+        // Consume the attachment being enumerated, even if hardware enabled the port.
+        controller.port_changed[port_id] = false;
+        if(status.has_changes)
+        {
+            (void)xhci::clear_port_change_bits(controller.controller, port_id, status.raw);
+            if(drain_controller_port_changes(controller, port_id))
+            {
+                controller.port_changed[port_id] = true;
+                return false;
+            }
+        }
     }
 
     // Retain outcomes in normal boots as well as diagnostic boots.
@@ -1683,16 +1689,11 @@ bool initialize_port(PageFrameContainer& frames,
     {
         (void)xhci::power_on_port(controller.controller, port_id);
     }
-    if(!status.enabled && !reset_port(controller, port_id))
+    if(!status.enabled && !reset_port(controller, port_id, status))
     {
         debug("xhci: port reset failed port=")(port_id)();
         return false;
     }
-    if(!xhci::read_port_status(controller.controller, port_id, status))
-    {
-        return false;
-    }
-
     XhciDeviceState* device = allocate_device(controller);
     if(nullptr == device)
     {
@@ -1866,16 +1867,9 @@ bool initialize_port(PageFrameContainer& frames,
                 release_device(frames, controller, *device);
                 return false;
             }
-        if(!dma_allocate_buffer(frames,
-                                controller.owner,
-                                kXhciTransferRingBytes,
-                                DmaDirection::Bidirectional,
-                                input.interrupt_ring_dma) ||
-           !dma_allocate_buffer(frames,
-                                controller.owner,
-                                selected.packet,
-                                DmaDirection::Bidirectional,
-                                input.report_buffer_dma) ||
+        if(!allocate_controller_dma(
+               frames, controller, kXhciTransferRingBytes, input.interrupt_ring_dma) ||
+           !allocate_controller_dma(frames, controller, selected.packet, input.report_buffer_dma) ||
            !xhci::initialize_command_ring(input.interrupt_ring_dma.virtual_address,
                                           input.interrupt_ring_dma.size_bytes,
                                           input.interrupt_ring_dma.physical_address,
@@ -1981,10 +1975,6 @@ void enumerate_ports(PageFrameContainer& frames, XhciControllerState& controller
             if(bootlog_diagnostics_enabled())
                 debug("usbdiag: enumeration pci=")(controller.pci_index)(" port=")(port_id)(" ok=")(
                     initialized)();
-        }
-        {
-            IrqSpinGuard guard(g_event_lock);
-            controller.port_changed[port_id] = false;
         }
     }
 }
@@ -2113,6 +2103,12 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         }
     }
 
+    if(!tsc_clock_calibrate())
+    {
+        debug("xhci: calibrated reset timing unavailable")();
+        release_controller(frames, *controller);
+        return false;
+    }
     if(!xhci::acquire_legacy_ownership(controller->controller, handoff_delay, nullptr))
     {
         debug("xhci: firmware handoff failed")();
@@ -2120,9 +2116,12 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         return false;
     }
     controller->owned = true;
-    (void)tsc_clock_calibrate();
     debug("xhci: firmware handoff complete")();
-    if(!xhci::controller_reset(controller->controller, kXhciInitTimeoutSpins))
+    if(!xhci::controller_reset(controller->controller,
+                               kXhciInitTimeoutSpins,
+                               nullptr,
+                               nullptr,
+                               device.vendor_id == 0x8086 ? handoff_delay : nullptr))
     {
         debug("xhci: controller reset failed")();
         release_controller(frames, *controller);
@@ -2156,6 +2155,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
     const xhci::RingSet rings{
         .dcbaa_physical = controller->dcbaa_dma.physical_address,
         .command_ring_physical = controller->command_ring_dma.physical_address,
+        .command_ring_bytes = controller->command_ring_dma.size_bytes,
         .event_ring_physical = controller->event_ring_dma.physical_address,
         .erst_physical = controller->erst_dma.physical_address,
         .command_ring_cycle_state = controller->command_ring.cycle_state,

@@ -757,6 +757,31 @@ void outcome(long result)
         status.consecutive_failures = 0;
     status.suspended = suspended;
 }
+bool try_begin_exclusive()
+{
+    bool expected = false;
+    if(!atomic_compare_exchange_strong(&busy, &expected, true))
+        return false;
+    uint32_t idle = 0;
+    if(atomic_compare_exchange_strong(&admission, &idle, UINT32_MAX))
+        return true;
+    atomic_store_release(&busy, false);
+    return false;
+}
+void end_exclusive()
+{
+    atomic_store_release(&admission, 0u);
+    atomic_store_release(&busy, false);
+}
+long export_disk()
+{
+    suspended = false;
+    status.suspended = 0;
+    status.consecutive_failures = 0;
+    const long result = disk(true, true);
+    outcome(result);
+    return result;
+}
 }  // namespace
 bool syscall_needs_filesystem(uint64_t number, uint64_t operation)
 {
@@ -822,20 +847,10 @@ bool try_run(unsigned target, long& result)
         result = OS1_ERR_INVALID;
         return true;
     }
-    bool expected = false;
-    if(!atomic_compare_exchange_strong(&busy, &expected, true))
+    if(!try_begin_exclusive())
     {
         result = OS1_ERR_WOULD_BLOCK;
         return false;
-    }
-    uint32_t idle = 0;
-    if(!atomic_compare_exchange_strong(&admission, &idle, UINT32_MAX))
-    {
-        atomic_store_release(&busy, false);
-        {
-            result = OS1_ERR_WOULD_BLOCK;
-            return false;
-        }
     }
     long r;
     if(target == OS1_LOG_EXPORT_TMP)
@@ -846,16 +861,9 @@ bool try_run(unsigned target, long& result)
             ++status.failures;
     }
     else
-    {
-        suspended = false;
-        status.suspended = 0;
-        status.consecutive_failures = 0;
-        r = disk(true, true);
-        outcome(r);
-    }
+        r = export_disk();
     publish_status();
-    atomic_store_release(&admission, 0u);
-    atomic_store_release(&busy, false);
+    end_exclusive();
     result = r;
     return true;
 }
@@ -874,15 +882,8 @@ void poll()
     if(now - last_poll < second / 4)
         return;
     last_poll = now;
-    bool expected = false;
-    if(!atomic_compare_exchange_strong(&busy, &expected, true))
+    if(!try_begin_exclusive())
         return;
-    uint32_t idle = 0;
-    if(!atomic_compare_exchange_strong(&admission, &idle, UINT32_MAX))
-    {
-        atomic_store_release(&busy, false);
-        return;
-    }
     Ref mount;
     long mounted = vfs_resolve(initrd_namespace_root(), "disk", 4, mount.object);
     if(!mounted)
@@ -922,18 +923,29 @@ void poll()
     else if(suspended)
         retire_closed(false);
     publish_status();
-    atomic_store_release(&admission, 0u);
-    atomic_store_release(&busy, false);
+    end_exclusive();
 }
-void final_drain()
+bool FinalDrainGuard::try_acquire()
 {
-    if(!atomic_load_acquire(&initialized) || !staging)
+    if(!held_)
+        held_ = try_begin_exclusive();
+    return held_;
+}
+FinalDrainGuard::~FinalDrainGuard()
+{
+    if(held_)
+        end_exclusive();
+}
+void FinalDrainGuard::drain()
+{
+    if(!held_ || !atomic_load_acquire(&initialized) || !staging)
         return;
     Ref mount;
     if(vfs_resolve(initrd_namespace_root(), "disk", 4, mount.object) == 0 &&
        !(mount.node()->allowed_rights & OS1_RIGHT_CREATE))
         return;
-    (void)run(OS1_LOG_EXPORT_DISK);
+    (void)export_disk();
+    publish_status();
 }
 #ifdef OS1_HOST_TEST
 void test_reset()

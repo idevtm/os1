@@ -235,6 +235,12 @@ void init()
     if(current != g_cpu_boot && ApStartupState::Pending == cpu_ap_startup_state(current))
     {
         cpu_init();
+        if(lapic_x2apic_active())
+        {
+            debug("CPU ")(current->id)(": x2APIC mode active; xAPIC MMIO required")();
+            (void)cpu_ap_finish_startup(current, ApStartupState::TimedOut);
+            cpu_idle_loop();
+        }
         if(nullptr != lapic)
         {
             assert(current->id == static_cast<uint8_t>(lapic[ID] >> 24));

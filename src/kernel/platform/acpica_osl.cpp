@@ -33,6 +33,8 @@ extern "C"
 #if defined(OS1_HOST_TEST)
 // Exercise the same bounded formatter as the kernel, not the host libc formatter.
 extern "C" int os1_acpica_vsnprintf(char*, size_t, const char*, va_list);
+bool (*host_acpica_memory_write_fault)(ACPI_PHYSICAL_ADDRESS, UINT64, UINT32);
+void (*host_acpica_stall_observer)(UINT32);
 #endif
 
 namespace
@@ -498,7 +500,8 @@ void AcpiOsSleep(UINT64 milliseconds)
 void AcpiOsStall(UINT32 microseconds)
 {
 #if defined(OS1_HOST_TEST)
-    (void)microseconds;
+    if(host_acpica_stall_observer)
+        host_acpica_stall_observer(microseconds);
 #else
     tsc_clock_delay_us(microseconds);
 #endif
@@ -564,6 +567,10 @@ ACPI_STATUS AcpiOsReadMemory(ACPI_PHYSICAL_ADDRESS address, UINT64* value, UINT3
 
 ACPI_STATUS AcpiOsWriteMemory(ACPI_PHYSICAL_ADDRESS address, UINT64 value, UINT32 width)
 {
+#if defined(OS1_HOST_TEST)
+    if(host_acpica_memory_write_fault && host_acpica_memory_write_fault(address, value, width))
+        return AE_ERROR;
+#endif
     return write_physical_value(address, value, width);
 }
 

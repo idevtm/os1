@@ -130,6 +130,37 @@ def main():
         send('END\n')
         assert b'command failed:' not in expect()
         content('/tmp/here', 'first\n\nliteral > data\n')
+        for command, diagnostic in [
+            ('no-such-command << END', b'unknown command: no-such-command\n'),
+            ('cd << END', b'missing parameter\n'),
+            ('echo ( << END ) > /tmp/legacy-here-output', b'too many positional arguments\n'),
+        ]:
+            send(command + '\n')
+            expect(diagnostic)
+            send('touch /tmp/here-injected\nEND\n')
+            assert b'\nEND\n' in expect()
+            assert b'cat/copy failed' in run('cat /tmp/here-injected')
+        assert b'\n<<tag\n' in run('out.print(text:<<tag)')
+        assert b'warning:' in run('label = <<tag')
+        assert b'\n<<tag\n' in run('echo label')
+
+        for command, delimiter, diagnostic in [
+            ('no-such-command ( << FIRST ) << SECOND', 'FIRST', b'duplicate redirection'),
+            ('no-such-command | ( << END', 'END', b'unsupported shell operator'),
+            ('cat << END;', 'END', b'unsupported shell operator'),
+            ('cat << "END";', 'END', b'unsupported shell operator'),
+            ('cat << END >', 'END', b'missing redirection path'),
+            ('out.print(text:<<tag) << END', 'END', b'duplicate redirection'),
+        ]:
+            send(command + '\ntouch /tmp/here-injected\n' + delimiter + '\n')
+            assert diagnostic in expect()
+            assert b'cat/copy failed' in run('cat /tmp/here-injected')
+            assert b'after-document\nos1> ' in run('echo "after-document"')
+
+        assert b'unsupported redirection on typed expression' in run(
+            'out.print(text:<<tag) > /tmp/typed-here-output')
+        assert b'missing redirection path' in run('out.print(text:<<tag) >')
+        assert b'cat/copy failed' in run('cat /tmp/typed-here-output')
         send('cat << STOP > /tmp/absent\n')
         send(b'\x04')
         assert b'redirection failed' in expect()
@@ -245,6 +276,13 @@ def main():
         expect()
         assert b'edit: saved' in run('edit /tmp/scripted < /tmp/editor-script')
         content('/tmp/scripted', 'saved from file\n')
+        if args.program_disk:
+            run('echo original > /disk/editor-replace')
+            assert b'edit: saved' in run('edit /disk/editor-replace < /tmp/editor-script')
+            content('/disk/editor-replace', 'original\nsaved from file\n')
+            listing = run('ls /disk')
+            assert b'.shell-' not in listing, listing
+
         # Child shells terminate at finite EOF and keep prompts off stdout.
         send("sh < /tmp/empty > /tmp/empty-shell\necho 'empty-shell-complete'\n")
         assert b'command failed:' not in expect(b'empty-shell-complete\n')
@@ -262,6 +300,32 @@ def main():
         for _ in range(70):
             assert b'failed' not in run('echo stable > /tmp/repeat')
         content('/tmp/repeat', 'stable\n')
+        # Fill tmpfs while leaving a one-page original in place.
+        run('echo original > /tmp/editor-quota')
+        fillers = []
+        for index in range(64):
+            path = f'/tmp/editor-filler-{index}'
+            fillers.append(path)
+            if b'failed' in run(f'echo fill > {path}'):
+                break
+        else:
+            raise AssertionError('expected tmpfs page quota exhaustion')
+        # Leave one page for the replacement. Its first write can now make progress.
+        assert len(fillers) >= 2
+        run(f'rm {fillers.pop(-2)}')
+        send('edit /tmp/editor-quota\n')
+        expect(b'edit> ')
+        send('c 1\n')
+        insertion(['x' * 120] * 70)
+        send('w\n')
+        assert b'edit: save failed' in expect(b'edit> ')
+        send('q\n')
+        assert b'unsaved changes' in expect(b'edit> ')
+        send('q!\n')
+        expect()
+        content('/tmp/editor-quota', 'original\n')
+        for path in fillers:
+            run(f'rm {path}')
         # Long input must not execute its truncated, potentially destructive prefix.
         run('echo dangerous > /tmp/overlong ' + 'x' * 130)
         assert b'cat/copy failed' in run('cat /tmp/overlong')

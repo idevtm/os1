@@ -21,10 +21,10 @@ bool large_page_is_already_mapped(VirtualMemory& vm,
                                   uint64_t virtual_address,
                                   uint64_t physical_address)
 {
-    return page_is_already_mapped(vm, virtual_address, physical_address) &&
-           page_is_already_mapped(vm,
-                                  virtual_address + kLargePageSize2MiB - kPageSize,
-                                  physical_address + kLargePageSize2MiB - kPageSize);
+    uint64_t translated_physical = 0;
+    uint64_t flags = 0;
+    return vm.translate(virtual_address, translated_physical, flags) &&
+           translated_physical == physical_address && (flags & VirtualMemory::PAGE_LARGE);
 }
 }  // namespace
 
@@ -62,21 +62,22 @@ bool map_direct_range(VirtualMemory& vm, uint64_t physical_start, uint64_t lengt
         const bool use_large_page = (0 == (current % kLargePageSize2MiB)) &&
                                     (0 == (virtual_address % kLargePageSize2MiB)) &&
                                     ((end - current) >= kLargePageSize2MiB);
-        if(use_large_page)
+        if(use_large_page &&
+           (large_page_is_already_mapped(vm, virtual_address, current) ||
+            vm.map_physical_2m(virtual_address,
+                               current,
+                               1,
+                               PageFlags::Present | PageFlags::Write | PageFlags::NoExecute)))
         {
-            if(!large_page_is_already_mapped(vm, virtual_address, current) &&
-               !vm.map_physical_2m(
-                   virtual_address, current, 1, PageFlags::Present | PageFlags::Write | PageFlags::NoExecute))
-            {
-                return false;
-            }
             current += kLargePageSize2MiB;
             continue;
         }
 
         if(!page_is_already_mapped(vm, virtual_address, current) &&
-           !vm.map_physical(
-               virtual_address, current, 1, PageFlags::Present | PageFlags::Write | PageFlags::NoExecute))
+           !vm.map_physical(virtual_address,
+                            current,
+                            1,
+                            PageFlags::Present | PageFlags::Write | PageFlags::NoExecute))
         {
             return false;
         }

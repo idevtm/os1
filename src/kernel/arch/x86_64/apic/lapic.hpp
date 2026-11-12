@@ -51,6 +51,9 @@
 
 // Pointer to local APIC - mapped at same physical address on every CPU.
 // Initialized in mp.c
+// Read the current CPU's APIC mode before using LAPIC MMIO.
+[[nodiscard]] bool lapic_x2apic_active();
+
 extern volatile uint32_t* lapic;
 
 #ifdef __cplusplus

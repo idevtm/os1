@@ -329,7 +329,8 @@ long move(VfsNode* from,
           VfsNode* to,
           const char* destination,
           size_t b,
-          bool replace)
+          bool replace,
+          uint64_t source_id)
 {
     if(!valid_name(source, a) || !valid_name(destination, b))
         return OS1_ERR_INVALID;
@@ -346,6 +347,8 @@ long move(VfsNode* from,
         if(!from->linked || !to->linked)
             return OS1_ERR_CLOSED;
         node = lookup_locked(from, source, a);
+        if(source_id && (!node || node->object_id != source_id))
+            return OS1_ERR_CHANGED;
         if(!node)
             return OS1_ERR_NOT_FOUND;
         target = lookup_locked(to, destination, b);

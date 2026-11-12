@@ -75,6 +75,8 @@ struct ResetHookState
 {
     bool halted_reported = false;
     bool reset_cleared = false;
+    uint32_t reset_delay_us = 0;
+    volatile uint8_t* operational = nullptr;
 };
 
 void emulate_reset(volatile uint8_t* operational, void* context, uint32_t)
@@ -91,10 +93,20 @@ void emulate_reset(volatile uint8_t* operational, void* context, uint32_t)
 
     if(!state.reset_cleared && (0u != (*command & xhci::kUsbcmdHostControllerReset)))
     {
+        EXPECT_EQ(1000u, state.reset_delay_us);
         *command = static_cast<uint32_t>(*command & ~xhci::kUsbcmdHostControllerReset);
         *status = xhci::kUsbstsHalted;
         state.reset_cleared = true;
     }
+}
+void record_reset_delay(uint32_t microseconds, void* context)
+{
+    auto& state = *static_cast<ResetHookState*>(context);
+    const auto* command =
+        reinterpret_cast<volatile const uint32_t*>(state.operational + xhci::kOperationalUsbcmd);
+    EXPECT_NE(0u, *command & xhci::kUsbcmdHostControllerReset);
+    EXPECT_FALSE(state.reset_cleared);
+    state.reset_delay_us = microseconds;
 }
 }  // namespace
 
@@ -179,7 +191,7 @@ TEST(XhciController, InitializesEventRingSegmentTable)
 
 TEST(XhciController, DequeuesEventsAndTracksCycleWrap)
 {
-    std::array<uint8_t, 32> ring{};
+    alignas(uint32_t) std::array<uint8_t, 32> ring{};
     xhci::EventRingInfo info{};
     ASSERT_TRUE(xhci::initialize_event_ring_state(0x345000u, 2u, info));
 
@@ -220,6 +232,24 @@ TEST(XhciController, DequeuesEventsAndTracksCycleWrap)
     EXPECT_EQ(7u, event.slot_id);
 }
 
+TEST(XhciController, EventControlWordRequiresNaturalAlignment)
+{
+    alignas(uint32_t) std::array<uint8_t, 32> ring{};
+    xhci::EventRingInfo info{};
+    ASSERT_TRUE(xhci::initialize_event_ring_state(0x345000u, 1u, info));
+    write_event_trb(ring,
+                    1u,
+                    0x200040u,
+                    1u << 24,
+                    (xhci::kTrbTypeCommandCompletionEvent << 10) | xhci::kTrbCycleBit);
+
+    xhci::EventInfo event{};
+    EXPECT_FALSE(xhci::dequeue_event_trb(ring.data() + 1, 16u, 0x345000u, info, event));
+    EXPECT_EQ(0u, info.dequeue_index);
+    EXPECT_TRUE(info.cycle_state);
+    EXPECT_EQ(0u, event.parameter);
+}
+
 TEST(XhciController, ControllerResetStopsAndClearsReset)
 {
     std::array<uint8_t, 0x400> mmio{};
@@ -232,12 +262,54 @@ TEST(XhciController, ControllerResetStopsAndClearsReset)
             layout.capability.cap_length + xhci::kOperationalUsbsts,
             xhci::kUsbstsControllerNotReady);
 
-    ResetHookState hook_state{};
-    ASSERT_TRUE(xhci::controller_reset(layout, 8u, emulate_reset, &hook_state));
+    ResetHookState hook_state{.operational = layout.operational};
+    ASSERT_TRUE(xhci::controller_reset(layout, 8u, emulate_reset, &hook_state, record_reset_delay));
     EXPECT_TRUE(hook_state.halted_reported);
     EXPECT_TRUE(hook_state.reset_cleared);
     EXPECT_EQ(xhci::kUsbstsHalted,
               read32(mmio, layout.capability.cap_length + xhci::kOperationalUsbsts));
+}
+
+TEST(XhciController, RejectsRingsOutside32BitDmaWithoutProgrammingRegisters)
+{
+    std::array<uint8_t, 0x400> mmio{};
+    populate_capability_block(mmio);
+    xhci::ControllerLayout layout{};
+    ASSERT_TRUE(xhci::parse_capability(mmio.data(), mmio.size(), layout));
+
+    xhci::RingSet rings{
+        .dcbaa_physical = 0x120000u,
+        .command_ring_physical = 0x124000u,
+        .command_ring_bytes = 4096u,
+        .event_ring_physical = 0xffffffc0u,
+        .erst_physical = 0x12c000u,
+        .command_ring_cycle_state = true,
+        .event_ring_trb_count = 256u,
+    };
+    EXPECT_FALSE(xhci::controller_program(layout, rings, 8u));
+    EXPECT_EQ(0u, read64(mmio, layout.capability.cap_length + xhci::kOperationalCrcr));
+    EXPECT_EQ(0u, read64(mmio, layout.capability.cap_length + xhci::kOperationalDcbaap));
+    EXPECT_FALSE(xhci::program_command_ring(layout, 0x1'0000'0000ull, 4096u, true));
+    EXPECT_FALSE(xhci::request_command_abort(layout, 0x1'0000'0000ull, 4096u));
+    rings.event_ring_physical = 0x128000u;
+    rings.command_ring_physical = 0xffffffc0u;
+    EXPECT_FALSE(xhci::controller_program(layout, rings, 8u));
+    EXPECT_FALSE(xhci::program_command_ring(layout, rings.command_ring_physical, 4096u, true));
+    EXPECT_FALSE(xhci::request_command_abort(layout, rings.command_ring_physical, 4096u));
+    EXPECT_EQ(0u, read64(mmio, layout.capability.cap_length + xhci::kOperationalCrcr));
+    EXPECT_FALSE(layout.capability.address_64);
+    EXPECT_TRUE(xhci::dma_range_supported(layout.capability, UINT32_MAX, 1));
+    EXPECT_FALSE(xhci::dma_range_supported(layout.capability, UINT32_MAX, 2));
+
+    write32(mmio, 0x10u, 1u);
+    ASSERT_TRUE(xhci::parse_capability(mmio.data(), mmio.size(), layout));
+    EXPECT_TRUE(layout.capability.address_64);
+    rings.command_ring_physical = 0x1'0000'0040ull;
+    rings.event_ring_physical = 0xffffffc0u;
+    ASSERT_TRUE(xhci::controller_program(layout, rings, 8u));
+    EXPECT_EQ(0x1'0000'0041ull,
+              read64(mmio, layout.capability.cap_length + xhci::kOperationalCrcr));
+    EXPECT_FALSE(xhci::dma_range_supported(layout.capability, UINT64_MAX, 2));
 }
 
 TEST(XhciController, ProgramsOperationalAndInterrupterRegisters)
@@ -251,6 +323,7 @@ TEST(XhciController, ProgramsOperationalAndInterrupterRegisters)
     const xhci::RingSet rings{
         .dcbaa_physical = 0x120000u,
         .command_ring_physical = 0x124000u,
+        .command_ring_bytes = 4096u,
         .event_ring_physical = 0x128000u,
         .erst_physical = 0x12c000u,
         .command_ring_cycle_state = true,
@@ -1020,20 +1093,58 @@ TEST(XhciCommandRecovery, WritesAbortAndProgramsOnlyAStoppedRing)
     alignas(8) std::array<uint8_t, 64> operational{};
     xhci::ControllerLayout controller{};
     controller.operational = operational.data();
+    controller.capability.address_64 = true;
     constexpr uint64_t ring = 0x1'1234'5000ull;
     const auto reg = xhci::kOperationalCrcr;
     write32(operational, reg, xhci::kCrcrCommandRingRunning);
 
     EXPECT_TRUE(xhci::command_ring_running(controller));
-    EXPECT_FALSE(xhci::program_command_ring(controller, ring, true));
-    EXPECT_TRUE(xhci::request_command_abort(controller, ring));
+    EXPECT_FALSE(xhci::program_command_ring(controller, ring, 4096u, true));
+    EXPECT_TRUE(xhci::request_command_abort(controller, ring, 4096u));
     EXPECT_EQ(ring | xhci::kCrcrCommandAbort, read64(operational, reg));
 
     write32(operational, reg, 0);
     EXPECT_FALSE(xhci::command_ring_running(controller));
-    EXPECT_TRUE(xhci::request_command_abort(controller, ring));
+    EXPECT_TRUE(xhci::request_command_abort(controller, ring, 4096u));
     EXPECT_EQ(ring | xhci::kCrcrCommandAbort, read64(operational, reg));
-    EXPECT_FALSE(xhci::request_command_abort(controller, ring + 1));
-    EXPECT_TRUE(xhci::program_command_ring(controller, ring, true));
+    EXPECT_FALSE(xhci::request_command_abort(controller, ring + 1, 4096u));
+    EXPECT_TRUE(xhci::program_command_ring(controller, ring, 4096u, true));
     EXPECT_EQ(ring | xhci::kCrcrRingCycleState, read64(operational, reg));
+}
+
+TEST(XhciController, PortRecoveryRejectsAcknowledgedConnectionChange)
+{
+    xhci::PortStatus status{};
+    status.connected = true;
+    status.enabled = true;
+    status.speed = 4;
+    EXPECT_TRUE(xhci::port_reset_recovered(status, 4, false));
+    EXPECT_FALSE(xhci::port_reset_recovered(status, 4, true));
+    status.raw = xhci::kPortScConnectStatusChange;
+    EXPECT_FALSE(xhci::port_reset_recovered(status, 4, false));
+    status.raw = 0;
+    EXPECT_FALSE(xhci::port_reset_recovered(status, 3, false));
+    status.reset = true;
+    EXPECT_FALSE(xhci::port_reset_recovered(status, 4, false));
+}
+
+TEST(XhciController, DrainsConnectionChangeArrivingDuringResetAcknowledgment)
+{
+    uint32_t changes = xhci::kPortScPortResetChange;
+    unsigned writes = 0;
+    const bool changed = xhci::drain_port_changes(
+        [&](xhci::PortStatus& status) {
+            status.connected = true;
+            status.raw = changes;
+            return true;
+        },
+        [&](uint32_t mask) {
+            if(writes++ == 0)
+                changes |= xhci::kPortScConnectStatusChange;
+            changes &= ~mask;
+        });
+
+    EXPECT_TRUE(changed);
+    EXPECT_EQ(0u, changes);
+    EXPECT_EQ(2u, writes);
 }

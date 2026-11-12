@@ -44,7 +44,7 @@ bool prepare_head(QueueHead& qh,
         return false;
     qh.next = uint32_t(self) | 2;  // Circular asynchronous QH list.
     qh.endpoint = address | (uint32_t(endpoint) << 8) | (speed << 12) | (1u << 14) |
-                  (periodic ? 0 : 1u << 15) | (uint32_t(packet) << 16) | (4u << 28);
+                  (periodic ? 0 : (1u << 15) | (4u << 28)) | (uint32_t(packet) << 16);
     if(speed != 2 && !endpoint)
         qh.endpoint |= 1u << 27;
     qh.capabilities =

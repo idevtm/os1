@@ -90,6 +90,7 @@ struct Capability
     uint16_t max_interrupters = 0;
     uint8_t max_ports = 0;
     uint8_t context_size_bytes = 32;
+    bool address_64 = false;
     uint16_t scratchpad_buffers = 0;
     uint32_t doorbell_offset = 0;
     uint32_t runtime_offset = 0;
@@ -332,6 +333,27 @@ struct PortStatus
     bool has_changes = false;
 };
 
+// A new change can arrive while the port's event generation is still gated.
+template<typename Read, typename Acknowledge>
+bool drain_port_changes(Read read, Acknowledge acknowledge)
+{
+    bool connection_changed = false;
+    PortStatus status{};
+    for(unsigned attempt = 0; attempt < 4; ++attempt)
+    {
+        if(!read(status))
+            return connection_changed;
+        connection_changed |= !status.connected || (status.raw & kPortScConnectStatusChange);
+        const uint32_t changes = status.raw & kPortScChangeBits;
+        if(!changes)
+            return connection_changed;
+        acknowledge(changes);
+    }
+    // Keep interrupt work bounded. Treat an uncertain connection as changed.
+    acknowledge(kPortScChangeBits);
+    return true;
+}
+
 struct [[gnu::packed]] EventRingSegmentTableEntry
 {
     uint64_t ring_segment_base = 0;
@@ -343,6 +365,7 @@ struct RingSet
 {
     uint64_t dcbaa_physical = 0;
     uint64_t command_ring_physical = 0;
+    size_t command_ring_bytes = 0;
     uint64_t event_ring_physical = 0;
     uint64_t erst_physical = 0;
     bool command_ring_cycle_state = false;
@@ -353,6 +376,7 @@ using PollHook = void (*)(volatile uint8_t* operational, void* context, uint32_t
 
 void set_slot_context(uint32_t* words, uint8_t speed, uint8_t port, uint8_t context_entries);
 bool parse_capability(volatile void* mmio_base, size_t mmio_size, ControllerLayout& out);
+bool dma_range_supported(const Capability& capability, uint64_t address, size_t bytes);
 uint32_t read_page_size_mask(const ControllerLayout& controller);
 bool initialize_command_ring(void* ring_base,
                              size_t ring_bytes,
@@ -381,6 +405,7 @@ void ring_doorbell(const ControllerLayout& controller,
                    uint8_t doorbell_index,
                    uint8_t target,
                    uint16_t stream_id = 0u);
+bool port_reset_recovered(const PortStatus& status, uint8_t speed, bool connection_changed);
 bool read_port_status(const ControllerLayout& controller, uint8_t port_id, PortStatus& out);
 bool clear_port_change_bits(const ControllerLayout& controller,
                             uint8_t port_id,
@@ -393,10 +418,16 @@ bool controller_stop(const ControllerLayout& controller,
 bool controller_reset(const ControllerLayout& controller,
                       uint32_t timeout_spins,
                       PollHook poll_hook = nullptr,
-                      void* poll_context = nullptr);
+                      void* poll_context = nullptr,
+                      void (*intel_reset_delay)(uint32_t, void*) = nullptr);
 bool command_ring_running(const ControllerLayout& controller);
-bool request_command_abort(const ControllerLayout& controller, uint64_t ring_physical);
-bool program_command_ring(const ControllerLayout& controller, uint64_t ring_physical, bool cycle);
+bool request_command_abort(const ControllerLayout& controller,
+                           uint64_t ring_physical,
+                           size_t ring_bytes);
+bool program_command_ring(const ControllerLayout& controller,
+                          uint64_t ring_physical,
+                          size_t ring_bytes,
+                          bool cycle);
 bool controller_program(const ControllerLayout& controller,
                         const RingSet& rings,
                         uint8_t max_device_slots);

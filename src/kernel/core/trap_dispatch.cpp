@@ -36,6 +36,11 @@ extern "C" Thread* trap_dispatch(TrapFrame* frame)
                 before, frame->rax, frame->rax == os1_sys_ipc ? frame->rdi : frame->rsi);
         next = handle_syscall(frame);
     }
+    else if(frame->vector == kLapicSpuriousVector)
+    {
+        // A spurious LAPIC interrupt has no in-service entry to acknowledge.
+        return before;
+    }
     else if(interrupt_vector_is_external(static_cast<uint8_t>(frame->vector)))
         next = handle_irq(frame);
     else
