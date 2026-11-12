@@ -1223,6 +1223,10 @@ Console I/O now uses process-owned descriptors, shared open instances, and nativ
 
 The shell does not parse serial boot logs to inspect kernel state. Instead, `observe(kind, buffer, size)` copies versioned fixed-record snapshots described by [`src/uapi/os1/observe.h`](../src/uapi/os1/observe.h) out of the kernel.
 
+Process, device, resource, and IRQ snapshots retry capture once if registry growth exceeds the first allocation.
+The retry uses a fresh count and stays within the caller's byte limit.
+If capture still cannot fit, the syscall returns `-1` before it writes the destination.
+
 Process, device, resource, IRQ, and event queries use temporary storage owned by the query.
 The query bounds the storage by the caller length and the registry count or event ring capacity.
 Small captures use a local buffer. Larger captures use temporary page frames.
