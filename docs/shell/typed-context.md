@@ -136,8 +136,10 @@ Explicit paths bypass the alias table.
 | `rmdir` | `fs.remove_directory` | Required String `path`, slot 1; empty directories only |
 
 `os.fs.list` uses the current directory when you omit `path`.
-With `list:true`, it prints the file type, size in bytes, modification time in nanoseconds, and name.
-The shell prints `modify_ns:unsupported` when the file has no modification time.
+With `list:true`, it prints a table with the file type, exact size in bytes, modification time in UTC, and name.
+The size column aligns to the right. Directory names end with `/`.
+The shell formats the time as `YYYY-MM-DD HH:MM:SS`. It prints `-` when the time is unavailable.
+Use `stat` or `fs.info` to read the raw timestamp in nanoseconds.
 The detailed format requires lookup and inspect access for directory entries.
 
 ```text

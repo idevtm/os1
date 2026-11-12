@@ -7,6 +7,7 @@
 #include <os1/tree.hpp>
 
 #include "discovery/view.hpp"
+#include "shell/listing.hpp"
 #include "shell/values.hpp"
 namespace os1::user::shell_runtime
 {
@@ -943,6 +944,9 @@ inline long list(const char* path, bool detailed)
     Handle directory(open(path, rights, detailed ? OS1_RIGHT_INSPECT : 0));
     if(directory.fd < 0)
         return directory.fd;
+    if(detailed &&
+       !files::put(1, shell::long_listing_header, sizeof(shell::long_listing_header) - 1))
+        return OS1_ERR_IO;
     alignas(8) uint8_t data[1024]{};
     for(;;)
     {
@@ -976,13 +980,11 @@ inline long list(const char* path, bool detailed)
                 if(status < 0)
                     return status;
                 is_directory = metadata.kind == OS1_OBJECT_DIRECTORY;
-                const char kind = is_directory ? 'd' : '-';
-                constexpr char no_time[] = " modify_ns:unsupported";
-                if(!files::put(1, &kind, 1) || !tree::field(" bytes:", metadata.logical_bytes) ||
-                   !((times.valid & OS1_TIME_MODIFY)
-                         ? tree::field(" modify_ns:", times.modify_ns)
-                         : files::put(1, no_time, sizeof(no_time) - 1)) ||
-                   !files::put(1, " ", 1))
+                const shell::LongListingRow row(is_directory,
+                                                metadata.logical_bytes,
+                                                times.valid & OS1_TIME_MODIFY,
+                                                times.modify_ns);
+                if(!files::put(1, row.prefix, sizeof(row.prefix)))
                     return OS1_ERR_IO;
             }
             for(unsigned i = 0; i < record->name_bytes; ++i)
