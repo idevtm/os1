@@ -47,9 +47,9 @@ int main(int argc, char** argv)
         startup_record = original;
         files::Handle script(files::open_file("/tmp/system-script", files::Mode::Replace));
         CHECK(script.fd >= 0, "system script");
-        constexpr char text[] = "echo \"no inspect sync\" > \"/disk/no-inspect\"\n";
+        constexpr char text[] = "echo \"no inspect sync\" > \"/no-inspect\"\n";
         CHECK(write(script.fd, text, sizeof(text) - 1) == sizeof(text) - 1, "system script write");
-        files::Handle shell(open("/disk/bin/sh", OS1_RIGHT_READ | OS1_RIGHT_EXECUTE));
+        files::Handle shell(open("/bin/sh", OS1_RIGHT_READ | OS1_RIGHT_EXECUTE));
         CHECK(shell.fd >= 0, "system shell");
         os1_launch_request request{};
         request.version = OS1_STARTUP_VERSION;
@@ -59,9 +59,9 @@ int main(int argc, char** argv)
         request.startup.root_fd = root();
         request.startup.cwd_fd = cwd();
         request.startup.argc = 2;
-        constexpr char arguments[] = "/disk/bin/sh\0/tmp/system-script";
+        constexpr char arguments[] = "/bin/sh\0/tmp/system-script";
         request.startup.string_bytes = sizeof(arguments);
-        request.startup.argv[1] = sizeof("/disk/bin/sh");
+        request.startup.argv[1] = sizeof("/bin/sh");
         for(unsigned i = 0; i < sizeof(arguments); ++i)
             request.startup.strings[i] = arguments[i];
         request.grant_count = 5;
@@ -126,7 +126,7 @@ int main(int argc, char** argv)
                   equal(startup_record->strings + startup_record->envp[0], "MODE=test"),
               "environment");
         CHECK(root() == -1 && cwd() == -1, "namespace roles");
-        CHECK(open("/disk/etc/motd", OS1_RIGHT_READ) == OS1_ERR_BAD_DESCRIPTOR, "no ambient root");
+        CHECK(open("/etc/motd", OS1_RIGHT_READ) == OS1_ERR_BAD_DESCRIPTOR, "no ambient root");
         CHECK(read(0, nullptr, 0) == OS1_ERR_BAD_DESCRIPTOR, "no implicit stdin");
         static const char success[] = "[user/vfscheck] restricted child ok\n";
         write(1, success, sizeof(success) - 1);
@@ -135,7 +135,7 @@ int main(int argc, char** argv)
     CHECK(os1::tmpfs_check::run(), "tmpfs protocol");
     constexpr char tmp_ok[] = "[user/vfscheck] tmpfs native two clients compatibility unlink ok\n";
     write(1, tmp_ok, sizeof(tmp_ok) - 1);
-    const long file = open("/disk/etc/motd", OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_DELEGATE);
+    const long file = open("/etc/motd", OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_DELEGATE);
     CHECK(file >= 0, "open file");
     const long alias = duplicate(file, OS1_RIGHT_READ | OS1_RIGHT_SEEK);
     CHECK(alias >= 0, "duplicate file");
@@ -158,7 +158,7 @@ int main(int argc, char** argv)
           "enumeration authority");
     close(directory);
 
-    const long executable = open("/disk/bin/vfscheck", OS1_RIGHT_EXECUTE);
+    const long executable = open("/bin/vfscheck", OS1_RIGHT_EXECUTE);
     CHECK(executable >= 0, "open executable");
     os1_launch_request request{};
     request.version = OS1_STARTUP_VERSION;

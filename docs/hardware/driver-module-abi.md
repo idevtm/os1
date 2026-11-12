@@ -11,7 +11,7 @@ boot PCI match -> bounded snapshot -> digest -> ELF validation -> mapping -> ent
 
 ## Package and authority
 
-The build installs `/disk/system/drivers/<build-id-prefix>/virtio-net/driver.elf` and `manifest.json`.
+The build installs `/system/drivers/<build-id-prefix>/virtio-net/driver.elf` and `manifest.json`.
 The prefix contains 16 hexadecimal characters from the owned-source and build-profile digest.
 The full build identity remains in the manifest and ELF metadata.
 The kernel embeds the exact ELF SHA-256 digest and its PCI match, `1af4:1041`.
@@ -105,7 +105,7 @@ The second module uses the same trusted loader and a separate 128 KiB window at 
 compatible BootInfo framebuffer -> trusted display ELF -> probe -> publish Display
 ```
 
-The build installs the module under `/disk/system/drivers/<build-id-prefix>/firmware-framebuffer/`.
+The build installs the module under `/system/drivers/<build-id-prefix>/firmware-framebuffer/`.
 The kernel checks the active framebuffer format and geometry before package access.
 This firmware match uses the boot display metadata. The PCI inventory remains separate.
 The [internal table](../../src/common/driver/display.h) uses ABI 2 and exports framebuffer and Bochs operations.

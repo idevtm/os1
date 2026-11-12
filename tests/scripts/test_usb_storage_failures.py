@@ -86,12 +86,12 @@ def controller_timeout(args, disk, log):
                 operational = base + (command(f'readl {base:#x}') & 255)
                 saved = command(f'readl {operational:#x}')
                 command(f'writel {operational:#x} {saved & ~1:#x}')
-                output = run('cat /disk/readme', allow_errors=True)
+                output = run('cat /readme', allow_errors=True)
                 assert b'failed' in output or b'error' in output, output
                 run('echo controller-timeout-survived', b'controller-timeout-survived\n')
                 # Restore the emulated run bit. The retired handle must stay dead.
                 command(f'writel {operational:#x} {saved:#x}')
-                output = run('cat /disk/readme', allow_errors=True)
+                output = run('cat /readme', allow_errors=True)
                 assert b'failed' in output or b'error' in output, output
                 run('echo no-retired-reuse', b'no-retired-reuse\n')
             finally:
@@ -137,20 +137,20 @@ def main():
                     sender = threading.Thread(target=keyboard)
                     sender.start()
                     try:
-                        run('/disk/diskutil seed')  # HID echo can interleave with utility output.
+                        run('/diskutil seed')  # HID echo can interleave with utility output.
                     finally:
                         sender.join()
                     assert not errors, errors
                     output = expect()
                     assert b'usb\n' in output, output
                 else:
-                    run('/disk/diskutil seed', b'diskutil seed ok')
-                run('/disk/diskutil verify', b'diskutil verify ok')
+                    run('/diskutil seed', b'diskutil seed ok')
+                run('/diskutil verify', b'diskutil verify ok')
                 inventory_before = run('context os.devices.inventory.usb')
                 identities_before = set(re.findall(rb'usb_[0-9]+', inventory_before))
                 qmp.execute('device_del', {'id': 'usbdata'})
                 qmp.removed()
-                output = run('cat /disk/readme', allow_errors=True)
+                output = run('cat /readme', allow_errors=True)
                 assert b'failed' in output or b'error' in output, output
                 run('echo shell-alive', b'shell-alive\n')
                 qmp.execute('blockdev-add', {'driver': 'raw', 'node-name': 'reconnected',
@@ -160,7 +160,7 @@ def main():
                 # Finish asynchronous driver output before parsing shell prompts or fields.
                 expect(b'ehci: storage ready' if args.transport == 'ehci' else b'usb-storage: ready', timeout=15)
                 expect(b'\n', timeout=15)
-                output = run('cat /disk/readme', allow_errors=True)
+                output = run('cat /readme', allow_errors=True)
                 assert b'failed' in output or b'error' in output, output
                 deadline = time.monotonic()+15
                 while True:
@@ -191,8 +191,8 @@ def main():
     disk = log.with_suffix('.clean.raw')
     create(disk, args.utility, reset=True, manifest=args.programs_manifest)
     args.poweroff = True
-    boot(args, disk, 'high-speed-seed', commands=[('/disk/diskutil seed', b'diskutil seed ok')])
-    boot(args, disk, 'high-speed', commands=[('/disk/diskutil verify', b'diskutil verify ok')])
+    boot(args, disk, 'high-speed-seed', commands=[('/diskutil seed', b'diskutil seed ok')])
+    boot(args, disk, 'high-speed', commands=[('/diskutil verify', b'diskutil verify ok')])
     args.poweroff = False
     args.readonly = True
     before = disk.read_bytes()

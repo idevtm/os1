@@ -102,12 +102,12 @@ def exercise_graphics(args, run, expect):
         # with no EHCI reports, without claiming to reproduce the physical stall.
         out = run('run-tests "--no-input" "--ehci-stalls"', b'run-tests: PASS; saved results',
                   action=trace_demo)
-        match = re.search(rb'run-tests: results (/disk/tests/[^\s]+)', out)
+        match = re.search(rb'run-tests: results (/tests/[^\s]+)', out)
         if not match:
             # The prompt wait in trace_demo consumed the early runner output.
-            match = re.search(rb'run-tests: results (/disk/tests/[^\s]+)', trace_demo.prefix)
+            match = re.search(rb'run-tests: results (/tests/[^\s]+)', trace_demo.prefix)
         assert match, out
-        args.capture_path = match[1].decode().removeprefix('/disk') + '/captures.tar'
+        args.capture_path = match[1].decode() + '/captures.tar'
     finally:
         qmp.close()
 
@@ -159,7 +159,7 @@ def main():
             assert re.search(rb'pointer diagnostics events=[1-9]', demo), demo
             assert f' input_id={selected} '.encode() in demo and selected > 0, demo
             assert f' trace_ticket={ticket}\n'.encode() in demo and ticket > 0, demo
-            module = json.loads(Path(args.metadata).read_text())['image'].removeprefix('/disk')
+            module = json.loads(Path(args.metadata).read_text())['image']
             part = Path(temporary) / 'program.ext2'
             bad = Path(temporary) / 'corrupt.elf'
             bad.write_bytes(b'corrupt display module')

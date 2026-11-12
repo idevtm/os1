@@ -78,7 +78,7 @@ constexpr DeviceId kKeyboardOwner{DeviceBus::Platform, 1};
 constexpr DeviceId kPointerOwner{DeviceBus::Platform, 3};
 constexpr DeviceId kLapicTimerOwner{DeviceBus::Platform, 2};
 // Real-hardware bring-up watchdog: the platform resets after two stages without
-// a kick. After /bin/init starts, a longer stage leaves time at the shell and
+// a kick. After /sbin/init starts, a longer stage leaves time at the shell and
 // still ends in a reset so a successful boot's log gets saved too.
 constexpr uint32_t kBootWatchdogStageSeconds = 45;
 constexpr uint32_t kPostInitWatchdogStageSeconds = 90;
@@ -436,10 +436,10 @@ bool prepare_scheduler_timer()
     load_boot_drivers();
     log_export::initialize();
     Thread* init_thread =
-        load_user_program(page_frames, g_kernel_root_cr3, "/bin/init", nullptr, false);
+        load_user_program(page_frames, g_kernel_root_cr3, "/sbin/init", nullptr, false);
     if(nullptr == init_thread)
     {
-        write_console_line("failed to load /bin/init");
+        write_console_line("failed to load /sbin/init");
         finish_boot_sequence_thread(1);
     }
 

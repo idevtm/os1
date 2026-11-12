@@ -116,10 +116,10 @@ def main():
         ok('g = process.streams.output.geometry')
         ok('g.columns',b'80' if not args.code else None)
         ok('process.streams.output.geometry.columns',b'80' if not args.code else None)
-        ok('out.print text:path.search(path:"sh")',b'/disk/bin/sh')
+        ok('out.print text:path.search(path:"sh")',b'/bin/sh')
         nested='"sh"'
         for _ in range(7): nested='path.search(path:'+nested+')'
-        ok('out.print text:'+nested,b'/disk/bin/sh')
+        ok('out.print text:'+nested,b'/bin/sh')
         bad('process.streams.input.acquire_input()',b'exclusive result requires a with scope')
         bad('persistent = process.streams.input.acquire_input()',b'exclusive result requires a with scope')
         for prefix in ('with s = ', 'with  s = ', 'with s\t= '):

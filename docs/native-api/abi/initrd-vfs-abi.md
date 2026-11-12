@@ -11,8 +11,8 @@ General generated bindings and runtime reflection remain proposals.
 
 ## Boot program placement
 
-The kernel loads `/bin/init` from immutable initrd.
-Init supervises `/disk/bin/sh` and starts `/bin/rescue` after a launch or wait error.
+The kernel loads `/sbin/init` from immutable initrd.
+Init supervises `/bin/sh` and starts `/sbin/rescue` after a launch or wait error.
 
 | Shell result | Init action |
 | --- | --- |
@@ -37,7 +37,11 @@ parent traversal, normalized duplicate entries, file/directory collisions,
 links, and other node types reject the entire import. Missing parent directories
 are synthesized; one explicit directory entry may complete a synthesized node.
 No partially imported namespace is published.
-Startup adds the empty `/tmp` mount before publication; a conflicting initrd name rejects startup.
+Startup adds an empty `/tmp` to the initrd tree.
+When ext2 mounts, the kernel uses it as the root and attaches the initrd `/sbin` and the volatile `/tmp`.
+These mounts hide ext2 entries with the same names.
+The kernel requires an initrd `/sbin` directory before it can select an ext2 root.
+If no ext2 volume mounts, the kernel publishes the initrd root with `/tmp`.
 
 Limits are 64 MiB of archive data, 2048 nodes including the root, and 64 named
 components of import depth. The depth limit also bounds recursive destruction.
@@ -176,7 +180,7 @@ Closing those entries loses that authority. Pathname spawn/exec compatibility
 calls resolve through the process's existing root/cwd; compatibility spawn passes
 existing standard streams and selected namespace roles, never the whole table.
 The shell uses native launch and forwards arguments through explicit grants.
-Bare shell command names search `/bin`, then `/disk/bin`, within existing namespace authority.
+Bare shell command names search `/bin`, within existing namespace authority.
 Paths containing `/` bypass search. Only NOT_FOUND permits the next candidate.
 This shell policy also applies to `exec` and `call`; kernel launch does not add a search path.
 

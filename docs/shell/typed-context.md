@@ -16,7 +16,7 @@ bind positional/named arguments
 
 `process.environment` is a bounded bag of records, lists, strings, integers, and booleans.
 Children inherit independent copies through [startup ABI version 3](../native-api/abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension).
-The initial path list contains `/bin`, then `/disk/bin`.
+The initial path list contains `/bin`.
 No PATH text variable mirrors that list.
 Code for `path` and `fs` resides in the linked user runtime; neither requires a service process.
 
@@ -31,9 +31,9 @@ process.environment.build = {jobs:4, label:"debug", features:["console", "storag
 echo process.environment.build.label
 process.environment.build
 path.list
-path.add "/disk/tools"
+path.add "/tools"
 path.search "tool"
-path.remove "/disk/tools"
+path.remove "/tools"
 ```
 
 Environment assignment replaces or adds one field under an existing Record.

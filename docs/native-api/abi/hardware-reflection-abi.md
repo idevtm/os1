@@ -185,7 +185,7 @@ os.storage.devices -> partitions -> filesystems -> os.fs.mounts
 | `os.storage.devices` | `block_N`; driver-published block devices |
 | `os.storage.partitions` | `partition_N`; observed nonempty primary MBR entries |
 | `os.storage.filesystems` | `filesystem_N`; successfully mounted ext2 filesystems |
-| `os.fs.mounts` | `mount_N`; successful ext2 mount at `/disk` |
+| `os.fs.mounts` | `mount_N`; successful ext2 mount at `/` |
 | `os.devices.catalog_records_dropped` | Capture failures and records omitted at capacity |
 
 This profile does not enumerate every possible filesystem or every VFS mount.

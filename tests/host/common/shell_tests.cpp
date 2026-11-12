@@ -205,27 +205,22 @@ TEST(Ps2Modifiers, KeypadAndConsoleShortcutsKeepTheirMeaning)
     EXPECT_EQ(uint8_t(ps2_console_character(modifiers, 0x0f)), OS1_CONSOLE_KEY_BACKTAB);
 }
 
-TEST(ProgramPath, RecoveryPrecedesDiskAndOnlyMissingContinues)
+TEST(ProgramPath, BareNamesSearchOnlyBin)
 {
     char path[64]{};
     int calls = 0;
-    auto recovery = [&](const char* candidate) {
+    auto found = [&](const char* candidate) {
         ++calls;
         EXPECT_STREQ(candidate, "/bin/ls");
         return 0L;
     };
-    EXPECT_EQ(os1::shell::resolve_program("ls", path, sizeof(path), recovery), 0);
+    EXPECT_EQ(os1::shell::resolve_program("ls", path, sizeof(path), found), 0);
     EXPECT_STREQ(path, "/bin/ls");
     EXPECT_EQ(calls, 1);
-    calls = 0;
-    auto disk = [&](const char* candidate) {
-        ++calls;
-        EXPECT_STREQ(candidate, calls == 1 ? "/bin/counter" : "/disk/bin/counter");
-        return calls == 1 ? long(OS1_ERR_NOT_FOUND) : 0L;
-    };
-    EXPECT_EQ(os1::shell::resolve_program("counter", path, sizeof(path), disk), 0);
-    EXPECT_EQ(calls, 2);
-    for(long error : {long(OS1_ERR_ACCESS), long(OS1_ERR_BAD_IMAGE), long(OS1_ERR_WOULD_BLOCK)})
+    for(long error : {long(OS1_ERR_NOT_FOUND),
+                      long(OS1_ERR_ACCESS),
+                      long(OS1_ERR_BAD_IMAGE),
+                      long(OS1_ERR_WOULD_BLOCK)})
     {
         calls = 0;
         EXPECT_EQ(os1::shell::resolve_program("counter",
@@ -255,7 +250,7 @@ TEST(ProgramPath, ExplicitPathsNeverSearchAndBoundsRejectTruncation)
     }
     EXPECT_EQ(calls, 0);
     EXPECT_EQ(os1::shell::resolve_program("unknown", path, sizeof(path), probe), OS1_ERR_NOT_FOUND);
-    EXPECT_EQ(calls, 2);
+    EXPECT_EQ(calls, 1);
     EXPECT_EQ(os1::shell::resolve_program("counter", path, 8, probe), OS1_ERR_RANGE);
     EXPECT_EQ(os1::shell::resolve_program("", path, sizeof(path), probe), OS1_ERR_INVALID);
     EXPECT_EQ(os1::shell::resolve_program(nullptr, path, sizeof(path), probe), OS1_ERR_INVALID);

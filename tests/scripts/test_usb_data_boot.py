@@ -31,17 +31,17 @@ def main():
     new_boot = log.with_suffix('.boot.img')
     def program(path):
         data = json.loads(Path(args.programs_manifest).read_text())
-        data['programs'] += [{'source': str(Path(path).resolve()), 'destination': '/disk/bin/probe'}]
+        data['programs'] += [{'source': str(Path(path).resolve()), 'destination': '/bin/probe'}]
         manifest.write_text(json.dumps(data))
     program(args.version1)
     create(args.image, args.utility, manifest, disk)
     boot(args, disk, 'initial', [
         ('probe', b'deployed program version 1'),
         ('counter --initial 7 --ceiling 20', b'counter initial=7 ceiling=20'),
-        ('intf /disk/bin/textprocessor', b'interface TextProcessor'),
-        ('/disk/diskutil seed', b'diskutil seed ok'),
-        ('echo retained-usb-data > /disk/note', None),
-        ('/disk/diskutil sync', b'diskutil sync ok')])
+        ('intf /bin/textprocessor', b'interface TextProcessor'),
+        ('/diskutil seed', b'diskutil seed ok'),
+        ('echo retained-usb-data > /note', None),
+        ('/diskutil sync', b'diskutil sync ok')])
     shutil.copyfile(args.image, new_boot)
     # An unused pre-ESP sector proves boot bytes change without altering executable code.
     with new_boot.open('r+b') as image:
@@ -56,8 +56,8 @@ def main():
             if mode == 'boot':
                 assert digest(target, DATA_START, disk.stat().st_size - DATA_START) == data_before
     update('boot')
-    commands = [('/disk/diskutil verify', b'diskutil verify ok'),
-                ('cat /disk/note', b'retained-usb-data\n')]
+    commands = [('/diskutil verify', b'diskutil verify ok'),
+                ('cat /note', b'retained-usb-data\n')]
     boot(args, disk, 'boot-update', [('probe', b'deployed program version 1'), *commands])
     program(args.version2)
     update('programs')

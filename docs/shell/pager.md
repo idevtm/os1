@@ -15,7 +15,7 @@ Both forms require one String `path`, as positional slot 1 or a named argument.
 They use the existing [typed binder](typed-context.md#commands-and-arguments).
 
 ```text
-less "/disk/log"
+less "/log"
 pager.show path:"/tmp/note"
 ```
 

@@ -86,7 +86,7 @@ General operation cancellation, external kill, and automatic restart/replay rema
 
 ## TextProcessor protocol and examples
 
-`/disk/bin/textprocessor` receives only a provider endpoint at fd 3 through an explicit
+`/bin/textprocessor` receives only a provider endpoint at fd 3 through an explicit
 launch grant, with READ|WRITE. It receives no root/cwd or standard streams. Its
 code initializes enabled=true, revision=1, processed=0, publishes READY, serves
 requests sequentially, and exits after client closure. This private activation
@@ -140,7 +140,7 @@ Run these disk commands:
 
 ```text
 ipccheck
-intf /disk/bin/textprocessor
+intf /bin/textprocessor
 ```
 
 `intf` opens the file with READ|SEEK|INSPECT, reads its ELF section table and the

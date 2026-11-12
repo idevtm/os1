@@ -1,12 +1,12 @@
 #include <os1/observe.h>
-#include <os1/syscall.hpp>
-
 #include <stddef.h>
 #include <stdint.h>
 
+#include <os1/syscall.hpp>
+
 namespace
 {
-constexpr char kBusyYieldPath[] = "/disk/bin/busyyield";
+constexpr char kBusyYieldPath[] = "/bin/busyyield";
 constexpr uint32_t kMaxCpuRecords = 8;
 constexpr uint32_t kObserveAttempts = 2048;
 
@@ -64,8 +64,8 @@ void write_success(uint64_t first_pid, uint32_t first_cpu, uint64_t second_pid, 
 
 bool observe_cpus(Os1ObserveCpuRecord*& records, uint32_t& record_count)
 {
-    static uint8_t buffer[sizeof(Os1ObserveHeader) +
-                          kMaxCpuRecords * sizeof(Os1ObserveCpuRecord)] = {};
+    static uint8_t buffer[sizeof(Os1ObserveHeader) + kMaxCpuRecords * sizeof(Os1ObserveCpuRecord)] =
+        {};
 
     const long observed = os1::user::observe(OS1_OBSERVE_CPUS, buffer, sizeof(buffer));
     if(observed < static_cast<long>(sizeof(Os1ObserveHeader)))
@@ -74,16 +74,14 @@ bool observe_cpus(Os1ObserveCpuRecord*& records, uint32_t& record_count)
     }
 
     const auto* header = reinterpret_cast<const Os1ObserveHeader*>(buffer);
-    if((header->kind != OS1_OBSERVE_CPUS) ||
-       (header->record_size != sizeof(Os1ObserveCpuRecord)) ||
+    if((header->kind != OS1_OBSERVE_CPUS) || (header->record_size != sizeof(Os1ObserveCpuRecord)) ||
        (header->record_count > kMaxCpuRecords))
     {
         return false;
     }
 
     const size_t required = sizeof(Os1ObserveHeader) +
-                            static_cast<size_t>(header->record_count) *
-                                sizeof(Os1ObserveCpuRecord);
+                            static_cast<size_t>(header->record_count) * sizeof(Os1ObserveCpuRecord);
     if(observed < static_cast<long>(required))
     {
         return false;

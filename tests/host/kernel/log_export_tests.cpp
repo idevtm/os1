@@ -144,6 +144,7 @@ protected:
         kmem_init(frames);
         os1::host_test::InitrdBuilder archive;
         archive.entry(".", {}, 0040755);
+        archive.entry("sbin", {}, 0040755);
         archive.finish();
         auto* data = kernel_physical_pointer<uint8_t>(0x100000);
         std::memcpy(data, archive.bytes.data(), archive.bytes.size());
@@ -182,7 +183,7 @@ protected:
         disk.assign(std::istreambuf_iterator<char>(file), {});
         device = {"log-test", disk.size() / 512, 512, 8, 1, this, submit, submit};
         device.read_only = read_only;
-        ASSERT_EQ(0, ext2_mount(initrd_namespace_root(), device));
+        ASSERT_EQ(0, mount_ext2_root_for_test(device));
     }
     static void open_during_snapshot()
     {
@@ -211,7 +212,11 @@ protected:
     NativeObject* open(const char* path)
     {
         NativeObject* object = nullptr;
-        EXPECT_EQ(0, vfs_resolve(initrd_namespace_root(), path + 1, std::strlen(path) - 1, object));
+        EXPECT_EQ(0,
+                  vfs_resolve(initrd_namespace_root(),
+                              path[1] ? path + 1 : ".",
+                              path[1] ? std::strlen(path) - 1 : 1,
+                              object));
         return object;
     }
     std::vector<uint8_t> read(const char* path)
@@ -346,7 +351,7 @@ TEST_F(LogExport, ExportDoesNotInvalidateUnrelatedDirectoryWalk)
     legacy.generation = 0;
     ASSERT_EQ(0, vfs_tree_step(table, fd, legacy));
     diagnostic_log::tick(2'000'000'000);
-    log_export::poll();  // Creates /disk/log and the first persistent segment.
+    log_export::poll();  // Creates /log and the first persistent segment.
     ASSERT_GT(log_export::info().disk_bytes, 0u);
     step.action = OS1_TREE_NEXT;
     EXPECT_EQ(0, vfs_tree_step(table, fd, step));
@@ -373,7 +378,7 @@ TEST_F(LogExport, ScopedWalkRejectsLogEntryChangesButNotSiblingExport)
         EXPECT_EQ(0, vfs_tree_step(table, fd, step));
         return step;
     };
-    for(const char* path : {"/tmp", "/disk"})
+    for(const char* path : {"/tmp", "/"})
     {
         auto* base = static_cast<VfsNode*>(open(path));
         ASSERT_NE(nullptr, base);
@@ -420,7 +425,7 @@ TEST_F(LogExport, ScopedMoveInvalidatesBothParentsAndMovedObjectOnBothBackends)
         EXPECT_EQ(0, vfs_tree_step(table, fd, step));
         return step;
     };
-    for(const char* path : {"/tmp", "/disk"})
+    for(const char* path : {"/tmp", "/"})
     {
         auto* base = static_cast<VfsNode*>(open(path));
         ASSERT_NE(nullptr, base);
@@ -599,16 +604,16 @@ TEST_F(LogExport, DiskFramesSurviveRemountAndBootNumbersIncrease)
     ASSERT_EQ(1u, previous);
     char name[64]{};
     os1::log::filename({previous, 0, 1, 1}, name);
-    auto bytes = read((std::string("/disk/log/") + name).c_str());
+    auto bytes = read((std::string("/log/") + name).c_str());
     verify(bytes);
     log_export::test_reset();
     reset_initrd_namespace_for_test();
     ASSERT_EQ(0, initialize_initrd_namespace());
-    ASSERT_EQ(0, ext2_mount(initrd_namespace_root(), device));
+    ASSERT_EQ(0, mount_ext2_root_for_test(device));
     log_export::initialize();
     ASSERT_EQ(0, log_export::run(OS1_LOG_EXPORT_DISK));
     EXPECT_EQ(previous + 1, log_export::info().boot_id);
-    EXPECT_EQ(bytes, read((std::string("/disk/log/") + name).c_str()));
+    EXPECT_EQ(bytes, read((std::string("/log/") + name).c_str()));
 }
 TEST_F(LogExport, ShutdownReportsBusyBeforeStorageSyncWhenAdmissionStaysHeld)
 {
@@ -728,7 +733,7 @@ TEST_F(LogExport, RotationRetainsFourBootsAndForeignFiles)
         log_export::test_reset();
         log_export::initialize();
     }
-    auto* object = open("/disk/log");
+    auto* object = open("/log");
     auto* dir = static_cast<VfsNode*>(object);
     uint64_t cursor = 0, next = 0;
     std::set<uint64_t> boots;
@@ -792,7 +797,7 @@ TEST_F(LogExport, PendingHistoryCompletionAndClosingLifetime)
     EXPECT_EQ(0u, log_export::info().closing_lost);
     char name[64]{};
     os1::log::filename({1, thread->process->pid, 2, 2}, name);
-    auto bytes = read((std::string("/disk/log/") + name).c_str());
+    auto bytes = read((std::string("/log/") + name).c_str());
     verify(bytes);
     unsigned pending = 0, completed = 0, suppressed = 0;
     for(size_t at = 0; at < bytes.size();)
@@ -846,7 +851,7 @@ TEST_F(LogExport, ShellThresholdDrainsBeforePeriodicDeadlineAndMissingDiskReleas
 TEST_F(LogExport, FreeSpaceReserveStopsExportBeforeCreatingDirectory)
 {
     mount();
-    auto* root = open("/disk");
+    auto* root = open("/");
     auto* dir = static_cast<VfsNode*>(root);
     OpenInstance* output = nullptr;
     ASSERT_EQ(0, dir->operations->create(dir, "fill", 4, OS1_OBJECT_FILE, output));
@@ -902,7 +907,7 @@ TEST_F(LogExport, RetentionRevalidatesReplacementBeforeRemoval)
     EXPECT_EQ(OS1_ERR_EXISTS, log_export::run(OS1_LOG_EXPORT_DISK));
     char name[64]{};
     os1::log::filename({1, 0, 1, 1}, name);
-    auto data = read((std::string("/disk/log/") + name).c_str());
+    auto data = read((std::string("/log/") + name).c_str());
     EXPECT_EQ("user", std::string(data.begin(), data.end()));
 }
 TEST_F(LogExport, TemporaryCleanupRevalidatesReplacement)
@@ -927,7 +932,7 @@ TEST_F(LogExport, HeaderReadFailureIsNotForeignFile)
     ASSERT_EQ(0, log_export::run(OS1_LOG_EXPORT_DISK));
     char name[64]{};
     os1::log::filename({1, 0, 1, 1}, name);
-    auto* object = open((std::string("/disk/log/") + name).c_str());
+    auto* object = open((std::string("/log/") + name).c_str());
     auto* node = static_cast<VfsNode*>(object);
     auto* original = node->operations;
     VfsOperations fail = *original;
@@ -944,7 +949,7 @@ TEST_F(LogExport, IndirectAllocationMaintainsFreeSpaceReserve)
     mount();
     events(1);
     ASSERT_EQ(0, log_export::run(OS1_LOG_EXPORT_DISK));
-    auto* dir_object = open("/disk/log");
+    auto* dir_object = open("/log");
     auto* dir = static_cast<VfsNode*>(dir_object);
     // Inject space reporting at the VFS contract: a 10% reserve need not align to a block.
     auto* original = dir->operations;
@@ -958,7 +963,7 @@ TEST_F(LogExport, IndirectAllocationMaintainsFreeSpaceReserve)
     dir->operations = &limited;
     char name[64]{};
     os1::log::filename({1, 0, 1, 1}, name);
-    auto* file_object = open((std::string("/disk/log/") + name).c_str());
+    auto* file_object = open((std::string("/log/") + name).c_str());
     auto* file = static_cast<VfsNode*>(file_object);
     ASSERT_EQ(0, file->operations->truncate(file, 49152));
     object_release(file_object);
@@ -974,7 +979,7 @@ TEST_F(LogExport, ShortAppendRetainsPrefixAndUsesNewSegment)
     ASSERT_EQ(0, log_export::run(OS1_LOG_EXPORT_DISK));
     char name[64]{};
     os1::log::filename({1, 0, 1, 1}, name);
-    std::string path = std::string("/disk/log/") + name;
+    std::string path = std::string("/log/") + name;
     auto prefix = read(path.c_str());
     auto* object = open(path.c_str());
     auto* node = static_cast<VfsNode*>(object);
@@ -997,7 +1002,7 @@ TEST_F(LogExport, ShortAppendRetainsPrefixAndUsesNewSegment)
     ASSERT_EQ(0, log_export::run(OS1_LOG_EXPORT_DISK));
     EXPECT_EQ(torn, read(path.c_str()));
     os1::log::filename({1, 0, 2, 1}, name);
-    verify(read((std::string("/disk/log/") + name).c_str()));
+    verify(read((std::string("/log/") + name).c_str()));
 }
 TEST_F(LogExport, ByteAndSegmentBudgetsHoldUnderSustainedTraffic)
 {
@@ -1016,7 +1021,7 @@ TEST_F(LogExport, ByteAndSegmentBudgetsHoldUnderSustainedTraffic)
         ASSERT_EQ(0, log_export::run(OS1_LOG_EXPORT_DISK));
     }
     const auto measured_reads = read_bytes;
-    auto* object = open("/disk/log");
+    auto* object = open("/log");
     auto* dir = static_cast<VfsNode*>(object);
     unsigned count = 0;
     uint64_t cursor = 0, next = 0, total[2]{};
@@ -1031,7 +1036,7 @@ TEST_F(LogExport, ByteAndSegmentBudgetsHoldUnderSustainedTraffic)
         ++count;
         os1::log::Name n{};
         ASSERT_TRUE(os1::log::parse_name(entry.name, entry.name_bytes, n));
-        auto data = read((std::string("/disk/log/") + entry.name).c_str());
+        auto data = read((std::string("/log/") + entry.name).c_str());
         verify(data);
         EXPECT_LE(data.size(), 262144u);
         total[n.stream - 1] += data.size();
@@ -1154,7 +1159,7 @@ TEST_F(LogExport, VfsTickWakesWorkerWithoutReadingStorage)
     ASSERT_NE(nullptr, worker);
     ASSERT_EQ(ThreadState::Blocked, worker->state);
 
-    auto* disk_root = static_cast<VfsNode*>(open("/disk"));
+    auto* disk_root = static_cast<VfsNode*>(open("/"));
     ASSERT_NE(nullptr, disk_root);
     OpenInstance* opened = nullptr;
     ASSERT_EQ(0, disk_root->operations->create(disk_root, "test", 4, OS1_OBJECT_FILE, opened));
@@ -1191,7 +1196,7 @@ TEST_F(LogExport, ConsoleWriteContinuesWhileFileIoDefers)
     mount();
     shell();
     ASSERT_EQ(0, descriptor_bootstrap_console(thread->process->descriptors));
-    auto* disk_root = static_cast<VfsNode*>(open("/disk"));
+    auto* disk_root = static_cast<VfsNode*>(open("/"));
     ASSERT_NE(nullptr, disk_root);
     OpenInstance* opened = nullptr;
     ASSERT_EQ(0, disk_root->operations->create(disk_root, "test", 4, OS1_OBJECT_FILE, opened));

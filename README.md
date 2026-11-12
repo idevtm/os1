@@ -16,7 +16,7 @@ The BIOS compatibility image loads the same kernel before entering its higher-ha
 The freestanding C++20 kernel loads protected user programs from initrd or ext2.
 It provides syscall entry through `SYSCALL` and return through `SYSRET`.
 
-The kernel starts `/bin/init`, which supervises `/disk/bin/sh` and the initrd rescue console.
+The kernel starts `/sbin/init`, which supervises `/bin/sh` and the initrd rescue console.
 Console output uses VGA text mode or a framebuffer text renderer.
 The [deployment guide](docs/filesystems/program-deployment.md#boot-and-recovery) describes disk startup and recovery.
 
@@ -24,7 +24,7 @@ Milestone 5 is implemented and the 2026-04-30 driver/device/platform pass landed
 
 The 2026-05-10 integration replaced the previous AML interpreter with upstream ACPICA.
 ACPICA supports table discovery, namespace loading, device enumeration, `_PRT` routing, resource parsing, and device power transitions.
-`/disk/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose cached route information through passive userland observation.
+`/bin/acpiprobe` and `OS1_OBSERVE_ACPI` expose cached route information through passive userland observation.
 
 Fresh UEFI images show two boot entries: `os1` and `os1 diagnostics`.
 The second entry enables the [accepted diagnostic logging budgets](docs/native-api/context-diagnostics.md#accepted-defaults--2026-11-08).
@@ -50,7 +50,7 @@ isolation, and a kernel-only update path for the preserved G74SX USB layout.
 The [2026-11-06 review](docs/reviews/2026-11-06-review.md) records current capabilities, corrected findings, and remaining priorities.
 It distinguishes the corrected BIOS scheduler-handoff fault from unrelated historical failures and physical qualification still needed.
 ACPI observation now reads cached routes without executing firmware methods.
-`/disk/bin/acpiprobe` reports passive inventory and disabled power control.
+`/bin/acpiprobe` reports passive inventory and disabled power control.
 The [passive observation record](docs/archive/kernel/2026-11-05-passive-acpi-observation.md) documents this correction. The [console descriptor milestone](docs/native-api/abi/console-descriptor-abi.md) now provides real
 process entries, rights, duplication, close, flags, and retained I/O references.
 The [dated implementation plan](docs/archive/native-api/2026-11-04-console-descriptor-implementation-plan.md)
@@ -62,13 +62,13 @@ explicit child grants, and executable-reference launch. The
 Initrd contains `init` and `rescue` for recovery without storage.
 The normal shell, utilities, and resources require ext2.
 See [disk shell startup](docs/filesystems/program-deployment.md#boot-and-recovery) before upgrading an existing image.
-Other bundled programs are installed under `/disk/bin`; the shell initially searches `/bin`, then `/disk/bin`; typed path operations can change that list.
+Other bundled programs are installed under `/bin`; the shell initially searches `/bin`; typed path operations can change that list.
 For an existing QEMU disk, run `./os1.sh storage_deploy` after this upgrade.
 For an existing managed USB stick, select **Update boot and programs (preserve data)**.
 See the [deployment guide](docs/filesystems/program-deployment.md).
 
-`intf /disk/bin/textprocessor` prints interface records from the binary without running it.
-The [Counter/events phase](docs/native-api/abi/counter-events-abi.md) adds `/disk/bin/counter`, typed
+`intf /bin/textprocessor` prints interface records from the binary without running it.
+The [Counter/events phase](docs/native-api/abi/counter-events-abi.md) adds `/bin/counter`, typed
 constructor arguments and CLI conversion, volatile subscriptions, timed waits,
 and parent-owned private-provider supervision. The [shared activation phase](docs/native-api/abi/shared-activation-abi.md) adds
 bounded capability attachments and a scoped activation service whose Counter
@@ -79,7 +79,7 @@ network stack remain future work.
 The [session and rich-parameter implementation](docs/archive/native-api/2026-11-05-client-sessions-and-parameters.md)
 adds independent budgeted Counter sessions, observer/mutable activation grants,
 and shared constructor/method codecs with typed defaults, descriptions and dot-based
-CLI conversion. Try `intf /disk/bin/paramdemo`, `paramcheck`, and `activationcheck`.
+CLI conversion. Try `intf /bin/paramdemo`, `paramcheck`, and `activationcheck`.
 The [exclusive Buffer ABI](docs/native-api/abi/buffer-loans-abi.md) adds Operation-scoped loans and distinct reply outputs.
 `buffercheck` exercises both TextProcessor paths. See the [implementation record](docs/archive/native-api/2026-11-05-exclusive-buffer-implementation.md) for validation and limits.
 Inline control payloads remain bounded to 256 bytes. Live readers and shared read/write remain deferred.
@@ -87,7 +87,7 @@ Inline control payloads remain bounded to 256 bytes. Live readers and shared rea
 The [temporary filesystem ABI](docs/native-api/abi/tmpfs-abi.md) adds native Directory/File methods, mutation rights, and bounded writable `/tmp`.
 Run `vfscheck` to check native clients, descriptor access, sparse files, and unlink lifetime.
 Kernel Buffer transfers remain deferred. Physical USB controller qualification remains in progress.
-[Persistent ext2 in QEMU](docs/filesystems/ext2.md) mounts `/disk`, runs a disk-only utility, and preserves synchronized files across reboot.
+[Persistent ext2 in QEMU](docs/filesystems/ext2.md) mounts ext2 as `/`, runs a disk-only utility, and preserves synchronized files across reboot.
 
 The [kernel Console adapter](docs/native-api/abi/kernel-console-abi.md) adds copied IPC `write`, `try_read`, and the `info` property.
 `ipccheck` exercises two processes with independent service authority and retained asynchronous results.
@@ -372,7 +372,7 @@ Up/Down selects; Tab descends; Enter accepts a selection before a later Enter ex
 See the [context discovery guide](docs/native-api/context-discovery.md) for the current scope and input controls.
 See [typed context and basic commands](docs/shell/typed-context.md) for cwd, path configuration, strict scripts, and same-filesystem moves.
 See [metadata and recursive tools](docs/shell/filesystem-tools.md) for `stat`, `df`, `find`, `du`, `cp -r`, and `rm -r`.
-Use `less "/disk/log"` for [interactive paging](docs/shell/pager.md); press `b` to go back or `q` to quit.
+Use `less "/log"` for [interactive paging](docs/shell/pager.md); press `b` to go back or `q` to quit.
 See [text utilities](docs/shell/text-utilities.md) for `head`, `tail`, `grep`, `wc`, `file`, and their typed method bindings.
 Files under `/tmp` disappear on reboot.
 
@@ -429,7 +429,7 @@ The build writes outputs under `build/artifacts/`:
 - `kernel.elf` — shared higher-half kernel core used by the BIOS path and loaded as a module by the Limine path
 - `kernel_limine.elf` — higher-half Limine frontend that normalizes boot state, loads the shared kernel by physical `PT_LOAD` ranges, and enters it through temporary transition mappings
 - `cpu_start.bin` — AP trampoline blob used for debugging / disassembly
-- `initrd.cpio` — recovery archive containing `/bin/init` and `/bin/rescue`
+- `initrd.cpio` — recovery archive containing `/sbin/init` and `/sbin/rescue`
 - `virtio-test-disk.raw` — generated raw disk image used to validate the `virtio-blk` path during boot and smoke tests
 - `user/*.elf` — statically linked programs for recovery packaging or ext2 deployment
 - `program-test-disk.raw` — disposable ext2 program fixture; QEMU tests use private overlays
@@ -449,7 +449,7 @@ The raw image remains 2880 sectors (1.44 MB), including the unchanged boot-log a
 
 The smoke targets cover both boot paths, including the baseline shell, observability, SMP balance, `exec`, and `spawn` flows, so higher-half regressions are exercised on both UEFI and BIOS.
 
-`/disk/bin/ascii` prints the `0x00..0x7F` ASCII table in 8 columns and exists mainly as a visual check that the framebuffer text backend is rendering the bundled 8x16 font correctly.
+`/bin/ascii` prints the `0x00..0x7F` ASCII table in 8 columns and exists mainly as a visual check that the framebuffer text backend is rendering the bundled 8x16 font correctly.
 
 The helper wrapper scripts remain available as thin CMake frontends:
 
@@ -564,8 +564,8 @@ See [program deployment](docs/filesystems/program-deployment.md) for manifests a
 cmake --build build --target run_persistent
 ```
 
-Inside the guest, run `/disk/diskutil seed`, then `/disk/diskutil verify`.
-Run `/disk/diskutil sync` after shell writes and before stopping QEMU.
+Inside the guest, run `/diskutil seed`, then `/diskutil verify`.
+Run `/diskutil sync` after shell writes and before stopping QEMU.
 Use `run_usb_storage` or `run_usb_storage_bios` to attach the same disk through xHCI USB mass storage.
 Use `run_ehci_storage_uefi` or `run_ehci_storage_bios` for EHCI USB 2 storage.
 The USB persistence checks cover both controllers; high-speed EHCI hubs still need physical qualification.
@@ -577,7 +577,7 @@ The two-boot smoke tests also use `e2fsck` when available (`brew install e2fspro
 ### USB boot with persistent data
 
 Run `./os1.sh usb` and select **Create boot + ext2 data image (erase USB)**.
-This creates boot partitions and a preformatted 128 MiB data partition mounted at `/disk`.
+This creates boot partitions and a preformatted 128 MiB data partition mounted as `/`.
 For later changes, select **Update boot files**, **Deploy programs**, or **Update boot and programs**.
 These actions retain a backup and preserve the existing data layout and unlisted files.
 See the [USB workflow](docs/hardware/usb-image-workflow.md) for requirements, preservation limits, and recovery notes.
@@ -596,7 +596,7 @@ See the [SystemControl contract](docs/native-api/abi/system-control-abi.md) for 
 
 Memory logs can be exported without a diagnostic boot image.
 Run `os.system.log.export target:"tmp"` to refresh bounded snapshots under `/tmp/log`.
-Run `os.system.log.export target:"disk"` to drain and synchronize persistent segments under `/disk/log`.
+Run `os.system.log.export target:"disk"` to drain and synchronize persistent segments under `/log`.
 `os.system.log.export_info` reports status and failure counters.
 Automatic disk export uses bounded retention and stops after repeated failures.
 See the [log export ABI](docs/native-api/abi/log-export-abi.md) for recovery, privacy, and storage limits.

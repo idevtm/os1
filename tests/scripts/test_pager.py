@@ -119,7 +119,7 @@ def main():
                 expect()
                 rows.append({'repeat': repeat, 'shell_idle': baseline, 'pager_idle': candidate})
             log.with_suffix('.idle.json').write_text(json.dumps(rows, indent=2) + '\n')
-        for root in ('/tmp', '/disk'):
+        for root in ('/tmp', '/'):
             path = root + '/pager-input'
             for i in range(65):
                 result = run(f'echo "page-line-{i:03d}" {">" if i == 0 else ">>"} "{path}"')

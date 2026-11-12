@@ -30,14 +30,14 @@ There is no general shell glob expansion or regular expression support.
 
 ```text
 stat "/tmp/note"
-find "/disk" name:"*.txt" kind:file
+find "/" name:"*.txt" kind:file
 fs.find "/tmp" kind:directory
-cp -r destination:"/disk/backup" "/tmp/work"
-fs.copy "/tmp/work" "/disk/backup" recursive:true
+cp -r destination:"/backup" "/tmp/work"
+fs.copy "/tmp/work" "/backup" recursive:true
 rm -r "/tmp/work"
-du "/disk/backup"
-fs.usage "/disk/backup" logical:true
-df "/disk"
+du "/backup"
+fs.usage "/backup" logical:true
+df "/"
 ```
 
 Named arguments can occur before or after positional arguments.
@@ -74,7 +74,7 @@ Current shell input and backend limits can be smaller.
 Each frame retains source and optional destination handles; frame storage is bounded.
 File copy uses a 4096-byte buffer.
 Traversal stays within the starting filesystem and does not follow future links.
-A namespace-root search therefore excludes `/tmp` and `/disk`; select each mount explicitly.
+A search from the ext2 root excludes `/sbin` and `/tmp`. Select each mount explicitly.
 
 An existing destination directory receives the source basename.
 Recursive copies merge directories and replace destination files by default.

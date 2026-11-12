@@ -82,7 +82,7 @@ def create(output, utility, mib=32, reset=False, manifest=None):
         offset += length
     inode(2, 0o40755, directory, 2)
     inode(11, 0o100755, Path(utility).read_bytes())
-    inode(12, 0o100644, b'Persistent ext2 storage. Run /disk/diskutil sync before stopping QEMU.\n')
+    inode(12, 0o100644, b'Persistent ext2 storage. Run /diskutil sync before stopping QEMU.\n')
     superblock = bytearray(1024)
     for offset, value in {0: inodes, 4: blocks, 12: blocks - next_block, 16: inodes - 12,
                           24: 2, 28: 2, 32: 32768, 36: 32768, 40: inodes,

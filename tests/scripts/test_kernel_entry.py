@@ -29,8 +29,8 @@ def main():
     disk = log.with_suffix('.raw')
     manifest = log.with_suffix('.json')
     shutil.copyfile(args.program_disk, disk)
-    manifest.write_text(json.dumps({'version': 1, 'programs': [
-        {'source': str(Path(args.probe).resolve()), 'destination': '/disk/bin/entry-probe'}]}))
+    manifest.write_text(json.dumps({'version': 3, 'programs': [
+        {'source': str(Path(args.probe).resolve()), 'destination': '/bin/entry-probe'}]}))
     deploy(disk, manifest, args.debugfs, args.e2fsck)
 
     def exercise(run, _expect):

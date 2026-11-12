@@ -10,7 +10,7 @@ This is an experimental ABI; rebuild user binaries for the current startup versi
 
 ```text
 counter --initial 10 --ceiling 100
-intf /disk/bin/counter
+intf /bin/counter
 countercheck
 ```
 

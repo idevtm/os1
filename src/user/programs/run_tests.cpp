@@ -214,7 +214,7 @@ bool output_directory(uint64_t fingerprint, const char* label)
     tr::hex(fingerprint, machine + at);
     for(unsigned i = 0; i < 16; ++i)
         build[2 + i] = identity.image[i];
-    freestanding::copy_string(directory, sizeof(directory), "/disk/tests");
+    freestanding::copy_string(directory, sizeof(directory), "/tests");
     if(mkdir(directory) < 0)
         return false;
     const char* components[] = {machine, build};
@@ -295,7 +295,7 @@ long ehci_stall_capture()
     text(1, "Move the USB mouse continuously for 20 to 30 seconds. Press q when done.\n");
     const char* args[] = {"gfxdemo", "--stall-report"};
     const long pid = u::run_program(
-        "/disk/bin/gfxdemo", 2, args, false, 0, nullptr, nullptr, nullptr, -1, nullptr, demo.fd);
+        "/bin/gfxdemo", 2, args, false, 0, nullptr, nullptr, nullptr, -1, nullptr, demo.fd);
     if(pid < 0)
         return pid;
     int child_status = 0;
@@ -746,8 +746,7 @@ int main(int argc, char** argv)
     }
     if(!output_directory(fingerprint.value, label))
     {
-        f::message(
-            "run-tests: cannot create a new /disk/tests run; check storage and free space\n");
+        f::message("run-tests: cannot create a new /tests run; check storage and free space\n");
         return 1;
     }
     text(1, "run-tests: results ");
@@ -791,7 +790,7 @@ int main(int argc, char** argv)
     if(ehci_stalls)
         field(manifest.fd, "ehci_stalls", 1);
     {
-        f::Handle binary(u::open("/disk/bin/run-tests", OS1_RIGHT_READ));
+        f::Handle binary(u::open("/bin/run-tests", OS1_RIGHT_READ));
         tr::Hash deployed;
         long n = binary.fd < 0 ? binary.fd : 0;
         while(binary.fd >= 0 && (n = u::read(binary.fd, scratch, sizeof(scratch))) > 0)

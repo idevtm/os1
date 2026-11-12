@@ -35,8 +35,10 @@ def manifest_entries(manifest):
     data = json.loads(manifest.read_text())
     if (not isinstance(data, dict) or
             not ((data.get('version') == 1 and set(data) == {'version', 'programs'}) or
-                 (data.get('version') == 2 and set(data) == {'version', 'programs', 'resources'}))):
-        raise ValueError('expected version 1 programs or version 2 programs and resources')
+                 (data.get('version') == 2 and set(data) == {'version', 'programs', 'resources'}) or
+                 (data.get('version') == 3 and set(data) in ({'version', 'programs'},
+                                                              {'version', 'programs', 'resources'})))):
+        raise ValueError('expected version 1 programs or version 2/3 programs and resources')
     programs = data['programs']
     resources = data.get('resources', [])
     if (not isinstance(programs, list) or not isinstance(resources, list) or
@@ -48,9 +50,12 @@ def manifest_entries(manifest):
         if not isinstance(entry, dict) or set(entry) != {'source', 'destination'}:
             raise ValueError('each program needs source and destination')
         destination = entry['destination']
-        if not isinstance(destination, str) or not destination.startswith('/disk/'):
-            raise ValueError('destination must be beneath /disk')
-        components = destination[6:].split('/')
+        prefix = '/' if data['version'] == 3 else '/disk/'
+        if not isinstance(destination, str) or not destination.startswith(prefix):
+            raise ValueError(f'destination must start with {prefix}')
+        components = destination[len(prefix):].split('/')
+        if components[0] in ('sbin', 'tmp'):
+            raise ValueError('destination overlaps a reserved mount')
         if (len(destination) > 255 or any(not re.fullmatch(r'[A-Za-z0-9_.-]{1,63}', c) or
                                           c in ('.', '..') for c in components)):
             raise ValueError('destination needs bounded plain path components')
@@ -111,7 +116,7 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
             for name, (mode, _) in programs.items():
                 if name in before and (before[name][0] & 0xf000 != 0x8000 or
                                        (mode == 0o100755 and not before[name][0] & 0o111)):
-                    raise ValueError(f'refusing to replace a data file or directory: /disk{name}')
+                    raise ValueError(f'refusing to replace a data file or directory: {name}')
             # Resource defaults are create-only. Preserve existing files, including metadata.
             changed = {name: (mode, content) for name, (mode, content) in programs.items()
                        if name not in before or (mode == 0o100755 and
@@ -147,12 +152,12 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
             after = snapshot(part)
             for name, prior in before.items():
                 if name not in changed and after.get(name) != prior:
-                    raise ValueError(f'preservation check failed: /disk{name}')
+                    raise ValueError(f'preservation check failed: {name}')
             if set(after) != set(before) | set(programs) | directories:
                 raise ValueError('unexpected namespace change')
             for name, (mode, content) in changed.items():
                 if after.get(name, ())[:2] != (mode, hashlib.sha256(content).hexdigest()):
-                    raise ValueError(f'program verification failed: /disk{name}')
+                    raise ValueError(f'program verification failed: {name}')
             staged = temporary / 'image.raw'
             with staged.open('w+b') as target:
                 # Lock the replacement inode before publication, too.
@@ -175,7 +180,7 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
                 finally:
                     os.close(directory_fd)
             for name in changed:
-                print(f'Deployed /disk{name} sha256={hashlib.sha256(programs[name][1]).hexdigest()}')
+                print(f'Deployed {name} sha256={hashlib.sha256(programs[name][1]).hexdigest()}')
             print(f'Preserved {len(before.keys() - changed.keys())} existing entries; '
                   f'elapsed_seconds={time.monotonic()-started:.6f}; staging_bytes<={length*2+start+sum(len(content) for _, content in changed.values())}')
             return True

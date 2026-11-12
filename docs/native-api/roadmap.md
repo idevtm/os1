@@ -26,7 +26,7 @@ flowchart TD
 ```
 
 The [ext2 shell startup record](../archive/filesystems/2026-11-09-ext2-shell-bootstrap.md) moves normal userland out of initrd.
-This packaging change retains the current object protocols and `/disk` namespace.
+That packaging change kept the object protocols and the historical `/disk` namespace.
 Physical startup and preserving updates need separate hardware acceptance.
 
 ## Current foundation and gaps
@@ -85,7 +85,7 @@ Permissions and links remain deferred.
 | Broader services, proposed | Dynamic registration, device interfaces, and application resource contexts |
 
 The minimal initrd and disk-program split is implemented; see its [record](../archive/filesystems/2026-11-06-minimal-initrd.md).
-Current search defaults to `/bin`, then `/disk/bin`; local typed path operations can change the inherited list.
+The initial search path contains `/bin`. Typed path operations can change the inherited list.
 Startup ABI version 3 carries the typed context; no text `PATH` mirror is introduced.
 The selected environment contains inherited plain data; capabilities remain separate explicit grants.
 Existing service and hardware work does not require a complete reflective shell.
@@ -349,7 +349,7 @@ The [design proposal](context-diagnostics.md) records options and acceptance cri
 | Live context discovery | Inspect available `os` and `process` members without object creation | Fixed authorized descriptions, bounded child enumeration, and shell completion |
 | Kernel diagnostics | Capture system, API, and device records in bounded memory; failures must not stop the system | Structured records, query filters, explicit loss, and command correlation |
 | Shell history | Keep timestamped command records in a shell-owned memory ring | Command start/result records and optional filters |
-| Staged exports | Kernel: memory, `/tmp`, USB; shell serialization: `/tmp`, USB | Bounded files under `/tmp/log` and `/disk/log`; independent export failures |
+| Staged exports | Kernel: memory, `/tmp`, USB; shell serialization: `/tmp`, USB | Bounded files under `/tmp/log` and `/log`; independent export failures |
 | Hardware automation | Correlate commands, kernel work, and device observations | Export build identity, boot identity, clock quality, records, and loss evidence |
 
 The [first memory logging slice](abi/memory-log-abi.md) implements bounded capture and command correlation.

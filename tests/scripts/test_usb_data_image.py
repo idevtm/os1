@@ -57,8 +57,8 @@ class Images(unittest.TestCase):
         self.utility = self.root / 'utility'
         self.manifest = self.root / 'manifest.json'
         self.utility.write_bytes(elf(b'version1'))
-        self.manifest.write_text(json.dumps({'version': 1, 'programs': [
-            {'source': str(self.utility), 'destination': '/disk/diskutil'}]}))
+        self.manifest.write_text(json.dumps({'version': 3, 'programs': [
+            {'source': str(self.utility), 'destination': '/diskutil'}]}))
         boot_fixture(self.boot)
         usb.create(self.boot, self.utility, self.manifest, self.image, 4)
         self.end = self.image.stat().st_size

@@ -326,9 +326,15 @@ TEST_F(Ext2, VfsMountAuthoritySnapshotAndUnlinkPolicy)
     EXPECT_EQ(mount->operations->remove(mount, "new", 3, 0), OS1_ERR_WOULD_BLOCK);
     instance_release(opened);
     EXPECT_EQ(mount->operations->remove(mount, "new", 3, 0), 0);
+    ASSERT_EQ(0, mount->operations->create(mount, "sbin", 4, OS1_OBJECT_DIRECTORY, opened));
+    instance_release(opened);
     EXPECT_EQ(mount->operations->sync(mount), 0);
     object_release(mount);
     root_node.children = nullptr;
+    NativeObject* boot_root = &root_node;
+    EXPECT_EQ(OS1_ERR_BAD_IMAGE, ext2_mount_root(boot_root, device));
+    EXPECT_EQ(&root_node, boot_root);
+    EXPECT_EQ(nullptr, root_node.children);
     ext2::put32(disk.bytes.data() + 454, UINT32_MAX);
     EXPECT_EQ(ext2_mount(&root_node, device), OS1_ERR_BAD_IMAGE);
 }

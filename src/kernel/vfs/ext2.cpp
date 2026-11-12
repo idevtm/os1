@@ -292,9 +292,11 @@ long remove_locked(VfsNode* base, const char* name, size_t size, uint32_t kind)
         return OS1_ERR_INVALID;
     if(!p->linked)
         return OS1_ERR_CLOSED;
-    auto* child = static_cast<DiskNode*>(find(p, name, size));
+    auto* child = find(p, name, size);
     if(!child)
         return OS1_ERR_NOT_FOUND;
+    if(child->mount_root)
+        return OS1_ERR_ACCESS;
     if(kind && child->kind != kind)
         return OS1_ERR_INVALID;
     if(child->children)
@@ -302,7 +304,9 @@ long remove_locked(VfsNode* base, const char* name, size_t size, uint32_t kind)
     // Ext2 has no orphan journal. Do not unlink an object retained by a caller.
     if(atomic_load_acquire(&child->references) != 1)
         return OS1_ERR_WOULD_BLOCK;
-    long r = fs.volume.remove(p->number, p->inode, name, size, child->number, child->inode);
+    auto* disk_child = static_cast<DiskNode*>(child);
+    long r =
+        fs.volume.remove(p->number, p->inode, name, size, disk_child->number, disk_child->inode);
     if(r < 0)
         return r;
     VfsNode** at = &p->children;
@@ -340,6 +344,8 @@ long rename(VfsNode* base, const char* from, size_t a, const char* to, size_t b)
     if(!child)
         return OS1_ERR_NOT_FOUND;
     auto* target = find(p, to, b);
+    if(child->mount_root || (target && target->mount_root))
+        return OS1_ERR_ACCESS;
     if(target == child)
         return 0;
     if(target)
@@ -392,12 +398,16 @@ long move(VfsNode* from,
         return OS1_ERR_INVALID;
     if(!p->linked || !q->linked)
         return OS1_ERR_CLOSED;
-    auto* child = static_cast<DiskNode*>(find(p, source, a));
-    if(source_id && (!child || child->object_id != source_id))
+    auto* source_node = find(p, source, a);
+    if(source_id && (!source_node || source_node->object_id != source_id))
         return OS1_ERR_CHANGED;
-    auto* target = static_cast<DiskNode*>(find(q, destination, b));
-    if(!child)
+    auto* target_node = find(q, destination, b);
+    if(!source_node)
         return OS1_ERR_NOT_FOUND;
+    if(source_node->mount_root || (target_node && target_node->mount_root))
+        return OS1_ERR_ACCESS;
+    auto* child = static_cast<DiskNode*>(source_node);
+    auto* target = static_cast<DiskNode*>(target_node);
     if(child == target)
         return 0;
     if(vfs_contains(child, q))
@@ -639,7 +649,7 @@ const VfsOperations operations{lookup,        create,        remove, rename,    
                                sync,          snapshot,      move,   metadata,  space,
                                create_locked, remove_locked, times,  set_times, ext2::block_bytes};
 }  // namespace
-long ext2_mount(NativeObject* root, BlockDevice& device)
+static long mount_ext2(NativeObject*& root, BlockDevice& device, bool as_root)
 {
     if(!root || root->kind != OS1_OBJECT_DIRECTORY || device.sector_size != 512)
         return OS1_ERR_INVALID;
@@ -702,7 +712,7 @@ long ext2_mount(NativeObject* root, BlockDevice& device)
         kfree(fs);
         return r;
     }
-    auto* mount = node(*fs, 2, inode, "disk", 4, 0);
+    auto* mount = node(*fs, 2, inode, as_root ? "" : "disk", as_root ? 0 : 4, 0);
     if(!mount)
     {
         kfree(fs);
@@ -719,20 +729,65 @@ long ext2_mount(NativeObject* root, BlockDevice& device)
             if(bool(fs->volume.allocated[b / 8] & (1u << (b % 8))) != bool(fs->volume.owners[b]))
                 r = OS1_ERR_BAD_IMAGE;
     }
-    if(r == 0 && find(static_cast<VfsNode*>(root), "disk", 4))
+    if(r == 0 && !as_root && find(static_cast<VfsNode*>(root), "disk", 4))
         r = OS1_ERR_EXISTS;
     if(r < 0)
     {
         object_release(mount);
         return r;
     }
-    mount->next = static_cast<VfsNode*>(root)->children;
-    static_cast<VfsNode*>(root)->children = mount;
+    auto* previous = static_cast<VfsNode*>(root);
+    if(as_root)
+    {
+        const char* reserved[] = {"sbin", "tmp"};
+        for(const char* name : reserved)
+        {
+            const size_t size = name[0] == 's' ? 4 : 3;
+            auto* attachment = find(previous, name, size);
+            if(!attachment)
+                continue;
+            if(auto* hidden = find(mount, name, size))
+            {
+                vfs_detach(mount, hidden);
+                object_release(hidden);
+            }
+            vfs_detach(previous, attachment);
+            attachment->mount_root = true;
+            attachment->cookie = ++fs->cookie;
+            attachment->next = mount->children;
+            mount->children = attachment;
+        }
+        root = mount;
+        object_release(previous);
+    }
+    else
+    {
+        mount->next = previous->children;
+        previous->children = mount;
+    }
     mounted_disk = fs;
     hardware_catalog::mounted(
         device, unsigned((partition - (mbr + 446)) / 16 + 1), fs->volume.super);
     return 0;
 }
+
+long ext2_mount_root(NativeObject*& root, BlockDevice& device)
+{
+    if(!root || root->kind != OS1_OBJECT_DIRECTORY)
+        return OS1_ERR_INVALID;
+    // Only the boot archive can supply the first user process.
+    auto* recovery = find(static_cast<VfsNode*>(root), "sbin", 4);
+    if(!recovery || recovery->kind != OS1_OBJECT_DIRECTORY || recovery->operations)
+        return OS1_ERR_BAD_IMAGE;
+    return mount_ext2(root, device, true);
+}
+
+#if defined(OS1_HOST_TEST)
+long ext2_mount(NativeObject* root, BlockDevice& device)
+{
+    return mount_ext2(root, device, false);
+}
+#endif
 
 long ext2_system_sync(bool freeze)
 {

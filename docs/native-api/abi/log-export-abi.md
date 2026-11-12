@@ -1,13 +1,13 @@
 # Log export ABI
 
-This profile exports existing memory records to bounded files under `/tmp/log` and `/disk/log`.
+This profile exports existing memory records to bounded files under `/tmp/log` and `/log`.
 Memory capture and queries remain available when export fails.
 
 ```text
 kernel ring + retained shell histories
   -> copy one record under the capture lock
   -> shared 64 KiB staging buffer
-  -> explicit /tmp snapshots OR periodic /disk segments
+  -> explicit /tmp/log snapshots OR periodic /log segments
   -> CRC32 validation -> host JSON Lines reader
 ```
 
@@ -24,7 +24,7 @@ The true namespace root supplies the binding authority.
 
 The export request contains four `u32` fields: version, size, target, and reserved.
 Version is 1, size is 16, and reserved is zero.
-Target 1 selects `/tmp`; target 2 selects `/disk`.
+Target 1 selects `/tmp`; target 2 selects `/`.
 No caller-supplied path is accepted.
 Export includes the available kernel records and all registered shell histories.
 Own-process history queries retain their existing access restriction.
@@ -58,7 +58,7 @@ The fixed status record has no unbounded error text.
 | Destination | Policy | Limits |
 | --- | --- | --- |
 | `/tmp/log` | Explicit replacement of managed snapshots | 32 KiB kernel plus 32 KiB aggregate shell data |
-| `/disk/log` | Append complete frames and rotate managed segments | 3 MiB kernel plus 1 MiB shell data |
+| `/log` | Append complete frames and rotate managed segments | 3 MiB kernel plus 1 MiB shell data |
 | Persistent retention | Oldest boot and segment first | Four boots; sixteen segments; 256 KiB per segment |
 | Free-space reserve | Checked before directory creation and file extension | Greater of 2 MiB or 10% of filesystem capacity |
 | Background drain | Normal / diagnostic | 2 seconds / 250 milliseconds, or 32 KiB pending |

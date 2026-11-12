@@ -30,10 +30,10 @@ def main():
     if args.workload == 'timestamps':
         commands = [('kmem', b'kmem complete'),
                     ('echo "measurement" > "/tmp/note"', None),
-                    ('echo "measurement" > "/disk/note"', None)]
+                    ('echo "measurement" > "/note"', None)]
         for _ in range(20):
-            commands.extend([('touch "/tmp/note"', None), ('touch "/disk/note"', None)])
-    commands.extend([('/disk/diskutil "sync"', b'sync ok'), ('kmem', b'kmem complete')])
+            commands.extend([('touch "/tmp/note"', None), ('touch "/note"', None)])
+    commands.extend([('/diskutil "sync"', b'sync ok'), ('kmem', b'kmem complete')])
     results = []
     for firmware in ('bios', 'uefi'):
         for repeat in range(3):

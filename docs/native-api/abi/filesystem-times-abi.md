@@ -131,9 +131,9 @@ It preserves contents and sets ACCESS and MODIFY to now through native IPC.
 
 ```text
 touch "/tmp/note"
-touch path:"/disk/note"
+touch path:"/note"
 fs.update_times "/tmp/note"
-stat "/disk/note"
+stat "/note"
 ```
 
 `stat` and `fs.info` show nanoseconds and storage resolution.

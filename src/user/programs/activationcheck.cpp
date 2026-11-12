@@ -99,7 +99,7 @@ int invalid_provider()
 }
 long start_manager(const char* class_path, os1_ipc_pair& manager, os1_ipc_pair& observer)
 {
-    long image = open("/disk/bin/activation", OS1_RIGHT_EXECUTE);
+    long image = open("/bin/activation", OS1_RIGHT_EXECUTE);
     if(image < 0)
         return image;
     long registered = open(class_path, OS1_RIGHT_EXECUTE | OS1_RIGHT_DELEGATE);
@@ -169,7 +169,7 @@ int main(int argc, char** argv)
         return 0;
     }
     os1_ipc_pair manager{}, observer{};
-    long manager_pid = start_manager("/disk/bin/counter", manager, observer);
+    long manager_pid = start_manager("/bin/counter", manager, observer);
     os1_launch_request r{};
     long image = -1;
     CHECK(manager_pid > 0, "manager launch");
@@ -270,7 +270,7 @@ int main(int argc, char** argv)
           "no initial replay");
     os1_ipc_pair sync{};
     CHECK(ipc(OS1_IPC_CREATE, 0, &sync) == 0, "sync pair");
-    image = open("/disk/bin/activationcheck", OS1_RIGHT_EXECUTE);
+    image = open("/bin/activationcheck", OS1_RIGHT_EXECUTE);
     CHECK(image >= 0, "client image");
     activation::launch_record(r);
     r.grant_count = 4;
@@ -356,7 +356,7 @@ int main(int argc, char** argv)
     close(first);
     for(unsigned fault = 0; fault < 3; ++fault)
     {
-        manager_pid = start_manager("/disk/bin/activationcheck", manager, observer);
+        manager_pid = start_manager("/bin/activationcheck", manager, observer);
         CHECK(manager_pid > 0 && ipc_wait_until(manager.client, activation::deadline()) == 0,
               "invalid provider manager");
         for(unsigned i = 0; i < 2; ++i)

@@ -30,8 +30,8 @@ def main():
         return result
 
     def first(run, expect):
-        run('/disk/bin/vfscheck "times"', b'time authority ok')
-        for root in ('/tmp', '/disk'):
+        run('/bin/vfscheck "times"', b'time authority ok')
+        for root in ('/tmp', '/'):
             path = root + '/timed'
             run(f'touch path:"{path}"')
             created = times(run, path)
@@ -63,15 +63,15 @@ def main():
             assert directory[0] == directory[1] == directory[2]
             run(f'fs.update_times "{path}"')
             saved[root] = times(run, path)
-        unsupported = run('stat "/bin/init"')
+        unsupported = run('stat "/sbin/init"')
         assert b'access_ns:unsupported modify_ns:unsupported change_ns:unsupported' in unsupported, unsupported
-        for command in ('touch "/bin/init"', 'fs.update_times "/tmp/missing"'):
+        for command in ('touch "/sbin/init"', 'fs.update_times "/tmp/missing"'):
             assert b'failed' in run(command, allow_errors=True)
         assert b'failed' in run('stat "/tmp/missing"', allow_errors=True)
         run('write "/tmp/times.sh"\ntouch "/tmp/script-file"\nfs.update_times "/tmp/script-file"\n.')
         run('sh "/tmp/times.sh"')
         times(run, '/tmp/script-file')
-        run('/disk/diskutil sync', b'sync ok')
+        run('/diskutil sync', b'sync ok')
 
     boot(args, disk, 'first', exercise=first)
     if args.e2fsck:
@@ -84,11 +84,11 @@ def main():
         assert check.returncode == 0, check.stdout + check.stderr
 
     def reboot(run, expect):
-        assert times(run, '/disk/timed') == saved['/disk']
-        run('cat "/disk/timed"', b'preserved\n')
-        assert times(run, '/disk/timed') == saved['/disk']
+        assert times(run, '/timed') == saved['/']
+        run('cat "/timed"', b'preserved\n')
+        assert times(run, '/timed') == saved['/']
         assert b'failed' in run('stat "/tmp/timed"', allow_errors=True)
-        run('/disk/diskutil sync', b'sync ok')
+        run('/diskutil sync', b'sync ok')
     boot(args, disk, 'reboot', exercise=reboot)
     print('timestamp shell, authority, noatime, and reboot checks passed')
 

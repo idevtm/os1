@@ -42,10 +42,10 @@ def exercise(run, expect):
     ok('process.environment.build', b'jobs:4')
     ok('process.environment.filename = "two/new.txt"')
     ok('cat process.environment.filename', b'payload\n')
-    ok('write "child.sh"\nprocess.environment.build.label = "child"\npath.remove "/disk/bin"\necho process.environment.build.label\npwd\n.')
+    ok('write "child.sh"\nprocess.environment.build.label = "child"\npath.remove "/bin"\necho process.environment.build.label\npwd\n.')
     ok('sh "child.sh"', b'child\n')
     ok('echo process.environment.build.label', b'parent\n')
-    ok('path.list', b'/disk/bin\n')
+    ok('path.list', b'/bin\n')
     ok('write "strict.sh"\necho missing.value\necho "must-not-run"\n.')
     failed = run('sh "strict.sh"', allow_errors=True)
     assert b'unresolved expression' in failed and b'must-not-run\n' not in failed, failed
@@ -68,7 +68,7 @@ def exercise(run, expect):
     ok('cat "two/new.txt"', b'payload\n')
     ok('write "here.sh"\ncat << END > "/tmp/from-script"\nheredoc body\nEND\ncat "/tmp/from-script"\n.')
     ok('sh "here.sh"', b'heredoc body\n')
-    ok('write "bad-argv.sh"\n/disk/bin/cat missing:name > "/tmp/guard"\necho "must-not-run"\n.')
+    ok('write "bad-argv.sh"\n/bin/cat missing:name > "/tmp/guard"\necho "must-not-run"\n.')
     ok('echo "preserved" > "/tmp/guard"')
     failed = run('sh "bad-argv.sh"', allow_errors=True)
     assert b'invalid executable argument' in failed and b'must-not-run\n' not in failed, failed
@@ -77,8 +77,8 @@ def exercise(run, expect):
     assert b'unknown enum name' in failed, failed
     ok('cat "/tmp/guard"', b'preserved\n')
     ok('echo "colon file" > "/tmp/with:colon"')
-    ok('/disk/bin/cat "/tmp/with:colon"', b'colon file\n')
-    ok('cd "/disk"')
+    ok('/bin/cat "/tmp/with:colon"', b'colon file\n')
+    ok('cd "/"')
     ok('mkdir "move-a"')
     ok('mkdir "move-b"')
     ok('echo "persistent move" > "move-a/source"')
@@ -87,9 +87,9 @@ def exercise(run, expect):
     ok('cat "move-b/target"', b'persistent move\n')
     ok('mkdir "move-a/sub"')
     ok('cd "move-a/sub"')
-    ok('mv "/disk/move-a/sub" "/disk/move-b/sub"')
-    ok('pwd', b'/disk/move-b/sub\n')
-    ok('/disk/diskutil sync', b'sync ok')
+    ok('mv "/move-a/sub" "/move-b/sub"')
+    ok('pwd', b'/move-b/sub\n')
+    ok('/diskutil sync', b'sync ok')
     ok('kmem', b'kmem complete')
 
 
@@ -105,10 +105,10 @@ def main():
     shutil.copyfile(args.program_disk, disk)
     boot(args, disk, 'first', exercise=exercise)
     boot(args, disk, 'reboot', commands=[
-        ('cat "/disk/move-b/target"', b'persistent move\n'),
-        ('ls "/disk/move-a"', None),
-        ('cd "/disk/move-b/sub"', None),
-        ('pwd', b'/disk/move-b/sub\n'),
+        ('cat "/move-b/target"', b'persistent move\n'),
+        ('ls "/move-a"', None),
+        ('cd "/move-b/sub"', None),
+        ('pwd', b'/move-b/sub\n'),
     ])
     print('typed shell, child isolation, and move reboot checks passed')
 

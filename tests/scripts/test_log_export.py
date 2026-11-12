@@ -46,14 +46,14 @@ def main():
         info = run('os.system.log.export_info')
         assert b'last_status:0' in info or b'last_status=0' in info, info
         run('os.system.log.export target:"disk"')
-        run('ls "/disk/log"', b'kernel-')
+        run('ls "/log"', b'kernel-')
         run('exit', b'shell ended')
         run('echo "new-session-marker"')
         run('os.system.log.export target:"disk"')
         # Descriptor writes and executable metadata must coexist with timed export.
         for i in range(40):
-            run(f'echo "foreground-{i}" > "/disk/foreground"')
-            run('cat "/disk/foreground"', f'foreground-{i}'.encode())
+            run(f'echo "foreground-{i}" > "/foreground"')
+            run('cat "/foreground"', f'foreground-{i}'.encode())
 
         time.sleep(2.2)  # The worker must drain the closed history without input.
         run('os.system.log.export target:"disk"')
@@ -95,7 +95,7 @@ def main():
     first_boot = max(f['boot'] for f in frames)
 
     def second(run, expect):
-        run('ls "/disk/log"', b'kernel-')
+        run('ls "/log"', b'kernel-')
         run('echo "second-boot-marker"')
         run('os.system.log.export target:"disk"')
         run('diskutil sync', b'diskutil sync ok')

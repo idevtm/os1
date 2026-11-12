@@ -134,20 +134,20 @@ endforeach()
 set(recovery_programs init rescue)
 set(recovery_commands)
 set(recovery_files)
-set(program_manifest "{\"version\":2,\"programs\":[")
+set(program_manifest "{\"version\":3,\"programs\":[")
 set(separator "")
 foreach(program IN LISTS OS1_USER_PROGRAM_FILES)
   get_filename_component(name "${program}" NAME_WE)
   if(name IN_LIST recovery_programs)
-    list(APPEND recovery_commands COMMAND "${CMAKE_COMMAND}" -E copy "${program}" "${USER_STAGE_DIR}/bin/${name}")
+    list(APPEND recovery_commands COMMAND "${CMAKE_COMMAND}" -E copy "${program}" "${USER_STAGE_DIR}/sbin/${name}")
     list(APPEND recovery_files "${program}")
   else()
-    string(APPEND program_manifest "${separator}{\"source\":\"${program}\",\"destination\":\"/disk/bin/${name}\"}")
+    string(APPEND program_manifest "${separator}{\"source\":\"${program}\",\"destination\":\"/bin/${name}\"}")
     set(separator ",")
   endif()
 endforeach()
 # Retain the published path used by older images and deployment workflows.
-string(APPEND program_manifest ",{\"source\":\"${OS1_USER_DISKUTIL_ELF}\",\"destination\":\"/disk/diskutil\"}],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/disk/etc/motd\"}]}\n")
+string(APPEND program_manifest ",{\"source\":\"${OS1_USER_DISKUTIL_ELF}\",\"destination\":\"/diskutil\"}],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/etc/motd\"}]}\n")
 file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs-base.json" CONTENT "${program_manifest}")
 add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json"
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"
@@ -167,7 +167,7 @@ set(OS1_USER_PROGRAM_FILES "${OS1_USER_PROGRAM_FILES}" PARENT_SCOPE)
 add_custom_command(
   OUTPUT "${OS1_INITRD_CPIO}"
   COMMAND "${CMAKE_COMMAND}" -E rm -rf "${USER_STAGE_DIR}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_STAGE_DIR}/bin"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${USER_STAGE_DIR}/sbin"
   ${recovery_commands}
   COMMAND "${CMAKE_COMMAND}"
     "-DSTAGE_DIR=${USER_STAGE_DIR}" "-DOUTPUT_FILE=${OS1_INITRD_CPIO}"

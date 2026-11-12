@@ -293,8 +293,8 @@ The [driver architecture](docs/hardware/driver-architecture.md) defines bootstra
 
 ### Kernel and userland separation
 
-The system boots `/bin/init`, which supervises `/disk/bin/sh`.
-If the shell cannot load, init starts `/bin/rescue` from initrd.
+The system boots `/sbin/init`, which supervises `/bin/sh`.
+If the shell cannot load, init starts `/sbin/rescue` from initrd.
 Protected user programs load from initrd or supported ext2 files.
 Descriptors, explicit launch grants, arguments/environment, and bounded hosted services are implemented.
 The [console milestone](docs/archive/native-api/2026-11-04-console-descriptor-implementation-plan.md) corrected child publication and mapping-failure cleanup.
@@ -554,9 +554,9 @@ The in-repo milestone designs (M1–M5) refine the coarser A–G map below into 
 - ring-3 user-mode execution
 - ELF64 executable loading from a cpio-newc initrd
 - a small SYSCALL/SYSRET-entered syscall interface (`write`, `read`, `exit`, `yield`, `getpid`, `observe`, `spawn`, `waitpid`, `exec`) for console I/O, observability, and initrd-backed process control
-- initrd startup and rescue through `/bin/init` and `/bin/rescue`
-- normal shell and bundled programs on ext2 under `/disk/bin`
-- `/disk/bin/ascii` remains a human-only font probe; automated smokes do not validate glyph appearance
+- initrd startup and rescue through `/sbin/init` and `/sbin/rescue`
+- normal shell and bundled programs on ext2 under `/bin`
+- `/bin/ascii` remains a human-only font probe; automated smokes do not validate glyph appearance
 - serial-drivable shell and smoke coverage on both boot paths
 - structured observability through versioned fixed-record snapshots (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, `irqs`, `kmem`, `acpi`) and a 256-record kernel event ring covering traps, scheduler transitions, IRQs, block I/O, PCI bind, user-copy failures, smoke markers, timer-source choice, `kmem` corruption, NIC RX, AP-online/tick events, reschedule/TLB-shootdown IPIs, thread migration, and run-queue depth
 
@@ -616,7 +616,7 @@ Some earlier open questions have since been resolved in source or in the milesto
 - **Resolved:** the modern default boot path is Limine plus UEFI, while BIOS remains available during the transition ([M3](docs/archive/boot/2026-04-22-milestone-3-modern-default-boot-path.md)).
 - **Resolved:** the first protected-userland ABI is statically linked ELF64 / `ET_EXEC` loaded from a `cpio newc` initrd, with SYSCALL/SYSRET-entered syscalls matching the System V AMD64 register layout and now covering console I/O, observability, and initrd-backed process control ([M2](docs/archive/kernel/2026-04-22-milestone-2-process-model-and-isolation.md), [M5](docs/archive/kernel/2026-04-23-milestone-5-interactive-shell-and-observability.md), [src/uapi/os1/syscall_numbers.h](src/uapi/os1/syscall_numbers.h), [src/kernel/syscall/abi.hpp](src/kernel/syscall/abi.hpp), [src/kernel/arch/x86_64/cpu/syscall.cpp](src/kernel/arch/x86_64/cpu/syscall.cpp), [src/uapi/os1/observe.h](src/uapi/os1/observe.h), [src/user/](src/user/)).
 - **Resolved:** the original [M5 environment](docs/archive/kernel/2026-04-23-milestone-5-interactive-shell-and-observability.md) used an initrd shell.
-  The current supervisor starts `/disk/bin/sh` and retains `/bin/rescue` for storage failures.
+  The current supervisor starts `/bin/sh` and retains `/sbin/rescue` for storage failures.
   See [boot and recovery](docs/filesystems/program-deployment.md#boot-and-recovery).
 - **Resolved:** PCI device interrupts use MSI-X first, then MSI, then IOAPIC INTx as a best-effort fallback. ACPICA-backed `_PRT` data feeds the INTx fallback when present; firmware-populated `interrupt_line` is the secondary fallback ([src/kernel/platform/pci_msi.cpp](src/kernel/platform/pci_msi.cpp), [src/kernel/platform/acpica_integration.cpp](src/kernel/platform/acpica_integration.cpp), [src/kernel/platform/acpica_osl.cpp](src/kernel/platform/acpica_osl.cpp)).
 - **Resolved:** the BSP scheduler tick uses an HPET-calibrated LAPIC periodic timer when available, with the PIT retained as a fallback when HPET or LAPIC calibration is unavailable ([src/kernel/core/kernel_main.cpp](src/kernel/core/kernel_main.cpp)).

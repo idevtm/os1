@@ -15,7 +15,7 @@ endif()
 if(NOT DEFINED STRIP_EXECUTABLE)
   message(FATAL_ERROR "STRIP_EXECUTABLE must be set")
 endif()
-file(GLOB initrd_programs "${STAGE_DIR}/bin/*")
+file(GLOB initrd_programs "${STAGE_DIR}/sbin/*")
 foreach(program IN LISTS initrd_programs)
   execute_process(COMMAND "${STRIP_EXECUTABLE}" --strip-all --remove-section=.comment "${program}"
     RESULT_VARIABLE strip_result)

@@ -90,13 +90,13 @@ def main():
     try:
         expect(b'shell prompt ready\n')
         expect()
-        assert (b'ext2 mounted /disk' in transcript) == bool(args.program_disk)
-        listed = run('ls "/bin"')
+        assert (b'ext2 mounted /' in transcript) == bool(args.program_disk)
+        listed = run('ls "/sbin"')
         lines = re.sub(rb'^root alloc 0x[0-9a-f]+\n', b'', listed, flags=re.M).decode().splitlines()[1:-1]
         assert set(lines) == {'init', 'rescue'}, listed
         if not args.program_disk:
             assert b'unknown command: counter' in run('counter')
-            assert b'shell: ls failed' in run('ls /disk')
+            assert b'shell: ls failed' in run('ls /')
         for command, expected in [('echo', b'\n'), ('echo "hello world"', b'hello world\n'),
                                   ('echo "a  b c"', b'a  b c\n')]:
             result = run(command)
@@ -113,7 +113,7 @@ def main():
         content('/tmp/copy', 'A > B\nsecond\n')
         assert b'duplicate redirection' in run('echo damage > /tmp/copy > /tmp/other')
         content('/tmp/copy', 'A > B\nsecond\n')
-        assert b'redirection failed' in run('echo damage > /bin/init')
+        assert b'redirection failed' in run('echo damage > /sbin/init')
         assert b'restored\n' in run("echo 'restored'")
         send('cat > "/tmp/eof"\n')
         # cat has no prompt; its input echo provides a fresh synchronization point.
@@ -277,10 +277,10 @@ def main():
         assert b'edit: saved' in run('edit /tmp/scripted < /tmp/editor-script')
         content('/tmp/scripted', 'saved from file\n')
         if args.program_disk:
-            run('echo original > /disk/editor-replace')
-            assert b'edit: saved' in run('edit /disk/editor-replace < /tmp/editor-script')
-            content('/disk/editor-replace', 'original\nsaved from file\n')
-            listing = run('ls /disk')
+            run('echo original > /editor-replace')
+            assert b'edit: saved' in run('edit /editor-replace < /tmp/editor-script')
+            content('/editor-replace', 'original\nsaved from file\n')
+            listing = run('ls /')
             assert b'.shell-' not in listing, listing
 
         # Child shells terminate at finite EOF and keep prompts off stdout.

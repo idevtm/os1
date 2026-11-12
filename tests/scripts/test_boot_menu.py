@@ -98,7 +98,7 @@ def main():
     boot(args, disk, 'failed-autorun', exercise=failed_run)
     transcript = Path(args.log).with_suffix('.failed-autorun.log').read_bytes()
     assert transcript.count(b'shell: diagnostic tests starting') == 1, transcript[-3000:]
-    assert b'cannot create a new /disk/tests run' in transcript, transcript[-3000:]
+    assert b'cannot create a new /tests run' in transcript, transcript[-3000:]
     assert b'shell: diagnostic tests failed or unavailable' in transcript, transcript[-3000:]
     assert b'run-tests: PASS; saved results' not in transcript
 

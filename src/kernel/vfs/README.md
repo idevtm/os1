@@ -1,10 +1,11 @@
 # Kernel VFS
 
-The VFS combines immutable initrd objects with a bounded writable `/tmp` mount.
+The VFS selects ext2 as the root when a supported disk mounts.
+It preserves read-only recovery programs under `/sbin` and a bounded writable `/tmp`.
 Both use the descriptor and open-instance ownership model in `resource/`.
 
 ```text
-fs/initrd -> import immutable tree -> mount tmpfs -> publish root
+initrd + tmpfs -> select ext2 root or initrd fallback -> publish root
 Granted directory -> lookup/create -> open instance -> descriptor or native binding
 ```
 
