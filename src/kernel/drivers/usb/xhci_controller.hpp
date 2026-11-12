@@ -204,6 +204,13 @@ struct CommandCompletion
 
 using PollClock = uint64_t (*)();
 
+struct PollLimits
+{
+    PollClock clock;
+    uint64_t duration;
+    uint32_t stalled_polls;
+};
+
 // The clock determines elapsed time. The poll bound covers an unavailable or stalled clock.
 class PollDeadline
 {
@@ -412,11 +419,11 @@ bool clear_port_change_bits(const ControllerLayout& controller,
                             uint32_t clear_mask = kPortScChangeBits);
 bool power_on_port(const ControllerLayout& controller, uint8_t port_id);
 bool controller_stop(const ControllerLayout& controller,
-                     uint32_t timeout_spins,
+                     PollLimits limits,
                      PollHook poll_hook = nullptr,
                      void* poll_context = nullptr);
 bool controller_reset(const ControllerLayout& controller,
-                      uint32_t timeout_spins,
+                      PollLimits limits,
                       PollHook poll_hook = nullptr,
                       void* poll_context = nullptr,
                       void (*intel_reset_delay)(uint32_t, void*) = nullptr);
@@ -432,7 +439,7 @@ bool controller_program(const ControllerLayout& controller,
                         const RingSet& rings,
                         uint8_t max_device_slots);
 bool controller_run(const ControllerLayout& controller,
-                    uint32_t timeout_spins,
+                    PollLimits limits,
                     PollHook poll_hook = nullptr,
                     void* poll_context = nullptr);
 void acknowledge_interrupt(const ControllerLayout& controller,

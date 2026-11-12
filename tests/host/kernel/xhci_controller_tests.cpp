@@ -263,7 +263,8 @@ TEST(XhciController, ControllerResetStopsAndClearsReset)
             xhci::kUsbstsControllerNotReady);
 
     ResetHookState hook_state{.operational = layout.operational};
-    ASSERT_TRUE(xhci::controller_reset(layout, 8u, emulate_reset, &hook_state, record_reset_delay));
+    ASSERT_TRUE(xhci::controller_reset(
+        layout, {nullptr, 0, 8u}, emulate_reset, &hook_state, record_reset_delay));
     EXPECT_TRUE(hook_state.halted_reported);
     EXPECT_TRUE(hook_state.reset_cleared);
     EXPECT_EQ(xhci::kUsbstsHalted,
@@ -1013,6 +1014,92 @@ uint64_t read_fake_xhci_clock()
     return fake_xhci_ticks;
 }
 }  // namespace
+
+TEST(XhciTimeout, ControllerStopUsesElapsedTimeAndStalledClockBound)
+{
+    std::array<uint8_t, 0x400> mmio{};
+    populate_capability_block(mmio);
+    xhci::ControllerLayout layout{};
+    ASSERT_TRUE(xhci::parse_capability(mmio.data(), mmio.size(), layout));
+
+    unsigned polls = 0;
+    const auto delayed_halt = [](volatile uint8_t* operational, void* context, uint32_t iteration) {
+        ++*static_cast<unsigned*>(context);
+        ++fake_xhci_ticks;
+        if(iteration == 5)
+            *reinterpret_cast<volatile uint32_t*>(operational + xhci::kOperationalUsbsts) =
+                xhci::kUsbstsHalted;
+    };
+    fake_xhci_ticks = 10;
+    EXPECT_TRUE(xhci::controller_stop(layout, {read_fake_xhci_clock, 10, 3}, delayed_halt, &polls));
+    EXPECT_EQ(6u, polls);
+
+    write32(mmio, layout.capability.cap_length + xhci::kOperationalUsbsts, 0);
+    polls = 0;
+    EXPECT_FALSE(xhci::controller_stop(layout, {read_fake_xhci_clock, 4, 3}, delayed_halt, &polls));
+    EXPECT_EQ(4u, polls);
+
+    const auto stalled = [](volatile uint8_t*, void* context, uint32_t) {
+        ++*static_cast<unsigned*>(context);
+    };
+    polls = 0;
+    EXPECT_FALSE(xhci::controller_stop(layout, {read_fake_xhci_clock, 10, 3}, stalled, &polls));
+    EXPECT_EQ(3u, polls);
+}
+
+TEST(XhciTimeout, ResetTimesOutAtEitherResetRegister)
+{
+    std::array<uint8_t, 0x400> mmio{};
+    populate_capability_block(mmio);
+    xhci::ControllerLayout layout{};
+    ASSERT_TRUE(xhci::parse_capability(mmio.data(), mmio.size(), layout));
+    const auto status_offset = layout.capability.cap_length + xhci::kOperationalUsbsts;
+    const auto command_offset = layout.capability.cap_length + xhci::kOperationalUsbcmd;
+    const auto tick = [](volatile uint8_t* operational, void* context, uint32_t) {
+        ++fake_xhci_ticks;
+        if(*static_cast<bool*>(context))
+        {
+            auto& command =
+                *reinterpret_cast<volatile uint32_t*>(operational + xhci::kOperationalUsbcmd);
+            command = command & ~xhci::kUsbcmdHostControllerReset;
+        }
+    };
+    for(bool clear_reset : {false, true})
+    {
+        write32(mmio, command_offset, 0);
+        write32(mmio, status_offset, xhci::kUsbstsHalted | xhci::kUsbstsControllerNotReady);
+        fake_xhci_ticks = 10;
+        EXPECT_FALSE(
+            xhci::controller_reset(layout, {read_fake_xhci_clock, 4, 3}, tick, &clear_reset));
+        EXPECT_EQ(clear_reset ? 16u : 15u, fake_xhci_ticks);
+        EXPECT_EQ(clear_reset ? 0u : xhci::kUsbcmdHostControllerReset,
+                  read32(mmio, command_offset));
+    }
+}
+
+TEST(XhciTimeout, RunWaitsForReadyAndRequiresHaltedToClear)
+{
+    std::array<uint8_t, 0x400> mmio{};
+    populate_capability_block(mmio);
+    xhci::ControllerLayout layout{};
+    ASSERT_TRUE(xhci::parse_capability(mmio.data(), mmio.size(), layout));
+    const auto status_offset = layout.capability.cap_length + xhci::kOperationalUsbsts;
+    const auto command_offset = layout.capability.cap_length + xhci::kOperationalUsbcmd;
+    const auto tick = [](volatile uint8_t*, void*, uint32_t) { ++fake_xhci_ticks; };
+    const xhci::PollLimits limits{read_fake_xhci_clock, 4, 3};
+
+    fake_xhci_ticks = 10;
+    write32(mmio, status_offset, xhci::kUsbstsHalted | xhci::kUsbstsControllerNotReady);
+    EXPECT_FALSE(xhci::controller_run(layout, limits, tick));
+    EXPECT_EQ(14u, fake_xhci_ticks);
+    EXPECT_EQ(0u, read32(mmio, command_offset));
+
+    fake_xhci_ticks = 10;
+    write32(mmio, status_offset, xhci::kUsbstsHalted);
+    EXPECT_FALSE(xhci::controller_run(layout, limits, tick));
+    EXPECT_EQ(15u, fake_xhci_ticks);
+    EXPECT_NE(0u, read32(mmio, command_offset) & xhci::kUsbcmdRunStop);
+}
 
 TEST(XhciTimeout, ADelayedCommandCanOutlastTheOldPollBudget)
 {

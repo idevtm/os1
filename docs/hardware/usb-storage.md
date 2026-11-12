@@ -72,6 +72,9 @@ It reads the event payload only after the cycle bit matches the consumer cycle s
 The driver checks each xHCI DMA range against the controller's AC64 capability before publication.
 A controller without AC64 accepts only ranges below 4 GiB.
 The driver requires a calibrated clock for xHCI reset timing.
+Each register wait during xHCI controller stop, reset, or run has a one-second elapsed-time limit.
+One million consecutive polls without clock progress also end the wait.
+Reset can perform three register waits. Run can perform two.
 After writing HCRST on Intel xHCI, the driver waits 1 ms before the next register access.
 After an xHCI port reset, the driver waits 10 ms and checks the port again before enumeration.
 EHCI periodic queue heads use a zero NAK reload value.

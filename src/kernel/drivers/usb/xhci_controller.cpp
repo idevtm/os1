@@ -65,11 +65,12 @@ bool wait_for_mask(volatile uint8_t* operational,
                    size_t offset,
                    uint32_t mask,
                    uint32_t expected,
-                   uint32_t timeout_spins,
+                   PollLimits limits,
                    PollHook poll_hook,
                    void* poll_context)
 {
-    for(uint32_t iteration = 0; iteration < timeout_spins; ++iteration)
+    PollDeadline deadline(limits.clock, limits.duration, limits.stalled_polls);
+    for(uint32_t iteration = 0;; ++iteration)
     {
         if(nullptr != poll_hook)
         {
@@ -79,10 +80,10 @@ bool wait_for_mask(volatile uint8_t* operational,
         {
             return true;
         }
+        if(deadline.expired())
+            return false;
         cpu_pause();
     }
-
-    return (read32(operational, offset) & mask) == expected;
 }
 }  // namespace
 
@@ -726,7 +727,7 @@ bool power_on_port(const ControllerLayout& controller, uint8_t port_id)
 }
 
 bool controller_stop(const ControllerLayout& controller,
-                     uint32_t timeout_spins,
+                     PollLimits limits,
                      PollHook poll_hook,
                      void* poll_context)
 {
@@ -746,18 +747,18 @@ bool controller_stop(const ControllerLayout& controller,
                          kOperationalUsbsts,
                          kUsbstsHalted,
                          kUsbstsHalted,
-                         timeout_spins,
+                         limits,
                          poll_hook,
                          poll_context);
 }
 
 bool controller_reset(const ControllerLayout& controller,
-                      uint32_t timeout_spins,
+                      PollLimits limits,
                       PollHook poll_hook,
                       void* poll_context,
                       void (*intel_reset_delay)(uint32_t, void*))
 {
-    if(!controller_stop(controller, timeout_spins, poll_hook, poll_context))
+    if(!controller_stop(controller, limits, poll_hook, poll_context))
     {
         return false;
     }
@@ -773,7 +774,7 @@ bool controller_reset(const ControllerLayout& controller,
                       kOperationalUsbcmd,
                       kUsbcmdHostControllerReset,
                       0u,
-                      timeout_spins,
+                      limits,
                       poll_hook,
                       poll_context))
     {
@@ -784,7 +785,7 @@ bool controller_reset(const ControllerLayout& controller,
                          kOperationalUsbsts,
                          kUsbstsControllerNotReady,
                          0u,
-                         timeout_spins,
+                         limits,
                          poll_hook,
                          poll_context);
 }
@@ -862,7 +863,7 @@ bool controller_program(const ControllerLayout& controller,
 }
 
 bool controller_run(const ControllerLayout& controller,
-                    uint32_t timeout_spins,
+                    PollLimits limits,
                     PollHook poll_hook,
                     void* poll_context)
 {
@@ -875,7 +876,7 @@ bool controller_run(const ControllerLayout& controller,
                       kOperationalUsbsts,
                       kUsbstsControllerNotReady,
                       0u,
-                      timeout_spins,
+                      limits,
                       poll_hook,
                       poll_context))
     {
@@ -890,7 +891,7 @@ bool controller_run(const ControllerLayout& controller,
                          kOperationalUsbsts,
                          kUsbstsHalted,
                          0u,
-                         timeout_spins,
+                         limits,
                          poll_hook,
                          poll_context);
 }

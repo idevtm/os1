@@ -56,7 +56,7 @@ constexpr size_t kXhciCommandRingBytes = kPageSize;
 constexpr size_t kXhciEventRingBytes = kPageSize;
 constexpr size_t kXhciTransferRingBytes = kPageSize;
 constexpr size_t kXhciControlBufferBytes = 512u;
-constexpr uint32_t kXhciInitTimeoutSpins = 1000000u;
+constexpr uint64_t kXhciControllerTimeout100ns = 10'000'000u;  // 1 s per handshake.
 constexpr uint64_t kXhciMaxBarBytes = 16ull * 1024 * 1024;
 constexpr uint16_t kPciCommandMemorySpace = 0x0002u;
 constexpr uint32_t kXhciStalledClockPolls = 1000000u;
@@ -469,6 +469,13 @@ void release_device(PageFrameContainer& frames,
     device = {};
 }
 
+xhci::PollLimits controller_wait_limits()
+{
+    return {tsc_clock_hz() ? tsc_clock_now_100ns : nullptr,
+            kXhciControllerTimeout100ns,
+            kXhciStalledClockPolls};
+}
+
 void release_controller(PageFrameContainer& frames, XhciControllerState& controller)
 {
     if(controller.dma_published)
@@ -480,7 +487,7 @@ void release_controller(PageFrameContainer& frames, XhciControllerState& control
             fail_device(device);
             hardware_catalog::unavailable(device.catalog_id);
         }
-        (void)xhci::controller_stop(controller.controller, kXhciInitTimeoutSpins);
+        (void)xhci::controller_stop(controller.controller, controller_wait_limits());
         if(controller.pci_index < kPlatformMaxPciDevices)
         {
             const auto& pci = g_platform.devices[controller.pci_index];
@@ -492,7 +499,7 @@ void release_controller(PageFrameContainer& frames, XhciControllerState& control
     }
     if(controller.owned && nullptr != controller.controller.operational)
     {
-        (void)xhci::controller_stop(controller.controller, kXhciInitTimeoutSpins);
+        (void)xhci::controller_stop(controller.controller, controller_wait_limits());
     }
     if((PciInterruptMode::None != controller.interrupt.mode) &&
        (controller.pci_index < kPlatformMaxPciDevices))
@@ -2125,7 +2132,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
     controller->owned = true;
     debug("xhci: firmware handoff complete")();
     if(!xhci::controller_reset(controller->controller,
-                               kXhciInitTimeoutSpins,
+                               controller_wait_limits(),
                                nullptr,
                                nullptr,
                                device.vendor_id == 0x8086 ? handoff_delay : nullptr))
@@ -2171,7 +2178,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
     };
     controller->dma_published = true;
     if(!xhci::controller_program(controller->controller, rings, controller->configured_slots) ||
-       !xhci::controller_run(controller->controller, kXhciInitTimeoutSpins))
+       !xhci::controller_run(controller->controller, controller_wait_limits()))
     {
         debug("xhci: controller start failed")();
         release_controller(frames, *controller);
