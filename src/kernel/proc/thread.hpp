@@ -156,6 +156,8 @@ Thread* first_thread(void);
 Thread* next_thread(const Thread* thread);
 // Return the thread bound to the current CPU.
 Thread* current_thread(void);
+// Observe the CPU that still owns the saved frame and stack.
+cpu* thread_current_cpu(const Thread* thread);
 // Return the scheduler's idle thread.
 Thread* idle_thread(void);
 // Return the idle thread assigned to `owner`, if any.
@@ -170,8 +172,8 @@ void mark_thread_ready(Thread* thread, cpu* target = nullptr);
 void block_current_thread_on_block_io(Completion* completion);
 // clear a thread's wait metadata after the wait has completed.
 void clear_thread_wait(Thread* thread);
-// Wake a blocked thread, preserving the currently running thread state when the
-// wake happens from an interrupt on that same thread.
+// Wake without writing the saved frame. A current thread remains on its owner
+// until handoff. Callers that write the frame must check ownership first.
 void wake_blocked_thread(Thread* thread, cpu* target = nullptr);
 // Return the first thread blocked on a wait reason.
 Thread* first_blocked_thread(ThreadWaitReason reason);

@@ -603,11 +603,7 @@ void service_vfs_waiters(PageFrameContainer& frames)
             thread = waiters.head;
             if(!thread)
                 return;
-            bool current = false;
-            for(cpu* owner = g_cpu_boot; owner; owner = owner->next)
-                if(__atomic_load_n(&owner->current_thread, __ATOMIC_ACQUIRE) == thread)
-                    current = true;
-            if(current || thread->state == ThreadState::Dying)
+            if(thread_current_cpu(thread) || thread->state == ThreadState::Dying)
                 return;
             (void)wait_queue_dequeue_locked(waiters);
             if(!waiters.head)

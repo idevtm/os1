@@ -7,17 +7,6 @@ namespace
 {
 WaitQueue g_child_waiters{"child-exit"};
 
-bool current_on_remote_cpu(const Thread* thread)
-{
-    for(cpu* owner = g_cpu_boot; owner; owner = owner->next)
-    {
-        if(owner != cpu_cur() &&
-           __atomic_load_n(&owner->current_thread, __ATOMIC_ACQUIRE) == thread)
-            return true;
-    }
-    return false;
-}
-
 bool wait_pid(PageFrameContainer& frames,
               Thread* thread,
               uint64_t pid,
@@ -116,7 +105,8 @@ bool wake_child_waiters(PageFrameContainer& frames)
         thread->wait_link = nullptr;
 
         long result = -1;
-        const bool remote = current_on_remote_cpu(thread);
+        const cpu* owner = thread_current_cpu(thread);
+        const bool remote = owner && owner != cpu_cur();
         retry_remote |= remote;
         if(!remote && try_complete_wait_pid(frames,
                                             thread,

@@ -301,7 +301,7 @@ public:
 };
 }  // namespace
 
-TEST_F(UsbInputObserve, RegistryGrowthAfterSizingLeavesUserBufferUntouched)
+TEST_F(UsbInputObserve, RegistryGrowthAfterSizingRetriesWithFreshCapacity)
 {
     platform_reset_state();
     struct Changes
@@ -309,6 +309,7 @@ TEST_F(UsbInputObserve, RegistryGrowthAfterSizingLeavesUserBufferUntouched)
         PageFrameContainer& frames;
         DmaBuffer dma{};
         bool ok = false;
+        unsigned attempts = 0;
     } changes{frames};
     const DeviceId owner{DeviceBus::Platform, 8};
     const ObserveContext context{.frames = &frames};
@@ -316,12 +317,17 @@ TEST_F(UsbInputObserve, RegistryGrowthAfterSizingLeavesUserBufferUntouched)
     for(uint32_t kind :
         {OS1_OBSERVE_PROCESSES, OS1_OBSERVE_DEVICES, OS1_OBSERVE_RESOURCES, OS1_OBSERVE_IRQS})
     {
-        const uint64_t canary = 0xa5a5a5a5a5a5a5a5ull;
-        ASSERT_TRUE(copy_to_user(frames, thread, kUserImageBase, &canary, sizeof(canary)));
+        const long initial = sys_observe(context, kind, kUserImageBase, 4096);
+        ASSERT_GE(initial, static_cast<long>(sizeof(Os1ObserveHeader)));
+        Os1ObserveHeader before{};
+        ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase, &before, sizeof(before)));
         changes.ok = false;
+        changes.attempts = 0;
         ObserveCheckpoint checkpoint(
             [](uint32_t selected, void* state) {
                 auto& changes = *static_cast<Changes*>(state);
+                if(changes.attempts++ != 0)
+                    return;
                 const DeviceId owner{DeviceBus::Platform, 8};
                 switch(selected)
                 {
@@ -345,16 +351,61 @@ TEST_F(UsbInputObserve, RegistryGrowthAfterSizingLeavesUserBufferUntouched)
                 }
             },
             &changes);
-        EXPECT_EQ(-1, sys_observe(context, kind, kUserImageBase, 4096));
+        EXPECT_EQ(initial + before.record_size, sys_observe(context, kind, kUserImageBase, 4096));
         EXPECT_TRUE(changes.ok);
-        uint64_t observed = 0;
-        ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase, &observed, sizeof(observed)));
-        EXPECT_EQ(canary, observed);
+        EXPECT_EQ(2u, changes.attempts);
+        Os1ObserveHeader after{};
+        ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase, &after, sizeof(after)));
+        EXPECT_EQ(before.record_count + 1, after.record_count);
+        EXPECT_EQ(before.record_size, after.record_size);
+        EXPECT_EQ(kind, after.kind);
     }
 
     dma_release_buffer(frames, changes.dma);
     EXPECT_TRUE(platform_release_irq_route(37));
     device_binding_remove(owner);
+    platform_reset_state();
+}
+
+TEST_F(UsbInputObserve, SnapshotRetryStopsWhenRegistryKeepsGrowingOrBufferIsSmall)
+{
+    platform_reset_state();
+    const DeviceId owner{DeviceBus::Platform, 8};
+    for(uint8_t vector = 64; vector < 104; ++vector)
+        ASSERT_TRUE(platform_register_local_apic_irq_route(owner, vector, vector));
+
+    std::array<uint8_t, kPageSize> canary, observed;
+    canary.fill(0xa5);
+    const ObserveContext context{.frames = &frames};
+    ASSERT_TRUE(copy_to_user(frames, thread, kUserImageBase, canary.data(), canary.size()));
+    struct Growth
+    {
+        PageFrameContainer& frames;
+        uint64_t free_pages;
+        unsigned attempts = 0;
+    } growth{frames, frames.free_page_count()};
+    {
+        ObserveCheckpoint checkpoint(
+            [](uint32_t kind, void* state) {
+                EXPECT_EQ(OS1_OBSERVE_IRQS, kind);
+                auto& growth = *static_cast<Growth*>(state);
+                EXPECT_EQ(growth.free_pages - (growth.attempts < 2),
+                          growth.frames.free_page_count());
+                const uint8_t irq = 5 + growth.attempts++;
+                EXPECT_TRUE(platform_register_isa_irq_route(
+                    {DeviceBus::Platform, 8}, irq, irq, 0, 32 + irq));
+            },
+            &growth);
+        EXPECT_EQ(-1, sys_observe(context, OS1_OBSERVE_IRQS, kUserImageBase, canary.size()));
+        EXPECT_EQ(2u, growth.attempts);
+        EXPECT_EQ(-1,
+                  sys_observe(context, OS1_OBSERVE_IRQS, kUserImageBase, sizeof(Os1ObserveHeader)));
+        EXPECT_EQ(3u, growth.attempts);
+    }
+    EXPECT_EQ(growth.free_pages, frames.free_page_count());
+    ASSERT_TRUE(copy_from_user(frames, thread, kUserImageBase, observed.data(), observed.size()));
+    EXPECT_EQ(canary, observed);
+    platform_release_irq_routes_for_owner(owner);
     platform_reset_state();
 }
 

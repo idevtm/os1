@@ -45,22 +45,6 @@ void reaper_worker()
 #endif
 }
 
-bool thread_is_current_on_any_cpu(const Thread* thread)
-{
-    if(nullptr == thread)
-    {
-        return false;
-    }
-
-    for(cpu* owner = g_cpu_boot; nullptr != owner; owner = owner->next)
-    {
-        if(__atomic_load_n(&owner->current_thread, __ATOMIC_ACQUIRE) == thread)
-        {
-            return true;
-        }
-    }
-    return false;
-}
 }  // namespace
 
 void initialize_reaper()
@@ -118,7 +102,7 @@ void reap_dead_threads(PageFrameContainer& frames)
         thread->reap_next = nullptr;
 
         const bool ready =
-            !thread_is_current_on_any_cpu(thread) && atomic_load_acquire(&thread->io_pins) == 0;
+            !thread_current_cpu(thread) && atomic_load_acquire(&thread->io_pins) == 0;
         if(ready)
         {
             cancel_console_read(thread);
@@ -192,5 +176,4 @@ void reap_dead_threads(PageFrameContainer& frames)
             break;
         reap_process(orphan, frames);
     }
-
 }

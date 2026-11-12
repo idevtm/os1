@@ -1498,11 +1498,7 @@ void ipc_drain_wakeups()
             Thread** link = &signalled.head;
             while(*link)
             {
-                bool current = false;
-                for(cpu* owner = g_cpu_boot; owner; owner = owner->next)
-                    if(__atomic_load_n(&owner->current_thread, __ATOMIC_ACQUIRE) == *link)
-                        current = true;
-                if(!current && (*link)->state != ThreadState::Dying)
+                if(!thread_current_cpu(*link) && (*link)->state != ThreadState::Dying)
                     break;
                 link = &(*link)->wait_link;
             }

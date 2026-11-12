@@ -14,9 +14,9 @@ void worker()
     for(;;)
     {
         usb::stall_trace::sample(OS1_EHCI_TRACE_WORKER);
-        ehci_poll_devices(*allocator, ticks % 50 == 0);
-        if(ticks % 50 == 0)
-            xhci_poll_devices(*allocator);
+        const bool topology = ticks % 50 == 0;
+        ehci_poll_devices(*allocator, topology);
+        xhci_poll_devices(*allocator, topology);
         ipc_refresh_input_waiters();
         ++ticks;
         kernel_sleep_for(current_thread(), 5'000'000);
