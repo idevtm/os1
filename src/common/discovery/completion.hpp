@@ -10,6 +10,24 @@ struct Completion
     unsigned cursor = 0;
     unsigned size = 0, start = 0, prefix = 0, selected = 0, matches = 0;
     unsigned ids[2048]{};
+    // Command names are borrowed from static dispatch tables.
+    const char* commands[64]{};
+    unsigned command_count = 0;
+    const char* command_name(unsigned index) const
+    {
+        return command_count && index >= matches - command_count
+                   ? commands[index - (matches - command_count)]
+                   : nullptr;
+    }
+    void add_command(const char* name)
+    {
+        if(command_count == sizeof(commands) / sizeof(commands[0]) ||
+           matches == sizeof(ids) / sizeof(ids[0]))
+            return;
+        commands[command_count++] = name;
+        ++matches;
+        open = true;
+    }
     uint64_t generation = 0;
     bool open = false, detail = false;
     int leaf = -1;
@@ -317,7 +335,7 @@ struct Completion
             options = "path|stream";
         if(!*options)
             return false;
-        matches = 0;
+        matches = command_count = 0;
         while(*options && matches < 8)
         {
             unsigned n = 0;
@@ -343,7 +361,7 @@ struct Completion
     {
         cancel();
         values = false;
-        matches = selected = 0;
+        matches = selected = command_count = 0;
         generation = view.generation;
         bool quoted = false;
         char quote = 0;
@@ -479,15 +497,21 @@ struct Completion
                 cancel();
         }
         else if(begin(view))
+            close_exact(view);
+    }
+    void close_exact(const View& view)
+    {
+        // A complete name must remain executable when a longer name shares its prefix.
+        for(unsigned i = 0; i < matches; ++i)
         {
-            // A complete name must remain executable when a longer name shares its prefix.
-            // Explicit Tab can reopen the choices after this automatic refinement.
-            for(unsigned i = 0; i < matches; ++i)
-                if(os1::context::length(view.member(ids[i]).name) == cursor - prefix)
-                {
-                    cancel();
-                    break;
-                }
+            const char* command = command_name(i);
+            const unsigned length = command ? os1::context::length(command)
+                                            : os1::context::length(view.member(ids[i]).name);
+            if(length == cursor - prefix)
+            {
+                cancel();
+                return;
+            }
         }
     }
     void move(int direction)
@@ -546,6 +570,12 @@ struct Completion
             if(chosen_field < field_count)
                 focus_field(chosen_field);
             return true;
+        }
+        if(const char* name = command_name(selected))
+        {
+            bool accepted = replace(prefix, replace_end, name, os1::context::length(name));
+            cancel();
+            return accepted;
         }
         unsigned id = ids[selected];
         bool object = view.container(id) && view.member(id).kind != Kind::Method &&

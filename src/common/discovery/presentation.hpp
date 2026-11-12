@@ -70,6 +70,11 @@ struct Presentation
                         line.append(index == state.selected ? "> " : "  ");
                         if(state.values)
                             line.append(state.choices[index]);
+                        else if(const char* command = state.command_name(index))
+                        {
+                            line.append(command);
+                            line.append(" [command]");
+                        }
                         else
                             line.member(view.member(state.ids[index]));
                     }

@@ -128,7 +128,11 @@ The display keeps the cursor in a bounded horizontal viewport.
 A failed guided command remains editable at the next prompt.
 History recall uses completed, unsuppressed interactive records from the existing 32-slot ring.
 It preserves the unfinished draft and cursor when the user returns past the newest record.
-Filename completion and arbitrary provider discovery remain separate work.
+At the first command word, Tab also offers short names from the shell dispatch tables.
+The menu marks these entries with `[command]`.
+Select a command to insert its name.
+Press Enter again to run it.
+Filename completion, executable search directory enumeration, and arbitrary provider discovery remain separate work.
 See [guided commands](../shell/guided-command-plan.md) for ownership, bounds, and validation.
 
 ```text

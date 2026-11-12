@@ -3,6 +3,7 @@
 #include <os1/discovery.hpp>
 #include <os1/file_tools.hpp>
 #include <os1/log.hpp>
+#include <os1/shell_runtime.hpp>
 
 #include "discovery/presentation.hpp"
 namespace os1::user::prompt
@@ -75,6 +76,39 @@ inline long inspect(const char* path, int fd)
         children += page.count;
     } while(!page.end);
     return children || output(fd, "(no children)\n") ? 0 : OS1_ERR_FAULT;
+}
+inline void begin_choices(os1::discovery::Completion& state)
+{
+    state.begin(view);
+    unsigned first = 0;
+    while(first < state.size && os1::shell::space(state.line[first]))
+        ++first;
+    unsigned end = first;
+    while(end < state.size && os1::discovery::Completion::token(state.line[end]) &&
+          state.line[end] != '.' && state.line[end] != '[' && state.line[end] != ']')
+        ++end;
+    const char boundary = state.line[end];
+    if(state.cursor <= first || state.cursor > end ||
+       (boundary && !os1::shell::space(boundary) && boundary != '<' && boundary != '>'))
+        return;
+
+    auto offer = [&](const char* name) {
+        for(const char* c = name; *c; ++c)
+            if(*c == '.')
+                return;
+        const unsigned bytes = state.cursor - first;
+        if(os1::context::length(name) >= bytes &&
+           os1::context::same(name, bytes, state.line + first, bytes) && view.resolve(name) < 0)
+        {
+            state.prefix = first;
+            state.replace_end = end;
+            state.add_command(name);
+        }
+    };
+    for(const auto& binding : shell_runtime::bindings)
+        offer(binding.name);
+    for(const char* name : shell_runtime::builtins)
+        offer(name);
 }
 struct Display
 {
@@ -349,14 +383,14 @@ inline long read(files::Reader& fallback, files::Line& line)
             if(state.open)
                 state.accept(view, true);
             else if(!state.step_field(view, key == OS1_CONSOLE_KEY_BACKTAB ? -1 : 1) && key == '\t')
-                state.begin(view);
+                begin_choices(state);
             if(!display.paint(state))
                 return OS1_ERR_FAULT;
         }
         else if(key == OS1_CONSOLE_KEY_COMPLETE || key == 0)
         {
             if(!state.value_choices(view))
-                state.begin(view);
+                begin_choices(state);
             if(!display.paint(state))
                 return OS1_ERR_FAULT;
         }
@@ -408,7 +442,15 @@ inline long read(files::Reader& fallback, files::Line& line)
             if(key == '.')
                 state.begin(view);
             else if(choices_open && os1::discovery::Completion::token(static_cast<char>(key)))
-                state.refine(view, value_list);
+            {
+                if(value_list)
+                    state.refine(view, true);
+                else
+                {
+                    begin_choices(state);
+                    state.close_exact(view);
+                }
+            }
             if(repaint || state.open ||
                state.size + display.presentation.prefix > display.presentation.width)
             {
