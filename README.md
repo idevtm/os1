@@ -463,14 +463,13 @@ Run `./os1.sh` and select **USB > Build and write USB stick**, or run `./os1.sh 
 | --- | --- |
 | Layout | Choose **Replace kernel and initrd** or **Create a fresh boot image**. |
 | Build | Compile the current kernel and initrd as your normal user. |
-| Target | Use the arrow keys to select **Write to disk…**, then press Enter. |
-| Confirm | Type the selected disk identifier and press Enter. |
+| Target | Move to the disk marked **Erase and write**. Press Enter to write the image to that disk. |
 | Write | Enter your sudo password if prompted. The helper writes, verifies, and ejects the disk. |
 
 This workflow currently supports macOS.
 USB menus start on **Cancel** and discard queued input.
 Press `q` or Escape to cancel a menu.
-A full-image write replaces the selected disk’s contents after confirmation.
+A full-image write replaces the selected disk’s contents.
 Do not run the whole script with sudo.
 The dedicated build directory defaults to `build/usb-write`; set `USB_BUILD_DIR` to change it.
 The replacement option requires the verified base image; set `OS1_USB_BASE_IMAGE` if it is stored elsewhere.

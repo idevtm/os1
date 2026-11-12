@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Real filesystem updates, bounded writes, rollback, layout rejection, and locks."""
-from contextlib import nullcontext
 import hashlib
 import io
 import json
@@ -204,8 +203,8 @@ class Images(unittest.TestCase):
                     MediaName='Test USB', Internal=False, WholeDisk=True, VirtualOrPhysical='Physical',
                     BusProtocol='USB', DeviceBlockSize=512, Writable=True, IORegistryEntryID=1234)
         changed = dict(info, IORegistryEntryID=5678)
-        for typed, current in [('\n', info), ('disk14\n', info), ('disk13\n', changed), ('disk13\n', info)]:
-            with self.subTest(typed=typed, changed=current is changed):
+        for action, current in [(None, info), ('apply', changed), ('apply', info)]:
+            with self.subTest(action=action, changed=current is changed):
                 calls = []
 
                 def privileged(command, purpose, **kwargs):
@@ -220,10 +219,8 @@ class Images(unittest.TestCase):
 
                 with patch.object(writer, 'build_image', return_value=self.boot), \
                      patch.object(writer, 'list_disks', return_value=[info]), \
-                     patch.object(writer, 'choose_menu', return_value=0) as menu, \
-                     patch.object(writer, 'sudo_terminal', side_effect=nullcontext), \
-                     patch.object(writer.termios, 'tcflush'), \
-                     patch.object(writer.sys.stdin, 'readline', return_value=typed), \
+                     patch.object(writer, 'choose_menu', side_effect=[0, action]) as menu, \
+                     patch.object(writer.sys.stdin, 'readline', side_effect=AssertionError('extra prompt')), \
                      patch.object(writer, 'disk_info', return_value=current), \
                      patch.object(writer, 'sudo_step', side_effect=privileged):
                     if current is changed:
@@ -231,11 +228,18 @@ class Images(unittest.TestCase):
                             writer.update_interactive(args, 'boot')
                     else:
                         writer.update_interactive(args, 'boot')
-                self.assertTrue(menu.call_args.kwargs['require_selection'])
+                self.assertEqual(menu.call_count, 2)
+                self.assertTrue(all(call.kwargs['require_selection'] for call in menu.call_args_list))
+                action_label = 'disk13: Apply boot update'
+                title, options, detail = menu.call_args.args
+                columns = menu.call_args.kwargs['action_min_columns']
+                self.assertEqual(columns, len(action_label) + 3)
+                frame = writer.menu_frame(title, [(None, 'Cancel'), *options], 1, detail, columns, 1)
+                self.assertIn(f'> {action_label}', frame)
                 backups = list((build / 'artifacts/usb-backups').glob('*.img'))
                 self.assertTrue(backups)
                 self.assertTrue(all(self.hash(backup) == self.before for backup in backups))
-                expected = ['--read', '--update'] if typed == 'disk13\n' and current is info else ['--read']
+                expected = ['--read', '--update'] if action == 'apply' and current is info else ['--read']
                 self.assertEqual([command[0] for command in calls], expected)
                 for command in calls:
                     self.assertEqual(command[command.index('--disk') + 1], 'disk13')

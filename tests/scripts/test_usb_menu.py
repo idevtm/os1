@@ -1,6 +1,7 @@
 """Exercise USB policy, real file copying, and pinned-layout payload updates."""
 from contextlib import nullcontext
 import hashlib
+import fcntl
 import importlib.util
 import io
 import json
@@ -206,7 +207,7 @@ class WriterTests(unittest.TestCase):
                  patch.object(writer, "build_image", return_value=Path(image.name)) as build, \
                  patch.object(writer, "list_disks", return_value=[disk()]), \
                  patch.object(writer, "choose_menu", return_value=0), \
-                 patch.object(writer, "confirm_device", return_value=True), \
+                 patch.object(writer, "disk_info", return_value=disk()), \
                  patch.object(writer.subprocess, "run") as command:
                 writer.interactive(args)
                 build.assert_called_once()
@@ -244,28 +245,25 @@ class WriterTests(unittest.TestCase):
                  patch.object(writer, "build_image", return_value=Path(image.name)), \
                  patch.object(writer, "list_disks", return_value=[disk()]), \
                  patch.object(writer, "choose_menu", return_value=0), \
-                 patch.object(writer, "confirm_device", return_value=True), \
+                 patch.object(writer, "disk_info", return_value=disk()), \
                  patch.object(writer.sys, "stderr", output), \
                  patch.object(writer.subprocess, "run", side_effect=sudo) as command:
                 writer.interactive(args)
                 command.assert_called_once()
 
-    def test_write_confirmation_matches_the_selected_disk_and_its_identity(self):
+    def test_write_uses_the_selected_disk_and_rechecks_its_identity(self):
         selected = dict(disk(), DeviceIdentifier="disk14", DeviceNode="/dev/disk14")
         changed = dict(selected, IORegistryEntryID=5678)
-        cases = [("\n", selected), ("disk13\n", selected), ("disk14", selected),
-                 ("disk14\n", changed), ("disk14\n", selected)]
         with tempfile.NamedTemporaryFile() as image:
             image.write(b"image")
             image.flush()
             args = types.SimpleNamespace(build_dir=Path("build/test"), toolchain=Path("toolchain"))
-            for typed, current in cases:
-                with self.subTest(typed=typed, current=current), \
+            for current in (changed, selected):
+                with self.subTest(changed=current is changed), \
                      patch.object(writer.os, "geteuid", return_value=501), \
                      patch.object(writer.sys.stdin, "isatty", return_value=True), \
-                     patch.object(writer.sys.stdin, "readline", return_value=typed), \
+                     patch.object(writer.sys.stdin, "readline", side_effect=AssertionError("extra prompt")), \
                      patch.object(writer, "sudo_terminal", side_effect=nullcontext), \
-                     patch.object(writer.termios, "tcflush") as flush, \
                      patch.object(writer, "choose_layout", return_value=("fresh", None)), \
                      patch.object(writer, "build_image", return_value=Path(image.name)), \
                      patch.object(writer, "list_disks", return_value=[disk(), selected]), \
@@ -275,22 +273,17 @@ class WriterTests(unittest.TestCase):
                     if current is changed:
                         with self.assertRaisesRegex(ValueError, "USB identity changed"):
                             writer.interactive(args)
+                        command.assert_not_called()
                     else:
                         writer.interactive(args)
-                    self.assertTrue(menu.call_args.kwargs["require_selection"])
-                    flush.assert_called_once_with(writer.sys.stdin.fileno(), termios.TCIFLUSH)
-                    if typed == "disk14\n":
-                        refresh.assert_called_once_with("disk14")
-                    else:
-                        refresh.assert_not_called()
-                    if typed == "disk14\n" and current is selected:
                         command.assert_called_once()
                         args_used = command.call_args.args[0]
                         self.assertEqual(args_used[args_used.index("--disk") + 1], "disk14")
                         self.assertEqual(json.loads(args_used[args_used.index("--identity") + 1]),
                                          writer.identity(selected))
-                    else:
-                        command.assert_not_called()
+                    menu.assert_called_once()
+                    self.assertTrue(menu.call_args.kwargs["require_selection"])
+                    refresh.assert_called_once_with("disk14")
 
     def test_root_cannot_build(self):
         with patch.object(writer.os, "geteuid", return_value=0), \
@@ -345,7 +338,7 @@ class MenuTests(unittest.TestCase):
             writer.interactive(None)
             build.assert_not_called()
 
-    def test_queued_input_cannot_select_or_confirm_a_usb_write(self):
+    def test_queued_input_cannot_select_a_usb_write(self):
         script = f"""
 import os
 import sys
@@ -369,7 +362,18 @@ with patch.object(writer.os, "geteuid", return_value=501), \
     writer.interactive(SimpleNamespace(build_dir=Path("."), toolchain=Path(".")))
 print("DONE", flush=True)
 """
+        for keys, expected_writes, columns in ((b"\x1b[B\r", 1, 26),
+                                                 (b"disk13\r", 0, 80),
+                                                 (b"", 0, 12)):
+            with self.subTest(keys=keys, columns=columns):
+                self.exercise_usb_write_menu(script, keys, expected_writes, columns)
+        self.exercise_usb_write_menu(script, b"\r", 0, 80, shrink=True)
+        self.exercise_usb_write_menu(script, b"", 0, 80, redirect=True)
+
+    def exercise_usb_write_menu(self, script, keys, expected_writes, columns, *,
+                                shrink=False, redirect=False):
         master, slave = os.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, columns, 0, 0))
         process = None
         output = b""
 
@@ -385,18 +389,33 @@ print("DONE", flush=True)
 
         try:
             process = subprocess.Popen([sys.executable, "-I", "-B", "-c", script],
-                                       stdin=slave, stdout=slave, stderr=slave)
+                                       stdin=slave, stdout=slave,
+                                       stderr=subprocess.PIPE if redirect else slave)
             wait_for(b"BUILDING")
             os.write(master, b"\r\r")
-            wait_for(b"q/Esc: cancel")
-            self.assertIsNone(process.poll(), output)
-            os.write(master, b"\x1b[B\rdisk13\r")
-            wait_for(b"Type disk13")
-            self.assertIsNone(process.poll(), output)
-            os.write(master, b"\r")
-            wait_for(b"DONE")
-            self.assertNotIn(b"WOULD WRITE", output)
-            self.assertEqual(process.wait(timeout=5), 0)
+            if keys:
+                wait_for(b"disk13: Erase and write")
+                self.assertIsNone(process.poll(), output)
+                self.assertNotIn(b"WOULD WRITE", output)
+                if shrink:
+                    os.write(master, b"\x1b[B")
+                    wait_for(b"> disk13: Erase and write")
+                    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 12, 0, 0))
+                os.write(master, keys)
+            if redirect:
+                _, error = process.communicate(timeout=5)
+                self.assertIn(b"display the USB menu on a terminal", error)
+                self.assertNotEqual(process.returncode, 0)
+                while select.select([master], [], [], 0)[0]:
+                    output += os.read(master, 65536)
+            elif keys and not shrink:
+                wait_for(b"DONE")
+                self.assertEqual(process.wait(timeout=5), 0)
+            else:
+                wait_for(b"widen the terminal")
+                self.assertNotEqual(process.wait(timeout=5), 0)
+            self.assertEqual(output.count(b"WOULD WRITE"), expected_writes)
+            self.assertNotIn(b"Type disk13", output)
         finally:
             if process is not None and process.poll() is None:
                 process.kill()
