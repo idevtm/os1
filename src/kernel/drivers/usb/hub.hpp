@@ -31,6 +31,7 @@ bool port_status(const Transport&, uint8_t port, uint32_t&);
 bool stable_high_speed(uint32_t status);
 unsigned unsupported_speed(uint32_t status);
 // Enumerate only high-speed children. Unsupported speeds remain unconfigured.
+bool power_ports(const Transport&, const Descriptor&);
 bool enumerate(const Transport&, const Descriptor&);
-bool enumerate_port(const Transport&, uint8_t port);
+bool enumerate_port(const Transport&, uint8_t port, bool debounce = true);
 }  // namespace usb::hub
