@@ -29,6 +29,12 @@ bool prepare_qtd(Qtd&,
                  bool toggle,
                  uint32_t next = terminate,
                  uint32_t alternate = terminate);
+void prepare_input_tail(Qtd&);
+bool append_input_qtd(Qtd& completed,
+                      Qtd& tail,
+                      uint64_t completed_physical,
+                      uint64_t report_physical,
+                      uint16_t packet);
 bool prepare_head(QueueHead&,
                   uint64_t self,
                   uint64_t first,
@@ -40,6 +46,20 @@ bool prepare_head(QueueHead&,
                   unsigned port = 0,
                   bool periodic = false);
 uint32_t remaining(uint32_t token);
+enum class RootAbortStep
+{
+    Wait,
+    Disable,
+    Complete
+};
+constexpr RootAbortStep root_abort_step(uint32_t status, bool disable_sent)
+{
+    if(status & (1u << 8))
+        return RootAbortStep::Wait;
+    if(!disable_sent)
+        return RootAbortStep::Disable;
+    return (status & 4u) ? RootAbortStep::Wait : RootAbortStep::Complete;
+}
 bool root_usable(uint32_t status);
 enum class AsyncTransfer
 {

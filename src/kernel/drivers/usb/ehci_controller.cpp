@@ -25,6 +25,39 @@ bool prepare_qtd(Qtd& td,
         td.buffer[i] = uint32_t((address & ~uint64_t(4095)) + i * 4096);
     return true;
 }
+void prepare_input_tail(Qtd& td)
+{
+    td = {};
+    td.next = td.alternate = terminate;
+    td.token = halted;
+}
+
+bool append_input_qtd(Qtd& completed,
+                      Qtd& tail,
+                      uint64_t completed_physical,
+                      uint64_t report_physical,
+                      uint16_t packet)
+{
+    if(!completed_physical || completed_physical > UINT32_MAX || (completed_physical & 31) ||
+       &completed == &tail ||
+       (__atomic_load_n(&completed.token, __ATOMIC_ACQUIRE) & (active | errors)) ||
+       (__atomic_load_n(&tail.token, __ATOMIC_ACQUIRE) & active))
+        return false;
+
+    Qtd transfer{};
+    const auto next = static_cast<uint32_t>(completed_physical);
+    if(!prepare_qtd(transfer, report_physical, packet, 1, false, next, next))
+        return false;
+
+    prepare_input_tail(completed);
+    const auto token = transfer.token;
+    transfer.token = halted;
+    tail = transfer;
+    // The controller can follow the tail link at any time. Publish ACTIVE last.
+    __atomic_store_n(&tail.token, token, __ATOMIC_RELEASE);
+    return true;
+}
+
 bool prepare_head(QueueHead& qh,
                   uint64_t self,
                   uint64_t first,

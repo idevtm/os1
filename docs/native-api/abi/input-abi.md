@@ -302,7 +302,7 @@ Each endpoint receives at most three recovery attempts per ten-second window.
 Backoff durations are 20, 40, and 80 milliseconds.
 The USB worker sleeps normally during backoff; other endpoints continue.
 The halted queue head retains its frame slots, which prevents another device from claiming them.
-Descriptor reuse requires confirmation that the periodic schedule stopped.
+Queue-head rebuild during recovery requires confirmation that the periodic schedule stopped.
 The driver preserves the hardware data toggle and restores CERR to three.
 It checks the root and ancestor hub ports before rearming.
 Recovery does not reset the device, create a new input object, or clear an endpoint STALL.

@@ -2,9 +2,16 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <string_view>
 #include <thread>
 #include <vector>
 
+#ifdef assert
+#undef assert
+#endif
+#include "arch/x86_64/apic/ipi.hpp"
+#include "arch/x86_64/cpu/cpu.hpp"
 #include "buffer/buffer.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
@@ -17,6 +24,8 @@
 #include "syscall/process.hpp"
 #include "syscall/vfs.hpp"
 #include "syscall/wait.hpp"
+
+extern void (*host_tlb_retirement_wait)(cpu*);
 
 namespace
 {
@@ -352,7 +361,7 @@ TEST_F(BufferMemory, AdmittedKernelCopyGateDelaysRevocation)
     BufferLoanBatch* loans = nullptr;
     std::thread worker;
     {
-        UserCopyGuard admitted;
+        UserCopyGuard admitted(&caller);
         worker = std::thread([&] {
             started = true;
             EXPECT_EQ(0, buffer_prepare_loans(frames, &a, attachment(fd), loans));
@@ -363,13 +372,149 @@ TEST_F(BufferMemory, AdmittedKernelCopyGateDelaysRevocation)
         for(unsigned i = 0; i < 1000; ++i)
             std::this_thread::yield();
         EXPECT_FALSE(done.load());
-        EXPECT_TRUE(readable(a, address));
+        VirtualMemory vm(frames, a.address_space_cr3);
+        uint64_t physical = 0, flags = 0;
+        EXPECT_TRUE(vm.translate(address, physical, flags));
     }
     worker.join();
     EXPECT_TRUE(done);
     EXPECT_FALSE(readable(a, address));
     buffer_cancel_loans(loans);
 }
+TEST_F(BufferMemory, AnUnrelatedAddressSpaceCanCopyBeforeRetirementAcknowledgment)
+{
+    const int fd = create(a);
+    ASSERT_GE(fd, 0);
+    const auto address = map(a, fd);
+    ASSERT_TRUE(readable(a, address));
+    ASSERT_TRUE(ipi_initialize());
+
+    cpu target{};
+    target.id = 209;
+    target.booted = static_cast<uint32_t>(ApStartupState::Online);
+    target.next = g_cpu_boot->next;
+    g_cpu_boot->next = &target;
+    auto previous_wait = host_tlb_retirement_wait;
+
+    std::atomic<bool> done = false;
+    std::thread remote;
+    auto check_and_acknowledge = [&](cpu* waiting_for) {
+        if(waiting_for == &target)
+        {
+            EXPECT_TRUE(caller.address_space.copy_gate.locked());
+            EXPECT_FALSE(provider.address_space.copy_gate.locked());
+            remote = std::thread([&] {
+                EXPECT_TRUE(readable(b, control));
+                done.store(true, std::memory_order_release);
+            });
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+            while(!done.load(std::memory_order_acquire) &&
+                  std::chrono::steady_clock::now() < deadline)
+                std::this_thread::yield();
+            EXPECT_TRUE(done.load(std::memory_order_acquire));
+        }
+        auto* previous = g_cpu_host_current;
+        g_cpu_host_current = waiting_for;
+        ipi_poll_tlb_shootdown();
+        g_cpu_host_current = previous;
+    };
+    static decltype(check_and_acknowledge)* active_callback;
+    active_callback = &check_and_acknowledge;
+    host_tlb_retirement_wait = [](cpu* waiting_for) { (*active_callback)(waiting_for); };
+    BufferLoanBatch* loans = nullptr;
+    EXPECT_EQ(0, buffer_prepare_loans(frames, &a, attachment(fd), loans));
+    host_tlb_retirement_wait = previous_wait;
+    active_callback = nullptr;
+    g_cpu_boot->next = target.next;
+    ASSERT_TRUE(remote.joinable());
+    remote.join();
+    EXPECT_FALSE(readable(a, address));
+    buffer_cancel_loans(loans);
+}
+
+TEST_F(BufferMemory, ProcessRevocationRetiresOnlyPresentMatchingAliases)
+{
+    const int mapped = create(a);
+    const int unmapped = create(a);
+    const int unrelated = create(b);
+    ASSERT_GE(mapped, 0);
+    ASSERT_GE(unmapped, 0);
+    ASSERT_GE(unrelated, 0);
+    const auto first = map(a, mapped);
+    const auto second = map(a, mapped);
+    const auto other = map(b, unrelated);
+    ASSERT_NE(first, second);
+    ASSERT_TRUE(readable(a, first));
+    ASSERT_TRUE(readable(a, second));
+    ASSERT_TRUE(readable(b, other));
+    ASSERT_TRUE(ipi_initialize());
+
+    constexpr uint8_t target_id = 210;
+    cpu target{};
+    target.id = target_id;
+    target.booted = static_cast<uint32_t>(ApStartupState::Online);
+    target.next = g_cpu_boot->next;
+    g_cpu_boot->next = &target;
+    auto previous_wait = host_tlb_retirement_wait;
+    static unsigned acknowledgments;
+    acknowledgments = 0;
+    host_tlb_retirement_wait = [](cpu* waiting_for) {
+        if(waiting_for->id == target_id)
+            ++acknowledgments;
+        auto* previous = g_cpu_host_current;
+        g_cpu_host_current = waiting_for;
+        ipi_poll_tlb_shootdown();
+        g_cpu_host_current = previous;
+    };
+
+    buffer_process_exec(frames, &caller);
+    EXPECT_EQ(1u, acknowledgments);
+    EXPECT_FALSE(readable(a, first));
+    EXPECT_FALSE(readable(a, second));
+    EXPECT_TRUE(readable(b, other));
+
+    buffer_process_cleanup(frames, &caller);
+    EXPECT_EQ(1u, acknowledgments);
+    buffer_process_cleanup(frames, &provider);
+    EXPECT_EQ(2u, acknowledgments);
+    EXPECT_FALSE(readable(b, other));
+
+    host_tlb_retirement_wait = previous_wait;
+    g_cpu_boot->next = target.next;
+}
+
+TEST_F(BufferMemory, StringCopiesStopAtNulBeforeCheckingTheNextPage)
+{
+    const uint64_t end = control + kPageSize;
+    char destination[8] = {'?', '?', '?', '?', '?', '?', '?', '?'};
+    const char final_bytes[] = {'a', 'b', '\0'};
+    ASSERT_TRUE(
+        copy_to_user(frames, &a, end - sizeof(final_bytes), final_bytes, sizeof(final_bytes)));
+    EXPECT_TRUE(
+        copy_user_string(frames, &a, end - sizeof(final_bytes), destination, sizeof(destination)));
+    EXPECT_EQ(std::string_view("ab\0", 3), std::string_view(destination, 3));
+    EXPECT_EQ('?', destination[3]);
+
+    const char unterminated = 'c';
+    ASSERT_TRUE(copy_to_user(frames, &a, end - 1, &unterminated, 1));
+    EXPECT_FALSE(
+        copy_user_string(frames, &a, end - sizeof(final_bytes), destination, sizeof(destination)));
+    EXPECT_EQ('c', destination[2]);
+    EXPECT_EQ('?', destination[3]);
+
+    VirtualMemory vm(frames, a.address_space_cr3);
+    ASSERT_TRUE(vm.allocate_and_map(end, 1, PageFlags::User | PageFlags::Write));
+    const char suffix[] = {'d', '\0'};
+    ASSERT_TRUE(copy_to_user(frames, &a, end, suffix, sizeof(suffix)));
+    EXPECT_TRUE(
+        copy_user_string(frames, &a, end - sizeof(final_bytes), destination, sizeof(destination)));
+    EXPECT_EQ(std::string_view("abcd\0", 5), std::string_view(destination, 5));
+
+    char small[3]{};
+    EXPECT_FALSE(copy_user_string(frames, &a, end - sizeof(final_bytes), small, sizeof(small)));
+    EXPECT_EQ(std::string_view("ab\0", 3), std::string_view(small, sizeof(small)));
+}
+
 TEST_F(BufferMemory, SameProcessLoanKeepsOriginalReservations)
 {
     int fd = create(a);

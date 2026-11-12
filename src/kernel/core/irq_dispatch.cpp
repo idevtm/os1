@@ -128,10 +128,7 @@ Thread* handle_irq(TrapFrame* frame)
         return current_thread();
     ipc_refresh_input_waiters();
     if(cpu_on_boot())
-    {
         wake_console_readers(page_frames);
-        wake_vfs_waiters(page_frames);
-    }
 
     if(nullptr == current_thread())
     {
@@ -148,6 +145,7 @@ Thread* handle_irq(TrapFrame* frame)
         if(scheduler_tick && cpu_on_boot())
         {
             wake_reaper_on_tick();
+            wake_vfs_worker_on_tick();
         }
         if(!trap_frame_is_user(*frame) && current_thread()->user_mode)
         {

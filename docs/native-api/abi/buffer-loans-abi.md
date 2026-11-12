@@ -202,7 +202,8 @@ Busy transitions retain the Operation and serialize receive, reply, closure, and
 The Buffer module owns pages, mapping records, generations, budgets, and transfer batches.
 The IPC module owns admission, reply receipts, terminal status, and completion visibility.
 
-The user-copy gate covers translation and direct-map access, including remote wake copies.
+Each user copy uses the target address-space gate, including copies from remote wake paths.
+A Buffer mapping change holds the affected address-space gate through acknowledged retirement.
 An admitted copy finishes before revocation can complete.
 Revocation writes zero page-table leaves before requesting translation retirement.
 Every online CPU reloads its actual hardware CR3 before acknowledging the retirement sequence.

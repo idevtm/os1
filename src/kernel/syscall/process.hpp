@@ -18,7 +18,11 @@ struct ProcessSyscallContext
 };
 
 // copy user bytes to the console stream for supported file descriptors.
-long sys_write(const ProcessSyscallContext& context, int fd, uint64_t user_buffer, size_t length);
+long sys_write(const ProcessSyscallContext& context,
+               int fd,
+               uint64_t user_buffer,
+               size_t length,
+               bool trace = false);
 // Load an initrd program into a new child process and make it runnable.
 long sys_spawn(const ProcessSyscallContext& context, uint64_t user_path);
 // Replace the current process image with another initrd program.

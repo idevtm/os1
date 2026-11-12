@@ -111,6 +111,8 @@ Unaccepted Busy block requests retry after a one-millisecond scheduler timer whe
 The shared IPC timer wait supplies an explicit reschedule and wakeup, including on BIOS APs without periodic ticks.
 Interrupt handlers, early boot, and user syscall frames poll instead of halting without a wake source.
 User syscall frames cannot park through the kernel-thread scheduling path.
+The BSP scheduler tick wakes the VFS worker while cursor requests remain queued.
+The worker executes retained descriptor requests in thread context.
 Read, write, and flush requests share this rule; accepted requests retain completion-based waiting.
 EHCI and xHCI defer scheduling while they own a synchronous controller resource.
 IRQ service continues, but scheduling and deferred filesystem work wait until ownership ends.
@@ -1377,7 +1379,8 @@ Small control records use ordinary copies. Buffer payload pages remain the same 
 
 Original mappings become inaccessible before request publication.
 Acknowledged retirement prevents stale translations from retaining access after a transfer.
-A user-copy gate covers translation and direct-map access, including copies from remote wake paths.
+Each user copy uses the target address-space gate, including copies from remote wake paths.
+A Buffer mapping change holds the affected address-space gate through acknowledged retirement.
 Every online CPU reloads its hardware CR3 before acknowledging retirement.
 Interrupt-disabled waiters service pending acknowledgements. An unresponsive CPU can stall retirement; it cannot permit early ownership publication.
 
@@ -1580,6 +1583,10 @@ The kernel now:
 On the default `q35` targets, both boot paths now discover four CPUs from ACPI and successfully bring up the APs.
 
 The runtime now boots APs into pre-created idle threads with IF=1, installs the shared IDT on each AP, starts per-CPU LAPIC timers when the LAPIC source is active, uses per-CPU run queues plus reschedule IPIs, and periodically load-balances runnable threads. Device interrupt affinity is still intentionally conservative: ISA IRQs remain BSP-routed, and PCI device IRQs are not yet steered to specific APs.
+
+The BSP registers and records the LAPIC scheduler vector before it starts the APs.
+IRQ dispatch compares incoming vectors with that recorded vector.
+The PIT fallback uses the legacy timer vector.
 
 ## Test And CI Architecture
 
@@ -1828,6 +1835,12 @@ Both controllers reuse the SCSI and Bulk-Only Transport implementation.
 EHCI serializes bulk commands and hub control through asynchronous schedule ownership.
 A separate periodic gate lets the worker service mouse reports while storage is active.
 A storage wait can also service the periodic schedule if it acquires that gate.
+Each input endpoint alternates two transfer descriptors in one DMA page.
+After a successful report, the worker can publish a new transfer while the schedule runs.
+The controller keeps the data toggle in its queue-head overlay.
+The worker stops the schedule before it rebuilds a halted queue head or changes the frame list.
+Some controllers copy the inactive transfer into the overlay and halt the queue head.
+The worker stops the schedule to recover from this controller behavior.
 Topology changes and retirement of all attached devices require both gates.
 A short register lock serializes schedule changes with controller shutdown.
 Hardware drivers remain in the kernel; the native File/Directory contract does not change.
@@ -1965,10 +1978,12 @@ process reaping -> retained closing history -> export or counted loss -> release
 ```
 
 A separate I/O provider worker checks export deadlines at bounded intervals.
-Export reserves admission against filesystem-capable syscalls, file providers, and deferred descriptor I/O.
-Conflicting syscalls yield before side effects and retry `INT 0x80`; queued descriptor operations wait for a later interrupt.
+Export reserves admission against filesystem operations, file providers, and deferred descriptor I/O.
+A descriptor read or write checks admission after it retains a file.
+Conflicting syscalls yield before side effects. They rewind the saved instruction pointer by two bytes to retry.
+The BSP scheduler tick wakes the VFS worker to retry queued file operations.
 This avoids foreground failures from the current nonblocking ext2 guard.
-Filesystem calls can wait during export; input IPC, clock calls, descriptor cleanup, and memory queries remain available.
+Filesystem calls can wait during export. Console I/O, input IPC, clock calls, descriptor cleanup, and memory queries remain available.
 A locked snapshot publishes completed export status without exposing concurrent writer fields.
 Explicit export requires log-read and system-control authority; status requires log-read authority.
 Its retained Operation waits for admission, with one-millisecond dispatch backoff.

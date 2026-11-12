@@ -11,10 +11,20 @@
 
 namespace
 {
-Spinlock g_copy_gate{"user-copy-retirement"};
+Spinlock g_unowned_copy_gate{"unowned-user-copy"};
 #if defined(OS1_HOST_TEST)
-thread_local unsigned g_copy_depth = 0;
+thread_local Spinlock* g_held_copy_gate = nullptr;
 #endif
+
+Spinlock*& held_copy_gate()
+{
+#if defined(OS1_HOST_TEST)
+    return g_held_copy_gate;
+#else
+    return cpu_cur()->user_copy_gate;
+#endif
+}
+
 [[nodiscard]] uint64_t user_copy_pid(const Thread* thread)
 {
     return (thread && thread->process) ? thread->process->pid : 0;
@@ -43,25 +53,24 @@ void record_user_copy_failure(const Thread* thread,
 }
 }  // namespace
 
-void user_copy_lock()
+UserCopyGuard::UserCopyGuard(Process* process)
+    : gate_(process ? &process->address_space.copy_gate : &g_unowned_copy_gate)
+    , previous_(held_copy_gate())
 {
-#if defined(OS1_HOST_TEST)
-    auto& depth = g_copy_depth;
-#else
-    auto& depth = cpu_cur()->user_copy_depth;
-#endif
-    if(depth++ == 0)
-        g_copy_gate.lock();
+    if(gate_ != previous_)
+    {
+        gate_->lock();
+        held_copy_gate() = gate_;
+    }
 }
-void user_copy_unlock()
+
+UserCopyGuard::~UserCopyGuard()
 {
-#if defined(OS1_HOST_TEST)
-    auto& depth = g_copy_depth;
-#else
-    auto& depth = cpu_cur()->user_copy_depth;
-#endif
-    if(--depth == 0)
-        g_copy_gate.unlock();
+    if(gate_ != previous_)
+    {
+        held_copy_gate() = previous_;
+        gate_->unlock();
+    }
 }
 
 bool copy_into_address_space(VirtualMemory& vm,
@@ -69,7 +78,8 @@ bool copy_into_address_space(VirtualMemory& vm,
                              const uint8_t* source,
                              uint64_t length)
 {
-    UserCopyGuard copy_guard;
+    // The loader has not published this address space to a thread.
+    IrqGuard irq;
     uint64_t copied = 0;
     while(copied < length)
     {
@@ -96,7 +106,6 @@ bool copy_to_user(PageFrameContainer& frames,
                   const void* source,
                   size_t length)
 {
-    UserCopyGuard copy_guard;
     if((nullptr == thread) || (nullptr == source))
     {
         record_user_copy_failure(thread,
@@ -116,6 +125,7 @@ bool copy_to_user(PageFrameContainer& frames,
         return false;
     }
 
+    UserCopyGuard copy_guard(thread->process);
     VirtualMemory vm(frames, thread->address_space_cr3);
     const uint8_t* src = (const uint8_t*)source;
     size_t copied = 0;
@@ -159,7 +169,6 @@ bool copy_from_user(PageFrameContainer& frames,
                     void* destination,
                     size_t length)
 {
-    UserCopyGuard copy_guard;
     if((nullptr == thread) || (nullptr == destination))
     {
         record_user_copy_failure(thread,
@@ -179,6 +188,7 @@ bool copy_from_user(PageFrameContainer& frames,
         return false;
     }
 
+    UserCopyGuard copy_guard(thread->process);
     VirtualMemory vm(frames, thread->address_space_cr3);
     uint8_t* dest = (uint8_t*)destination;
     size_t copied = 0;
@@ -233,18 +243,55 @@ bool copy_user_string(PageFrameContainer& frames,
         return false;
     }
 
-    for(size_t index = 0; index < destination_size; ++index)
+    UserCopyGuard copy_guard(thread->process);
+    VirtualMemory vm(frames, thread->address_space_cr3);
+    size_t copied = 0;
+    while(copied < destination_size)
     {
-        char ch = 0;
-        if(!copy_from_user(frames, thread, user_pointer + index, &ch, sizeof(ch)))
+        const uint64_t address = user_pointer + copied;
+        if(!user_address::is_user_address_range(address, 1))
         {
+            record_user_copy_failure(thread,
+                                     OS1_KERNEL_EVENT_FLAG_FROM_USER,
+                                     address,
+                                     1,
+                                     OS1_KERNEL_EVENT_USER_COPY_BAD_RANGE);
             return false;
         }
-        destination[index] = ch;
-        if(0 == ch)
+        uint64_t physical = 0;
+        uint64_t flags = 0;
+        if(!vm.translate(address, physical, flags))
         {
-            return true;
+            record_user_copy_failure(thread,
+                                     OS1_KERNEL_EVENT_FLAG_FROM_USER,
+                                     address,
+                                     1,
+                                     OS1_KERNEL_EVENT_USER_COPY_TRANSLATE);
+            return false;
         }
+        if(!user_address::has_required_user_flags(flags, false))
+        {
+            record_user_copy_failure(thread,
+                                     OS1_KERNEL_EVENT_FLAG_FROM_USER,
+                                     address,
+                                     1,
+                                     OS1_KERNEL_EVENT_USER_COPY_PERMISSION);
+            return false;
+        }
+
+        static_assert(kUserStackTop % kPageSize == 0);
+        const size_t page_bytes = kPageSize - (address & (kPageSize - 1));
+        const size_t chunk =
+            (destination_size - copied < page_bytes) ? destination_size - copied : page_bytes;
+        const auto* source = kernel_physical_pointer<const char>(physical);
+        for(size_t i = 0; i < chunk; ++i)
+        {
+            const char byte = source[i];
+            destination[copied + i] = byte;
+            if(byte == 0)
+                return true;
+        }
+        copied += chunk;
     }
 
     destination[destination_size - 1] = 0;

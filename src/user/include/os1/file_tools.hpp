@@ -73,7 +73,8 @@ struct Line
 struct Reader
 {
     int fd = 0;
-    char pending[128]{};
+    bool read_ahead = false;
+    char pending[1024]{};
     size_t position = 0, count = 0;
     long line(Line& out)
     {
@@ -83,8 +84,8 @@ struct Reader
         {
             if(position == count)
             {
-                // Do not read ahead: a foreground command can take over the same stdin.
-                long n = os1::user::read(fd, pending, 1);
+                // Only a privately opened script can keep unread bytes here.
+                long n = os1::user::read(fd, pending, read_ahead ? sizeof(pending) : 1);
                 if(n < 0)
                     return n;
                 position = 0;

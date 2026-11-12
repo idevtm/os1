@@ -78,7 +78,8 @@ struct cpu
     uint64_t migrate_in;
     uint64_t migrate_out;
     uint64_t balance_idle_ticks;
-    uint32_t user_copy_depth;
+    uint32_t buffer_lock_depth;
+    Spinlock* user_copy_gate;
     cpu* next;
     uint8_t id;
     uint32_t booted;

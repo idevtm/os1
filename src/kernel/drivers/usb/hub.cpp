@@ -55,16 +55,19 @@ unsigned unsupported_speed(uint32_t status)
         return 0;
     return status & 0x200u ? 15 : 120;
 }
-bool enumerate_port(const Transport& t, uint8_t port)
+bool enumerate_port(const Transport& t, uint8_t port, bool debounce)
 {
     uint32_t status = 0;
     if(!port_status(t, port, status))
         return false;
-    if(!(status & 1))
+    if(!(status & 1) || (!debounce && (status & (1u << 16))))
         return true;
-    t.delay_ms(t.context, 100);  // Connection debounce.
-    if(!port_status(t, port, status))
-        return false;
+    if(debounce)
+    {
+        t.delay_ms(t.context, 100);
+        if(!port_status(t, port, status))
+            return false;
+    }
     if(!(status & 1) || (status & 8))
         return true;
     if(!t.control(t.context, 0x23, 3, 4, port, nullptr, 0))
@@ -111,13 +114,19 @@ bool enumerate_port(const Transport& t, uint8_t port)
 
     return true;
 }
-bool enumerate(const Transport& t, const Descriptor& hub)
+bool power_ports(const Transport& t, const Descriptor& hub)
 {
     if(!hub.ports || hub.ports > 15)
         return false;
     for(uint8_t port = 1; port <= hub.ports; ++port)
         if(!t.control(t.context, 0x23, 3, 8, port, nullptr, 0))
             return false;
+    return true;
+}
+bool enumerate(const Transport& t, const Descriptor& hub)
+{
+    if(!power_ports(t, hub))
+        return false;
     t.delay_ms(t.context, hub.power_delay_ms);
     for(uint8_t port = 1; port <= hub.ports; ++port)
         if(!enumerate_port(t, port))

@@ -1,5 +1,6 @@
 #include "debug/log_export.hpp"
 
+#include <os1/buffer.h>
 #include <os1/ipc.h>
 #include <os1/resource.h>
 #include <os1/syscall_numbers.h>
@@ -184,8 +185,11 @@ long write(VfsNode* file, uint64_t offset, const void* data, size_t bytes)
     for(size_t at = 0; at < bytes;)
     {
         size_t count = bytes - at;
-        if(count > 256)
-            count = 256;
+        const size_t preferred = file->operations->preferred_io_bytes;
+        const size_t remaining =
+            preferred > 256 ? preferred - (offset + at) % preferred : preferred;
+        if(count > remaining)
+            count = remaining;
         long r = file->operations->write(file, offset + at, p + at, count, false, nullptr);
         if(r < 0)
             return r;
@@ -790,7 +794,13 @@ bool syscall_needs_filesystem(uint64_t number, uint64_t operation)
         case os1_sys_ipc:
             return false;
         case os1_sys_resource:
-            return operation < OS1_RESOURCE_CLOSE || operation > OS1_RESOURCE_SET_STATUS_FLAGS;
+            return !(operation >= OS1_RESOURCE_CLOSE &&
+                     operation <= OS1_RESOURCE_SET_STATUS_FLAGS) &&
+                   !(operation >= OS1_RESOURCE_BUFFER_CREATE &&
+                     operation <= OS1_RESOURCE_BUFFER_UNMAP);
+        case os1_sys_read:
+        case os1_sys_write:
+        case os1_sys_exit:
         case os1_sys_yield:
         case os1_sys_getpid:
         case os1_sys_observe:

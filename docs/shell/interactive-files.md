@@ -74,6 +74,8 @@ A nonzero child exit reports `command failed: <command> status=<value>`; launch 
 A successful `exec` retains redirected streams in the replacement image.
 A shell reading a finite input file exits at EOF; an interactive console shell accepts new input after Ctrl-D.
 For example, `sh < /tmp/script > /tmp/output` writes command results without shell prompts or startup messages.
+`sh /tmp/script` can read ahead on its private script descriptor.
+A shell that reads shared standard input reads only the bytes needed for each line.
 
 Quote paths with spaces, for example `cat "/tmp/my note"`.
 Single and double quotes protect operators; backslash escapes outside single quotes.
@@ -156,10 +158,12 @@ Other unrecoverable input errors terminate the editor with a diagnostic.
 
 File creation and truncation use [native Directory/File calls](../native-api/abi/tmpfs-abi.md).
 Stream copying uses the same open instances through descriptor operations.
+Regular-file transfers use buffers of up to 4096 bytes.
 The shell introduces no second handle table or filesystem authority model.
 
 Native `append` and descriptor APPEND select the current file end under the filesystem lock.
-Each append unit is at most 256 bytes and cannot overlap another append unit.
+A native append unit is at most 256 bytes. An ext2 descriptor append unit can reach 4096 bytes.
+The filesystem prevents overlap between append units.
 A larger descriptor write can interleave with other writers between units.
 The [filesystem quotas](../native-api/abi/tmpfs-abi.md#namespace-and-storage-rules) also apply to here-documents and editor saves.
 

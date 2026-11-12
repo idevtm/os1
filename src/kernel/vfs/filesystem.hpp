@@ -22,6 +22,7 @@ struct VfsOperations
     long (*remove_locked)(VfsNode*, const char*, size_t, uint32_t) = nullptr;
     long (*times)(VfsNode*, os1_file_times&) = nullptr;
     long (*set_times)(VfsNode*, uint32_t) = nullptr;
+    size_t preferred_io_bytes = 256;
 };
 bool vfs_backed(const NativeObject*);
 extern const VfsOperations tmpfs_operations;

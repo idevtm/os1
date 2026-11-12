@@ -75,6 +75,11 @@ The driver requires a calibrated clock for xHCI reset timing.
 After writing HCRST on Intel xHCI, the driver waits 1 ms before the next register access.
 After an xHCI port reset, the driver waits 10 ms and checks the port again before enumeration.
 EHCI periodic queue heads use a zero NAK reload value.
+The USB worker defers reconnect debounce to later polls.
+Runtime EHCI hubs defer downstream discovery until the port power delay ends.
+EHCI also polls root reset timing in stages. It releases the schedule gates between stages.
+The driver permits one EHCI root reset at a time per controller. Hub enumeration waits until that reset ends.
+
 
 The driver checks CBW/CSW lengths, signatures, tags, status, residue, and actual transferred bytes.
 A stalled status read permits one retry after endpoint halt recovery.

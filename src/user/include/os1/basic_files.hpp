@@ -81,19 +81,25 @@ inline int list(int argc, char** argv)
 
 inline int cat(int argc, char** argv)
 {
-    char bytes[1024];
+    char bytes[4096];
     for(int i = argc < 2 ? 0 : 1; i < argc; ++i)
     {
         const bool standard = !i || (argv[i][0] == '-' && !argv[i][1]);
-        const long file = standard ? 0 : os1::user::open(argv[i], OS1_RIGHT_READ);
+        long file = standard ? 0 : os1::user::open(argv[i], OS1_RIGHT_READ | OS1_RIGHT_INSPECT);
+        if(!standard && file == OS1_ERR_ACCESS)
+            file = os1::user::open(argv[i], OS1_RIGHT_READ);
         if(file < 0)
         {
             os1::user::write(2, "cat: cannot open file\n", sizeof("cat: cannot open file\n") - 1);
             return 1;
         }
+        os1_resource_info info{};
+        const size_t chunk = os1::user::query(file, &info) >= 0 && info.kind == OS1_OBJECT_FILE
+                                 ? sizeof(bytes)
+                                 : 1024;
         for(;;)
         {
-            long count = os1::user::read(file, bytes, sizeof(bytes));
+            long count = os1::user::read(file, bytes, chunk);
             if(count < 0)
             {
                 if(!standard)
