@@ -1158,7 +1158,13 @@ The assembly trap entry code now builds a shared `TrapFrame` layout for:
 - scheduler return paths
 
 The C++ dispatcher receives the same frame layout on each path.
-Interrupts and scheduler switches restore the full frame through `IRETQ`.
+Interrupt entry copies the interrupted stack pointer and stack selector from the hardware frame at every privilege level.
+Kernel and user `IRETQ` returns use the same five stack words.
+
+```text
+IRETQ stack -> RIP | CS | RFLAGS | RSP | SS
+```
+
 An eligible same-thread syscall return uses the `SYSRET` fast path.
 
 The local APIC uses vector `0xFF` for spurious interrupts.

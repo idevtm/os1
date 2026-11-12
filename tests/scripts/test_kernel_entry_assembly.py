@@ -63,6 +63,13 @@ def main():
             and kernel_gs[0] == ('lfence', '') and 'gs:' in kernel_gs[1][1],
             'Trap entry must exchange and fence GS before the first access')
 
+    frame_save = symbols['trap_entry_common.save_frame']
+    require(frame_save[-4:] == [('mov', 'rdx,qwordptr[rsp+0x38]'),
+                                ('mov', 'qwordptr[rax+0xa0],rdx'),
+                                ('mov', 'rdx,qwordptr[rsp+0x40]'),
+                                ('mov', 'qwordptr[rax+0xa8],rdx')],
+            'Every trap must copy the saved RSP and SS from the hardware frame')
+
     syscall = symbols['syscall_entry']
     require(syscall[:2] == [('swapgs', ''), ('lfence', '')],
             'SYSCALL must exchange GS before any stack or GS access')
@@ -74,13 +81,23 @@ def main():
             'SYSRET must exchange GS and load RSP immediately before return')
 
     user = symbols['restore_frame_ptr.resume_user']
+    kernel_frame = symbols['restore_frame_ptr.kernel_return']
+    require(kernel_frame[:5] == [('push', 'qwordptr[r11+0xa8]'),
+                                 ('push', 'qwordptr[r11+0xa0]'),
+                                 ('push', 'qwordptr[r11+0x98]'),
+                                 ('push', 'qwordptr[r11+0x90]'),
+                                 ('push', 'qwordptr[r11+0x88]')]
+            and branches_to(kernel_frame[5], 'jmp', 'restore_frame_ptr.resume_kernel'),
+            'Kernel IRET must build all five words on the current stack')
     kernel = symbols['restore_frame_ptr.resume_kernel']
     require(all(op == 'push' for op, _ in user[:5]) and
             all(op != 'mov' or not operands.startswith('rsp,') for op, operands in user) and
             user[-2] == ('swapgs', '') and user[-1][0] in ('iret', 'iretq'),
             'User IRET must use the kernel stack and exchange GS')
     require(any(op in ('iret', 'iretq') for op, _ in kernel)
-            and all(op != 'swapgs' for op, _ in kernel), 'Kernel IRET must keep GS')
+            and all(op != 'swapgs' for op, _ in kernel)
+            and all(op != 'mov' or not operands.startswith('rsp,') for op, operands in kernel),
+            'Kernel IRET must keep GS and restore RSP from the return frame')
 
 
 if __name__ == '__main__':
