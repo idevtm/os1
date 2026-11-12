@@ -1072,6 +1072,12 @@ The BSP receives its initial `cpu` page from the boot frontend. Additional CPUs 
 
 ### AP startup records
 
+The kernel requires xAPIC MMIO for local interrupts.
+If firmware leaves x2APIC active on the BSP, platform discovery stops before LAPIC MMIO access.
+An AP with active x2APIC stays offline.
+MADT discovery skips enabled x2APIC records when it finds the BSP in a Local APIC record.
+If the BSP has no Local APIC record, an enabled x2APIC record causes an unsupported-topology error.
+
 The AP trampoline selects a stack by xAPIC ID. A late AP can read only its own startup record.
 
 | Startup data | Lifetime |

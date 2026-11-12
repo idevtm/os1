@@ -19,6 +19,15 @@
 
 volatile uint32_t* lapic;  // Initialized in mp.c
 
+bool lapic_x2apic_active()
+{
+    constexpr uint32_t ia32_apic_base = 0x1b;
+    constexpr uint64_t extended_mode = 1ull << 10;
+    cpuinfo info{};
+    cpuid(1, &info);
+    return (info.edx & (1u << 9)) && (rdmsr(ia32_apic_base) & extended_mode);
+}
+
 static void lapic_write(int index, int value)
 {
     lapic[index] = value;

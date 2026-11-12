@@ -1286,6 +1286,8 @@ size_t madt_entry_minimum(uint8_t type)
     {
         case ACPI_MADT_TYPE_LOCAL_APIC:
             return sizeof(ACPI_MADT_LOCAL_APIC);
+        case ACPI_MADT_TYPE_LOCAL_X2APIC:
+            return sizeof(ACPI_MADT_LOCAL_X2APIC);
         case ACPI_MADT_TYPE_IO_APIC:
             return sizeof(ACPI_MADT_IO_APIC);
         case ACPI_MADT_TYPE_INTERRUPT_OVERRIDE:
@@ -1335,6 +1337,7 @@ bool acpica_parse_madt(uint64_t& lapic_base,
     const uint8_t bsp_apic_id = current_apic_id();
     bool found_bsp = false;
     bool cpu_truncated = false;
+    bool x2apic_present = false;
 
     const auto* cursor = reinterpret_cast<const uint8_t*>(madt) + sizeof(ACPI_TABLE_MADT);
     const auto* end = reinterpret_cast<const uint8_t*>(madt) + madt->Header.Length;
@@ -1375,6 +1378,11 @@ bool acpica_parse_madt(uint64_t& lapic_base,
                 }
                 break;
             }
+            case ACPI_MADT_TYPE_LOCAL_X2APIC: {
+                const auto* entry = reinterpret_cast<const ACPI_MADT_LOCAL_X2APIC*>(subtable);
+                x2apic_present |= (entry->LapicFlags & ACPI_MADT_ENABLED) != 0;
+                break;
+            }
             case ACPI_MADT_TYPE_IO_APIC: {
                 const auto* entry = reinterpret_cast<const ACPI_MADT_IO_APIC*>(subtable);
                 if(ioapic_count >= kPlatformMaxIoApics)
@@ -1409,7 +1417,8 @@ bool acpica_parse_madt(uint64_t& lapic_base,
                 break;
             }
             case ACPI_MADT_TYPE_LOCAL_APIC_OVERRIDE: {
-                const auto* entry = reinterpret_cast<const ACPI_MADT_LOCAL_APIC_OVERRIDE*>(subtable);
+                const auto* entry =
+                    reinterpret_cast<const ACPI_MADT_LOCAL_APIC_OVERRIDE*>(subtable);
                 lapic_base = entry->Address;
                 break;
             }
@@ -1421,6 +1430,12 @@ bool acpica_parse_madt(uint64_t& lapic_base,
     }
 
     AcpiPutTable(reinterpret_cast<ACPI_TABLE_HEADER*>(madt));
+
+    if(x2apic_present && !found_bsp)
+        return set_status_error(AE_SUPPORT,
+                                "acpica: x2APIC MADT requires a supported xAPIC BSP entry");
+    if(x2apic_present)
+        debug("acpica: x2APIC MADT CPU entries omitted; using xAPIC topology")();
 
     if((0 == cpu_count) || (0 == ioapic_count) || (0 == lapic_base))
     {

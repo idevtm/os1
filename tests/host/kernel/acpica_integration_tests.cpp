@@ -599,6 +599,64 @@ TEST_F(AcpicaIntegration, CapsMadtCpuInventoryAndKeepsLateBsp)
                                    overrides));
 }
 
+TEST_F(AcpicaIntegration, MadtX2ApicRecordsRequireAnXapicBspEntry)
+{
+    for(bool legacy_bsp : {false, true})
+    {
+        os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+        auto frames = make_frames();
+        kmem_init(frames);
+        VirtualMemory vm(frames);
+        AcpicaScopedReset cleanup;
+        build_tables(arena, true, false);
+        auto* madt = reinterpret_cast<TestMadt*>(arena.data() + kMadtPhysical);
+        auto* cursor = reinterpret_cast<uint8_t*>(madt + 1);
+        ACPI_MADT_LOCAL_X2APIC x2apic{};
+        x2apic.Header = {ACPI_MADT_TYPE_LOCAL_X2APIC, sizeof(x2apic)};
+        x2apic.LocalApicId = 0x100;
+        x2apic.LapicFlags = ACPI_MADT_ENABLED;
+        std::memcpy(cursor, &x2apic, sizeof(x2apic));
+        cursor += sizeof(x2apic);
+        if(legacy_bsp)
+        {
+            ACPI_MADT_LOCAL_APIC bsp{};
+            bsp.Header = {ACPI_MADT_TYPE_LOCAL_APIC, sizeof(bsp)};
+            bsp.LapicFlags = ACPI_MADT_ENABLED;
+            std::memcpy(cursor, &bsp, sizeof(bsp));
+            cursor += sizeof(bsp);
+        }
+        ACPI_MADT_IO_APIC ioapic{};
+        ioapic.Header = {ACPI_MADT_TYPE_IO_APIC, sizeof(ioapic)};
+        ioapic.Address = 0xfec00000;
+        std::memcpy(cursor, &ioapic, sizeof(ioapic));
+        cursor += sizeof(ioapic);
+        madt->header.length = cursor - reinterpret_cast<uint8_t*>(madt);
+        finalize_sdt(madt->header);
+
+        ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+        uint64_t lapic_base = 0;
+        size_t cpus = 0, ioapics = 0, overrides = 0;
+        std::array<CpuInfo, kPlatformMaxCpus> cpu_table{};
+        std::array<IoApicInfo, kPlatformMaxIoApics> ioapic_table{};
+        std::array<InterruptOverride, kPlatformMaxInterruptOverrides> override_table{};
+        EXPECT_EQ(legacy_bsp,
+                  acpica_parse_madt(lapic_base,
+                                    cpu_table.data(),
+                                    cpus,
+                                    ioapic_table.data(),
+                                    ioapics,
+                                    override_table.data(),
+                                    overrides));
+        if(legacy_bsp)
+        {
+            EXPECT_EQ(1u, cpus);
+            EXPECT_TRUE(cpu_table[0].is_bsp);
+        }
+        else
+            EXPECT_STREQ("AE_SUPPORT", acpica_last_status());
+    }
+}
+
 TEST_F(AcpicaIntegration, ShutdownDiagnosticsPreserveMissingS5Exception)
 {
     os1::host_test::PhysicalMemoryArena arena(kArenaBytes);

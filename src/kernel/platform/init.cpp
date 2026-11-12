@@ -1,6 +1,7 @@
 // Platform discovery sequence: ACPI discovery, topology publication, and PCI
 // enumeration. Driver probing is deferred until interrupts are online.
 #include "arch/x86_64/apic/ioapic.hpp"
+#include "arch/x86_64/apic/lapic.hpp"
 #include "debug/debug.hpp"
 #include "handoff/boot_info.hpp"
 #include "handoff/memory_layout.h"
@@ -21,6 +22,11 @@
 bool platform_discover(const BootInfo& boot_info, VirtualMemory& kernel_vm)
 {
     KASSERT_ON_BSP();
+    if(lapic_x2apic_active())
+    {
+        debug("platform: x2APIC mode active; xAPIC MMIO required")();
+        return false;
+    }
     platform_reset_state();
 
     if(!acpica_initialize_tables(kernel_vm, boot_info))
