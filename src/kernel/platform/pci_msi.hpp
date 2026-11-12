@@ -30,6 +30,8 @@ void pci_build_msi_message(uint32_t destination_apic_id,
                            uint64_t& address,
                            uint32_t& data);
 
+void pci_build_bsp_msi_message(uint8_t vector, uint64_t& address, uint32_t& data);
+
 void pci_msix_write_table_entry(volatile void* table_base,
                                 uint16_t entry_index,
                                 uint64_t address,

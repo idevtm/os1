@@ -1534,6 +1534,7 @@ The kernel now:
 - claims PCI BARs through `drivers/bus/resource.*`
 - enables PCI interrupts through MSI-X first, MSI second, and IOAPIC INTx as a
   best-effort fallback
+- uses the boot CPU record for the destination of MSI-X, MSI, and IOAPIC interrupts
 - allocates coherent DMA buffers with explicit owner, virtual address, physical
   address, direction, page count, and active state
 - binds built-in and disk-loaded drivers through a bounded PCI registry and shared lifecycle admission

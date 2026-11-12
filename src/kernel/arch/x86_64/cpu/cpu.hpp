@@ -124,6 +124,11 @@ inline bool cpu_ap_finish_startup(cpu* c, ApStartupState state)
 
 extern cpu* g_cpu_boot;
 
+[[nodiscard]] inline uint8_t cpu_boot_apic_id()
+{
+    return g_cpu_boot ? g_cpu_boot->id : 0;
+}
+
 #if defined(OS1_HOST_TEST)
 extern cpu* g_cpu_host_current;
 
