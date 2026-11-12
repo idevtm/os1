@@ -1,7 +1,8 @@
 # Deploy programs without resetting QEMU storage
 
 Offline deployment updates selected executables and preserves other existing files.
-The operation requires a stopped guest and an existing standalone QEMU data image.
+An update requires a stopped guest and an existing standalone QEMU data image.
+The default UEFI launch creates a missing image or updates its disk programs before it starts QEMU.
 
 ```text
 manifest + built programs
@@ -56,8 +57,12 @@ kernel mounts storage -> /sbin/init -> /bin/sh -> exit -> restart
                              +-- launch failure or repeated rapid exits -> /sbin/rescue -> retry
 ```
 
-Stop QEMU before you update an existing data image.
-Run `./os1.sh storage_deploy` to install the shell and current programs without erasing other files.
+Stop the guest before you start another launch with the same image.
+The default UEFI targets `run` and `run_serial` update programs before boot.
+If deployment fails, the target stops before it starts QEMU.
+Use `./os1.sh run_persistent` to boot in UEFI without deployment.
+If the kernel rejects the disk, this target lets you reach the initrd rescue console.
+Use `./os1.sh storage_deploy` to update programs without starting QEMU.
 For a managed USB image, select **Update boot and programs (preserve data)** in the USB menu.
 Create a boot-plus-ext2 image for a new stick.
 A boot-only image starts rescue unless another supported disk supplies `/bin/sh`.
@@ -84,12 +89,14 @@ Kernel drivers remain built into the kernel. Moving programs does not change sto
 The default manifest installs the full shell and bundled programs under `/bin`.
 It also retains `/diskutil` for existing synchronization workflows.
 Initrd contains only `init` and `rescue`.
-The manifest installs `/etc/motd` as a resource default.
-The shell searches `/bin` for bare command names.
+The manifest installs `/etc/motd` and `/etc/shell/init.sh` when they are absent.
+Deployment preserves existing copies of both files.
+The default shell profile adds `/bin` to the search list.
 Names containing `/` bypass search. Providers in verification programs use explicit `/bin` paths.
-New QEMU images receive the manifest during creation; an existing image remains unchanged.
-After upgrading an older image, run `storage_deploy` to install the moved programs.
-Ordinary builds and QEMU launches preserve the installed version until deployment runs.
+New QEMU images receive the manifest during creation.
+The explicit `storage_create` target leaves an existing image unchanged.
+Ordinary builds preserve the installed programs.
+Before a BIOS launch, use `storage_deploy` to install current programs on an older disk.
 The deployment target builds bundled user programs before reading the manifest.
 
 For additional programs, save this example as `build/my-programs.json`:

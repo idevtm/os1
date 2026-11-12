@@ -62,8 +62,8 @@ explicit child grants, and executable-reference launch. The
 Initrd contains `init` and `rescue` for recovery without storage.
 The normal shell, utilities, and resources require ext2.
 See [disk shell startup](docs/filesystems/program-deployment.md#boot-and-recovery) before upgrading an existing image.
-Other bundled programs are installed under `/bin`; the shell initially searches `/bin`; typed path operations can change that list.
-For an existing QEMU disk, run `./os1.sh storage_deploy` after this upgrade.
+Other bundled programs are installed under `/bin`. The default shell profile adds `/bin` to the search list.
+The default UEFI launch updates the disk programs before boot. It preserves data and the existing shell profile.
 For an existing managed USB stick, select **Update boot and programs (preserve data)**.
 See the [deployment guide](docs/filesystems/program-deployment.md).
 

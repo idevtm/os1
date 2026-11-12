@@ -1632,7 +1632,10 @@ The main CMake targets are:
 - `smoke_exec_bios`
 - `smoke_all`
 
-`run` boots the default UEFI ISO under OVMF on `q35` and attaches the generated `virtio-blk` test disk. `run_serial` uses the same guest image but attaches the shell to serial stdio in the terminal. `run_bios` boots the raw image under BIOS on `q35` with the same secondary `virtio-blk` test disk attached, while `run_bios_serial` keeps that boot path but routes the guest shell through serial stdio.
+The `run` and `run_serial` targets prepare the persistent ext2 disk before they start QEMU.
+Preparation creates a missing image or deploys changed programs. It preserves existing data and startup profiles.
+Both targets boot the UEFI ISO under OVMF on `q35`. The `run_serial` target routes the guest shell to the terminal.
+The BIOS targets use the raw boot image and the persistent ext2 disk.
 
 The default build produces both `os1.iso` and `os1.raw`, so a normal
 `cmake --build build` followed by `ctest --test-dir build --output-on-failure`

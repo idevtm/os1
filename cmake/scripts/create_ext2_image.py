@@ -20,10 +20,16 @@ def put16(data, at, value):
 def put32(data, at, value):
     struct.pack_into('<I', data, at, value)
 
-def create(output, utility, mib=32, reset=False, manifest=None):
+def create(output, utility, mib=32, reset=False, manifest=None, *, update_existing=False):
     output = Path(output)
+    if update_existing and (reset or manifest is None):
+        raise ValueError('updating requires a manifest and cannot reset the image')
     if output.exists() and not reset:
-        print(f'Keeping persistent disk: {output}')
+        if update_existing:
+            from deploy_storage import deploy
+            deploy(output, manifest)
+        else:
+            print(f'Keeping persistent disk: {output}')
         return
     if not 4 <= mib <= 128:
         raise ValueError('size must be 4..128 MiB')
@@ -146,7 +152,9 @@ if __name__ == '__main__':
     p.add_argument('--output', required=True, type=Path)
     p.add_argument('--utility', required=True, type=Path)
     p.add_argument('--size-mib', type=int, default=32)
-    p.add_argument('--manifest', type=Path, help='seed programs only when creating an image')
+    p.add_argument('--manifest', type=Path, help='programs and resource defaults to install')
     p.add_argument('--reset', action='store_true', help='replace this image and all of its files')
+    p.add_argument('--update-existing', action='store_true', help='update programs on an existing image')
     args = p.parse_args()
-    create(args.output, args.utility, args.size_mib, args.reset, args.manifest)
+    create(args.output, args.utility, args.size_mib, args.reset, args.manifest,
+           update_existing=args.update_existing)

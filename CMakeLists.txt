@@ -684,6 +684,11 @@ endif()
 # Keep the kernel-only target available for scripted use; interactive USB work uses usb.
 
 if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
+  add_custom_target(storage_prepare_uefi
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/create_ext2_image.py"
+      --output "${OS1_PERSISTENT_DISK}" --utility "${OS1_USER_DISKUTIL_ELF}"
+      --manifest "${OS1_STORAGE_MANIFEST}" --update-existing
+    DEPENDS user_programs USES_TERMINAL VERBATIM)
   add_custom_target(
     run
     BYPRODUCTS "${OS1_SERIAL_LOG}" "${OS1_OVMF_VARS_FILE}"
@@ -718,7 +723,7 @@ if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
       cpu_reset
       -d
       int
-    DEPENDS os1_image storage_create
+    DEPENDS os1_image storage_prepare_uefi
     USES_TERMINAL
     VERBATIM
   )
@@ -752,7 +757,7 @@ if(OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
       stdio
       -display
       none
-    DEPENDS os1_image storage_create
+    DEPENDS os1_image storage_prepare_uefi
     USES_TERMINAL
     VERBATIM
   )
@@ -764,7 +769,7 @@ endif()
 os1_register_menu_target(
   run
   "Default modern UEFI path"
-  "Boot OVMF on q35 with persistent ext2 storage and installed programs."
+  "Update disk programs, then boot OVMF on q35 with persistent ext2 storage."
 )
 os1_register_menu_target(
   run_serial
