@@ -1712,37 +1712,7 @@ int main(int argc_main, char** argv_main)
                                  strings_equal(tokens[0], "history") ||
                                  strings_equal(tokens[0], "process.shell.history.print");
         bool external = call.method == os1::user::shell_runtime::Method::Unknown;
-        const char* builtins[] = {"context",
-                                  "process.context.list",
-                                  "write",
-                                  "edit",
-                                  "help",
-                                  "pid",
-                                  "sys",
-                                  "ps",
-                                  "cpu",
-                                  "pci",
-                                  "initrd",
-                                  "usb",
-                                  "devices",
-                                  "irqs",
-                                  "resources",
-                                  "kmem",
-                                  "events",
-                                  "call",
-                                  "sync",
-                                  "shutdown",
-                                  "reboot",
-                                  "system.sync",
-                                  "system.shutdown",
-                                  "system.reboot",
-                                  "exec",
-                                  "exit",
-                                  "dmesg",
-                                  "history",
-                                  "os.system.log.print",
-                                  "process.shell.history.print"};
-        for(const char* builtin : builtins)
+        for(const char* builtin : os1::user::shell_runtime::builtins)
             if(strings_equal(tokens[0], builtin))
                 external = false;
         os1::user::files::Handle executable;
