@@ -410,6 +410,7 @@ add_custom_command(OUTPUT "${OS1_PROGRAM_TEST_DISK}"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/deploy_storage.py"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/ext2_inspect.py"
     "${PROJECT_SOURCE_DIR}/src/user/data/motd"
+    "${PROJECT_SOURCE_DIR}/src/user/data/shell-init.sh"
   VERBATIM)
 add_custom_target(os1_program_test_disk DEPENDS "${OS1_PROGRAM_TEST_DISK}")
 

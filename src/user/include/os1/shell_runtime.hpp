@@ -49,54 +49,36 @@ struct Binding
     const char* name;
     Method method;
 };
-constexpr Binding bindings[] = {{"less", Method::Pager},
-                                {"pager.show", Method::Pager},
-                                {"head", Method::Head},
+constexpr Binding bindings[] = {{"pager.show", Method::Pager},
                                 {"text.head", Method::Head},
-                                {"tail", Method::Tail},
                                 {"text.tail", Method::Tail},
-                                {"grep", Method::Search},
                                 {"text.search", Method::Search},
-                                {"wc", Method::Count},
                                 {"text.count", Method::Count},
-                                {"file", Method::Identify},
                                 {"fs.identify", Method::Identify},
-                                {"stat", Method::Info},
                                 {"fs.info", Method::Info},
-                                {"df", Method::Space},
                                 {"fs.space", Method::Space},
-                                {"find", Method::Find},
                                 {"fs.find", Method::Find},
-                                {"du", Method::Usage},
                                 {"fs.usage", Method::Usage},
-                                {"echo", Method::Print},
                                 {"out.print", Method::Print},
                                 {"process.streams.output.print", Method::Print},
-                                {"pwd", Method::Cwd},
                                 {"fs.cwd", Method::Query},
-                                {"cd", Method::ChangeDirectory},
                                 {"fs.change_directory", Method::ChangeDirectory},
-                                {"ls", Method::List},
                                 {"fs.list", Method::List},
-                                {"touch", Method::Touch},
                                 {"fs.update_times", Method::UpdateTimes},
                                 {"fs.ensure_file", Method::Ensure},
                                 {"fs.create_file", Method::Create},
-                                {"cp", Method::Copy},
-                                {"cat", Method::Copy},
                                 {"fs.copy", Method::Copy},
-                                {"mv", Method::Move},
                                 {"fs.move", Method::Move},
-                                {"rm", Method::Remove},
                                 {"fs.remove_file", Method::Remove},
-                                {"mkdir", Method::MakeDirectory},
                                 {"fs.create_directory", Method::MakeDirectory},
-                                {"rmdir", Method::RemoveDirectory},
                                 {"fs.remove_directory", Method::RemoveDirectory},
                                 {"path.list", Method::PathList},
                                 {"path.add", Method::PathAdd},
                                 {"path.remove", Method::PathRemove},
-                                {"path.search", Method::PathSearch}};
+                                {"path.search", Method::PathSearch},
+                                {"fs.print_cwd", Method::Cwd},
+                                {"fs.touch", Method::Touch},
+                                {"text.cat", Method::Copy}};
 inline constexpr const char* builtins[] = {"context",
                                            "process.context.list",
                                            "write",
@@ -276,6 +258,76 @@ inline unsigned source_slot(Method method)
 {
     return method == Method::Search ? 1 : 0;
 }
+struct Alias
+{
+    char name[64]{};
+    char target[96]{};
+    char option = 0;
+    bool option_value = true;
+};
+inline Alias aliases[32]{};
+inline Alias* find_alias(const char* name)
+{
+    for(auto& alias : aliases)
+        if(alias.name[0] && shell::equal(alias.name, name))
+            return &alias;
+    return nullptr;
+}
+inline bool valid_alias_name(const char* name)
+{
+    if(!*name || *name == '-' || (*name >= '0' && *name <= '9'))
+        return false;
+    for(const char* p = name; *p; ++p)
+        if(!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') ||
+             *p == '_' || *p == '-'))
+            return false;
+    for(const char* builtin : builtins)
+        if(shell::equal(name, builtin))
+            return false;
+    return !shell::equal(name, "drop") && !shell::equal(name, "with");
+}
+inline Method method_for(const char* name)
+{
+    if(auto* alias = find_alias(name))
+        name = alias->target;
+    if(prefix(name, "os.fs."))
+        name += 3;
+    else if(prefix(name, "process.path."))
+        name += 8;
+    for(const auto& binding : bindings)
+        if(shell::equal(name, binding.name))
+            return binding.method;
+    return Method::Unknown;
+}
+inline bool path_operand(Method method, unsigned slot)
+{
+    if(method == Method::Copy || method == Method::Move)
+        return slot < 2;
+    if(text_method(method))
+        return slot == source_slot(method);
+    switch(method)
+    {
+        case Method::List:
+        case Method::ChangeDirectory:
+        case Method::Touch:
+        case Method::UpdateTimes:
+        case Method::Ensure:
+        case Method::Create:
+        case Method::Remove:
+        case Method::MakeDirectory:
+        case Method::RemoveDirectory:
+        case Method::Info:
+        case Method::Space:
+        case Method::Find:
+        case Method::Usage:
+        case Method::Pager:
+        case Method::PathAdd:
+        case Method::PathRemove:
+            return slot == 0;
+        default:
+            return false;
+    }
+}
 struct Call
 {
     Method method = Method::Unknown;
@@ -325,18 +377,14 @@ struct Call
         os1::context::init(values);
         if(!command.argc)
             return true;
-        const char* name = command.argv[0];
+        const Alias* alias = find_alias(command.argv[0]);
+        const char* name = alias ? alias->target : command.argv[0];
         if(prefix(name, "os.fs."))
             name += 3;
         else if(prefix(name, "process.path."))
             name += 8;
-        for(const auto& b : bindings)
-            if(shell::equal(name, b.name))
-            {
-                method = b.method;
-                break;
-            }
-        cat = shell::equal(name, "cat");
+        method = method_for(name);
+        cat = shell::equal(name, "text.cat");
         bool assignment = command.argc > 1 && shell::equal(command.argv[1], "=");
         if(assignment && shell::equal(name, "fs.cwd"))
             method = Method::ChangeDirectory;
@@ -363,7 +411,7 @@ struct Call
             parameters[0] = {"source", true, !cat};
             parameters[1] = {"destination", true, method == Method::Move};
             parameters[2] = {"mode", false, false};
-            parameters[3] = {"recursive", false, false, shell::equal(name, "cp") ? 'r' : char(0)};
+            parameters[3] = {"recursive", false, false, alias ? alias->option : char(0)};
             count = method == Method::Copy ? 4 : 2;
         }
         else if(method == Method::Query || method == Method::Cwd || method == Method::PathList)
@@ -396,10 +444,11 @@ struct Call
         int boolean_slot = -1;
         if(method == Method::Copy)
             boolean_slot = 3;
-        if((method == Method::RemoveDirectory && !shell::equal(name, "rmdir")) ||
-           (method == Method::Remove && shell::equal(name, "rm")))
+        if((method == Method::RemoveDirectory &&
+            (!shell::equal(command.argv[0], "rmdir") || (alias && alias->option))) ||
+           (method == Method::Remove && alias))
         {
-            parameters[1] = {"recursive", false, false, shell::equal(name, "rm") ? 'r' : char(0)};
+            parameters[1] = {"recursive", false, false, alias ? alias->option : char(0)};
             boolean_slot = 1;
             count = 2;
         }
@@ -411,7 +460,7 @@ struct Call
         }
         if(method == Method::Usage)
         {
-            parameters[1] = {"logical", false, false};
+            parameters[1] = {"logical", false, false, alias ? alias->option : char(0)};
             boolean_slot = 1;
             count = 2;
         }
@@ -427,8 +476,14 @@ struct Call
                 {
                     if(starts[p] == SIZE_MAX)
                     {
-                        nodes[p] =
-                            os1::context::add(values, 0, "option", 6, OS1_VALUE_BOOLEAN, "", 0, 1);
+                        nodes[p] = os1::context::add(values,
+                                                     0,
+                                                     "option",
+                                                     6,
+                                                     OS1_VALUE_BOOLEAN,
+                                                     "",
+                                                     0,
+                                                     alias && alias->option_value);
                         if(nodes[p] < 0)
                             return false;
                     }
@@ -438,6 +493,28 @@ struct Call
                             shell::equal(command.argv[i], "-") &&
                             command.raw[command.begin[i]] == '-')
                         streams[p] = 0;
+                    else if(path_operand(method, p) && command.raw[starts[p]] != '"' &&
+                            command.raw[starts[p]] != '\'' &&
+                            stream(command.raw + starts[p], command.end[i] - starts[p]) < 0)
+                    {
+                        const char* arg = command.argv[i];
+                        if(starts[p] != command.begin[i])
+                        {
+                            while(*arg && *arg != ':')
+                                ++arg;
+                            if(*arg)
+                                ++arg;
+                        }
+                        nodes[p] = os1::context::add(values,
+                                                     0,
+                                                     parameters[p].name,
+                                                     files::length(parameters[p].name),
+                                                     OS1_VALUE_STRING,
+                                                     arg,
+                                                     files::length(arg));
+                        if(nodes[p] < 0)
+                            return false;
+                    }
                     else if(!evaluate(command.raw + starts[p],
                                       command.end[i] - starts[p],
                                       p,

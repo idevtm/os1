@@ -13,6 +13,7 @@ struct Completion
     // Command names are borrowed from static dispatch tables.
     const char* commands[64]{};
     unsigned command_count = 0;
+    bool path_choices = false;
     const char* command_name(unsigned index) const
     {
         return command_count && index >= matches - command_count
@@ -362,6 +363,7 @@ struct Completion
         cancel();
         values = false;
         matches = selected = command_count = 0;
+        path_choices = false;
         generation = view.generation;
         bool quoted = false;
         char quote = 0;
@@ -575,6 +577,11 @@ struct Completion
         {
             bool accepted = replace(prefix, replace_end, name, os1::context::length(name));
             cancel();
+            if(accepted)
+            {
+                selected_value = false;
+                scan_fields(view);
+            }
             return accepted;
         }
         unsigned id = ids[selected];

@@ -2033,7 +2033,8 @@ The [catalog plan](native-api/hardware-catalog-plan.md) records scope, validatio
 
 The [runtime discovery profile](native-api/context-discovery.md) exposes fixed bindings and copied environment data without activation.
 The shell shares this profile between `context` inspection and Tab completion.
-At the first command word, the prompt also offers short names from the shell dispatch tables.
+The prompt also offers configured aliases, shell commands, executable names, and file paths.
+The disk startup profile configures aliases and executable search directories before the first prompt.
 
 ```text
 resource metadata + environment + shell bindings -> bounded View -> context / completion

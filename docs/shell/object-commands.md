@@ -24,7 +24,7 @@ flowchart LR
 | Copy | `fs.copy` accepts path or object sources/destinations; `cp` defaults to replace and `cat` to append |
 | Creation | `touch` creates if absent and updates access/modification times; existing directories are supported |
 | Expressions | String concatenation and formatting remain deferred extensions |
-| Search | Initial path contains `/bin`, then `/disk/bin`; configuration files come later |
+| Search | The boot context starts with an empty list. The disk startup profile adds `/bin`. |
 | Search behavior | Ordered search, explicit-path bypass, not-found-only fallback, and retained executable references |
 | Environment | Inherited plain data objects; independent child copies first, possible copy-on-write optimization later |
 
@@ -37,7 +37,7 @@ Aliases provide convenient names for operations or small bound calls.
 They apply equally to interactive commands and scripts.
 They do not require a separate process.
 The implementation should bind parsed operations and arguments, rather than paste raw text into another command.
-Alias-definition syntax, scope, replacement, and recursion limits remain open.
+See [startup configuration](typed-context.md#startup-configuration) for the implemented alias methods.
 
 | Short command | Proposed binding | Behavior |
 | --- | --- | --- |
@@ -61,7 +61,7 @@ Alias defaults fill omitted parameters; an explicit argument overrides a default
 Aliases do not change the selected interpretation mode.
 A child process cannot change its parent's context through `cd` or `path.add`.
 Context-changing aliases therefore execute inside the current shell.
-Explicit executable paths, such as `/disk/bin/ls`, bypass aliases and program search.
+Explicit executable paths, such as `/bin/ls`, bypass aliases and program search.
 
 ## Copy and file creation
 
@@ -147,18 +147,20 @@ The interactive exception does not change aliases, positional mappings, or param
 | Input | Interactive default | Script default: strict mode |
 | --- | --- | --- |
 | `echo fs.cwd` with a readable String property | Evaluate the property; no fallback warning | Evaluate the property |
-| `cat a.txt` with no resolvable `a.txt` property | Use String `"a.txt"`; emit a text-fallback warning | Resolution error; do not run the copy |
-| `cat a.txt` with a resolvable property | Use its value; no text fallback | Use its value |
+| `cat a.txt` | Use the literal path | Use the literal path |
+| `os.fs.copy(source:process.environment.filename)` | Evaluate the String property | Evaluate the String property |
 | `cat "a.txt"` | Use the literal path; no fallback warning | Use the literal path |
 | Resolved expression has an incompatible type | Type error | Type error |
 | Getter fails or access is denied | Preserve that failure | Preserve that failure |
 
-Object and property resolution take precedence over unquoted text.
+Path operands in short file commands use literal words.
+The established stream names retain their stream meaning in short file commands.
+Other expression operands resolve objects and properties before text fallback.
 Fallback applies when a simple argument token cannot resolve as an expression, including an absent object or member.
 Thus, a missing `txt` member on `a` can also produce the interactive fallback warning.
 Fallback produces only a String; it cannot manufacture a stream object or capability.
 The resulting String must still satisfy the selected parameter's type.
-Quote a filename when a binding with the same spelling would select an unwanted object or property.
+Quote filenames that contain spaces or shell punctuation.
 
 Fallback is a lexical/name-resolution exception, not recovery from failed execution.
 Do not retry a failed getter, method, permission check, or type conversion as a literal filename.
@@ -268,15 +270,16 @@ Legacy executable argv conversion remains a separate adapter; existing programs 
 ## Path and inherited data
 
 `path` is a runtime object over the plain ordered list in `process.environment.path`.
-The initial list is `/bin`, then `/disk/bin`.
+The boot context starts with an empty list.
+The disk startup profile adds `/bin`.
 It is not mirrored into a `PATH` string.
-Custom configuration files are deferred.
+See [startup configuration](typed-context.md#startup-configuration) for the profile and rollback rules.
 
 ```text
-path.add "/disk/bin"
+path.add "/bin"
 path.list
 path.search "textprocessor"
-path.remove "/disk/bin"
+path.remove "/bin"
 ```
 
 `add` appends a new entry; duplicate addition is a no-op.

@@ -161,6 +161,38 @@ def main():
         inspect()
         args.rescue = True
         args.poweroff = True
+    args.rescue = False
+    args.poweroff = False
+    args.bare_shell = True
+    for invalid in (None, "statement", "nul"):
+        shutil.copyfile(args.program_disk, disk)
+        inspect()
+        subprocess.run([tool('debugfs'), '-w', '-R', 'rm /etc/shell/init.sh', str(partition)],
+                       check=True, capture_output=True)
+        if invalid:
+            profile = log.with_suffix('.invalid-profile.sh')
+            content = ('process.path.add(path:"/bin")\n'
+                       'process.shell.aliases.add(name:"listing", target:"os.fs.list")\n')
+            if invalid == "nul":
+                content += 'process.path.add(path:"/tools")\x00invalid\n'
+            else:
+                content += 'process.shell.aliases.add(name:"oops", target:"bad.target")\n'
+            profile.write_text(content)
+            subprocess.run([tool('debugfs'), '-w', '-R',
+                            f'write "{profile}" /etc/shell/init.sh', str(partition)],
+                           check=True, capture_output=True)
+        with disk.open('r+b') as out:
+            out.seek(2048 * 512)
+            out.write(partition.read_bytes())
+        def bare(run, _expect):
+            run('out.print "canonical prompt"', b'canonical prompt\n')
+            run('process.path.list', b'[]')
+            run('listing /', b'unknown command', allow_errors=True)
+            run('yield', b'unknown command', allow_errors=True)
+        phase = 'invalid-profile-' + invalid if invalid else 'missing-profile'
+        boot(args, disk, phase, exercise=bare)
+        transcript = log.with_suffix(f'.{phase}.log').read_bytes()
+        assert (b'/etc/shell/init.sh:3: invalid shell startup configuration' in transcript) == bool(invalid)
     print('Missing storage/shell, invalid ELF, rescue retry, preserving repair, and shell restart passed')
 
 

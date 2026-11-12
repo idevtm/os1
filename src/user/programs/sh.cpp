@@ -13,7 +13,44 @@
 #include <os1/vfs.hpp>
 
 #include "interface/parameter_demo.hpp"
+#include "interface/shell_startup.hpp"
 #include "shell/program_path.hpp"
+
+namespace
+{
+namespace p = os1::parameters;
+constexpr p::Metadata shell_parameters()
+{
+    using namespace p::fixture;
+    p::Metadata m{};
+    m.magic = p::metadata_magic;
+    m.version = m.schema_version = 1;
+    m.size = sizeof(m);
+    m.schema_id = os1::shell_startup::schema_id;
+    m.type_count = 3;
+    m.entry_count = 1;
+    m.types[0] = compound(m, 1, p::Kind::Record, 0, 1, "ShellStartup");
+    m.types[1] = compound(m, 2, p::Kind::Optional, 0, 0, "OptionalScript");
+    m.types[1].element = 2;
+    m.types[2] = scalar(m, 3, p::Kind::String, 0, 0, 0, "ScriptPath");
+    m.types[2].bound = 240;
+    m.entries[0] = entry(m, os1::shell_startup::field_id, 1, "init_script");
+    return m;
+}
+[[gnu::used, gnu::section(".os.parameters")]]
+constinit const p::Metadata startup_parameters = shell_parameters();
+[[gnu::used, gnu::section(".os.parameter-bindings")]]
+const p::Binding startup_parameter_binding{p::binding_magic,
+                                           1,
+                                           sizeof(p::Binding),
+                                           os1::shell_startup::schema_id,
+                                           1,
+                                           1,
+                                           os1::shell_startup::schema_id,
+                                           1,
+                                           0,
+                                           {}};
+}  // namespace
 
 namespace
 {
@@ -1482,9 +1519,131 @@ bool may_write(os1::user::shell_runtime::Method method)
             return false;
     }
 }
+bool load_shell_profile()
+{
+    namespace u = os1::user;
+    namespace files = u::files;
+    using namespace u::shell_runtime;
+    char path[256]{};
+    bool supplied = false;
+    if(u::startup_record && u::startup_record->constructor.schema_id)
+    {
+        const auto& args = u::startup_record->constructor;
+        static p::Value value;
+        p::Diagnostic diagnostic{};
+        if(args.schema_id != startup_parameters.schema_id || args.version != 1 ||
+           !p::decode(startup_parameters, args.payload, args.size, value, diagnostic))
+            return false;
+        const auto field = p::child_key(value, 0, os1::shell_startup::field_id);
+        if(field != p::no_index && value.nodes[field].number)
+        {
+            const auto& data = value.nodes[value.nodes[field].first];
+            __builtin_memcpy(path, value.strings + data.begin, data.size);
+            if(files::length(path) != data.size || path[0] != '/')
+                return false;
+            supplied = true;
+        }
+    }
+    if(!supplied)
+    {
+        int inherited = os1::context::child(u::environment_data, 0, "shell_init_script");
+        if(inherited < 0 ||
+           !os1::context::string(u::environment_data, inherited, path, sizeof(path)))
+            return true;
+    }
+    files::Handle profile(files::open_file(path, files::Mode::Existing));
+    if(profile.fd == OS1_ERR_NOT_FOUND)
+        return true;
+    static os1::context::Data saved_environment;
+    static Alias saved_aliases[32];
+    saved_environment = u::environment_data;
+    __builtin_memcpy(saved_aliases, aliases, sizeof(aliases));
+    files::Reader reader;
+    reader.fd = profile.fd;
+    reader.read_ahead = true;
+    unsigned number = 0;
+    for(; profile.fd >= 0 && number < 128;)
+    {
+        files::Line line;
+        ++number;
+        if(reader.line(line) < 0)
+            break;
+        if(line.eof && !line.size)
+        {
+            if(!supplied)
+                return true;
+            int inherited = os1::context::child(u::environment_data, 0, "shell_init_script");
+            static os1::context::Data updated;
+            if(inherited < 0)
+                updated = u::environment_data;
+            if((inherited < 0 || os1::context::without(u::environment_data, inherited, updated)) &&
+               os1::context::add(updated,
+                                 0,
+                                 "shell_init_script",
+                                 17,
+                                 OS1_VALUE_STRING,
+                                 path,
+                                 files::length(path)) >= 0)
+            {
+                u::environment_data = updated;
+                return true;
+            }
+            break;
+        }
+        bool nul = false;
+        for(unsigned i = 0; i < line.size; ++i)
+            nul |= line.bytes[i] == 0;
+        if(nul)
+            break;
+        normalize_line(line.bytes, line.size);
+        const char* statement = line.bytes;
+        while(os1::shell::space(*statement))
+            ++statement;
+        if(!*statement || *statement == '#')
+            continue;
+        const bool path_command =
+            prefix(statement, "process.path.add(") || prefix(statement, "process.path.remove(");
+        const bool alias_command = prefix(statement, "process.shell.aliases.add(") ||
+                                   prefix(statement, "process.shell.aliases.remove(") ||
+                                   prefix(statement, "process.shell.aliases.add_switch(") ||
+                                   prefix(statement, "process.shell.aliases.remove_switch(");
+        if(!path_command && !alias_command)
+            break;
+        static os1::shell::expression::Tree tree;
+        using K = os1::shell::expression::Kind;
+        if(!tree.parse(statement) || tree.nodes[tree.root].kind != K::Call)
+            break;
+        bool literal = true;
+        for(unsigned i = 1; i < tree.count; ++i)
+        {
+            const auto& node = tree.nodes[i];
+            const bool boolean =
+                node.kind == K::Reference &&
+                (os1::context::same(tree.text + node.begin, node.end - node.begin, "true", 4) ||
+                 os1::context::same(tree.text + node.begin, node.end - node.begin, "false", 5));
+            if(i != tree.root && node.kind != K::Literal && node.kind != K::Record && !boolean)
+                literal = false;
+        }
+        if(!literal || ((!path_command || supplied) && !u::commands::run(statement, false)))
+            break;
+    }
+    u::environment_data = saved_environment;
+    __builtin_memcpy(aliases, saved_aliases, sizeof(aliases));
+    files::put(2, path, files::length(path));
+    files::put(2, ":", 1);
+    files::number(2, number);
+    files::message(": invalid shell startup configuration");
+    if(u::commands::error)
+    {
+        files::message(": ");
+        files::message(u::commands::error);
+    }
+    files::message("\n");
+    return true;
+}
 }  // namespace
 
-int main(int argc_main, char** argv_main)
+static int shell_main(int argc_main, char** argv_main)
 {
     ShellLifetime lifetime;
     os1::user::commands::initialize();
@@ -1497,6 +1656,12 @@ int main(int argc_main, char** argv_main)
             os1::discovery::same(name, "process.shell.history.print"), command.argc, command.argv);
         return command_failed ? OS1_ERR_INVALID : 0;
     };
+    if(!load_shell_profile())
+        os1::user::files::message("shell: invalid startup constructor\n");
+    if(argc_main >= 2 && os1::user::startup_record &&
+       os1::user::startup_record->constructor.schema_id == os1::shell_startup::schema_id &&
+       os1::user::shell_runtime::prefix(argv_main[1], "init_script:"))
+        argc_main = 1;
     if(os1::user::logs::context(OS1_LOG_CONTEXT_OPEN) < 0)
         os1::user::files::message("shell: history capture unavailable\n");
     if(argc_main == 2 && os1::discovery::same(argv_main[1], "--boot"))
@@ -1970,4 +2135,12 @@ int main(int argc_main, char** argv_main)
         if(!console_input && (command_failed || output_failed))
             return 1;
     }
+}
+
+extern "C" int os1_typed_entry(const os1_startup_record* startup)
+{
+    char* argv[OS1_ARGUMENT_LIMIT + 1]{};
+    for(unsigned i = 0; i < startup->argc; ++i)
+        argv[i] = const_cast<char*>(startup->strings + startup->argv[i]);
+    return shell_main(startup->argc, argv);
 }

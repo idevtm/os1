@@ -174,7 +174,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             repeated = run('usb')
             assert snapshot == repeated, 'USB boot diagnostics must be immutable'
 
-        listed = run('ls /sbin')
+        listed = run('os.fs.list "/sbin"' if getattr(args, 'bare_shell', False) else 'ls /sbin')
         assert b'diskutil' not in listed, 'utility must not be installed in initrd'
         if on_boot is not None:
             on_boot()

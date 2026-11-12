@@ -132,7 +132,13 @@ At the first command word, Tab also offers short names from the shell dispatch t
 The menu marks these entries with `[command]`.
 Select a command to insert its name.
 Press Enter again to run it.
-Filename completion, executable search directory enumeration, and arbitrary provider discovery remain separate work.
+At a file operand or redirection, Tab offers authorized filesystem names.
+The shell quotes a name that needs quotes.
+At a command word, the shell checks the executable search list.
+It uses the execution resolver to check executable candidates.
+For a rich constructor, Tab can show fields and cases from offline image metadata.
+Completion never activates the image.
+Arbitrary provider discovery remains separate work.
 See [guided commands](../shell/guided-command-plan.md) for ownership, bounds, and validation.
 
 ```text

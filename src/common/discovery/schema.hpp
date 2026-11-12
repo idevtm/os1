@@ -139,6 +139,19 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
         d.add("path", T::String, "\"\"");
         return d;
     }
+    if(starts(path, "process.shell.aliases."))
+    {
+        const char* operation = path + sizeof("process.shell.aliases.") - 1;
+        if(!same(operation, "list"))
+            d.add("name");
+        if(same(operation, "add"))
+            d.add("target");
+        if(same(operation, "add_switch") || same(operation, "remove_switch"))
+            d.add("spelling");
+        if(same(operation, "add_switch"))
+            d.add("assignment", T::Record);
+        return d;
+    }
     if(same(path, "process.shell.bindings.remove"))
     {
         d.add("name");

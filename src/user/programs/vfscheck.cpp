@@ -47,7 +47,7 @@ int main(int argc, char** argv)
         startup_record = original;
         files::Handle script(files::open_file("/tmp/system-script", files::Mode::Replace));
         CHECK(script.fd >= 0, "system script");
-        constexpr char text[] = "echo \"no inspect sync\" > \"/no-inspect\"\n";
+        constexpr char text[] = "out.print \"no inspect sync\" > \"/no-inspect\"\n";
         CHECK(write(script.fd, text, sizeof(text) - 1) == sizeof(text) - 1, "system script write");
         files::Handle shell(open("/bin/sh", OS1_RIGHT_READ | OS1_RIGHT_EXECUTE));
         CHECK(shell.fd >= 0, "system shell");

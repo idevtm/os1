@@ -77,14 +77,444 @@ inline long inspect(const char* path, int fd)
     } while(!page.end);
     return children || output(fd, "(no children)\n") ? 0 : OS1_ERR_FAULT;
 }
+// Names are valid only while this prompt owns its completion menu.
+inline constexpr unsigned completion_path_limit = 256;
+inline char file_choices[64][completion_path_limit * 2 + 3]{};
+
+template<class Offer>
+inline void directory_choices(const char* path, Offer offer)
+{
+    files::Handle directory(open(path, OS1_RIGHT_ENUMERATE));
+    if(directory.fd < 0)
+        return;
+    alignas(8) uint8_t data[1024];
+    for(unsigned page = 0; page < 32; ++page)
+    {
+        long bytes = read_directory(directory.fd, data, sizeof(data));
+        if(bytes <= 0)
+            return;
+        size_t at = 0;
+        while(at < static_cast<size_t>(bytes))
+        {
+            if(static_cast<size_t>(bytes) - at < sizeof(os1_directory_record))
+                return;
+            const auto& entry = *reinterpret_cast<const os1_directory_record*>(data + at);
+            if(entry.record_bytes < sizeof(entry) || entry.record_bytes % 8 ||
+               entry.record_bytes > static_cast<size_t>(bytes) - at || !entry.name_bytes ||
+               entry.name_bytes > OS1_NAME_MAX ||
+               entry.name_bytes > entry.record_bytes - sizeof(entry))
+                return;
+            if(!offer(reinterpret_cast<const char*>(&entry + 1), entry.name_bytes, entry.kind))
+                return;
+            at += entry.record_bytes;
+        }
+    }
+}
+inline bool plain_name(const char* name, unsigned bytes)
+{
+    for(unsigned i = 0; i < bytes; ++i)
+        if((!os1::discovery::Completion::token(name[i]) && name[i] != '-' && name[i] != '/') ||
+           name[i] == '[' || name[i] == ']')
+            return false;
+    return true;
+}
+inline bool listed(const os1::discovery::Completion& state, const char* name)
+{
+    for(unsigned i = 0; i < state.matches; ++i)
+    {
+        const char* candidate = state.command_name(i);
+        if(candidate && os1::discovery::same(candidate, name))
+            return true;
+    }
+    return false;
+}
+inline void executable_choices(os1::discovery::Completion& state, unsigned first)
+{
+    const auto& env = environment_data;
+    int path = os1::context::child(env, 0, "path");
+    if(path < 0 || env.nodes[path].kind != OS1_VALUE_LIST)
+        return;
+    unsigned stored = 0;
+    for(unsigned i = 1; i < env.count && state.command_count < 64; ++i)
+    {
+        if(env.nodes[i].parent != static_cast<unsigned>(path))
+            continue;
+        char directory[OS1_PATH_MAX]{};
+        if(!os1::context::string(env, i, directory, sizeof(directory)))
+            return;
+        directory_choices(directory, [&](const char* name, unsigned bytes, unsigned kind) {
+            const unsigned prefix = state.cursor - first;
+            if(kind != OS1_OBJECT_FILE || bytes < prefix || !plain_name(name, bytes) ||
+               !os1::context::same(name, prefix, state.line + first, prefix))
+                return true;
+            char* candidate = file_choices[stored];
+            __builtin_memcpy(candidate, name, bytes);
+            candidate[bytes] = 0;
+            const bool shadowed = view.resolve(candidate) >= 0 || listed(state, candidate);
+            char resolved[OS1_PATH_MAX]{};
+            files::Handle executable;
+            if(!shadowed)
+                executable.reset(context::search(candidate, resolved, sizeof(resolved)));
+            if(shadowed || executable.fd < 0)
+            {
+                unsigned base = files::length(directory);
+                if(!base || base + bytes + 2 >= completion_path_limit)
+                    return true;
+                __builtin_memcpy(candidate, directory, base);
+                if(candidate[base - 1] != '/')
+                    candidate[base++] = '/';
+                __builtin_memcpy(candidate + base, name, bytes);
+                candidate[base + bytes] = 0;
+                if(!plain_name(candidate, base + bytes) || listed(state, candidate))
+                    return true;
+                executable.reset(context::search(candidate, resolved, sizeof(resolved)));
+            }
+            if(executable.fd >= 0)
+            {
+                state.add_command(candidate);
+                ++stored;
+            }
+            return state.command_count < 64;
+        });
+    }
+}
+inline unsigned word_end(const os1::discovery::Completion& state, unsigned at)
+{
+    char quote = 0;
+    for(; at < state.size; ++at)
+    {
+        const char c = state.line[at];
+        if(c == '\\' && quote != '\'' && at + 1 < state.size)
+            ++at;
+        else if(quote)
+        {
+            if(c == quote)
+                quote = 0;
+        }
+        else if(c == '"' || c == '\'')
+            quote = c;
+        else if(os1::shell::space(c) || c == '<' || c == '>')
+            break;
+    }
+    return at;
+}
+inline bool offer_paths(os1::discovery::Completion& state,
+                        unsigned begin,
+                        unsigned end,
+                        bool directories,
+                        bool force_quote,
+                        bool explicit_command)
+{
+    char raw[completion_path_limit]{};
+    unsigned used = 0, slash = 0;
+    char delimiter =
+        state.line[begin] == '"' || state.line[begin] == '\'' ? state.line[begin++] : 0;
+    for(unsigned i = begin; i < state.cursor; ++i)
+    {
+        char c = state.line[i];
+        if(c == delimiter)
+            break;
+        if(c == '\\' && delimiter != '\'' && i + 1 < state.cursor)
+            c = state.line[++i];
+        if(used + 1 >= sizeof(raw))
+            return false;
+        raw[used++] = c;
+        if(c == '/')
+            slash = used;
+    }
+    char parent[completion_path_limit] = ".";
+    if(slash)
+    {
+        __builtin_memcpy(parent, raw, slash);
+        parent[slash] = 0;
+    }
+    state.cancel();
+    state.values = false;
+    state.matches = state.selected = state.command_count = 0;
+    state.generation = view.generation;
+    state.path_choices = true;
+    state.prefix = begin - (delimiter != 0);
+    state.replace_end = end;
+    directory_choices(parent, [&](const char* name, unsigned bytes, unsigned kind) {
+        if((directories && kind != OS1_OBJECT_DIRECTORY) || bytes < used - slash ||
+           !os1::context::same(name, used - slash, raw + slash, used - slash) ||
+           (used == slash && name[0] == '.'))
+            return true;
+        char full[completion_path_limit]{};
+        if(slash + bytes + 1 >= sizeof(full))
+            return true;
+        __builtin_memcpy(full, raw, slash);
+        __builtin_memcpy(full + slash, name, bytes);
+        unsigned n = slash + bytes;
+        if(kind == OS1_OBJECT_DIRECTORY)
+            full[n++] = '/';
+        else if(explicit_command)
+        {
+            char resolved[OS1_PATH_MAX]{};
+            files::Handle executable(context::search(full, resolved, sizeof(resolved)));
+            if(executable.fd < 0)
+                return true;
+        }
+        char* out = file_choices[state.command_count];
+        unsigned at = 0;
+        const bool quoted = force_quote || delimiter || !plain_name(full, n) || full[0] == '-' ||
+                            shell_runtime::stream(full, n) >= 0;
+        if(quoted)
+            out[at++] = '"';
+        for(unsigned i = 0; i < n; ++i)
+        {
+            unsigned char c = full[i];
+            if(c < 0x20 || c >= 0x7f)
+                return true;
+            if(c == '\\' || c == '"')
+                out[at++] = '\\';
+            out[at++] = c;
+        }
+        if(quoted)
+            out[at++] = '"';
+        out[at] = 0;
+        state.add_command(out);
+        return state.command_count < 64;
+    });
+    return true;
+}
+inline bool path_choices(os1::discovery::Completion& state, unsigned first, unsigned command_end)
+{
+    const bool explicit_command = state.cursor <= command_end && state.cursor > first;
+    if(state.cursor < command_end && !explicit_command)
+        return false;
+    unsigned begin = first, slot = 0;
+    bool redirected = false, in_word = false, named = false, options = true;
+    char quote = 0;
+    for(unsigned i = command_end; i < state.cursor; ++i)
+    {
+        const char c = state.line[i];
+        if(quote)
+        {
+            if(c == '\\' && quote == '"' && i + 1 < state.cursor)
+                ++i;
+            else if(c == quote)
+                quote = 0;
+            continue;
+        }
+        if(c == '\\' && i + 1 < state.cursor)
+        {
+            in_word = true;
+            ++i;
+            continue;
+        }
+        if(c == '<' || c == '>')
+        {
+            if(c == '<' && state.line[i + 1] == '<')
+                return false;
+            redirected = true;
+            in_word = named = false;
+            begin = i + 1;
+        }
+        else if(os1::shell::space(c))
+        {
+            if(in_word && !redirected)
+            {
+                if(options && i - begin == 2 && state.line[begin] == '-' &&
+                   state.line[begin + 1] == '-')
+                    options = false;
+                else if(!named && (!options || state.line[begin] != '-'))
+                    ++slot;
+            }
+            if(in_word)
+                redirected = false;
+            in_word = named = false;
+            begin = i + 1;
+        }
+        else
+        {
+            in_word = true;
+            if(c == ':' && os1::context::identifier(state.line + begin, i - begin))
+                named = true;
+            else if(c == '"' || c == '\'')
+                quote = c;
+        }
+    }
+    char command[64]{};
+    if(command_end - first >= sizeof(command) || command_end == first)
+        return false;
+    __builtin_memcpy(command, state.line + first, command_end - first);
+    const auto method = shell_runtime::method_for(command);
+    if(explicit_command)
+    {
+        bool slash = false;
+        for(unsigned i = first; i < state.cursor; ++i)
+        {
+            if(state.line[i] == '(' && state.line[first] != '"' && state.line[first] != '\'')
+                return false;
+            slash |= state.line[i] == '/';
+        }
+        if(!slash)
+            return false;
+    }
+    else if(!redirected)
+    {
+        for(unsigned i = begin; i < state.cursor && state.line[i] != '"' && state.line[i] != '\'';
+            ++i)
+        {
+            if(state.line[i] != ':')
+                continue;
+            const unsigned length = i - begin;
+            if(!os1::context::identifier(state.line + begin, length))
+                break;
+            if(os1::context::same(state.line + begin, length, "destination", 11))
+                slot = 1;
+            else if(os1::context::same(state.line + begin, length, "source", 6))
+                slot = shell_runtime::source_slot(method);
+            else if(os1::context::same(state.line + begin, length, "path", 4))
+                slot = 0;
+            else
+                return false;
+            begin = i + 1;
+            break;
+        }
+        if(!shell_runtime::path_operand(method, slot) || (options && state.line[begin] == '-'))
+            return false;
+    }
+    unsigned end = word_end(state, begin);
+    if(end < state.cursor)
+        return false;
+    const bool directories = !redirected && (method == shell_runtime::Method::List ||
+                                             method == shell_runtime::Method::ChangeDirectory);
+    return offer_paths(state, begin, end, directories, redirected, explicit_command);
+}
+inline bool guided_path_choices(os1::discovery::Completion& state)
+{
+    state.scan_fields(view);
+    for(unsigned i = 0; i < state.field_count; ++i)
+    {
+        const auto& field = state.fields[i];
+        if(field.method < 0 || field.parameter < 0 || state.cursor < field.begin ||
+           state.cursor > field.end)
+            continue;
+        char path[os1::discovery::path_limit]{};
+        if(!os1::discovery::member_path(view, field.method, path, sizeof(path)))
+            return false;
+        const auto method = shell_runtime::method_for(path);
+        if(!shell_runtime::path_operand(method, field.parameter))
+            return false;
+        const char first = state.line[field.begin];
+        if(first != '"' && first != '\'' && first != '/' && first != '.')
+            return false;
+        const bool directories = method == shell_runtime::Method::List ||
+                                 method == shell_runtime::Method::ChangeDirectory;
+        return offer_paths(state, field.begin, field.end, directories, true, false);
+    }
+    return false;
+}
+inline bool parameter_choices(os1::discovery::Completion& state,
+                              unsigned first,
+                              unsigned command_end)
+{
+    if(state.cursor <= command_end || command_end == first || command_end - first >= 64)
+        return false;
+    char command[64]{};
+    __builtin_memcpy(command, state.line + first, command_end - first);
+    unsigned start = state.cursor;
+    while(start > command_end && !os1::shell::space(state.line[start - 1]))
+        --start;
+    if(!plain_name(state.line + start, state.cursor - start))
+        return false;
+    if(const auto* alias = shell_runtime::find_alias(command))
+    {
+        if(alias->option && state.cursor == start + 1 && state.line[start] == '-')
+        {
+            file_choices[0][0] = '-';
+            file_choices[0][1] = alias->option;
+            file_choices[0][2] = 0;
+            state.prefix = start;
+            state.replace_end = word_end(state, start);
+            state.add_command(file_choices[0]);
+            return true;
+        }
+        return false;
+    }
+    if(shell_runtime::method_for(command) != shell_runtime::Method::Unknown)
+        return false;
+    char resolved[OS1_PATH_MAX]{};
+    files::Handle image(context::search(command, resolved, sizeof(resolved)));
+    if(image.fd < 0)
+        return false;
+    static os1::parameters::Metadata metadata, scratch;
+    os1::parameters::Binding binding{};
+    if(parameter_metadata(image.fd, metadata, scratch) != 1 ||
+       !parameter_binding(image.fd, metadata, binding) || !binding.constructor)
+        return false;
+
+    namespace p = os1::parameters;
+    const p::Type* type = &metadata.types[metadata.root];
+    unsigned segment = start;
+    for(unsigned i = start; i < state.cursor; ++i)
+    {
+        if(state.line[i] != '.')
+            continue;
+        if(type->kind == p::Kind::Optional)
+            type = &metadata.types[type->element];
+        const auto entry = p::entry_name(metadata, *type, state.line + segment, i - segment);
+        if(entry == p::no_index || metadata.entries[entry].type == p::no_index)
+            return false;
+        type = &metadata.types[metadata.entries[entry].type];
+        segment = i + 1;
+    }
+    if(type->kind == p::Kind::Optional)
+        type = &metadata.types[type->element];
+    if(type->kind != p::Kind::Record && type->kind != p::Kind::Variant &&
+       type->kind != p::Kind::Enum)
+        return false;
+    state.cancel();
+    state.values = state.path_choices = false;
+    state.matches = state.selected = state.command_count = 0;
+    state.prefix = segment;
+    state.replace_end = segment;
+    while(state.replace_end < state.size &&
+          (os1::context::identifier(state.line + state.replace_end, 1) ||
+           (state.line[state.replace_end] >= '0' && state.line[state.replace_end] <= '9') ||
+           state.line[state.replace_end] == '-'))
+        ++state.replace_end;
+    const bool has_delimiter =
+        state.line[state.replace_end] == ':' || state.line[state.replace_end] == '.';
+    const unsigned bytes = state.cursor - segment;
+    for(unsigned i = 0; i < type->count && state.command_count < 64; ++i)
+    {
+        const auto& entry = metadata.entries[type->first + i];
+        const auto name = entry.text.name;
+        if(name.size < bytes ||
+           !os1::context::same(metadata.strings + name.offset, bytes, state.line + segment, bytes))
+            continue;
+        char* out = file_choices[state.command_count];
+        __builtin_memcpy(out, metadata.strings + name.offset, name.size);
+        unsigned size = name.size;
+        if(entry.type != p::no_index && !has_delimiter)
+        {
+            const auto& member = metadata.types[entry.type];
+            const auto kind = member.kind == p::Kind::Optional ? metadata.types[member.element].kind
+                                                               : member.kind;
+            out[size++] = kind == p::Kind::Record || kind == p::Kind::Variant ? '.' : ':';
+        }
+        out[size] = 0;
+        state.add_command(out);
+    }
+    return state.open;
+}
 inline void begin_choices(os1::discovery::Completion& state)
 {
     state.begin(view);
+    if(guided_path_choices(state))
+        return;
     unsigned first = 0;
     while(first < state.size && os1::shell::space(state.line[first]))
         ++first;
+    const unsigned command_end = word_end(state, first);
+    if(path_choices(state, first, command_end) || parameter_choices(state, first, command_end))
+        return;
     unsigned end = first;
-    while(end < state.size && os1::discovery::Completion::token(state.line[end]) &&
+    while(end < state.size &&
+          (os1::discovery::Completion::token(state.line[end]) || state.line[end] == '-') &&
           state.line[end] != '.' && state.line[end] != '[' && state.line[end] != ']')
         ++end;
     const char boundary = state.line[end];
@@ -92,6 +522,11 @@ inline void begin_choices(os1::discovery::Completion& state)
        (boundary && !os1::shell::space(boundary) && boundary != '<' && boundary != '>'))
         return;
 
+    if(state.start != first)
+    {
+        state.cancel();
+        state.matches = state.selected = state.command_count = 0;
+    }
     auto offer = [&](const char* name) {
         for(const char* c = name; *c; ++c)
             if(*c == '.')
@@ -105,10 +540,14 @@ inline void begin_choices(os1::discovery::Completion& state)
             state.add_command(name);
         }
     };
-    for(const auto& binding : shell_runtime::bindings)
-        offer(binding.name);
+    for(const auto& alias : shell_runtime::aliases)
+        if(alias.name[0])
+            offer(alias.name);
     for(const char* name : shell_runtime::builtins)
         offer(name);
+    state.prefix = first;
+    state.replace_end = end;
+    executable_choices(state, first);
 }
 struct Display
 {
@@ -382,14 +821,30 @@ inline long read(files::Reader& fallback, files::Line& line)
         {
             if(state.open)
                 state.accept(view, true);
-            else if(!state.step_field(view, key == OS1_CONSOLE_KEY_BACKTAB ? -1 : 1) && key == '\t')
-                begin_choices(state);
+            else
+            {
+                bool legacy_field = false;
+                for(unsigned i = 0; i < state.field_count; ++i)
+                {
+                    const auto& field = state.fields[i];
+                    if(field.method < 0 && state.cursor >= field.begin && state.cursor <= field.end)
+                        legacy_field = true;
+                }
+                if(key == '\t' && state.focus < 0 && guided_path_choices(state))
+                {
+                    // Keep the current field while a path menu is open.
+                }
+                else if(key == '\t' && (legacy_field || !state.step_field(view, 1)))
+                    begin_choices(state);
+                else if(key == OS1_CONSOLE_KEY_BACKTAB)
+                    state.step_field(view, -1);
+            }
             if(!display.paint(state))
                 return OS1_ERR_FAULT;
         }
         else if(key == OS1_CONSOLE_KEY_COMPLETE || key == 0)
         {
-            if(!state.value_choices(view))
+            if(!guided_path_choices(state) && !state.value_choices(view))
                 begin_choices(state);
             if(!display.paint(state))
                 return OS1_ERR_FAULT;

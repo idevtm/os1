@@ -67,5 +67,5 @@ for entry in packages:
         assert package['match'] == 'validated firmware framebuffer'
         assert 'pci' not in package
 assert seen == expected
-assert {e['destination'] for e in resources} == {'/etc/motd', *(e['destination'] for e in packages)}
+assert {e['destination'] for e in resources} == {'/etc/motd', '/etc/shell/init.sh', *(e['destination'] for e in packages)}
 print(f'Two recovery executables; {len(programs)} complete disk ELFs; {len(resources)} resource defaults')

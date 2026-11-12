@@ -16,7 +16,7 @@ bind positional/named arguments
 
 `process.environment` is a bounded bag of records, lists, strings, integers, and booleans.
 Children inherit independent copies through [startup ABI version 3](../native-api/abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension).
-The initial path list contains `/bin`.
+The boot context starts with an empty search list. The disk startup profile adds `/bin`.
 No PATH text variable mirrors that list.
 Code for `path` and `fs` resides in the linked user runtime; neither requires a service process.
 
@@ -42,6 +42,37 @@ Record members can be enumerated through the bag representation; this is not gen
 Search retains the first executable candidate and launches that same object.
 Only NOT_FOUND advances to the next directory. Explicit paths bypass search and aliases.
 
+## Startup configuration
+
+Init passes the optional String constructor argument `init_script:"/etc/shell/init.sh"`.
+The shell applies the profile before the first prompt.
+The profile configures the command search list and the alias table.
+
+```text
+/sbin/init -> /bin/sh constructor -> /etc/shell/init.sh -> search list + aliases
+```
+
+The profile accepts literal calls to `process.path.add`, `process.path.remove`, and the alias mutation methods.
+If a statement fails, the shell reports its file and line and restores the previous configuration.
+A missing file leaves the initial configuration in place.
+Child shells can load aliases from the inherited profile path. They keep their inherited search list.
+
+```text
+process.path.add(path:"/bin")
+process.shell.aliases.add(name:"ls", target:"os.fs.list")
+process.shell.aliases.add(name:"cp", target:"os.fs.copy")
+process.shell.aliases.add_switch(name:"cp", spelling:"-r", assignment:{parameter:"recursive", value:true})
+process.shell.aliases.show(name:"cp")
+process.shell.aliases.remove_switch(name:"cp", spelling:"-r")
+process.shell.aliases.remove(name:"cp")
+process.shell.aliases.list()
+```
+
+An alias names a qualified shell method.
+An alias can define one short switch for a supported Boolean input.
+Duplicate assignments fail before invocation.
+Explicit paths bypass the alias table.
+
 ## Commands and arguments
 
 | Alias | Canonical binding | Parameters |
@@ -59,7 +90,7 @@ Only NOT_FOUND advances to the next directory. Explicit paths bypass search and 
 | `rmdir` | `fs.remove_directory` | Required String `path`, slot 1; empty directories only |
 
 `fs.create_file` uses exclusive creation. `fs.ensure_file` preserves existing contents.
-Built-in aliases work in scripts and interactive commands; custom alias definitions are deferred.
+The disk startup profile installs the default aliases. Alias changes apply only to the current shell.
 All method and property names use snake case.
 
 ```text
@@ -76,10 +107,12 @@ cd ".."
 ```
 
 Named arguments do not consume positional slots. Duplicate, unknown, missing, and excess arguments fail before invocation.
-`--` ends option recognition; this stage does not support recursive flags.
+`--` ends option recognition. The default profile defines `-r` for `cp` and `rm`.
 Both `fs.cwd = "/tmp"` and `cd "/tmp"` validate directory authority before changing context.
-A String parameter requires a String value; integers do not implicitly become path strings.
-Copy accepts path strings and the existing `out` or `process.streams.*` bindings.
+A typed String parameter requires a String value. A short path operand such as `cat 123` uses the literal filename.
+An explicit typed copy call accepts path strings and stream references.
+Short file commands treat bare operands as paths and preserve the established stream names.
+Completion quotes a filename that has a stream name.
 General variables containing File objects remain later work.
 
 A directory destination appends the source basename for copy and move.
@@ -105,8 +138,9 @@ cat "a.txt"
 sh "/tmp/task.sh"
 ```
 
-The second command resolves an object/property first, then warns on stderr if it treats `a.txt` as text.
-The same unresolved token fails in a script. Failed getters and type conversions never become literal text.
+The second command passes a literal path in both the prompt and a script.
+Use an explicit typed call to pass an object reference or computed path.
+Failed getters and type conversions report errors.
 `sh "script"` reads commands from a separate file handle and preserves the child's input stream.
 `sh < "script"` also remains available.
 Unhandled command failure stops the script; an interactive session continues after reporting it.
