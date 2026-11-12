@@ -41,6 +41,7 @@ Process* allocate_process_record()
     Process* process = static_cast<Process*>(kmem_cache_alloc(g_process_cache, KmallocFlags::Zero));
     if(nullptr != process)
     {
+        process->address_space.copy_gate.reset("address-space-copy");
         descriptor_table_initialize(process->descriptors);
         process->root_fd = process->cwd_fd = -1;
     }

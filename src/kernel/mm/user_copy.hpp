@@ -12,7 +12,7 @@
 // boundary that prevents syscalls from turning translation into a kernel-memory
 // copy gadget.
 
-// copy bytes into an arbitrary mapped address space using page-table translation.
+// Copy bytes into an unpublished address space during image setup.
 bool copy_into_address_space(VirtualMemory& vm,
                              uint64_t virtual_address,
                              const uint8_t* source,

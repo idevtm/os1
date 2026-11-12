@@ -1379,7 +1379,8 @@ Small control records use ordinary copies. Buffer payload pages remain the same 
 
 Original mappings become inaccessible before request publication.
 Acknowledged retirement prevents stale translations from retaining access after a transfer.
-A user-copy gate covers translation and direct-map access, including copies from remote wake paths.
+Each user copy uses the target address-space gate, including copies from remote wake paths.
+A Buffer mapping change holds the affected address-space gate through acknowledged retirement.
 Every online CPU reloads its hardware CR3 before acknowledging retirement.
 Interrupt-disabled waiters service pending acknowledgements. An unresponsive CPU can stall retirement; it cannot permit early ownership publication.
 

@@ -61,9 +61,13 @@ The module releases the failed alias and keeps the Buffer backing available to t
 
 ## Retirement rules
 
-The user-copy gate serializes ownership changes with translation and direct-map access.
-Copies hold the gate until physical access finishes. Buffer transitions hold it through acknowledged TLB retirement.
-The gate supports nested use on one CPU. Its interrupt guard prevents scheduler migration during nested use.
+The Buffer lock protects mapping records, ownership, and budgets.
+A user copy holds the target address-space gate through translation and direct-map access.
+A Buffer mapping change takes the address-space gate after the Buffer lock.
+It holds the gate through acknowledged TLB retirement.
+Copies in other address spaces can continue during retirement.
+A nested user copy can reuse the same address-space gate.
+An interrupt guard prevents migration while the CPU holds a gate.
 
 Retirement clears revoked leaves before publishing a global request sequence.
 Every online CPU reloads its actual hardware CR3 before acknowledging that sequence.
