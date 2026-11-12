@@ -1,7 +1,5 @@
 #include "debug/log.hpp"
 // Register-level syscall switch extracted from the kernel trap file.
-#include "syscall/dispatch.hpp"
-
 #include <os1/buffer.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -9,17 +7,27 @@
 #include "arch/x86_64/cpu/control_regs.hpp"
 #include "console/console.hpp"
 #include "core/kernel_state.hpp"
-#include "proc/startup.hpp"
 #include "ipc/channel.hpp"
+#include "proc/startup.hpp"
 #include "proc/thread.hpp"
 #include "sched/scheduler.hpp"
 #include "syscall/abi.hpp"
 #include "syscall/console_read.hpp"
+#include "syscall/dispatch.hpp"
 #include "syscall/observe.hpp"
 #include "syscall/process.hpp"
 #include "syscall/resource.hpp"
 #include "syscall/vfs.hpp"
 #include "syscall/wait.hpp"
+
+namespace
+{
+Thread* retry_vfs_syscall(TrapFrame* frame)
+{
+    frame->rip -= 2;  // Both SYSCALL and legacy INT 0x80 are two bytes.
+    return schedule_next(true);
+}
+}  // namespace
 
 Thread* handle_syscall(TrapFrame* frame)
 {
@@ -40,6 +48,8 @@ Thread* handle_syscall(TrapFrame* frame)
          (frame->rsi <= OS1_RESOURCE_SET_STATUS_FLAGS ||
           (frame->rsi >= OS1_RESOURCE_BUFFER_CREATE && frame->rsi <= OS1_RESOURCE_BUFFER_UNMAP))))
     {
+        if(frame->rax == os1_sys_read || frame->rax == os1_sys_write)
+            diagnostic_log::syscall_begin(thread, frame->rax, frame->rsi);
         frame->rax = OS1_ERR_ACCESS;
         return thread;
     }
@@ -49,9 +59,14 @@ Thread* handle_syscall(TrapFrame* frame)
         case os1_sys_log:
             frame->rax = diagnostic_log::context(page_frames, thread, frame->rdi, frame->rsi);
             return thread;
-        case os1_sys_write:
-            if(frame->rdi >= OS1_DESCRIPTOR_LIMIT) { frame->rax = OS1_ERR_BAD_DESCRIPTOR; return thread; }
-            frame->rax = (uint64_t)sys_write(
+        case os1_sys_write: {
+            if(frame->rdi >= OS1_DESCRIPTOR_LIMIT)
+            {
+                diagnostic_log::syscall_begin(thread, frame->rax, frame->rsi);
+                frame->rax = OS1_ERR_BAD_DESCRIPTOR;
+                return thread;
+            }
+            const long result = sys_write(
                 ProcessSyscallContext{
                     .frames = &page_frames,
                     .kernel_root_cr3 = g_kernel_root_cr3,
@@ -59,27 +74,38 @@ Thread* handle_syscall(TrapFrame* frame)
                 },
                 (int)frame->rdi,
                 frame->rsi,
-                (size_t)frame->rdx);
-            if(static_cast<long>(frame->rax) == kVfsBlocked)
+                (size_t)frame->rdx,
+                true);
+            if(result == kVfsRetry)
+                return retry_vfs_syscall(frame);
+            frame->rax = static_cast<uint64_t>(result);
+            if(result == kVfsBlocked)
                 return schedule_next(false);
             return thread;
+        }
         case os1_sys_read: {
             long read_result = OS1_ERR_INVALID;
-            if(read_or_block(page_frames, thread, frame->rdi, frame->rsi, frame->rdx, read_result)) {
+            if(read_or_block(
+                   page_frames, thread, frame->rdi, frame->rsi, frame->rdx, read_result, true))
+            {
+                if(read_result == kVfsRetry)
+                    return retry_vfs_syscall(frame);
                 frame->rax = static_cast<uint64_t>(read_result);
                 return thread;
             }
             return schedule_next(false);
         }
         case os1_sys_resource:
-            frame->rax = static_cast<uint64_t>(sys_resource(page_frames, thread,
-                frame->rdi, frame->rsi, frame->rdx));
+            frame->rax = static_cast<uint64_t>(
+                sys_resource(page_frames, thread, frame->rdi, frame->rsi, frame->rdx));
             if(static_cast<long>(frame->rax) == kVfsBlocked)
                 return schedule_next(false);
             return thread;
         case os1_sys_ipc:
-            frame->rax = static_cast<uint64_t>(sys_ipc(page_frames, thread, frame->rdi, frame->rsi, frame->rdx));
-            if(static_cast<long>(frame->rax) == kIpcBlocked) return schedule_next(false);
+            frame->rax = static_cast<uint64_t>(
+                sys_ipc(page_frames, thread, frame->rdi, frame->rsi, frame->rdx));
+            if(static_cast<long>(frame->rax) == kIpcBlocked)
+                return schedule_next(false);
             return thread;
         case os1_sys_launch:
             frame->rax = static_cast<uint64_t>(sys_launch({.frames = &page_frames,

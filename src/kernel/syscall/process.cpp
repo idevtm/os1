@@ -1,8 +1,11 @@
 #include "syscall/process.hpp"
 
 #include <os1/observe.h>
+#include <os1/syscall_numbers.h>
 
 #include "debug/debug.hpp"
+#include "debug/log.hpp"
+#include "debug/log_export.hpp"
 #include "mm/user_copy.hpp"
 #include "proc/startup.hpp"
 #include "proc/thread.hpp"
@@ -10,26 +13,39 @@
 #include "syscall/vfs.hpp"
 #include "util/fixed_string.hpp"
 
-long sys_write(const ProcessSyscallContext& context, int fd, uint64_t user_buffer, size_t length)
+long sys_write(
+    const ProcessSyscallContext& context, int fd, uint64_t user_buffer, size_t length, bool trace)
 {
     Thread* thread = current_thread();
     if(!thread || !thread->process || !context.frames)
         return OS1_ERR_INVALID;
     OpenInstance* instance = nullptr;
-    const long status = descriptor_acquire(thread->process->descriptors, fd, OS1_RIGHT_WRITE, instance);
-    if(status < 0) return status;
+    const long status =
+        descriptor_acquire(thread->process->descriptors, fd, OS1_RIGHT_WRITE, instance);
     InstanceRef retained(instance);
-    if(instance->object->kind == OS1_OBJECT_FILE)
+    const bool file = status >= 0 && instance->object->kind == OS1_OBJECT_FILE;
+    log_export::ForegroundGuard foreground(file);
+    if(!foreground.held)
+        return kVfsRetry;
+    if(trace)
+        diagnostic_log::syscall_begin(thread, os1_sys_write, user_buffer);
+    if(status < 0)
+        return status;
+    if(file)
         return vfs_write_or_block(*context.frames, thread, instance, user_buffer, length);
-    if(!(instance->object->interfaces & OS1_INTERFACE_BYTE_OUTPUT) || !instance->object->write_bytes)
+    if(!(instance->object->interfaces & OS1_INTERFACE_BYTE_OUTPUT) ||
+       !instance->object->write_bytes)
         return OS1_ERR_UNSUPPORTED;
-    if(length > OS1_IO_MAX_BYTES) return OS1_ERR_INVALID;
-    if(length == 0) return 0;
+    if(length > OS1_IO_MAX_BYTES)
+        return OS1_ERR_INVALID;
+    if(length == 0)
+        return 0;
     char buffer[128];
     size_t written = 0;
     while(written < length)
     {
-        const size_t chunk = ((length - written) < sizeof(buffer)) ? length - written : sizeof(buffer);
+        const size_t chunk =
+            ((length - written) < sizeof(buffer)) ? length - written : sizeof(buffer);
         if(user_buffer > ~uint64_t{0} - written ||
            !copy_from_user(*context.frames, thread, user_buffer + written, buffer, chunk))
             return written ? static_cast<long>(written) : OS1_ERR_FAULT;

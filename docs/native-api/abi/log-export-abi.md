@@ -68,8 +68,10 @@ The fixed status record has no unbounded error text.
 A dedicated I/O worker checks export deadlines at most every 250 milliseconds when idle.
 It also dispatches File, Directory, system-control, and explicit-export requests.
 A separate service worker handles input, console, and memory-log queries.
-Export requires exclusive admission against filesystem-capable syscall entry, file providers, and deferred descriptor I/O.
-A conflicting syscall yields before side effects and retries its existing two-byte `INT 0x80` instruction.
+Export requires exclusive admission against filesystem operations, file providers, and deferred descriptor I/O.
+Read and write check admission after they retain a file descriptor.
+Console I/O, process exit, and Buffer operations can proceed during export.
+A conflicting syscall yields before side effects. It rewinds the saved instruction pointer by two bytes to retry.
 Deferred descriptor operations remain queued until admission is available.
 An active foreground entry causes automatic export to defer without counting a storage failure.
 Native explicit export retains its Operation when foreground entries prevent admission.

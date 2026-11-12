@@ -1,7 +1,11 @@
 #include "syscall/console_read.hpp"
 
+#include <os1/syscall_numbers.h>
+
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "console/console_input.hpp"
+#include "debug/log.hpp"
+#include "debug/log_export.hpp"
 #include "mm/user_address.hpp"
 #include "mm/user_copy.hpp"
 #include "sync/wait_queue.hpp"
@@ -53,23 +57,30 @@ bool read_or_block(PageFrameContainer& frames,
                    uint64_t fd,
                    uint64_t user_buffer,
                    size_t length,
-                   long& result)
+                   long& result,
+                   bool trace)
 {
     result = OS1_ERR_INVALID;
     if(!thread || !thread->process)
         return true;
-    if(fd >= OS1_DESCRIPTOR_LIMIT)
+    OpenInstance* instance = nullptr;
+    result = fd < OS1_DESCRIPTOR_LIMIT
+                 ? descriptor_acquire(
+                       thread->process->descriptors, static_cast<int>(fd), OS1_RIGHT_READ, instance)
+                 : OS1_ERR_BAD_DESCRIPTOR;
+    InstanceRef retained(instance);
+    const bool file = result >= 0 && instance->object->kind == OS1_OBJECT_FILE;
+    log_export::ForegroundGuard foreground(file);
+    if(!foreground.held)
     {
-        result = OS1_ERR_BAD_DESCRIPTOR;
+        result = kVfsRetry;
         return true;
     }
-    OpenInstance* instance = nullptr;
-    result = descriptor_acquire(
-        thread->process->descriptors, static_cast<int>(fd), OS1_RIGHT_READ, instance);
+    if(trace)
+        diagnostic_log::syscall_begin(thread, os1_sys_read, user_buffer);
     if(result < 0)
         return true;
-    InstanceRef retained(instance);
-    if(instance->object->kind == OS1_OBJECT_FILE)
+    if(file)
     {
         result = vfs_read_or_block(frames, thread, instance, user_buffer, length);
         return result != kVfsBlocked;

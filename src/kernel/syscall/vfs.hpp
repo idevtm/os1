@@ -1,6 +1,8 @@
 #pragma once
 #include "proc/thread.hpp"
 constexpr long kVfsBlocked = -4096;
+// Export denied admission before any file I/O or wait registration.
+constexpr long kVfsRetry = -4099;
 constexpr uint32_t kVfsRead = 0;
 constexpr uint32_t kVfsWrite = 11;
 long sys_vfs(PageFrameContainer&, Thread*, int fd, uint64_t operation, uint64_t argument);

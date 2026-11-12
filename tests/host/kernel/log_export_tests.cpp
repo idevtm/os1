@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <os1/buffer.h>
 #include <os1/input.h>
 #include <os1/observe.h>
 #include <os1/syscall_numbers.h>
@@ -30,6 +31,9 @@
 #include "storage/block_device.hpp"
 #include "support/initrd_builder.hpp"
 #include "support/physical_memory.hpp"
+#include "syscall/console_read.hpp"
+#include "syscall/process.hpp"
+#include "syscall/vfs.hpp"
 #include "vfs/ext2.hpp"
 #include "vfs/filesystem.hpp"
 #include "vfs/namespace.hpp"
@@ -1136,6 +1140,44 @@ TEST(LogExportAuthority, RequiresControlForExportButNotStatus)
 }
 }  // namespace
 
+TEST_F(LogExport, ConsoleWriteContinuesWhileFileIoDefers)
+{
+    mount();
+    shell();
+    ASSERT_EQ(0, descriptor_bootstrap_console(thread->process->descriptors));
+    auto* disk_root = static_cast<VfsNode*>(open("/disk"));
+    ASSERT_NE(nullptr, disk_root);
+    OpenInstance* opened = nullptr;
+    ASSERT_EQ(0, disk_root->operations->create(disk_root, "test", 4, OS1_OBJECT_FILE, opened));
+    InstanceRef file(opened);
+    const int fd = descriptor_install(
+        thread->process->descriptors, file.get(), OS1_RIGHT_READ | OS1_RIGHT_WRITE, 0);
+    ASSERT_GE(fd, 0);
+    const char value = 'x';
+    ASSERT_TRUE(copy_to_user(frames, thread, kUserImageBase, &value, sizeof(value)));
+    auto* previous = current_thread();
+    set_current_thread(thread);
+    {
+        log_export::FinalDrainGuard guard;
+        EXPECT_TRUE(guard.try_acquire());
+        EXPECT_EQ(0, sys_write({.frames = &frames}, 1, 0, 0, true));
+        EXPECT_TRUE(thread->log_pending);
+        diagnostic_log::syscall_end(thread, 0);
+
+        EXPECT_EQ(kVfsRetry, sys_write({.frames = &frames}, fd, kUserImageBase, 1, true));
+        EXPECT_FALSE(thread->log_pending);
+        long result = 0;
+        EXPECT_TRUE(read_or_block(frames, thread, fd, kUserImageBase, 1, result, true));
+        EXPECT_EQ(kVfsRetry, result);
+        EXPECT_FALSE(thread->log_pending);
+        EXPECT_EQ(0u, file.get()->cursor);
+    }
+    EXPECT_EQ(1, sys_write({.frames = &frames}, fd, kUserImageBase, 1));
+    EXPECT_EQ(1u, file.get()->cursor);
+    set_current_thread(previous);
+    object_release(disk_root);
+}
+
 TEST_F(LogExport, ServiceLaneRemainsAvailableInsideExport)
 {
     shell();
@@ -1150,14 +1192,17 @@ TEST_F(LogExport, ServiceLaneRemainsAvailableInsideExport)
                          std::pair{os1_sys_ipc, int(OS1_IPC_RESULT)},
                          std::pair{os1_sys_ipc, int(OS1_IPC_WAIT_MANY)},
                          std::pair{os1_sys_ipc, int(OS1_IPC_CREATE)},
-                         std::pair{os1_sys_resource, int(OS1_RESOURCE_CLOSE)}})
+                         std::pair{os1_sys_resource, int(OS1_RESOURCE_CLOSE)},
+                         std::pair{os1_sys_resource, int(OS1_RESOURCE_BUFFER_MAP)},
+                         std::pair{os1_sys_read, 0},
+                         std::pair{os1_sys_write, 0},
+                         std::pair{os1_sys_exit, 0}})
         {
             log_export::ForegroundGuard allowed(
                 log_export::syscall_needs_filesystem(pair.first, pair.second));
             EXPECT_TRUE(allowed.held);
         }
         for(auto pair : {std::pair{os1_sys_spawn, 0},
-                         std::pair{os1_sys_write, 0},
                          std::pair{os1_sys_launch, 0},
                          std::pair{os1_sys_resource, int(OS1_RESOURCE_OPEN_AT)}})
         {

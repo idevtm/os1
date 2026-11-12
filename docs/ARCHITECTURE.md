@@ -1965,10 +1965,12 @@ process reaping -> retained closing history -> export or counted loss -> release
 ```
 
 A separate I/O provider worker checks export deadlines at bounded intervals.
-Export reserves admission against filesystem-capable syscalls, file providers, and deferred descriptor I/O.
-Conflicting syscalls yield before side effects and retry `INT 0x80`; queued descriptor operations wait for a later interrupt.
+Export reserves admission against filesystem operations, file providers, and deferred descriptor I/O.
+A descriptor read or write checks admission after it retains a file.
+Conflicting syscalls yield before side effects. They rewind the saved instruction pointer by two bytes to retry.
+Queued file operations wait for a later interrupt.
 This avoids foreground failures from the current nonblocking ext2 guard.
-Filesystem calls can wait during export; input IPC, clock calls, descriptor cleanup, and memory queries remain available.
+Filesystem calls can wait during export. Console I/O, input IPC, clock calls, descriptor cleanup, and memory queries remain available.
 A locked snapshot publishes completed export status without exposing concurrent writer fields.
 Explicit export requires log-read and system-control authority; status requires log-read authority.
 Its retained Operation waits for admission, with one-millisecond dispatch backoff.
