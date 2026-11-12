@@ -23,6 +23,9 @@ struct [[gnu::packed]] Trb
     uint32_t control;
 };
 
+static_assert(sizeof(Trb) == kTrbBytes);
+static_assert(offsetof(Trb, control) % alignof(uint32_t) == 0);
+
 [[nodiscard]] uint32_t read32(volatile const uint8_t* base, size_t offset)
 {
     return *reinterpret_cast<volatile const uint32_t*>(base + offset);
@@ -578,8 +581,8 @@ bool dequeue_event_trb(
     void* ring_base, size_t ring_bytes, uint64_t ring_physical, EventRingInfo& ring, EventInfo& out)
 {
     out = {};
-    if((nullptr == ring_base) || (0 == ring.trb_count) ||
-       (ring_bytes != (static_cast<size_t>(ring.trb_count) * kTrbBytes)) ||
+    if((nullptr == ring_base) || (reinterpret_cast<uintptr_t>(ring_base) % alignof(uint32_t)) ||
+       (0 == ring.trb_count) || (ring_bytes != (static_cast<size_t>(ring.trb_count) * kTrbBytes)) ||
        (ring.dequeue_index >= ring.trb_count))
     {
         return false;
@@ -587,7 +590,11 @@ bool dequeue_event_trb(
 
     const auto* trbs = static_cast<const Trb*>(ring_base);
     const Trb& entry = trbs[ring.dequeue_index];
-    const bool cycle = 0 != (entry.control & kTrbCycleBit);
+    const auto* control_word = reinterpret_cast<const uint32_t*>(
+        reinterpret_cast<const uint8_t*>(&entry) + offsetof(Trb, control));
+    // The controller publishes ownership through the cycle bit on coherent DMA memory.
+    const uint32_t control = __atomic_load_n(control_word, __ATOMIC_ACQUIRE);
+    const bool cycle = 0 != (control & kTrbCycleBit);
     if(cycle != ring.cycle_state)
     {
         return false;
@@ -595,21 +602,21 @@ bool dequeue_event_trb(
 
     out.parameter = (static_cast<uint64_t>(entry.parameter_high) << 32) | entry.parameter_low;
     out.status = entry.status;
-    out.control = entry.control;
-    out.transfer_length = entry.status & kEventTransferLengthMask;
-    out.completion_code = static_cast<uint8_t>(entry.status >> kEventCompletionCodeShift);
-    out.trb_type = static_cast<uint8_t>((entry.control & kTrbTypeMask) >> kTrbTypeShift);
+    out.control = control;
+    out.transfer_length = out.status & kEventTransferLengthMask;
+    out.completion_code = static_cast<uint8_t>(out.status >> kEventCompletionCodeShift);
+    out.trb_type = static_cast<uint8_t>((control & kTrbTypeMask) >> kTrbTypeShift);
 
     switch(out.trb_type)
     {
         case kTrbTypeTransferEvent:
             out.type = EventType::Transfer;
-            out.slot_id = static_cast<uint8_t>(entry.control >> 24);
-            out.endpoint_id = static_cast<uint8_t>((entry.control >> 16) & 0x1Fu);
+            out.slot_id = static_cast<uint8_t>(control >> 24);
+            out.endpoint_id = static_cast<uint8_t>((control >> 16) & 0x1Fu);
             break;
         case kTrbTypeCommandCompletionEvent:
             out.type = EventType::CommandCompletion;
-            out.slot_id = static_cast<uint8_t>(entry.control >> 24);
+            out.slot_id = static_cast<uint8_t>(control >> 24);
             break;
         case kTrbTypePortStatusChangeEvent:
             out.type = EventType::PortStatusChange;

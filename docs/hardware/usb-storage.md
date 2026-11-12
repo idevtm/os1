@@ -66,6 +66,9 @@ No MODE SELECT command changes the device's settings.
 
 ## Failure and concurrency rules
 
+The xHCI event consumer reads the cycle bit with acquire ordering.
+It reads the event payload only after the cycle bit matches the consumer cycle state.
+
 The driver checks CBW/CSW lengths, signatures, tags, status, residue, and actual transferred bytes.
 A stalled status read permits one retry after endpoint halt recovery.
 Malformed protocol status triggers bounded reset recovery while the transport remains usable.

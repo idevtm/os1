@@ -179,7 +179,7 @@ TEST(XhciController, InitializesEventRingSegmentTable)
 
 TEST(XhciController, DequeuesEventsAndTracksCycleWrap)
 {
-    std::array<uint8_t, 32> ring{};
+    alignas(uint32_t) std::array<uint8_t, 32> ring{};
     xhci::EventRingInfo info{};
     ASSERT_TRUE(xhci::initialize_event_ring_state(0x345000u, 2u, info));
 
@@ -218,6 +218,24 @@ TEST(XhciController, DequeuesEventsAndTracksCycleWrap)
     EXPECT_EQ(64u, event.transfer_length);
     EXPECT_EQ(2u, event.endpoint_id);
     EXPECT_EQ(7u, event.slot_id);
+}
+
+TEST(XhciController, EventControlWordRequiresNaturalAlignment)
+{
+    alignas(uint32_t) std::array<uint8_t, 32> ring{};
+    xhci::EventRingInfo info{};
+    ASSERT_TRUE(xhci::initialize_event_ring_state(0x345000u, 1u, info));
+    write_event_trb(ring,
+                    1u,
+                    0x200040u,
+                    1u << 24,
+                    (xhci::kTrbTypeCommandCompletionEvent << 10) | xhci::kTrbCycleBit);
+
+    xhci::EventInfo event{};
+    EXPECT_FALSE(xhci::dequeue_event_trb(ring.data() + 1, 16u, 0x345000u, info, event));
+    EXPECT_EQ(0u, info.dequeue_index);
+    EXPECT_TRUE(info.cycle_state);
+    EXPECT_EQ(0u, event.parameter);
 }
 
 TEST(XhciController, ControllerResetStopsAndClearsReset)
