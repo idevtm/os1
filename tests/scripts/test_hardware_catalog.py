@@ -23,7 +23,7 @@ def main():
 
     def exercise(run, expect):
         def context(path):
-            return run('inspect ' + path)
+            return run('inspect --details ' + path)
 
         def integer(path):
             out = context(path)
@@ -62,7 +62,7 @@ def main():
         assert integer('os.system.platform.cpu.family') > 0
         assert integer('os.system.platform.memory.usable_bytes') > 0
         assert b'name [field] String = ' in context('os.system.platform.cpu')
-        assert b'family [field] Integer' in run('inspect os.system.platform.cpu.fami\t')
+        assert b'family [field] Integer' in run('inspect --details os.system.platform.cpu.fami\t')
         lshw = run('lshw')
         for marker in (b'Processor', b'CpuIdentity', b'BootMemory', b'usable_bytes='):
             assert marker in lshw, lshw

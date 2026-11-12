@@ -54,7 +54,9 @@ def main():
                     command('kmem', b'kmem complete')
                     if args.workload == 'context':
                         # Old measurement images still expose the historical command.
-                        inspector = 'inspect' if b'\ninspect [' in command('help') else 'context'
+                        help_text = command('help')
+                        inspector = ('inspect --details' if b'\ninspect [--details]' in help_text
+                                     else 'inspect' if b'\ninspect [' in help_text else 'context')
                         for _ in range(20):
                             command(f'{inspector} os.devices.inventory.pci.pci_0.vendor_id',
                                     b'Integer = 32902')

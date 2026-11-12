@@ -2,6 +2,7 @@
 #include <os1/console.hpp>
 #include <os1/discovery.hpp>
 #include <os1/file_tools.hpp>
+#include <os1/inspect_syntax.hpp>
 #include <os1/log.hpp>
 #include <os1/shell_runtime.hpp>
 
@@ -81,6 +82,159 @@ inline long inspect(const char* path, int fd)
         return OS1_ERR_LIMIT;
     const int id = view.resolve(path);
     return id < 0 ? OS1_ERR_NOT_FOUND : inspect_node(path, id, fd);
+}
+inline const os1::context::Data* (*inspect_binding_value)(unsigned, unsigned&) = nullptr;
+inline void inspect_value(inspect_syntax::Output& out, const os1::context::Data& data, unsigned id)
+{
+    const auto& node = data.nodes[id];
+    switch(node.kind)
+    {
+        case OS1_VALUE_STRING:
+            out.quoted(data.text + node.text, node.text_bytes);
+            return;
+        case OS1_VALUE_INTEGER:
+            out.integer(node.integer);
+            return;
+        case OS1_VALUE_BOOLEAN:
+            out.print(node.integer ? "true" : "false");
+            return;
+    }
+    const bool record = node.kind == OS1_VALUE_RECORD;
+    out.print(record ? "{" : "[");
+    bool first = true;
+    for(unsigned i = id + 1; i < data.count; ++i)
+        if(data.nodes[i].parent == id)
+        {
+            if(!first)
+                out.print(", ");
+            first = false;
+            if(record)
+            {
+                out.put(data.text + data.nodes[i].name, data.nodes[i].name_bytes);
+                out.print(":");
+            }
+            inspect_value(out, data, i);
+        }
+    out.print(record ? "}" : "]");
+}
+inline const char* parameter_type(os1::discovery::InputType type)
+{
+    using T = os1::discovery::InputType;
+    switch(type)
+    {
+        case T::String:
+            return "String";
+        case T::Integer:
+            return "Integer";
+        case T::Boolean:
+            return "Bool";
+        case T::Enum:
+            return "Enum";
+        case T::PathOrStream:
+            return "PathOrStream";
+        case T::Record:
+            return "Record";
+        case T::Value:
+            return "Value";
+    }
+    return "unavailable";
+}
+inline void declare_member(inspect_syntax::Output& out, unsigned id)
+{
+    using namespace os1::discovery;
+    const auto member = view.member(id);
+    out.member(kind_name(member.kind), member.name);
+    if(member.kind == Kind::Method || member.kind == Kind::Event)
+    {
+        const auto definition = os1::discovery::definition(view, id);
+        out.print("(");
+        if(!definition.known)
+            out.print("unavailable");
+        for(unsigned i = 0; i < definition.count; ++i)
+        {
+            const auto& param = definition.parameters[i];
+            if(i)
+                out.print(", ");
+            out.print(param.name);
+            out.print(": ");
+            out.print(param.declared_type ? param.declared_type : parameter_type(param.type));
+            if(same(param.initial, "unset"))
+                out.print(" optional");
+            else if(!same(param.initial, "<?>"))
+            {
+                out.print(" = ");
+                out.print(param.initial);
+            }
+        }
+        out.print(")");
+        if(member.kind == Kind::Method)
+        {
+            const char* result = member.signature;
+            while(*result && !starts(result, " -> "))
+                ++result;
+            out.print(" -> ");
+            out.print(*result ? result + 4 : same(member.signature, "()") ? "Void" : "unavailable");
+        }
+    }
+    else
+    {
+        out.print(": ");
+        out.print(same(member.signature, "Boolean") ? "Bool"
+                  : *member.signature               ? member.signature
+                                                    : "unavailable");
+        if(member.kind == Kind::Property)
+            out.print(" { get } value unread");
+        else if(member.kind == Kind::Field)
+        {
+            out.print(" value ");
+            unsigned index = member.value;
+            const auto* data = index < view.environment.count ? &view.environment : nullptr;
+            if(!data && inspect_binding_value)
+                data = inspect_binding_value(member.value, index);
+            if(member.flags & External)
+            {
+                Os1HardwareNode node{};
+                if(!hardware::describe(id, node))
+                    out.print("unavailable");
+                else if(node.type == OS1_HARDWARE_INTEGER)
+                    out.number(node.integer);
+                else if(node.type == OS1_HARDWARE_STRING)
+                    out.quoted(node.text, files::length(node.text));
+                else
+                    out.print("unavailable");
+            }
+            else if(data)
+                inspect_value(out, *data, index);
+            else
+                out.print("unavailable");
+        }
+    }
+    out.print("\n");
+}
+inline long declare_node(const char* path, unsigned id, int fd)
+{
+    using namespace os1::discovery;
+    inspect_syntax::Output out{fd};
+    const auto member = view.member(id);
+    if(member.kind == Kind::Object ||
+       (member.kind == Kind::Field && member.parent == 0 && member.type == OS1_VALUE_RECORD))
+    {
+        out.heading("object", *path ? path : ".");
+        Cursor cursor{};
+        Page page{};
+        do
+        {
+            long status = view.enumerate(id, cursor, page);
+            if(status < 0)
+                return status;
+            for(unsigned i = 0; i < page.count && out.good; ++i)
+                declare_member(out, page.ids[i]);
+        } while(!page.end && out.good);
+        out.print("}\n");
+    }
+    else
+        declare_member(out, id);
+    return out.good ? 0 : OS1_ERR_IO;
 }
 template<class Emit>
 inline bool describe_alias(const shell_runtime::Alias& alias, Emit emit)
@@ -413,6 +567,18 @@ inline bool path_choices(os1::discovery::Completion& state,
     __builtin_memcpy(command, state.line + first, command_end - first);
     const auto method = shell_runtime::method_for(command);
     const bool inspect = os1::discovery::same(command, "inspect");
+    if(inspect && !explicit_command)
+    {
+        unsigned option = command_end;
+        while(os1::shell::space(state.line[option]))
+            ++option;
+        constexpr char details[] = "--details";
+        constexpr unsigned length = sizeof(details) - 1;
+        if(state.cursor > option + length &&
+           os1::context::same(state.line + option, length, details, length) &&
+           os1::shell::space(state.line[option + length]))
+            command_end = option + length;
+    }
     unsigned begin = first, slot = 0;
     bool redirected = false, in_word = false, named = false, options = !inspect;
     char quote = 0;

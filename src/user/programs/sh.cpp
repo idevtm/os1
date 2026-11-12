@@ -1586,6 +1586,7 @@ static int shell_main(int argc_main, char** argv_main)
     ShellLifetime lifetime;
     os1::user::commands::initialize();
     os1::user::discovery::extend = os1::user::commands::extend;
+    os1::user::prompt::inspect_binding_value = os1::user::commands::inspect_binding_value;
     os1::user::shell_runtime::resolve_path_value = os1::user::commands::resolve_path_value;
     os1::user::commands::extra_call = [](const char* name, const char* text) -> long {
         const int report = os1::user::shell_runtime::diagnostic_kind(name);
@@ -1904,7 +1905,12 @@ static int shell_main(int argc_main, char** argv_main)
         }
         os1::user::files::Handle inspect_input;
         int live_inspection = -1;
-        const char* inspection_path = argc == 2 ? tokens[1] : ".";
+        const bool inspection_details =
+            inspect_command && argc > 1 && strings_equal(tokens[1], "--details") &&
+            parsed.end[1] - parsed.begin[1] == sizeof("--details") - 1 &&
+            raw[parsed.begin[1]] == '-';
+        const unsigned inspection_operand = inspection_details ? 2 : 1;
+        const char* inspection_path = argc > inspection_operand ? tokens[inspection_operand] : ".";
         if(inspect_command || redirected_expression)
         {
             auto& view = os1::user::prompt::view;
@@ -1929,15 +1935,16 @@ static int shell_main(int argc_main, char** argv_main)
                     continue;
                 }
             }
-            else if(argc > 2)
+            else if(argc > inspection_operand + 1)
             {
-                os1::user::files::message("usage: inspect [object.path|image]\n");
+                os1::user::files::message("usage: inspect [--details] [object.path|image]\n");
                 if(!console_input)
                     return 1;
                 continue;
             }
-            else if(argc == 1 ||
-                    view.claims(raw + parsed.begin[1], parsed.end[1] - parsed.begin[1]))
+            else if(argc == inspection_operand ||
+                    view.claims(raw + parsed.begin[inspection_operand],
+                                parsed.end[inspection_operand] - parsed.begin[inspection_operand]))
             {
                 live_inspection = view.resolve(inspection_path);
                 if(live_inspection < 0)
@@ -1978,15 +1985,19 @@ static int shell_main(int argc_main, char** argv_main)
         command_record.executed = true;
         if(live_inspection >= 0)
         {
-            if(os1::user::prompt::inspect_node(inspection_path, live_inspection, output_fd) < 0)
+            const long status =
+                inspect_command && !inspection_details
+                    ? os1::user::prompt::declare_node(inspection_path, live_inspection, output_fd)
+                    : os1::user::prompt::inspect_node(inspection_path, live_inspection, output_fd);
+            if(status < 0)
             {
                 os1::user::shell_runtime::diagnostic("object inspection failed");
                 command_failed = true;
             }
         }
         else if(inspect_input.fd >= 0)
-            command_failed =
-                os1::user::image_inspection::inspect_handle(inspect_input.fd, inspection_path) != 0;
+            command_failed = os1::user::image_inspection::inspect_handle(
+                                 inspect_input.fd, inspection_path, inspection_details) != 0;
         else if(call.method == Method::Log)
             run_log(strings_equal(call.target, "process.shell.history.print"), argc, tokens);
         else if(call.method == Method::SystemControl)

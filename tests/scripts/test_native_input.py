@@ -28,7 +28,7 @@ def main():
         def exercise(run, expect):
             qmp = Qmp(args.qmp)
             try:
-                assert b'keyboard1 [object]' in run('inspect os.input')
+                assert b'keyboard1 [object]' in run('inspect --details os.input')
                 def attach(name):
                     qmp.execute('device_add', {'driver': 'usb-mouse', 'id': name, 'bus': 'xhci.0'})
                     # Drain the driver's ready line before parsing structured shell output.
@@ -38,11 +38,11 @@ def main():
                 attach('pointer')
 
                 def devices():
-                    out = run('inspect os.input')
+                    out = run('inspect --details os.input')
                     found = []
                     for child in re.findall(rb'^(mouse[0-9]+) \[object\]', out, re.MULTILINE):
                         name = child.decode()
-                        fields = run(f'inspect os.input.{name}')
+                        fields = run(f'inspect --details os.input.{name}')
                         match = re.search(rb'device \[field\] Integer = ([0-9]+)', fields)
                         assert match, fields
                         assert b'open [method, native]' in fields, fields
@@ -63,16 +63,16 @@ def main():
                 for _ in range(12):
                     assert devices() == stable, 'discovery changed without hotplug'
                 assert b'USB pointer' in run(f'os.input.{name}.name')
-                collection = run('inspect os.input.pointers')
+                collection = run('inspect --details os.input.pointers')
                 assert b'count [field]' in collection, collection
                 ordinal = int(name.removeprefix('mouse')) - 1
                 assert b'USB pointer' in run(f'os.input.pointers[{ordinal}].name')
                 run(f'indexed = os.input.pointers[{ordinal}].op\t')
-                assert b'get_state' in run('inspect indexed')
+                assert b'get_state' in run('inspect --details indexed')
                 run('drop indexed')
                 # Tab accepts the discovered leaf. Enter invokes its zero-argument method.
                 run(f'p = os.input.{name}.op\t')
-                assert b'get_state' in run('inspect p')
+                assert b'get_state' in run('inspect --details p')
                 run('a = p.subscribe')
                 run('b = p.subscribe')
                 empty = run('a.try_read', allow_errors=True)
@@ -102,7 +102,7 @@ def main():
                         break
                     assert time.monotonic() < end, state
                 assert b'input closed' in run('p.subscribe', allow_errors=True)
-                assert name.encode() + b' [object]' not in run('inspect os.input')
+                assert name.encode() + b' [object]' not in run('inspect --details os.input')
                 attach('replacement')
                 replacement, next_name = await_pointer(identity)
                 assert replacement > identity and next_name == name

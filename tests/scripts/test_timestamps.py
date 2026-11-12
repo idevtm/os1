@@ -31,7 +31,7 @@ def main():
         return result
 
     def first(run, expect):
-        run('inspect .os.system.clock', b'now [property] UtcTime')
+        run('inspect .os.system.clock', b'property now: UtcTime { get } value unread')
         run('snapshot = os.system.clock.now')
         original = int(re.search(rb'\n(\d+)\n', run('snapshot.unix_ns'))[1])
         utc = datetime.fromtimestamp(original // 1_000_000_000, timezone.utc)

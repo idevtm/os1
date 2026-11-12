@@ -18,6 +18,7 @@ struct Parameter
     InputType type = InputType::String;
     const char* initial = "<?>";
     const char* choices = "";
+    const char* declared_type = nullptr;
 };
 struct Definition
 {
@@ -27,10 +28,11 @@ struct Definition
     void add(const char* name,
              InputType type = InputType::String,
              const char* initial = "<?>",
-             const char* choices = "")
+             const char* choices = "",
+             const char* declared_type = nullptr)
     {
         if(count < 8)
-            parameters[count++] = {name, type, initial, choices};
+            parameters[count++] = {name, type, initial, choices, declared_type};
     }
 };
 inline bool same(const char* a, const char* b)
@@ -95,7 +97,7 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
                 d.add("column", T::Integer, "0");
                 break;
             case OS1_CONSOLE_WRITE:
-                d.add("bytes");
+                d.add("bytes", T::String, "<?>", "", "Bytes");
                 break;
             case OS1_CONSOLE_TRY_READ:
                 d.add("capacity", T::Integer, "128");
@@ -105,7 +107,7 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
                 d.add("text", T::String, "\"\"");
                 break;
             case OS1_CONSOLE_ACQUIRE_INPUT:
-                d.add("options", T::Record, "{handoff:false}");
+                d.add("options", T::Record, "{handoff:false}", "", "InputOptions");
                 d.exclusive = true;
                 break;
         }
@@ -123,11 +125,13 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
     if(interface == OS1_LOG_INTERFACE_ID)
     {
         if(member == OS1_LOG_EXPORT)
-            d.add("target", T::Enum, "tmp", "tmp|disk");
+            d.add("target", T::Enum, "tmp", "tmp|disk", "ExportTarget");
         if(member == OS1_LOG_READ)
             d.add("query",
                   T::Record,
-                  "{after:0, through:0, command_id:0, pid:0, min_level:1, kind:0}");
+                  "{after:0, through:0, command_id:0, pid:0, min_level:1, kind:0}",
+                  "",
+                  "LogQuery");
         return d;
     }
     if(starts(path, "os.fs."))
@@ -152,7 +156,7 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
     }
     if(!interface && member == clock_snapshot_format)
     {
-        d.add("style", T::Enum, "utc", "utc|iso8601");
+        d.add("style", T::Enum, "utc", "utc|iso8601", "ClockStyle");
         return d;
     }
     if(same(path, "os.system.clock.now"))
@@ -174,7 +178,7 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
         d.add("after", T::Integer, "unset");
         d.add("limit", T::Integer, "20");
         if(same(path, "os.system.log.print"))
-            d.add("level", T::Enum, "info", "info|warning|error");
+            d.add("level", T::Enum, "info", "info|warning|error", "Level");
         return d;
     }
     if(same(path, "process.streams.output.print") || same(path, "out.print"))
@@ -198,7 +202,7 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
               copy ? "process.streams.output" : "<?>");
         if(copy)
         {
-            d.add("mode", T::Enum, "unset", "unset|replace|append");
+            d.add("mode", T::Enum, "unset", "unset|replace|append", "CopyMode");
             d.add("recursive", T::Boolean, "false", "false|true");
         }
         return d;
@@ -213,7 +217,7 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
         if(same(path, "fs.find"))
         {
             d.add("name", T::String, "unset");
-            d.add("kind", T::Enum, "any", "any|file|directory");
+            d.add("kind", T::Enum, "any", "any|file|directory", "FileKind");
         }
         if(same(path, "fs.usage"))
             d.add("logical", T::Boolean, "false", "false|true");

@@ -311,6 +311,30 @@ TEST(RichParameters, SchemaRejectsInvalidReferencesBoundsCyclesAndText)
     m.entries[0].default_offset = rp::default_limit;
     reject(m);
 }
+TEST(RichParameters, DeclarationValuesDistinguishVariantCasesAndNull)
+{
+    const char* inputs[] = {"source.file:{path:\"/etc/readme\"} label:null",
+                            "source.text:\"hello\" label:\"null\"",
+                            "source.none"};
+    const char* variants[] = {"source:Source.file({path:\"/etc/readme\",offset:0})",
+                              "source:Source.text(\"hello\")",
+                              "source:Source.none"};
+    for(unsigned i = 0; i < 3; ++i)
+    {
+        rp::Value v{};
+        rp::Diagnostic d{};
+        ASSERT_TRUE(rich_parse(rich, inputs[i], v, d));
+        char buffer[1024]{};
+        rp::detail::Printer measured{rich, v, nullptr, 0, true};
+        measured.value(0);
+        ASSERT_LT(measured.size, sizeof(buffer));
+        rp::detail::Printer printer{rich, v, buffer, 0, true};
+        printer.value(0);
+        EXPECT_NE(nullptr, std::strstr(buffer, variants[i]));
+        EXPECT_NE(nullptr, std::strstr(buffer, "mode:ProcessingMode.balanced"));
+        EXPECT_NE(nullptr, std::strstr(buffer, i == 1 ? "label:\"null\"" : "label:null"));
+    }
+}
 TEST(RichParameters, DotBraceQuotingAndDeterministicRoundtrip)
 {
     const char* examples[] = {"",

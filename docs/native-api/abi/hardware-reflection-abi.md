@@ -140,9 +140,10 @@ Runtime refresh invalidates discovery cursors and clears the page cache.
 Each traversal pins the catalog generation; concurrent attachment changes can cancel it.
 
 Hardware fields evaluate to typed data and can be copied into shell bindings.
-The `context` command also displays their cached values beside field types.
+The `inspect` command displays cached values after the `value` keyword.
 Integer values use unsigned decimal notation. Strings use the sanitized observation text.
-Empty collections print `(no children)`; the default QEMU run has no attached USB controller or devices.
+Empty collections display empty declaration blocks. The details view prints `(no children)`.
+The default QEMU run has no attached USB controller or devices.
 Inspection does not invoke members, run property getters, or change device state.
 Object nodes are inspection targets; this slice does not return retained device-control objects.
 `echo` and `out.print` retain their String parameter contract.

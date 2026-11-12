@@ -69,11 +69,11 @@ This support does not imply general invocation of arbitrary discovered provider 
 `View` supports `resolve`, `container`, and `enumerate`.
 `Member.value` indexes the copied environment when the member describes environment data.
 List children use decimal indices, such as `process.environment.path.0`.
-The text inspector prints member kinds and signatures.
+The [shell syntax reference](../shell/syntax.md#inspection-declarations) defines the declaration format.
 The [shell name rules](../shell/typed-context.md#name-resolution-and-inspection) define how `inspect` selects a live object or an image file.
-For hardware fields, it also prints the value from the copied boot observation.
-It does not invoke methods or arbitrary property getters.
-An empty collection prints `(no children)` after its heading.
+Live declarations show values from copied environment data, shell bindings, and hardware descriptions when available.
+Inspection does not invoke methods or property getters.
+The details view prints `(no children)` after the heading of an empty collection.
 Typed clients can inspect copied environment values directly.
 
 | Bound | Value |

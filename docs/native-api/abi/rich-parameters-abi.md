@@ -164,10 +164,9 @@ association based on a fixture's field names or a method's name.
 
 `inspect` reads `.os.interface`, legacy `.os.constructor`, `.os.parameters`, and
 `.os.parameter-bindings` from the retained file descriptor without launching it.
-It reports constructor/method input bindings, type references, fields/cases,
-enumeration identities, optional omission/nullability, canonical typed defaults,
-bounds, summaries, descriptions, units and formats. A malformed binding fails
-inspection. A constructor-only image can omit `.os.interface`.
+It declares constructor and method inputs, type references, fields, variant cases, enums, optionals, defaults, and bounds.
+Use `inspect --details IMAGE` for wire identities, summaries, descriptions, units, and formats.
+A malformed binding fails inspection. A constructor-only image can omit `.os.interface`.
 The inspector also accepts legacy `.os.constructor` v1 records.
 
 `ParameterClient` uses a retained EXECUTE|READ|SEEK|INSPECT executable handle.
