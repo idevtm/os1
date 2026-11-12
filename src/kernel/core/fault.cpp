@@ -85,12 +85,22 @@ void on_kernel_exception(TrapFrame* frame)
 
 Thread* handle_exception(TrapFrame* frame)
 {
-    const uint32_t flags =
-        trap_frame_is_user(*frame) ? static_cast<uint32_t>(OS1_KERNEL_EVENT_FLAG_USER) : 0u;
-    kernel_event::record(
-        OS1_KERNEL_EVENT_TRAP, flags, frame->vector, frame->error_code, frame->rip, read_cr2());
+    const auto owner = exception_owner(*frame);
+    if(owner == ExceptionOwner::Platform)
+    {
+        kernel_event::record_subject(
+            OS1_KERNEL_EVENT_TRAP, 0, 0, 0, frame->vector, frame->error_code, frame->rip);
+    }
+    else
+    {
+        const uint32_t flags = owner == ExceptionOwner::UserProcess
+                                   ? static_cast<uint32_t>(OS1_KERNEL_EVENT_FLAG_USER)
+                                   : 0u;
+        kernel_event::record(
+            OS1_KERNEL_EVENT_TRAP, flags, frame->vector, frame->error_code, frame->rip, read_cr2());
+    }
 
-    if(trap_frame_is_user(*frame))
+    if(owner == ExceptionOwner::UserProcess)
     {
         const uint64_t pid =
             current_thread() && current_thread()->process ? current_thread()->process->pid : 0;

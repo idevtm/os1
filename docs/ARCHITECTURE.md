@@ -1258,6 +1258,9 @@ A separate authorized power diagnostic interface remains deferred pending driver
 
 The event ring currently stores 256 overwrite-on-full records with monotonic sequence numbers and direct `pid` / `tid` fields. Current event types cover traps, scheduler transitions, IRQs, block I/O, PCI binds, user-copy failures, smoke markers used by the observe smokes, the chosen scheduler timer source (PIT vs LAPIC), `kmem` corruption, NIC RX completions, AP-online / AP-tick events, reschedule / TLB-shootdown IPIs, kernel-thread ping markers, thread migration, and run-queue depth changes.
 
+Trap events for an NMI or a machine check use process and thread IDs of zero.
+These events clear `OS1_KERNEL_EVENT_FLAG_USER`.
+
 At the shell prompt, `events` prints an event snapshot.
 Continuous event streaming and its cancellation remain deferred.
 
@@ -1493,6 +1496,8 @@ Native File `append` and descriptor APPEND commit each 256-byte unit under the f
 This preserves one descriptor table, existing grant authority, and shared open-instance state.
 
 ### Process Fault Handling And Teardown
+
+NMI and machine-check exceptions use the fatal kernel path at either privilege level.
 
 If a user process faults:
 

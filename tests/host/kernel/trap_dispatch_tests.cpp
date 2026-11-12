@@ -82,3 +82,30 @@ TEST_F(TrapDispatch, LegacyIrq7And15StillUseOrdinaryIrqDispatch)
     EXPECT_EQ(exception_calls, 0u);
     EXPECT_EQ(syscall_calls, 0u);
 }
+
+TEST(ExceptionOwnership, NonMaskableInterruptAndMachineCheckBelongToPlatformAtEitherPrivilege)
+{
+    TrapFrame frame{};
+    for(uint64_t privilege : {0u, 3u})
+    {
+        frame.cs = privilege;
+        for(uint64_t vector : {T_NMI, T_MCHK})
+        {
+            frame.vector = vector;
+            EXPECT_EQ(exception_owner(frame), ExceptionOwner::Platform);
+        }
+    }
+}
+
+TEST(ExceptionOwnership, OrdinaryExceptionsFollowSavedPrivilege)
+{
+    TrapFrame frame{};
+    for(uint64_t vector : {T_PGFLT, T_ILLOP, T_GPFLT})
+    {
+        frame.vector = vector;
+        frame.cs = 3;
+        EXPECT_EQ(exception_owner(frame), ExceptionOwner::UserProcess);
+        frame.cs = 0;
+        EXPECT_EQ(exception_owner(frame), ExceptionOwner::Kernel);
+    }
+}

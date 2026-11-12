@@ -125,7 +125,7 @@ void record(
             pid = thread->process->pid;
         }
     }
-    diagnostic_log::event(type, flags, pid, arg0, arg1);
+    diagnostic_log::event(type, flags, pid, arg0, arg1, thread ? thread->process : nullptr);
     g_event_ring.append(
         g_timer_ticks, type, flags, current_cpu_id(), pid, tid, arg0, arg1, arg2, arg3);
 #endif
@@ -144,7 +144,8 @@ void record_subject(uint32_t type,
 #if defined(OS1_HOST_TEST)
     g_event_ring.append(0, type, flags, 0, pid, tid, arg0, arg1, arg2, arg3);
 #else
-    diagnostic_log::event(type, flags, pid, arg0, arg1);
+    Thread* thread = safe_current_thread();
+    diagnostic_log::event(type, flags, pid, arg0, arg1, thread ? thread->process : nullptr);
     g_event_ring.append(
         g_timer_ticks, type, flags, current_cpu_id(), pid, tid, arg0, arg1, arg2, arg3);
 #endif

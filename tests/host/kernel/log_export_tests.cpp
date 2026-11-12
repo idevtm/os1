@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <os1/input.h>
+#include <os1/observe.h>
 #include <os1/syscall_numbers.h>
 
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "arch/x86_64/interrupt/interrupt.hpp"
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
 #include "fs/initrd.hpp"
@@ -267,6 +269,38 @@ protected:
         EXPECT_EQ(at, bytes.size());
     }
 };
+TEST_F(LogExport, SubjectlessTrapClearsCommandAndProcessProvenance)
+{
+    Process context{};
+    context.pid = 10;
+    context.log_session = 11;
+    context.log_command = 12;
+    context.log_parent_command = 13;
+
+    diagnostic_log::event(OS1_KERNEL_EVENT_TRAP, 0, 0, T_NMI, 0, &context);
+    os1_log_query query{};
+    query.version = 1;
+    query.size = sizeof(query);
+    query.kind = OS1_LOG_EVENT;
+    os1_log_record record{};
+    ASSERT_EQ(diagnostic_log::read(query, record), 1);
+    EXPECT_EQ(record.arg0, T_NMI);
+    EXPECT_EQ(record.pid, 0u);
+    EXPECT_EQ(record.session_id, 0u);
+    EXPECT_EQ(record.command_id, 0u);
+    EXPECT_EQ(record.parent_command_id, 0u);
+
+    diagnostic_log::event(
+        OS1_KERNEL_EVENT_TRAP, OS1_KERNEL_EVENT_FLAG_USER, context.pid, T_PGFLT, 0, &context);
+    query.after = record.sequence;
+    ASSERT_EQ(diagnostic_log::read(query, record), 1);
+    EXPECT_EQ(record.arg0, T_PGFLT);
+    EXPECT_EQ(record.pid, context.pid);
+    EXPECT_EQ(record.session_id, context.log_session);
+    EXPECT_EQ(record.command_id, context.log_command);
+    EXPECT_EQ(record.parent_command_id, context.log_parent_command);
+}
+
 // The original CI interleavings are forced here; no wall-clock race is required.
 TEST_F(LogExport, ExportDoesNotInvalidateUnrelatedDirectoryWalk)
 {

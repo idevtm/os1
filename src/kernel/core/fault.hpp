@@ -4,9 +4,23 @@
 
 #include <stdint.h>
 
-#include "arch/x86_64/interrupt/trap_frame.hpp"
+#include "arch/x86_64/interrupt/interrupt.hpp"
 
 struct Thread;
+
+enum class ExceptionOwner
+{
+    UserProcess,
+    Kernel,
+    Platform,
+};
+
+[[nodiscard]] inline ExceptionOwner exception_owner(const TrapFrame& frame)
+{
+    if(frame.vector == T_NMI || frame.vector == T_MCHK)
+        return ExceptionOwner::Platform;
+    return trap_frame_is_user(frame) ? ExceptionOwner::UserProcess : ExceptionOwner::Kernel;
+}
 
 // Return a human-readable architectural name for an exception vector.
 const char* kernel_fault_name(uint64_t vector);
