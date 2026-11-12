@@ -1560,6 +1560,9 @@ int main(int argc_main, char** argv_main)
             return 1;
         }
         reader.fd = script.fd;
+        os1_resource_info script_info{};
+        reader.read_ahead =
+            os1::user::query(script.fd, &script_info) >= 0 && script_info.kind == OS1_OBJECT_FILE;
     }
     os1::user::files::Line input;
 

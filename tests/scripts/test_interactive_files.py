@@ -297,6 +297,19 @@ def main():
         assert b'command failed:' not in expect(b'script-shell-complete\n')
         assert b'command failed:' not in expect()
         content('/tmp/script-output', 'script-one\nscript-two\n')
+        # A privately opened script retains read-ahead across commands and here-documents.
+        script_lines = [f'echo "row-{i:02d}-' + 'x' * 95 + '"' for i in range(12)]
+        payload = script_lines + ['cat << INNER', 'buffered-here', 'INNER', 'echo "buffered-end"']
+        for offset in range(0, len(payload), 6):
+            operator = '>>' if offset else '>'
+            send(f'cat << OUTER {operator} /tmp/buffered-script\n')
+            for line in payload[offset:offset + 6]:
+                send(line + '\n')
+            send('OUTER\n')
+            expect()
+        run('sh "/tmp/buffered-script" > /tmp/buffered-output')
+        expected = ''.join(line[6:-1] + '\n' for line in script_lines)
+        content('/tmp/buffered-output', expected + 'buffered-here\nbuffered-end\n')
         for _ in range(70):
             assert b'failed' not in run('echo stable > /tmp/repeat')
         content('/tmp/repeat', 'stable\n')
