@@ -53,6 +53,7 @@ The host suite checks both languages and the IPC envelope layouts.
 | Memory logs and command correlation | [Memory log ABI](abi/memory-log-abi.md) |
 | System synchronization and power control | [SystemControl ABI](abi/system-control-abi.md) |
 | Filesystem timestamps and current-time mutation | [Timestamp ABI](abi/filesystem-times-abi.md) |
+| Read-only UTC wall clock | [Wall clock ABI](abi/wall-clock-abi.md) |
 | Filesystem metadata, space accounting, and guarded traversal | [Metadata and traversal ABI](abi/filesystem-metadata-abi.md) |
 | Typed environment, rooted navigation, and same-filesystem moves | [Startup and namespace extension](abi/initrd-vfs-abi.md#typed-environment-and-namespace-extension) |
 | Kernel-hosted Console methods, geometry, exclusive input sessions, and retained Operations | [Kernel console IPC ABI](abi/kernel-console-abi.md) |

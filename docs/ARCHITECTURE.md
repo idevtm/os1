@@ -1899,14 +1899,14 @@ Boot-local identity tokens remain separate from descriptor authority and persist
 Recursive policy stays outside the kernel.
 
 
-## Filesystem wall time
+## Wall time
 
 The [timestamp ABI](native-api/abi/filesystem-times-abi.md) adds separate native inspection and current-time mutation.
 The existing metadata record remains unchanged.
 
 ```text
 BSP RTC snapshot -> atomic wall clock -> backend timestamp fields -> native times / stat
-BSP scheduler tick ------------------^
+BSP scheduler tick ------------------^             -> observe wall clock -> shell clock property
 ```
 
 RTC sampling occurs after AP startup and respects the FADT RTC absence flag.
@@ -1915,6 +1915,7 @@ Tmpfs stores nanoseconds; ext2 stores whole seconds in standard inode fields.
 Backend guards serialize updates, and SET_TIMES authorizes explicit mutation.
 Ordinary reads do not write access times.
 Unavailable wall time prevents explicit updates but does not prevent ordinary file I/O.
+The [wall clock read](native-api/abi/wall-clock-abi.md) returns one UTC sample through the observation syscall.
 
 ## User-space text helpers
 

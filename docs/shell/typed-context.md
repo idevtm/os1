@@ -174,6 +174,23 @@ Call `os.system.diagnostics.summary()` to print the system report without an ali
 Existing disk profiles keep their contents during deployment.
 To add these aliases to an existing profile, copy the new declarations from the [default profile](../../src/user/data/shell-init.script).
 
+## Current date and time
+
+`os.system.clock.now` reads a [UTC snapshot](../native-api/abi/wall-clock-abi.md).
+Save the snapshot to read several fields from the same instant.
+
+```text
+n = os.system.clock.now
+n.year
+n.format(style:"iso8601")
+date -u
+now
+```
+
+The default profile supplies the `date` and `now` aliases.
+If an existing profile lacks those aliases, add their declarations from the [default profile](../../src/user/data/shell-init.script).
+The reflected command `os.system.clock.print` also works without aliases.
+
 ## Process, logs, and power
 
 ```text

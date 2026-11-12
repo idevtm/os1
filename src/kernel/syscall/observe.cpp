@@ -6,6 +6,7 @@
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "arch/x86_64/interrupt/interrupt.hpp"
 #include "core/kernel_state.hpp"
+#include "core/wall_clock.hpp"
 #include "debug/event_ring.hpp"
 #include "drivers/bus/device.hpp"
 #include "drivers/bus/resource.hpp"
@@ -970,6 +971,16 @@ long sys_observe(const ObserveContext& context, uint64_t kind, uint64_t user_buf
                 return result;
             return copy_to_user(*context.frames, thread, user_buffer, &request, sizeof(request))
                        ? 0
+                       : OS1_ERR_FAULT;
+        }
+        case OS1_OBSERVE_WALL_CLOCK: {
+            Os1ObserveWallClock result{};
+            if(length != sizeof(result) || !context.frames)
+                return OS1_ERR_INVALID;
+            if(!wall_clock_now(result.unix_ns))
+                return OS1_ERR_UNSUPPORTED;
+            return copy_to_user(*context.frames, thread, user_buffer, &result, sizeof(result))
+                       ? static_cast<long>(sizeof(result))
                        : OS1_ERR_FAULT;
         }
         case OS1_OBSERVE_SYSTEM:

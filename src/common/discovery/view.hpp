@@ -8,6 +8,7 @@
 #include <os1/vfs.h>
 
 #include "context/data.hpp"
+#include "shell/utc.hpp"
 namespace os1::discovery
 {
 constexpr unsigned node_limit = 256, page_limit = 8, path_limit = 256;
@@ -43,6 +44,7 @@ enum : uint32_t
     Shell = 8,
     External = 16
 };
+inline constexpr unsigned clock_snapshot_format = 1;
 struct Member
 {
     uint32_t parent = 0, target = 0;
@@ -494,11 +496,15 @@ struct View
             nodes[input].flags = Alias;
             nodes[input].target = OS1_HARDWARE_INPUT_ROOT;
         }
-        unsigned system = 0;
-        if(g.shell || (g.root.rights & (OS1_RIGHT_LOG_READ | OS1_RIGHT_SYSTEM_CONTROL)))
-            system = add(os, "system");
+        const unsigned system = add(os, "system");
+        const unsigned clock = add(system, "clock");
+        const unsigned now = add(clock, "now", Kind::Property, "UtcTime", 0, 0, 0, Local);
+        nodes[now].type = OS1_VALUE_RECORD;
+        for(const auto& field : os1::shell::utc_fields)
+            add(now, field, Kind::Field, "Integer");
         if(g.shell)
         {
+            add(clock, "print", Kind::Method, "iso:Boolean=false", 0, 0, 0, Local | Shell);
             const auto reports = add(system, "diagnostics");
             for(const auto& report : diagnostic_reports)
                 add(reports,
