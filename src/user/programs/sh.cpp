@@ -1810,9 +1810,7 @@ static int shell_main(int argc_main, char** argv_main)
         }
         using Method = os1::user::shell_runtime::Method;
         const bool inspect_command = strings_equal(tokens[0], "inspect");
-        const bool inspection = inspect_command || strings_equal(tokens[0], "help") ||
-                                strings_equal(tokens[0], "context") ||
-                                strings_equal(tokens[0], "process.context.list");
+        const bool inspection = inspect_command || strings_equal(tokens[0], "help");
         bool external = call.method == os1::user::shell_runtime::Method::Unknown;
         for(const auto& builtin : os1::user::shell_runtime::builtins)
             if(strings_equal(tokens[0], builtin.name))
@@ -1987,24 +1985,8 @@ static int shell_main(int argc_main, char** argv_main)
             }
         }
         else if(inspect_input.fd >= 0)
-            command_failed = os1::user::image_inspection::inspect_handle(inspect_input.fd) != 0;
-        else if(strings_equal(tokens[0], "context") ||
-                strings_equal(tokens[0], "process.context.list"))
-        {
-            const char* path = argc == 2 ? tokens[1] : "";
-            if(os1::user::shell_runtime::prefix(path, "path:"))
-                path += 5;
-            // Reflection paths contain only identifiers and decimal list indexes.
-            bool valid = argc <= 2;
-            for(const char* p = path; *p; ++p)
-                valid = valid && ((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
-                                  *p == '_' || *p == '.');
-            if(!valid || os1::user::prompt::inspect(path, output_fd) < 0)
-            {
-                os1::user::files::message("context: unavailable or invalid path\n");
-                command_failed = true;
-            }
-        }
+            command_failed =
+                os1::user::image_inspection::inspect_handle(inspect_input.fd, inspection_path) != 0;
         else if(call.method == Method::Log)
             run_log(strings_equal(call.target, "process.shell.history.print"), argc, tokens);
         else if(call.method == Method::SystemControl)

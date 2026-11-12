@@ -1011,16 +1011,6 @@ inline bool alias_call(const char* operation, Frame& f)
         }
     if(!f.legacy.valid)
         return fail("expanded call too long");
-    if(same(canonical, "process.context.list"))
-    {
-        char target[256];
-        if(!f.string(0, target, sizeof(target)))
-            return fail("invalid context path");
-        long status = prompt::inspect(target, 1);
-        if(status < 0)
-            return fail("context path unavailable", status);
-        return true;
-    }
     if(shell_runtime::diagnostic_kind(canonical) >= 0)
     {
         long status = extra_call ? extra_call(canonical, f.legacy.bytes) : OS1_ERR_UNSUPPORTED;
@@ -1908,7 +1898,7 @@ inline bool handles(const char* line)
     if(line[next] == '=' && !os1::discovery::starts(name, "process.environment") &&
        !same(name, "fs.cwd"))
         return true;
-    if(shell_runtime::is_builtin(name) && !same(name, "process.context.list"))
+    if(shell_runtime::is_builtin(name))
         return false;
     if(shell_runtime::find_alias(name) || !refresh())
         return false;

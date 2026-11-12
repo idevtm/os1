@@ -42,7 +42,6 @@ Refresh performs no filesystem writes and starts no processes.
 | `process.path`, alias `path` | Local path operations; search additionally requires lookup and execute authority |
 | `process.streams` | Present standard descriptors; Console descriptions follow each descriptor's rights |
 | `process.streams.output.print`, alias `out.print` | Shell output helper when output has WRITE authority |
-| `process.context.list`, alias `context` | Bounded structural inspection |
 | `process.shell.history` | Current shell history description; absent from ordinary process views |
 | `process.shell.bindings` | Shell-local named results and explicit removal |
 | User binding names | Retained data or object references; absent from child environments |
@@ -136,7 +135,7 @@ The menu marks these entries with `[command]`.
 Select a command to insert its name.
 Press Enter again to run it.
 At a file operand or redirection, Tab offers authorized filesystem names.
-For example, press Tab after `intf /b` to complete the directory prefix for an image path.
+For example, press Tab after `inspect /b` to complete the directory prefix for an image path.
 The shell quotes a name that needs quotes.
 At a command word, the shell checks the executable search list.
 It uses the execution resolver to check executable candidates.
@@ -147,9 +146,9 @@ See [guided commands](../shell/guided-command-plan.md) for ownership, bounds, an
 
 ```text
 context
-context os.system
-context process.environment
-process.context.list path:"process.environment.path"
+inspect os.system
+inspect process.environment
+inspect process.environment.path
 os.fs.list "/tmp"
 echo os.fs.cwd
 process.path.list

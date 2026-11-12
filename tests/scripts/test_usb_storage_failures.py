@@ -146,7 +146,7 @@ def main():
                 else:
                     run('/bin/diskutil seed', b'diskutil seed ok')
                 run('/bin/diskutil verify', b'diskutil verify ok')
-                inventory_before = run('context os.devices.inventory.usb')
+                inventory_before = run('inspect os.devices.inventory.usb')
                 identities_before = set(re.findall(rb'usb_[0-9]+', inventory_before))
                 qmp.execute('device_del', {'id': 'usbdata'})
                 qmp.removed()
@@ -164,7 +164,7 @@ def main():
                 assert b'failed' in output or b'error' in output, output
                 deadline = time.monotonic()+15
                 while True:
-                    current = run('context os.devices.inventory.usb')
+                    current = run('inspect os.devices.inventory.usb')
                     added = set(re.findall(rb'usb_[0-9]+',current)) - identities_before
                     if added:
                         break
@@ -174,7 +174,7 @@ def main():
                 path = 'os.devices.inventory.usb.'+next(iter(added)).decode()
                 deadline = time.monotonic()+15
                 while True:
-                    state = run('context '+path+'.state')
+                    state = run('inspect '+path+'.state')
                     if b'configured' in state:
                         break
                     assert time.monotonic() < deadline, state

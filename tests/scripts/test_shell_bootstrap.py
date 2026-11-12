@@ -167,7 +167,7 @@ def main():
     for invalid in (None, "statement", "nul"):
         shutil.copyfile(args.program_disk, disk)
         inspect()
-        subprocess.run([tool('debugfs'), '-w', '-R', 'rm /etc/shell/init.sh', str(partition)],
+        subprocess.run([tool('debugfs'), '-w', '-R', 'rm /etc/shell/init.script', str(partition)],
                        check=True, capture_output=True)
         if invalid:
             profile = log.with_suffix('.invalid-profile.sh')
@@ -182,7 +182,7 @@ def main():
                 content += 'process.shell.aliases.add(name:"oops", target:"bad.target")\n'
             profile.write_text(content)
             subprocess.run([tool('debugfs'), '-w', '-R',
-                            f'write "{profile}" /etc/shell/init.sh', str(partition)],
+                            f'write "{profile}" /etc/shell/init.script', str(partition)],
                            check=True, capture_output=True)
         with disk.open('r+b') as out:
             out.seek(2048 * 512)
@@ -201,7 +201,7 @@ def main():
         transcript = log.with_suffix(f'.{phase}.log').read_bytes()
         if invalid:
             line = 35 if invalid == "statement" else 3
-            assert f'/etc/shell/init.sh:{line}: invalid shell startup configuration'.encode() in transcript
+            assert f'/etc/shell/init.script:{line}: invalid shell startup configuration'.encode() in transcript
         else:
             assert b'invalid shell startup configuration' not in transcript
     print('Missing storage/shell, invalid ELF, rescue retry, preserving repair, and shell restart passed')

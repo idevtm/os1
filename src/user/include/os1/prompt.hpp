@@ -31,10 +31,12 @@ inline bool output(int fd, const char* text)
 inline bool describe(int fd, unsigned id)
 {
     const auto member = view.member(id);
-    if(!output(fd, member.name) || !output(fd, " [") ||
-       !output(fd, os1::discovery::kind_name(member.kind)) ||
-       !output(fd, member.flags & os1::discovery::Native ? ", native] " : "] ") ||
-       !output(fd, member.signature))
+    auto emit = [fd](const char* text) { return output(fd, text); };
+    if(!emit(member.name) ||
+       !os1::discovery::listing_kind(emit,
+                                     os1::discovery::kind_name(member.kind),
+                                     member.flags & os1::discovery::Native ? "native" : nullptr) ||
+       (*member.signature && (!emit(" ") || !emit(member.signature))))
         return false;
     if(member.kind == os1::discovery::Kind::Field && (member.flags & os1::discovery::External))
     {
@@ -53,10 +55,11 @@ inline bool describe(int fd, unsigned id)
 }
 inline long inspect_node(const char* path, unsigned id, int fd)
 {
-    if(!output(fd, "context ") || !output(fd, *path ? path : "<root>") || !output(fd, "\n"))
-        return OS1_ERR_FAULT;
     if(!view.container(id))
         return describe(fd, id) ? 0 : OS1_ERR_FAULT;
+    auto emit = [fd](const char* text) { return output(fd, text); };
+    if(!emit(*path ? path : ".") || !os1::discovery::listing_kind(emit, "object") || !emit("\n"))
+        return OS1_ERR_FAULT;
     os1::discovery::Cursor cursor{};
     os1::discovery::Page page{};
     unsigned children = 0;
@@ -410,12 +413,8 @@ inline bool path_choices(os1::discovery::Completion& state,
     __builtin_memcpy(command, state.line + first, command_end - first);
     const auto method = shell_runtime::method_for(command);
     const bool inspect = os1::discovery::same(command, "inspect");
-    const bool interface_image =
-        inspect ||
-        (method == shell_runtime::Method::Unknown &&
-         (os1::discovery::same(command, "intf") || os1::discovery::same(command, "/bin/intf")));
     unsigned begin = first, slot = 0;
-    bool redirected = false, in_word = false, named = false, options = !interface_image;
+    bool redirected = false, in_word = false, named = false, options = !inspect;
     char quote = 0;
     for(unsigned i = command_end; i < state.cursor; ++i)
     {
@@ -460,8 +459,7 @@ inline bool path_choices(os1::discovery::Completion& state,
         else
         {
             in_word = true;
-            if(!interface_image && c == ':' &&
-               os1::context::identifier(state.line + begin, i - begin))
+            if(!inspect && c == ':' && os1::context::identifier(state.line + begin, i - begin))
                 named = true;
             else if(c == '"' || c == '\'')
                 quote = c;
@@ -479,7 +477,7 @@ inline bool path_choices(os1::discovery::Completion& state,
         if(!slash)
             return false;
     }
-    else if(!redirected && interface_image)
+    else if(!redirected && inspect)
     {
         if(slot != 0)
             return false;
@@ -514,7 +512,7 @@ inline bool path_choices(os1::discovery::Completion& state,
     const bool inspecting_target = inspect && !redirected;
     if(redirected)
         state.inspect_choices = state.stream_choices = false;
-    if(!explicit_command && !(interface_image && !inspect) &&
+    if(!explicit_command &&
        (inspecting_target ? view.claims(state.line + begin, state.cursor - begin)
                           : view.claims_path(state.line + begin, state.cursor - begin)))
     {
@@ -530,8 +528,7 @@ inline bool path_choices(os1::discovery::Completion& state,
     const bool directories = !redirected && (method == shell_runtime::Method::List ||
                                              method == shell_runtime::Method::ChangeDirectory);
     state.path_references = !inspecting_target;
-    const bool combine = !explicit_command && (!interface_image || inspect) && state.begin(view) &&
-                         state.start == begin;
+    const bool combine = !explicit_command && state.begin(view) && state.start == begin;
     return offer_paths(state, begin, end, directories, redirected, explicit_command, combine);
 }
 inline bool guided_path_choices(os1::discovery::Completion& state, bool object_only = false)

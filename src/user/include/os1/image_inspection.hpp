@@ -2,6 +2,7 @@
 #include <os1/file_tools.hpp>
 #include <os1/vfs.hpp>
 
+#include "discovery/presentation.hpp"
 #include "interface/buffer_metadata.hpp"
 #include "interface/metadata.hpp"
 namespace os1::user::image_inspection
@@ -20,6 +21,17 @@ struct Output
     void print(const char* text)
     {
         put(text, files::length(text));
+    }
+
+    void kind(const char* kind, const char* qualifier = nullptr)
+    {
+        os1::discovery::listing_kind(
+            [this](const char* text) {
+                print(text);
+                return good;
+            },
+            kind,
+            qualifier);
     }
 
     void number(uint64_t value)
@@ -113,39 +125,48 @@ inline void rich_default(Output& output, const p::Metadata& m, const p::Entry& e
     printer.value(0);
     output.put(text, printer.size);
 }
-inline bool rich_help(Output& output, int fd, const Metadata& api)
+inline int read_rich(int fd, const Metadata& api, p::Metadata& m, p::Binding& binding)
 {
-    static p::Metadata m, scratch;
+    static p::Metadata scratch;
     int found = parameter_metadata(fd, m, scratch);
     if(found < 0)
-        return false;
+        return -1;
     if(!found)
-        return true;
-    p::Binding binding{};
-    if(!parameter_binding(fd, m, binding) || binding.interface_id != api.interface_id ||
-       binding.interface_version != api.interface_version)
-        return false;
-    output.print("rich parameters profile=1 schema=");
+        return 0;
+    if(!parameter_binding(fd, m, binding) ||
+       (api.interface_id ? binding.interface_id != api.interface_id ||
+                               binding.interface_version != api.interface_version
+                         : !binding.constructor || binding.member_count))
+        return -1;
+    for(unsigned i = 0; i < binding.member_count; ++i)
+        if(!p::binds(binding, api, binding.members[i]))
+            return -1;
+    return 1;
+}
+inline void rich_help(Output& output,
+                      const Metadata& api,
+                      const p::Metadata& m,
+                      const p::Binding& binding)
+{
+    output.print("parameters [schema] profile=1 schema=");
     output.number(m.schema_id);
     output.print(" version=");
     output.number(m.schema_version);
     output.print("\n");
     if(binding.constructor)
     {
-        output.print("constructor input=");
+        output.print("constructor [constructor] input=");
         rich_text(output, m, m.types[m.root].text.name);
         output.print("\n");
     }
     for(unsigned i = 0; i < binding.member_count; ++i)
     {
         unsigned id = binding.members[i];
-        if(!p::binds(binding, api, id))
-            return false;
         for(unsigned j = 0; j < api.member_count; ++j)
             if(api.members[j].id == id)
             {
-                output.print("method ");
                 output.print(api.members[j].name);
+                output.kind("method");
                 output.print(" input=");
                 rich_text(output, m, m.types[m.root].text.name);
                 output.print("\n");
@@ -154,8 +175,8 @@ inline bool rich_help(Output& output, int fd, const Metadata& api)
     for(unsigned i = 0; i < m.type_count; ++i)
     {
         const auto& t = m.types[i];
-        output.print("type ");
         rich_text(output, m, t.text.name);
+        output.kind("type");
         output.print(" ");
         output.print(rich_kind(t.kind));
         if(t.kind == p::Kind::Optional || t.kind == p::Kind::List)
@@ -186,10 +207,10 @@ inline bool rich_help(Output& output, int fd, const Metadata& api)
         {
             const auto& e = m.entries[t.first + j];
             output.print("  ");
-            output.print(t.kind == p::Kind::Enum      ? "value "
-                         : t.kind == p::Kind::Variant ? "case "
-                                                      : "field ");
             rich_text(output, m, e.text.name);
+            output.kind(t.kind == p::Kind::Enum      ? "value"
+                        : t.kind == p::Kind::Variant ? "case"
+                                                     : "field");
             output.print(" id=");
             output.number(e.id);
             if(e.type != p::no_index)
@@ -224,16 +245,15 @@ inline bool rich_help(Output& output, int fd, const Metadata& api)
     output.print(
         "CLI: field:value field.case options:{limit:10} label:null; quoted strings preserve "
         "spaces.\n");
-    return true;
 }
 inline constexpr uint32_t image_rights = OS1_RIGHT_READ | OS1_RIGHT_SEEK | OS1_RIGHT_INSPECT;
-inline int inspect_handle(int fd)
+inline int inspect_handle(int fd, const char* path)
 {
     Output output;
     os1_file_info info{};
     if(fd < 0 || file_info(fd, &info) < 0)
     {
-        output.print("intf: cannot open file\n");
+        output.print("inspect: cannot open file\n");
         return 1;
     }
     Metadata m{};
@@ -251,28 +271,65 @@ inline int inspect_handle(int fd)
         }
         return true;
     };
-    bool valid = read_elf(reader, info.byte_size, m);
-    if(!valid)
+    const int interface_found = read_section(reader, info.byte_size, ".os.interface", m, validate);
+    if(interface_found < 0)
     {
-        output.print("intf: invalid or absent interface metadata\n");
+        output.print("inspect: invalid interface metadata\n");
         return 1;
     }
-    output.print("class ");
-    output.print(m.class_name);
-    output.print("\ninterface ");
-    output.print(m.interface_name);
-    output.print(" id=");
-    output.number(m.interface_id);
-    output.print(" version=");
-    output.number(m.interface_version);
+    os1::buffer_metadata::Metadata buffers{};
+    const int buffer_found = read_section(reader,
+                                          info.byte_size,
+                                          ".os.buffers",
+                                          buffers,
+                                          [&](const os1::buffer_metadata::Metadata& value) {
+                                              return os1::buffer_metadata::validate(value, m);
+                                          });
+    if(buffer_found < 0)
+    {
+        output.print("inspect: invalid Buffer metadata\n");
+        return 1;
+    }
+    os1::constructor::Metadata ctor{};
+    const int found = constructor_metadata(fd, ctor);
+    static p::Metadata parameters;
+    p::Binding binding{};
+    const int rich_found = read_rich(fd, m, parameters, binding);
+    if(rich_found < 0)
+    {
+        output.print("inspect: invalid rich parameter metadata\n");
+        return 1;
+    }
+    if(found < 0)
+    {
+        output.print("inspect: invalid constructor metadata\n");
+        return 1;
+    }
+    if(!interface_found && !rich_found && !found)
+    {
+        output.print("inspect: no class metadata\n");
+        return 1;
+    }
+    output.print(interface_found ? m.class_name : path);
+    output.kind("class");
     output.print("\n");
+    if(interface_found)
+    {
+        output.print(m.interface_name);
+        output.kind("interface");
+        output.print(" id=");
+        output.number(m.interface_id);
+        output.print(" version=");
+        output.number(m.interface_version);
+        output.print("\n");
+    }
     for(unsigned i = 0; i < m.type_count; ++i)
     {
         const auto& t = m.types[i];
-        output.print("type ");
-        output.number(i + 1);
-        output.print(" ");
         output.print(t.name);
+        output.kind("type");
+        output.print(" id=");
+        output.number(i + 1);
         output.print(" size=");
         output.number(t.size);
         if(t.kind != Record)
@@ -286,7 +343,8 @@ inline int inspect_handle(int fd)
             const auto& f = m.fields[t.first_field + j];
             output.print("  ");
             output.print(f.name);
-            output.print(": ");
+            output.kind("field");
+            output.print(" ");
             output.print(scalar(f.kind));
             output.print("[");
             output.number(f.count);
@@ -298,11 +356,13 @@ inline int inspect_handle(int fd)
     for(unsigned i = 0; i < m.member_count; ++i)
     {
         const auto& a = m.members[i];
-        output.print(a.kind == Method        ? "method "
-                     : a.kind == PropertyGet ? "property get "
-                     : a.kind == PropertySet ? "property set "
-                                             : "event ");
         output.print(a.name);
+        output.kind(a.kind == Method  ? "method"
+                    : a.kind == Event ? "event"
+                                      : "property",
+                    a.kind == PropertyGet   ? "get"
+                    : a.kind == PropertySet ? "set"
+                                            : nullptr);
         output.print(" id=");
         output.number(a.id);
         output.print(" input=");
@@ -311,44 +371,20 @@ inline int inspect_handle(int fd)
         output.number(a.output);
         output.print(a.flags ? " implemented\n" : " metadata-only\n");
     }
-    os1::buffer_metadata::Metadata buffers{};
-    const int buffer_found = read_section(reader,
-                                          info.byte_size,
-                                          ".os.buffers",
-                                          buffers,
-                                          [&](const os1::buffer_metadata::Metadata& value) {
-                                              return os1::buffer_metadata::validate(value, m);
-                                          });
-    if(buffer_found < 0)
-    {
-        output.print("intf: invalid Buffer metadata\n");
-        return 1;
-    }
     for(unsigned i = 0; i < buffers.count; ++i)
     {
         const auto& b = buffers.members[i];
-        output.print("Buffer method=");
+        output.print("Buffer [transfer] method=");
         output.number(b.member);
         output.print(" mode=exclusive input=loan reference=attachment,offset,length output=");
         output.print(b.output == os1::buffer_metadata::return_input ? "return_same\n"
                                                                     : "move_distinct\n");
     }
-    os1::constructor::Metadata ctor{};
-    const int found = constructor_metadata(fd, ctor);
-    bool rich_valid = rich_help(output, fd, m);
-    if(!rich_valid)
-    {
-        output.print("intf: invalid rich parameter metadata\n");
-        return 1;
-    }
-    if(found < 0)
-    {
-        output.print("intf: invalid constructor metadata\n");
-        return 1;
-    }
+    if(rich_found)
+        rich_help(output, m, parameters, binding);
     if(found)
     {
-        output.print("constructor schema=");
+        output.print("constructor [constructor] schema=");
         output.number(ctor.schema_id);
         output.print(" version=");
         output.number(ctor.schema_version);
@@ -360,7 +396,8 @@ inline int inspect_handle(int fd)
             const auto& f = ctor.fields[i];
             output.print("  ");
             output.print(f.name);
-            output.print(": ");
+            output.kind("field");
+            output.print(" ");
             output.print(scalar(f.kind));
             output.print(" offset=");
             output.number(f.offset);
@@ -373,14 +410,9 @@ inline int inspect_handle(int fd)
     }
     if(!output.good)
     {
-        files::message("intf: cannot write inspection output\n");
+        files::message("inspect: cannot write inspection output\n");
         return 1;
     }
     return 0;
-}
-inline int inspect_file(const char* path)
-{
-    files::Handle image(open(path, image_rights));
-    return inspect_handle(image.fd);
 }
 }  // namespace os1::user::image_inspection

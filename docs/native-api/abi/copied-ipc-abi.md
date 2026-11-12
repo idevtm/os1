@@ -134,16 +134,16 @@ close(operation);
 `ipc_call(client, request, result)` is the synchronous equivalent; it closes its
 own Operation after obtaining the result.
 
-## Offline interface records and intf
+## Offline interface records and inspect
 
 Run these disk commands:
 
 ```text
 ipccheck
-intf /bin/textprocessor
+inspect /bin/textprocessor
 ```
 
-`intf` opens the file with READ|SEEK|INSPECT, reads its ELF section table and the
+`inspect` opens the file with READ|SEEK|INSPECT, reads its ELF section table and the
 read-only `.os.interface` section, validates it, and prints the schema. It does
 not execute the provider, create an object, or invoke getters.
 

@@ -114,7 +114,6 @@ os1_add_user_cxx_program(logcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/logcheck
 os1_add_user_cxx_program(ipccheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/ipccheck.cpp" OS1_USER_IPCCHECK_ELF)
 os1_add_user_cxx_program(paramdemo "${CMAKE_CURRENT_SOURCE_DIR}/programs/paramdemo.cpp" OS1_USER_PARAMDEMO_ELF)
 os1_add_user_cxx_program(paramcheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/paramcheck.cpp" OS1_USER_PARAMCHECK_ELF)
-os1_add_user_cxx_program(intf "${CMAKE_CURRENT_SOURCE_DIR}/programs/intf.cpp" OS1_USER_INTF_ELF)
 
 os1_add_user_cxx_program(counter "${CMAKE_CURRENT_SOURCE_DIR}/programs/counter.cpp" OS1_USER_COUNTER_ELF)
 os1_add_user_cxx_program(countercheck "${CMAKE_CURRENT_SOURCE_DIR}/programs/countercheck.cpp" OS1_USER_COUNTERCHECK_ELF)
@@ -146,7 +145,7 @@ foreach(program IN LISTS OS1_USER_PROGRAM_FILES)
     set(separator ",")
   endif()
 endforeach()
-string(APPEND program_manifest "],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/etc/motd\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/readme\",\"destination\":\"/etc/readme\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/shell-init.sh\",\"destination\":\"/etc/shell/init.sh\"}]}\n")
+string(APPEND program_manifest "],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/etc/motd\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/readme\",\"destination\":\"/etc/readme\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/shell-init.script\",\"destination\":\"/etc/shell/init.script\"}]}\n")
 file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs-base.json" CONTENT "${program_manifest}")
 add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json"
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"

@@ -104,15 +104,12 @@ struct Builtin
     const char* name;
     const char* usage;
 };
-inline constexpr Builtin builtins[] = {
-    {"context", "context [object.path]"},
-    {"process.context.list", "process.context.list [object.path]"},
-    {"write", "write [--append|--replace] path"},
-    {"edit", "edit path"},
-    {"help", "help [command|object.path]"},
-    {"inspect", "inspect [object.path|image]"},
-    {"exec", "exec image [arguments]"},
-    {"exit", "exit"}};
+inline constexpr Builtin builtins[] = {{"write", "write [--append|--replace] path"},
+                                       {"edit", "edit path"},
+                                       {"help", "help [command|object.path]"},
+                                       {"inspect", "inspect [object.path|image]"},
+                                       {"exec", "exec image [arguments]"},
+                                       {"exit", "exit"}};
 
 inline bool prefix(const char* text, const char* head)
 {

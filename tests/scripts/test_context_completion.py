@@ -99,10 +99,24 @@ def main():
         assert b'unknown or unavailable member' in run('.nonexistent')
         assert b'diagnostics [object]' in run('inspect .os.system')
         assert b'shutdown [method' in run('inspect .os.system.shutdown')
-        assert b'method ' in run('inspect /bin/textprocessor')
+        image = run('inspect /bin/textprocessor')
+        assert b'textprocessor [class]' in image and b'lowercase [method]' in image, image
+        startup = run('inspect /bin/sh')
+        assert b'/bin/sh [class]' in startup, startup
+        assert b'constructor [constructor] input=ShellStartup' in startup, startup
+        assert b'init_script [field] id=1: OptionalScript omitted=null' in startup, startup
+        assert b'OptionalScript [type] optional element=ScriptPath' in startup, startup
+        assert b'ScriptPath [type] string bound=240' in startup, startup
+        plain = run('inspect /bin/diskutil')
+        assert b'inspect: no class metadata' in plain and b'[class]' not in plain, plain
+        assert b'os [object]' in run('inspect .')
+        assert b'context [object]' not in run('inspect .process')
+        assert b'intf' not in run('ls /bin')
+        assert b'intf' not in run('help')
+        assert b'\ncontext [' not in run('help')
         run('cp /bin/textprocessor /tmp/metadata')
         assert b'redirection failed' in run('inspect /tmp/metadata > /tmp/./metadata')
-        assert b'method ' in run('inspect /tmp/metadata')
+        assert b'lowercase [method]' in run('inspect /tmp/metadata')
         run('touch /tmp/full-output')
         run('cp /bin/sh /tmp/full-output mode:append')
         assert b'65536' in run('ls -l /tmp')
@@ -262,22 +276,16 @@ def main():
         expect(b'  > ls /tmp/')
         send('\x03')
         expect()
-        send('intf /b\t')
-        expect(b'  > intf /bin/')
+        send('inspect /b\t')
+        expect(b'  > inspect /bin/')
         send('textp\t')
-        completed = expect(b'  > intf /bin/textprocessor')
-        assert b'intf: ' not in completed, completed
+        completed = expect(b'  > inspect /bin/textprocessor')
+        assert b'inspect: ' not in completed, completed
         send('\n')
-        assert b'method ' in expect()
-        run('process.shell.aliases.add(name:"intf", target:"os.fs.list")')
-        send('intf path:/tm\t')
-        expect(b'  > intf path:/tmp/')
-        send('\x03')
-        expect()
-        run('process.shell.aliases.remove(name:"intf")')
+        assert b'lowercase [method]' in expect()
         run('echo "colon path" > "/tmp/image:metadata"')
-        send('intf /tmp/image:m\t')
-        expect(b'  > intf "/tmp/image:metadata"')
+        send('inspect /tmp/image:m\t')
+        expect(b'  > inspect "/tmp/image:metadata"')
         send('\x03')
         expect()
         run('echo "path completion" > "/tmp/has space.txt"')
@@ -300,8 +308,8 @@ def main():
         expect()
         run('echo "dash path" > "/tmp/-dash"')
         run('cd /tmp')
-        send('/bin/intf -da\t')
-        expect(b'  > /bin/intf "-dash"')
+        send('inspect -da\t')
+        expect(b'  > inspect "-dash"')
         send('\x03')
         expect()
         send('cat -- -da\t')
@@ -349,45 +357,47 @@ def main():
         assert b'failed' not in run('os.system.sync')
         send('echo "escape-sequence"\x1b[3~\n')
         assert b'expected' not in expect()
-        roots = run('context')
+        roots = run('inspect')
         assert b'os [object]' in roots and b'process [object]' in roots, roots
-        os_members = run('context os')
-        os_child_count = len(re.findall(rb'^\w+ \[object\]', os_members, re.MULTILINE))
+        os_members = run('inspect os')
+        _, found, children = os_members.partition(b'\nos [object]\n')
+        assert found, os_members
+        os_child_count = len(re.findall(rb'^\w+ \[object\]', children, re.MULTILINE))
         assert 0 < os_child_count < 8, os_members
-        members = run('context os.system.log')
+        members = run('inspect os.system.log')
         assert b'read [method, native]' in members and b'print [method]' in members, members
-        hardware = run('context os.devices')
+        hardware = run('inspect os.devices')
         assert b'inventory [object]' in hardware and b'topology [object]' in hardware, hardware
-        pci = run('context os.devices.inventory.pci')
+        pci = run('inspect os.devices.inventory.pci')
         assert b'pci_0 [object]' in pci, pci
-        fields = run('context os.devices.inventory.pci.pci_0')
+        fields = run('inspect os.devices.inventory.pci.pci_0')
         assert b'vendor_id [field] Integer' in fields, fields
         assert b'vendor_id [field] Integer = 32902\n' in fields, fields
         assert b'name [field] String = Intel Bridge\n' in fields, fields
-        assert b'vendor_id [field] Integer = 32902\n' in run('context os.devices.inventory.pci.pci_0.vendor_id')
+        assert b'vendor_id [field] Integer = 32902\n' in run('inspect os.devices.inventory.pci.pci_0.vendor_id')
         if args.keyboard != 'usb':
-            assert b'(no children)\n' in run('context os.devices.inventory.usb')
+            assert b'(no children)\n' in run('inspect os.devices.inventory.usb')
         # Inspection must describe this mutating method without executing it.
-        assert b'shutdown [method' in run('context os.system.shutdown')
+        assert b'shutdown [method' in run('inspect os.system.shutdown')
         assert b'after-inspection\n' in run('echo "after-inspection"')
         assert b'32902\n' in run('os.devices.inventory.pci.pci_0.vendor_id')
         assert b'Intel Bridge\n' in run('echo os.devices.inventory.pci.pci_0.name')
         run('vendor = os.devices.inventory.pci.pci_0.vendor_id')
         assert b'32902\n' in run('vendor')
         run('drop vendor')
-        assert b'cpu_0 [object]' in run('context os.system.processors')
-        assert b'acpi_' in run('context os.firmware.acpi')
+        assert b'cpu_0 [object]' in run('inspect os.system.processors')
+        assert b'acpi_' in run('inspect os.firmware.acpi')
         send('os.devices.inventory.pci.pci_0.ven\t\n')
         assert b'32902\n' in expect()
         if args.keyboard == 'usb':
-            usb = run('context os.devices.classes.input')
+            usb = run('inspect os.devices.classes.input')
             assert b'interface_' in usb and b'UsbInterface' in usb, usb
         run('process.environment.config = {enabled:true, label:"sample"}')
-        fields = run('context process.environment.config')
+        fields = run('inspect process.environment.config')
         assert b'enabled [field] Boolean' in fields and b'label [field] String' in fields, fields
         before = int(re.search(rb'procs=(\d+)', run('sys'))[1])
         for _ in range(4):
-            run('process.context.list "process.environment.path"')
+            run('inspect process.environment.path')
         after = int(re.search(rb'procs=(\d+)', run('sys'))[1])
         assert before == after, (before, after)
 
@@ -498,7 +508,7 @@ def main():
         expect()
         assert b'restored\n' in run('echo "restored"')
         run('exit')
-        assert b'os [object]' in run('context')
+        assert b'os [object]' in run('inspect')
         print('context discovery, completion, and ownership checks passed')
     finally:
         child.terminate()

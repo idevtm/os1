@@ -98,7 +98,7 @@ to that retained object. No second full schema appears in `.rodata`.
 ## Commands in the booted native shell
 
 ```
-intf /bin/paramdemo
+inspect /bin/paramdemo
 paramdemo
 paramdemo initial:4 source.text:'Hi there' options.suffix:null
 paramdemo mode.thorough source.text:"hello world" options:{limit:5,suffix:null}
@@ -162,12 +162,13 @@ slots must be zero. The current profile permits one rich schema per image, share
 by the explicitly listed constructor/method bindings. There is no inferred
 association based on a fixture's field names or a method's name.
 
-`intf` reads `.os.interface`, legacy `.os.constructor`, `.os.parameters`, and
+`inspect` reads `.os.interface`, legacy `.os.constructor`, `.os.parameters`, and
 `.os.parameter-bindings` from the retained file descriptor without launching it.
 It reports constructor/method input bindings, type references, fields/cases,
 enumeration identities, optional omission/nullability, canonical typed defaults,
 bounds, summaries, descriptions, units and formats. A malformed binding fails
-inspection. `.os.constructor` v1 and its old display remain supported.
+inspection. A constructor-only image can omit `.os.interface`.
+The inspector also accepts legacy `.os.constructor` v1 records.
 
 `ParameterClient` uses a retained EXECUTE|READ|SEEK|INSPECT executable handle.
 It validates interface and binding metadata, sends normalized constructor defaults, and creates a private endpoint pair.

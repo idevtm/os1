@@ -53,8 +53,11 @@ def main():
                     command('sys', b'sys boot=')
                     command('kmem', b'kmem complete')
                     if args.workload == 'context':
+                        # Old measurement images still expose the historical command.
+                        inspector = 'inspect' if b'\ninspect [' in command('help') else 'context'
                         for _ in range(20):
-                            command('context os.devices.inventory.pci.pci_0.vendor_id', b'Integer = 32902')
+                            command(f'{inspector} os.devices.inventory.pci.pci_0.vendor_id',
+                                    b'Integer = 32902')
                     else:
                         for name in ('lspci', 'lsusb -t', 'lsblk', 'lshw'):
                             out = command(name, b'boot snapshot')

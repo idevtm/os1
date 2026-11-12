@@ -121,10 +121,6 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
             changed = {name: (mode, content) for name, (mode, content) in programs.items()
                        if name not in before or (mode == 0o100755 and
                            before[name][:2] != (mode, hashlib.sha256(content).hexdigest()))}
-            if not changed:
-                print('Programs already match; image unchanged.')
-                return False
-
             def edit(command):
                 # All command tokens are generated or restricted manifest paths.
                 # debugfs can return zero after an error; final snapshots verify every requested change.
@@ -132,6 +128,20 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
                                         capture_output=True, text=True)
                 if result.returncode:
                     raise ValueError('debugfs failed: ' + result.stdout + result.stderr)
+
+            profile = '/etc/shell/init.script'
+            legacy_profile = '/etc/shell/init.sh'
+            prior = before.get(legacy_profile)
+            if (profile not in before and profile in changed and changed[profile][0] == 0o100644
+                    and prior is not None and prior[0] & 0xf000 == 0x8000):
+                edit(f'dump {legacy_profile} legacy-profile')
+                content = (temporary / 'legacy-profile').read_bytes()
+                if hashlib.sha256(content).hexdigest() != prior[1]:
+                    raise ValueError('legacy shell startup profile verification failed')
+                changed[profile] = (changed[profile][0], content)
+            if not changed:
+                print('Programs already match; image unchanged.')
+                return False
 
             directories = {name for name, info in before.items() if info[0] & 0xf000 == 0x4000}
             for index, (name, (mode, content)) in enumerate(changed.items()):
@@ -179,8 +189,8 @@ def deploy(image, manifest, debugfs=None, e2fsck=None):
                     os.fsync(directory_fd)
                 finally:
                     os.close(directory_fd)
-            for name in changed:
-                print(f'Deployed {name} sha256={hashlib.sha256(programs[name][1]).hexdigest()}')
+            for name, (_, content) in changed.items():
+                print(f'Deployed {name} sha256={hashlib.sha256(content).hexdigest()}')
             print(f'Preserved {len(before.keys() - changed.keys())} existing entries; '
                   f'elapsed_seconds={time.monotonic()-started:.6f}; staging_bytes<={length*2+start+sum(len(content) for _, content in changed.values())}')
             return True

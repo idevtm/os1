@@ -5,7 +5,7 @@ namespace os1::shell_startup
 {
 constexpr uint64_t schema_id = 0x3154524154534853ull;
 constexpr unsigned field_id = 1;
-constexpr char profile[] = "/etc/shell/init.sh";
+constexpr char profile[] = "/etc/shell/init.script";
 
 // Rich parameter wire format. The record has one present optional String.
 constexpr os1_constructor_args boot_arguments()

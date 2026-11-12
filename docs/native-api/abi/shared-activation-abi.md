@@ -8,7 +8,7 @@ Implemented 2026-11-05, extending [copied IPC](copied-ipc-abi.md) and
 
 ```text
 activationcheck
-intf /bin/counter
+inspect /bin/counter
 ```
 
 `activationcheck` starts `/bin/activation` with an explicit Counter executable

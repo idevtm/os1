@@ -2,6 +2,11 @@
 #include "discovery/completion.hpp"
 namespace os1::discovery
 {
+template<class Emit>
+bool listing_kind(Emit emit, const char* kind, const char* qualifier = nullptr)
+{
+    return emit(" [") && emit(kind) && (!qualifier || (emit(", ") && emit(qualifier))) && emit("]");
+}
 struct Row
 {
     char bytes[OS1_CONSOLE_REDRAW_MAX + 1]{};

@@ -149,7 +149,7 @@ Discovery adds no device or subscription allocation.
 
 The functional and bounded-resource requirements passed automated checks.
 Physical USB mouse behavior and spontaneous hardware reconnects remain unmeasured after this change.
-Retest repeated `context os.input`, device-local acquisition, removal, and reconnect on each physical device.
+Retest repeated `inspect os.input`, device-local acquisition, removal, and reconnect on each physical device.
 Update both the kernel and disk programs before that retest.
 
 The measurement driver is `build/input-discovery/measure_input.py`.

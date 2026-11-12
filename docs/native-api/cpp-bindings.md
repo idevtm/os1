@@ -13,7 +13,7 @@ SDK and generated `.so` flow below remain proposals. For the implemented copied
 IPC prototype, see [the concrete ABI](abi/copied-ipc-abi.md),
 [ipccheck.cpp](../../src/user/programs/ipccheck.cpp),
 [textprocessor.cpp](../../src/user/programs/textprocessor.cpp), and
-[intf.cpp](../../src/user/programs/intf.cpp). These use handwritten bounded
+[the shell image inspector](../../src/user/include/os1/image_inspection.hpp). These use handwritten bounded
 records. The [Counter/events implementation](abi/counter-events-abi.md) adds
 volatile runtime events, typed constructor records/CLI conversion, and deadlines.
 See [counter.cpp](../../src/user/programs/counter.cpp) and

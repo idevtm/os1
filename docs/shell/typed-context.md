@@ -71,12 +71,14 @@ In a path or stream operand, `process.streams.input` selects the live stream.
 | --- | --- |
 | `inspect`, `inspect .` | List live roots and bindings. |
 | `inspect .os.fs.list` | Show the method definition and its defaults. |
-| `inspect /bin/textprocessor` | Read the image interface and constructor metadata. |
+| `inspect /bin/textprocessor` | Read the image interface metadata. |
+| `inspect /bin/sh` | Show the constructor and its optional `init_script` String. |
 | `help ls` | Show the alias and its settings. |
 
 Inspection reads descriptions and image metadata without invoking methods or starting programs.
 The live context listing contains roots and bindings.
-Existing `context` and `intf` commands remain available for scripts.
+Live objects and image classes use the same `name [kind] details` listing style.
+Use `inspect` in scripts that used the retired `context` or `intf` commands.
 
 Tab browses the applicable domains at the cursor.
 After `.`, it offers live roots. After `./`, it offers filesystem entries.
@@ -86,17 +88,18 @@ A selected spelling preserves the target when you press Enter.
 
 ## Startup configuration
 
-Init passes the optional String constructor argument `init_script:"/etc/shell/init.sh"`.
+Init passes the optional String constructor argument `init_script:"/etc/shell/init.script"`.
 The shell applies the profile before the first prompt.
 The profile configures the command search list and the alias table.
 
 ```text
-/sbin/init -> /bin/sh constructor -> /etc/shell/init.sh -> search list + aliases
+/sbin/init -> /bin/sh constructor -> /etc/shell/init.script -> search list + aliases
 ```
 
 The profile accepts literal calls to `process.path.add`, `process.path.remove`, and the alias mutation methods.
 If a statement fails, the shell reports its file and line and restores the previous configuration.
 A missing file leaves the initial configuration in place.
+During disk deployment, the updater copies a legacy `/etc/shell/init.sh` profile if the new file is absent.
 Child shells can load aliases from the inherited profile path. They keep their inherited search list.
 
 ```text
@@ -164,10 +167,10 @@ startup profile -> short alias -> os.system.diagnostics method -> report
 | `irqs` | `interrupts` |
 
 The methods print the existing reports and use the current observation permissions.
-Run `context os.system.diagnostics` to see the methods.
+Run `inspect os.system.diagnostics` to see the methods.
 Call `os.system.diagnostics.summary()` to print the system report without an alias.
 Existing disk profiles keep their contents during deployment.
-To add these aliases to an existing profile, copy the new declarations from the [default profile](../../src/user/data/shell-init.sh).
+To add these aliases to an existing profile, copy the new declarations from the [default profile](../../src/user/data/shell-init.script).
 
 ## Process, logs, and power
 

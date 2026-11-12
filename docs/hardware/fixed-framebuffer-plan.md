@@ -29,7 +29,7 @@ The demo draws a software pointer with the Native API input service.
 The [Display ABI](../native-api/abi/display-abi.md) defines the session and the demo procedure.
 The [module profile](driver-module-abi.md#firmware-framebuffer-module) defines the package and its trust check.
 Use the USB menu action **Update boot and programs** for a managed stick.
-Boot through UEFI to test graphics. Run `context os.display`, then run `gfxdemo`.
+Boot through UEFI to test graphics. Run `inspect os.display`, then run `gfxdemo`.
 
 | Check | Evidence |
 | --- | --- |
@@ -171,7 +171,7 @@ Record the pointer diagnostics and compare the input gaps with the event age and
 Physical testing of the new event path remains pending.
 
 For QEMU with an existing data disk, run `./os1.sh storage_deploy` before `./os1.sh run`.
-Inspect `context os.display` to confirm the backend.
+Run `inspect os.display` to confirm the backend.
 Select an alternate resolution from the `gfxdemo` menu.
 The Standard VGA test verifies the new screenshot dimensions and the return to the boot dimensions.
 

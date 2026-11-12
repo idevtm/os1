@@ -3,7 +3,7 @@
 Status: design direction approved on 2026-11-04. The first copied IPC prototype
 is implemented; the broader design remains unfrozen. The concrete
 [copied IPC ABI](abi/copied-ipc-abi.md) specifies numeric operations, records,
-quotas, locking, private TextProcessor, and offline `intf` inspection. The
+quotas, locking, private TextProcessor, and offline inspection. The
 [Counter/events extension](abi/counter-events-abi.md) adds a second protocol, typed
 construction, deadlines, volatile subscriptions, and restricted private supervision.
 The [shared activation extension](abi/shared-activation-abi.md) implements bounded

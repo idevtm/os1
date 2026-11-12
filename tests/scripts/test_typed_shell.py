@@ -87,7 +87,7 @@ def exercise(run, expect):
     ok('grep "process.pid [property] Integer" "help-output"', b'\nprocess.pid [property] Integer\n')
     ok('process.shell.aliases.remove(name:"check_help")')
     assert b'check_help ->' not in ok('help'), 'help lists a removed alias'
-    ok('context os.system.diagnostics', b'memory [method]')
+    ok('inspect os.system.diagnostics', b'memory [method]')
     ok('os.system.diagnostics.summary()', b'sys boot=')
     ok('os.system.diagnostics.summary > "system-report"')
     ok('cat "system-report"', b'sys boot=')

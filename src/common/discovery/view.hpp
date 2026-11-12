@@ -381,8 +381,6 @@ struct View
             nodes[map[i]].type = source.kind;
             nodes[map[i]].value = i;
         }
-        unsigned context = add(process, "context", Kind::Object, "ContextView");
-        add(context, "list", Kind::Method, "path:String=\"\"", 0, 0, 0, Local | Shell);
         if(g.shell)
         {
             add(process, "pid", Kind::Property, "Integer", 0, 0, 0, Local | Shell);
