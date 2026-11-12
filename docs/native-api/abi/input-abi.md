@@ -146,6 +146,9 @@ Allocation, admission, rights, and malformed-request failures use existing nativ
 
 ## Transport and physical acceptance
 
+A USB boot keyboard report with an error usage leaves the last valid keys and modifiers in effect.
+The report produces no Console input or native keyboard event.
+
 xHCI supports boot keyboards and mice directly connected to root ports.
 It supports the first two eligible boot HID interfaces in one configuration, including composite keyboard and mouse receivers.
 Each interface receives separate endpoint buffers, an input identity, and a native object.

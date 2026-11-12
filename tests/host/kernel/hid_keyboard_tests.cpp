@@ -134,3 +134,30 @@ TEST(HidKeyboard, GuidedCompletionKeysRemainDistinct)
         EXPECT_EQ(0x88, static_cast<unsigned char>(out[0]));
     }
 }
+
+TEST(HidKeyboard, ErrorReportsPreserveHeldKeysAndModifiers)
+{
+    for(uint8_t error : {1, 2, 3})
+    {
+        usb::hid::BootKeyboardState state{};
+        constexpr uint8_t shift = usb::hid::kModifierLeftShift;
+        uint8_t report[8]{shift, 0, 4};
+        char output[6]{};
+        size_t count = 0;
+        ASSERT_TRUE(usb::hid::boot_keyboard_apply_report(state, report, 8, output, 6, count));
+        ASSERT_EQ(1u, count);
+        EXPECT_EQ('A', output[0]);
+
+        // A valid key before the error must not produce input either.
+        uint8_t invalid[8]{0, 0, 5, error, error, error, error, error};
+        ASSERT_TRUE(usb::hid::boot_keyboard_apply_report(state, invalid, 8, output, 6, count));
+        EXPECT_EQ(0u, count);
+        EXPECT_EQ(shift, state.modifiers);
+        EXPECT_EQ(4u, state.keys[0]);
+
+        report[3] = 5;
+        ASSERT_TRUE(usb::hid::boot_keyboard_apply_report(state, report, 8, output, 6, count));
+        ASSERT_EQ(1u, count);
+        EXPECT_EQ('B', output[0]);
+    }
+}
