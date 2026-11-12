@@ -88,6 +88,7 @@ struct VirtioBlkState
     uint16_t descriptor_in_use_mask = 0;
     uint64_t capacity_sectors = 0;
     VirtioPciTransport transport{};
+    volatile uint16_t* notify_register = nullptr;
     Virtqueue queue{};
     VirtioBlkRequestSlot request_slots[kVirtioBlkMaxRequestSlots]{};
 };
@@ -387,7 +388,7 @@ bool virtio_blk_submit_request(BlockDevice& device, BlockRequest& request)
             virtio_blk_fail_immediately(request, BlockRequestStatus::Invalid);
             return false;
         }
-        virtio_pci_notify_queue(state.transport, 0);
+        virtio_pci_notify_queue(state.notify_register, 0);
     }
     // Poll with no queue lock held. This bounded profile works from IF=0 syscall
     // continuations as well as boot; interrupt completion remains enabled.
@@ -640,12 +641,14 @@ bool probe_virtio_blk_device(VirtualMemory& kernel_vm,
         release_pci_bars_for_owner(state.owner);
         return false;
     }
-    if(!virtio_pci_setup_queue(state.transport,
+    state.notify_register =
+        virtio_pci_setup_queue(state.transport,
                                0,
                                state.queue_size,
                                state.queue.ring_memory.physical_address,
                                state.queue.ring_memory.physical_address + kPageSize,
-                               state.queue.ring_memory.physical_address + 2u * kPageSize))
+                               state.queue.ring_memory.physical_address + 2u * kPageSize);
+    if(!state.notify_register)
     {
         debug("virtio-blk: queue setup failed")();
         virtio_blk_release_runtime_resources(frames, state);

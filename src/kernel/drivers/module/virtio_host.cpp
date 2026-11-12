@@ -20,6 +20,7 @@ namespace
 struct Queue
 {
     Virtqueue ring{};
+    volatile uint16_t* notify_register = nullptr;
     DmaBuffer buffer{};
     uint32_t busy = 0;
     bool device_writes = false;
@@ -41,6 +42,12 @@ struct Transport
 // Stable storage: pending IRQ callbacks and uncertain DMA can never address freed memory.
 // One admission per boot bounds both normal retained resources and failure quarantine.
 Transport state;
+void pause_device_reset()
+{
+#ifndef OS1_HOST_TEST
+    asm volatile("pause");
+#endif
+}
 uint64_t now_ns()
 {
     return tsc_clock_now_100ns() * 100;
@@ -63,7 +70,7 @@ int stop(void* handle)
                 retired = false;
                 break;
             }
-            asm volatile("pause");
+            pause_device_reset();
         }
     }
     if(state.pci.device)
@@ -111,7 +118,7 @@ void* open(uint32_t index, uint32_t config_bytes, uint64_t features)
             stop(&state);
             return nullptr;
         }
-        asm volatile("pause");
+        pause_device_reset();
     }
     virtio_pci_write_device_status(state.pci, kVirtioStatusAcknowledge | kVirtioStatusDriver);
     if(!virtio_pci_negotiate_features(state.pci, features, features))
@@ -148,21 +155,30 @@ uint8_t* queue(void* handle, uint32_t index, uint32_t writes, uint32_t* capacity
         return nullptr;
     if(size > kVirtqueueMaxSize)
         size = kVirtqueueMaxSize;
-    if(!virtqueue_allocate(page_frames, state.pci.owner, size, q.ring) ||
-       !dma_allocate_buffer(page_frames,
+    if(!virtqueue_allocate(page_frames, state.pci.owner, size, q.ring))
+        return nullptr;
+    if(!dma_allocate_buffer(page_frames,
                             state.pci.owner,
                             2048,
                             writes ? DmaDirection::FromDevice : DmaDirection::ToDevice,
                             q.buffer))
+    {
+        virtqueue_release(page_frames, q.ring);
         return nullptr;
+    }
     memset(q.buffer.virtual_address, 0, q.buffer.size_bytes);
-    if(!virtio_pci_setup_queue(state.pci,
-                               uint16_t(index),
-                               size,
-                               q.ring.ring_memory.physical_address,
-                               q.ring.ring_memory.physical_address + kPageSize,
-                               q.ring.ring_memory.physical_address + 2 * kPageSize))
+    q.notify_register = virtio_pci_setup_queue(state.pci,
+                                               uint16_t(index),
+                                               size,
+                                               q.ring.ring_memory.physical_address,
+                                               q.ring.ring_memory.physical_address + kPageSize,
+                                               q.ring.ring_memory.physical_address + 2 * kPageSize);
+    if(!q.notify_register)
+    {
+        dma_release_buffer(page_frames, q.buffer);
+        virtqueue_release(page_frames, q.ring);
         return nullptr;
+    }
     q.device_writes = writes != 0;
     q.configured = true;
     *capacity = uint32_t(q.buffer.size_bytes);
@@ -227,7 +243,7 @@ int submit(void* handle, uint32_t index, uint32_t bytes)
         __atomic_store_n(&q.busy, 0, __ATOMIC_RELEASE);
         return 0;
     }
-    virtio_pci_notify_queue(state.pci, uint16_t(index));
+    virtio_pci_notify_queue(q.notify_register, uint16_t(index));
     return 1;
 }
 int complete(void* handle, uint32_t index, uint32_t* bytes)

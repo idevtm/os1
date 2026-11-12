@@ -523,11 +523,12 @@ BootInfo.rsdp_physical
         |-- pci_bus_probe_all
         |     |-- match modern virtio-blk PCI function
         |     |-- bind shared virtio PCI transport
-        |     |-- claim BARs used by virtio capabilities
+        |     |-- claim BARs and validate virtio capability ranges
         |     |-- negotiate VERSION_1
         |     |-- allocate DMA for queue and request buffer
         |     |-- enable MSI-X, MSI, or IOAPIC INTx fallback
-        |     |-- setup queue and publish BlockDevice
+        |     |-- validate queue notification address and enable queue
+        |     |-- publish BlockDevice
         v
  BlockDevice submit/read/write ---> read sector 0, verify prefix
         |                         read sector 1, verify prefix
@@ -535,6 +536,10 @@ BootInfo.rsdp_physical
         v                         -> "virtio-blk smoke ok"
  RunVirtioBlkSmoke
 ```
+
+The virtio PCI transport checks each supported capability range against its claimed BAR.
+The driver caches a checked notification register for each queue before it enables the queue.
+Queue submission uses that register without reading the device notification offset again.
 
 Missing or malformed ACPI tables are a hard error on both boot paths. BIOS remains supported as a boot frontend, but it now depends on the same ACPI-derived topology contract as Limine.
 

@@ -50,12 +50,9 @@ struct VirtioPciTransport
     volatile VirtioPciCommonCfg* common_cfg = nullptr;
     volatile uint8_t* device_cfg = nullptr;
     volatile uint8_t* isr_status = nullptr;
-    volatile uint16_t* notify_register = nullptr;
-    uint8_t notify_bar = 0;
-    uint32_t notify_offset = 0;
+    uint64_t notify_base = 0;
+    uint32_t notify_length = 0;
     uint32_t notify_multiplier = 0;
-    uint16_t queue_size = 0;
-    uint16_t queue_notify_off = 0;
     PciInterruptHandle interrupt{};
 };
 
@@ -80,16 +77,16 @@ void virtio_pci_write_device_status(VirtioPciTransport& transport, uint8_t statu
 bool virtio_pci_negotiate_features(VirtioPciTransport& transport,
                                    uint64_t required_features,
                                    uint64_t accepted_features);
-bool virtio_pci_setup_queue(VirtioPciTransport& transport,
-                            uint16_t queue_index,
-                            uint16_t queue_size,
-                            uint64_t desc_physical,
-                            uint64_t avail_physical,
-                            uint64_t used_physical);
+volatile uint16_t* virtio_pci_setup_queue(VirtioPciTransport& transport,
+                                          uint16_t queue_index,
+                                          uint16_t queue_size,
+                                          uint64_t desc_physical,
+                                          uint64_t avail_physical,
+                                          uint64_t used_physical);
 bool virtio_pci_bind_queue_interrupt(VirtualMemory& kernel_vm,
                                      VirtioPciTransport& transport,
                                      uint16_t queue_index,
                                      uint16_t source_id,
                                      InterruptHandler handler,
                                      void* handler_data);
-void virtio_pci_notify_queue(VirtioPciTransport& transport, uint16_t queue_index);
+void virtio_pci_notify_queue(volatile uint16_t* notify_register, uint16_t queue_index);
