@@ -71,8 +71,9 @@ Otherwise that alias correctly keeps the connection alive and masks child exit.
 
 One IRQ-safe state lock protects connection state and wait registration. The
 check and registration happen atomically. State changes select ready waiters;
-IRQ/syscall entries drain only those already signalled, deferring publication
-while a waiter is still current on any CPU. Wait registrations retain the accepted
+IRQ and syscall entries check whether the signalled queue contains work.
+They take the IPC lock only when the queue can contain work.
+A signalled waiter remains queued while it is current on any CPU. Wait registrations retain the accepted
 instance, and detached wakeups pin thread lifetime through scheduler publication.
 User copies, allocation, descriptor-table calls, destruction, and scheduler calls
 occur outside the IPC lock. Process-table lock precedes IPC lock when registering.
