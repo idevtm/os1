@@ -468,10 +468,17 @@ long write(VfsNode* base, uint64_t offset, const void* in, size_t size, bool app
         return OS1_ERR_WOULD_BLOCK;
     if(!(n->allowed_rights & OS1_RIGHT_WRITE))
         return OS1_ERR_ACCESS;
-    if(size > 256)
+    if(size > ext2::block_bytes)
         return OS1_ERR_RANGE;
     if(append)
+    {
         offset = n->byte_size;
+        const size_t remaining = ext2::block_bytes - offset % ext2::block_bytes;
+        const size_t aligned = remaining / 256 * 256;
+        const size_t limit = aligned > 256 ? aligned : 256;
+        if(size > limit)
+            size = limit;
+    }
     long r = n->disk->volume.write(n->number, n->inode, offset, in, size);
     if(r >= 0)
     {
@@ -627,25 +634,10 @@ long set_times(VfsNode* base, uint32_t fields)
         return OS1_ERR_WOULD_BLOCK;
     return node->disk->volume.set_times(node->number, node->inode, fields);
 }
-const VfsOperations operations{lookup,
-                               create,
-                               remove,
-                               rename,
-                               read,
-                               write,
-                               truncate,
-                               seek,
-                               next,
-                               info,
-                               sync,
-                               snapshot,
-                               move,
-                               metadata,
-                               space,
-                               create_locked,
-                               remove_locked,
-                               times,
-                               set_times};
+const VfsOperations operations{lookup,        create,        remove, rename,    read,
+                               write,         truncate,      seek,   next,      info,
+                               sync,          snapshot,      move,   metadata,  space,
+                               create_locked, remove_locked, times,  set_times, ext2::block_bytes};
 }  // namespace
 long ext2_mount(NativeObject* root, BlockDevice& device)
 {

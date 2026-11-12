@@ -92,6 +92,8 @@ struct Subscription : NativeObject
 // Table operations, user copies, allocation, destruction, and scheduling stay outside.
 WaitQueue waiters{"ipc-state"};
 WaitQueue signalled{"ipc-signalled"};
+// Writers update the empty state under waiters.lock.
+bool signalled_pending = false;
 uint64_t next_generation = 1;
 uint64_t monotonic_ns = 0;
 // Each occupied slot stores the creator PID until the connection is released.
@@ -183,6 +185,7 @@ void release_wait(IpcWaitState& wait)
 }
 void signal_locked()
 {
+    const bool was_empty = !signalled.head;
     Thread** link = &waiters.head;
     while(*link)
     {
@@ -203,6 +206,8 @@ void signal_locked()
         t->wait_link = nullptr;
         wait_queue_enqueue_locked(signalled, t);
     }
+    if(was_empty && signalled.head)
+        __atomic_store_n(&signalled_pending, true, __ATOMIC_RELEASE);
 }
 void finish_locked(Operation* op, int32_t transport)
 {
@@ -1461,6 +1466,8 @@ void cancel_ipc_wait(Thread* thread)
             {
                 *link = thread->wait_link;
                 thread->wait_link = nullptr;
+                if(queue == &signalled && !signalled.head)
+                    __atomic_store_n(&signalled_pending, false, __ATOMIC_RELEASE);
                 break;
             }
         }
@@ -1482,7 +1489,7 @@ void ipc_refresh_input_waiters()
 
 void ipc_drain_wakeups()
 {
-    for(;;)
+    while(__atomic_load_n(&signalled_pending, __ATOMIC_ACQUIRE))
     {
         Thread* t = nullptr;
         IpcWaitState released{};
@@ -1504,6 +1511,8 @@ void ipc_drain_wakeups()
             t = *link;
             *link = t->wait_link;
             t->wait_link = nullptr;
+            if(!signalled.head)
+                __atomic_store_n(&signalled_pending, false, __ATOMIC_RELEASE);
             (void)atomic_fetch_add(&t->io_pins, 1u);
             released = t->wait.ipc;
             // Only a user syscall consumes this return register. A kernel worker

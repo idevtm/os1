@@ -1,6 +1,7 @@
 #include "buffer/buffer.hpp"
 
 #include "arch/x86_64/apic/ipi.hpp"
+#include "arch/x86_64/cpu/cpu.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
@@ -49,6 +50,38 @@ Budget* budgets;
 Buffer* objects;
 uint64_t next_identity;
 uint32_t global_pages;
+Spinlock buffer_lock{"buffer-ownership"};
+#if defined(OS1_HOST_TEST)
+thread_local uint32_t buffer_lock_depth = 0;
+#endif
+
+uint32_t& lock_depth()
+{
+#if defined(OS1_HOST_TEST)
+    return buffer_lock_depth;
+#else
+    return cpu_cur()->buffer_lock_depth;
+#endif
+}
+
+class BufferGuard
+{
+public:
+    BufferGuard()
+    {
+        if(lock_depth()++ == 0)
+            buffer_lock.lock();
+    }
+    ~BufferGuard()
+    {
+        if(--lock_depth() == 0)
+            buffer_lock.unlock();
+    }
+
+private:
+    IrqGuard irq_;
+};
+
 void retain(Budget* b)
 {
     if(b)
@@ -90,7 +123,7 @@ void set_owner(Buffer* b, Budget* owner)
 }
 void destroy_buffer(NativeObject* object)
 {
-    UserCopyGuard guard;
+    BufferGuard guard;
     auto* b = reinterpret_cast<Buffer*>(object);
     Buffer** link = &objects;
     while(*link != b)
@@ -116,17 +149,20 @@ void erase_map(Buffer* b, Mapping& m)
 }
 void revoke(Buffer* b, Budget* from, bool discard, bool borrowed_only = false)
 {
-    for(auto& m : b->maps)
-        if(m.budget == from && (!borrowed_only || m.borrowed))
-        {
-            if(m.present)
+    {
+        UserCopyGuard copy_guard(from->process);
+        bool had_present_alias = false;
+        for(auto& m : b->maps)
+            if(m.budget == from && (!borrowed_only || m.borrowed) && m.present)
             {
                 VirtualMemory vm(*b->frames, m.cr3);
                 vm.detach(m.address, b->page_count);
                 m.present = false;
+                had_present_alias = true;
             }
-        }
-    ipi_retire_tlb();
+        if(had_present_alias)
+            ipi_retire_tlb();
+    }
     if(discard)
         for(auto& m : b->maps)
             if(m.budget == from && (!borrowed_only || m.borrowed))
@@ -153,6 +189,7 @@ bool map_alias(Buffer* b, VirtualMemory& vm, uint64_t address, bool writable, bo
 void restore(Buffer* b, Budget* to)
 {
     set_owner(b, to);
+    UserCopyGuard copy_guard(to->process);
     for(auto& m : b->maps)
         if(m.budget == to && !m.present)
         {
@@ -228,7 +265,7 @@ long sys_buffer(PageFrameContainer& frames, Thread* t, uint64_t fd, uint64_t op,
 {
     if(!t || !t->process)
         return OS1_ERR_INVALID;
-    UserCopyGuard guard;
+    BufferGuard guard;
     auto* owner = budget(t->process);
     if(!owner)
         return OS1_ERR_NO_MEMORY;
@@ -317,6 +354,7 @@ long sys_buffer(PageFrameContainer& frames, Thread* t, uint64_t fd, uint64_t op,
             {
                 if(m.present)
                 {
+                    UserCopyGuard copy_guard(owner->process);
                     VirtualMemory vm(frames, m.cr3);
                     vm.detach(m.address, b->page_count);
                     ipi_retire_tlb();
@@ -354,6 +392,7 @@ long sys_buffer(PageFrameContainer& frames, Thread* t, uint64_t fd, uint64_t op,
     if(!slot || aliases >= OS1_BUFFER_OBJECT_MAP_LIMIT ||
        owner->maps >= OS1_BUFFER_PROCESS_MAP_LIMIT)
         return OS1_ERR_LIMIT;
+    UserCopyGuard copy_guard(t->process);
     VirtualMemory vm(frames, t->address_space_cr3);
     uint64_t address = kMapBase;
     for(; address < kMapBase + OS1_BUFFER_PROCESS_MAP_LIMIT * OS1_BUFFER_BYTES_MAX;
@@ -408,7 +447,7 @@ long buffer_prepare_loans(PageFrameContainer&,
 #endif
     if(!t || !t->process || !valid_batch(in))
         return OS1_ERR_INVALID;
-    UserCopyGuard guard;
+    BufferGuard guard;
     auto* caller = budget(t->process);
     if(!caller)
         return OS1_ERR_NO_MEMORY;
@@ -473,7 +512,7 @@ void buffer_finish_loans(BufferLoanBatch* b)
 {
     if(!b)
         return;
-    UserCopyGuard guard;
+    BufferGuard guard;
     if(b->finished)
         return;
     for(uint32_t i = 0; i < b->count; ++i)
@@ -493,7 +532,7 @@ void buffer_release_loans(BufferLoanBatch* b)
 {
     if(!b)
         return;
-    UserCopyGuard guard;
+    BufferGuard guard;
     // The terminal IPC transition must finish before dropping its batch.
     buffer_finish_loans(b);
     for(uint32_t i = 0; i < b->count; ++i)
@@ -512,7 +551,7 @@ long buffer_receive_loans(BufferLoanBatch* b, Thread* t, os1_ipc_buffers& out)
     out = {};
     if(!b || !t || !t->process)
         return OS1_ERR_INVALID;
-    UserCopyGuard guard;
+    BufferGuard guard;
     if(b->finished || b->borrower)
         return OS1_ERR_INVALID;
     auto* borrower = budget(t->process);
@@ -544,7 +583,7 @@ void buffer_rollback_receive(BufferLoanBatch* b, Thread* t, const os1_ipc_buffer
 {
     if(!b || !t)
         return;
-    UserCopyGuard guard;
+    BufferGuard guard;
     for(uint32_t i = 0; i < in.count; ++i)
         descriptor_close(t->process->descriptors, in.entries[i].fd);
     for(uint32_t i = 0; i < b->count; ++i)
@@ -568,7 +607,7 @@ long buffer_prepare_outputs(PageFrameContainer&,
     out = nullptr;
     if(!loans || !t || !t->process || !valid_batch(in))
         return OS1_ERR_INVALID;
-    UserCopyGuard guard;
+    BufferGuard guard;
     auto* source = budget(t->process);
     if(!source)
         return OS1_ERR_NO_MEMORY;
@@ -642,7 +681,7 @@ void buffer_cancel_outputs(BufferOutputBatch* b)
 {
     if(!b)
         return;
-    UserCopyGuard guard;
+    BufferGuard guard;
     for(uint32_t i = 0; i < b->count; ++i)
         if(b->disposition[i] == OS1_BUFFER_MOVE)
             restore(b->items[i], b->source);
@@ -656,7 +695,7 @@ long buffer_claim_outputs(BufferOutputBatch* b, Thread* t, os1_ipc_buffers& out)
         return 0;
     if(!t || !t->process)
         return OS1_ERR_INVALID;
-    UserCopyGuard guard;
+    BufferGuard guard;
     if(b->caller->process != t->process)
         return OS1_ERR_ACCESS;
     if(b->consumed)
@@ -687,7 +726,7 @@ void buffer_rollback_claim(BufferOutputBatch* b, Thread* t, const os1_ipc_buffer
 {
     if(!b || !t)
         return;
-    UserCopyGuard guard;
+    BufferGuard guard;
     if(!b->claimed || b->consumed)
         return;
     for(uint32_t i = 0; i < in.count; ++i)
@@ -704,7 +743,7 @@ void buffer_commit_claim(BufferOutputBatch* b)
 {
     if(!b)
         return;
-    UserCopyGuard guard;
+    BufferGuard guard;
     if(!b->claimed || b->consumed)
         return;
     b->consumed = true;
@@ -719,7 +758,7 @@ void buffer_release_outputs(BufferOutputBatch* b)
 {
     if(!b)
         return;
-    UserCopyGuard guard;
+    BufferGuard guard;
     for(uint32_t i = 0; i < b->count; ++i)
     {
         if(!b->consumed && b->disposition[i] == OS1_BUFFER_MOVE)
@@ -734,7 +773,7 @@ void buffer_release_outputs(BufferOutputBatch* b)
 }
 void buffer_process_exec(PageFrameContainer&, Process* p)
 {
-    UserCopyGuard guard;
+    BufferGuard guard;
     auto* owner = budget(p, false);
     if(!owner)
         return;
@@ -750,7 +789,7 @@ void buffer_process_exec(PageFrameContainer&, Process* p)
 }
 void buffer_process_cleanup(PageFrameContainer& frames, Process* p)
 {
-    UserCopyGuard guard;
+    BufferGuard guard;
     auto* owner = budget(p, false);
     if(!owner)
         return;

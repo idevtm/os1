@@ -3,7 +3,6 @@
 
 #include "arch/x86_64/apic/lapic.hpp"
 #include "arch/x86_64/interrupt/interrupt.hpp"
-#include "platform/irq_registry.hpp"
 
 namespace
 {
@@ -29,9 +28,7 @@ bool timer_vector_is_scheduler_tick(uint8_t vector)
         return IRQ_TIMER == legacy_irq_from_vector(vector);
     }
 
-    IrqRoute route{};
-    return platform_find_irq_route(vector, route) && route.kind == IrqRouteKind::LocalApic &&
-           route.source_id == T_LTIMER;
+    return g_lapic_calibration.valid && vector == g_lapic_calibration.vector;
 }
 
 void timer_source_set_lapic_calibration(uint8_t vector,

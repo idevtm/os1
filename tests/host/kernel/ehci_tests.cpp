@@ -6,7 +6,32 @@
 #include "drivers/usb/diagnostics.hpp"
 #include "drivers/usb/ehci_controller.hpp"
 #include "drivers/usb/hub.hpp"
+#include "drivers/usb/worker.hpp"
 #include "sync/smp.hpp"
+
+TEST(Ehci, ReconnectWaitRestartsAndCancelsOnNewConnectionStatus)
+{
+    usb::ReconnectDelay wait;
+    wait.changed(true, 100);
+    EXPECT_FALSE(wait.take_ready(1'000'099));
+    wait.changed(true, 200);
+    EXPECT_FALSE(wait.take_ready(1'000'100));
+    EXPECT_TRUE(wait.take_ready(1'000'200));
+    EXPECT_FALSE(wait.take_ready(1'000'201));
+    wait.changed(true, 300);
+    wait.changed(false, 400);
+    EXPECT_FALSE(wait.take_ready(1'000'000'000));
+}
+
+TEST(Ehci, RootAbortDisablesPortAfterResetRelease)
+{
+    constexpr uint32_t reset = 1u << 8;
+    constexpr uint32_t enabled = 4;
+    EXPECT_EQ(ehci::RootAbortStep::Wait, ehci::root_abort_step(reset, false));
+    EXPECT_EQ(ehci::RootAbortStep::Disable, ehci::root_abort_step(enabled, false));
+    EXPECT_EQ(ehci::RootAbortStep::Wait, ehci::root_abort_step(enabled, true));
+    EXPECT_EQ(ehci::RootAbortStep::Complete, ehci::root_abort_step(0, true));
+}
 
 TEST(Ehci, TransferDescriptorsRespectDmaBoundsAndWireLayout)
 {
@@ -200,6 +225,25 @@ struct HubFixture
     }
 };
 }  // namespace
+TEST(Ehci, RuntimeHubPowerAndDebounceAreSeparateFromReset)
+{
+    HubFixture fixture;
+    const usb::hub::Transport transport{
+        &fixture, HubFixture::control, HubFixture::delay, HubFixture::child};
+    ASSERT_TRUE(usb::hub::power_ports(transport, {3, 40}));
+    EXPECT_EQ(fixture.power, (std::vector<unsigned>{1, 2, 3}));
+    EXPECT_TRUE(fixture.delays.empty());
+    fixture.power_waited = true;
+
+    // A newer connection change must return to the worker's debounce phase.
+    ASSERT_TRUE(usb::hub::enumerate_port(transport, 1, false));
+    EXPECT_TRUE(fixture.resets.empty());
+    fixture.status[0] &= ~(1u << 16);
+    ASSERT_TRUE(usb::hub::enumerate_port(transport, 1, false));
+    EXPECT_EQ(fixture.children, (std::vector<unsigned>{1}));
+    EXPECT_EQ(fixture.delays, (std::vector<unsigned>{10, 10}));
+}
+
 TEST(UsbHub, PowersDebouncesResetsClearsChangesAndSelectsHighSpeed)
 {
     HubFixture f;
@@ -542,4 +586,54 @@ TEST(Ehci, SplitInputRecoveryIsBoundedAndRejectsOtherFailures)
     }
     ehci::InputRecovery high_speed{};
     EXPECT_FALSE(high_speed.schedule(observed, 4, 2, now));
+}
+
+TEST(Ehci, PeriodicInputAlternatesTransfersAndLinksShortReportsToTheTail)
+{
+    ehci::Qtd descriptors[2]{};
+    constexpr uint32_t physical[] = {0x1080, 0x10c0};
+    ASSERT_TRUE(ehci::prepare_qtd(descriptors[0], 0x1100, 8, 1, false, physical[1], physical[1]));
+    ehci::prepare_input_tail(descriptors[1]);
+
+    for(unsigned i = 0; i < 4; ++i)
+    {
+        unsigned current = i % 2;
+        unsigned next = current ^ 1u;
+        EXPECT_EQ(physical[next], descriptors[current].next);
+        EXPECT_EQ(physical[next], descriptors[current].alternate);
+        EXPECT_EQ(ehci::active, descriptors[current].token & ehci::active);
+        descriptors[current].token = (i % 2) << 16;
+        ASSERT_TRUE(ehci::append_input_qtd(
+            descriptors[current], descriptors[next], physical[current], 0x1100, 8));
+        EXPECT_EQ(ehci::halted, descriptors[current].token);
+        EXPECT_EQ(ehci::terminate, descriptors[current].next);
+        EXPECT_EQ(ehci::terminate, descriptors[current].alternate);
+        EXPECT_EQ(ehci::active, descriptors[next].token & ehci::active);
+        EXPECT_EQ(8u, ehci::remaining(descriptors[next].token));
+        EXPECT_EQ(0x1100u, descriptors[next].buffer[0]);
+    }
+}
+
+TEST(Ehci, PeriodicInputRejectsOwnedOrInvalidDescriptorsBeforeMutation)
+{
+    ehci::Qtd completed{}, tail{};
+    ehci::prepare_input_tail(tail);
+    for(uint32_t address : {0u, 1u, 0x1081u})
+        EXPECT_FALSE(ehci::append_input_qtd(completed, tail, address, 0x1100, 8));
+    EXPECT_FALSE(ehci::append_input_qtd(completed, completed, 0x1080, 0x1100, 8));
+    EXPECT_FALSE(ehci::append_input_qtd(completed, tail, 0x1080, 1ull << 32, 8));
+    EXPECT_EQ(0u, completed.token);
+    EXPECT_EQ(ehci::halted, tail.token);
+    for(uint32_t token : {ehci::active, ehci::halted})
+    {
+        completed.token = token;
+        EXPECT_FALSE(ehci::append_input_qtd(completed, tail, 0x1080, 0x1100, 8));
+        EXPECT_EQ(token, completed.token);
+        EXPECT_EQ(ehci::halted, tail.token);
+    }
+    completed.token = 0;
+    tail.token = ehci::active;
+    EXPECT_FALSE(ehci::append_input_qtd(completed, tail, 0x1080, 0x1100, 8));
+    EXPECT_EQ(0u, completed.token);
+    EXPECT_EQ(ehci::active, tail.token);
 }

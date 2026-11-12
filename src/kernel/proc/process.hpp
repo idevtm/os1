@@ -28,6 +28,7 @@ enum class ProcessState : uint32_t
 struct AddressSpace
 {
     uint64_t cr3 = 0;
+    Spinlock copy_gate{"address-space-copy"};
 };
 
 // Kmem-backed process registry entry. Future credentials, sessions, descriptor

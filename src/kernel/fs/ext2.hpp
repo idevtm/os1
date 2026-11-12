@@ -81,7 +81,8 @@ struct Volume
     long set_times(uint32_t, Inode&, uint32_t fields);
     long sync();
     long begin_write();
-    long get_block(const Inode&, uint32_t index, uint32_t& result);
+    // A caller can reuse meta only while it reads one inode without other metadata I/O.
+    long get_block(const Inode&, uint32_t index, uint32_t& result, bool* indirect_loaded = nullptr);
     long ensure_block(uint32_t number, Inode&, uint32_t index, uint32_t& result);
     long allocate(uint32_t number, uint32_t& result);
     long free_block(uint32_t block);

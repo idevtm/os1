@@ -872,10 +872,13 @@ inline long copy(Call& call)
                 return r;
         }
     }
-    char bytes[256];
+    char bytes[4096];
+    os1_resource_info source_info{};
+    const size_t chunk =
+        query(from, &source_info) >= 0 && source_info.kind == OS1_OBJECT_FILE ? sizeof(bytes) : 256;
     for(;;)
     {
-        long n = read(from, bytes, sizeof(bytes));
+        long n = read(from, bytes, chunk);
         if(n <= 0)
             return n;
         if(!files::put(to, bytes, n))

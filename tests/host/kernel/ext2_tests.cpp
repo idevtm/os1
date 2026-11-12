@@ -31,6 +31,9 @@ struct Disk
     int writes = -1;
     bool fail_read = false, fail_flush = false;
     unsigned flushes = 0, total_writes = 0;
+    uint32_t unreadable_block = UINT32_MAX;
+    uint32_t counted_block = UINT32_MAX;
+    unsigned counted_reads = 0;
     Disk()
     {
         std::ifstream file(OS1_EXT2_FIXTURE, std::ios::binary);
@@ -40,8 +43,10 @@ struct Disk
     {
         auto& d = *static_cast<Disk*>(ctx);
         size_t at = start + size_t(block) * 4096;
-        if(d.fail_read || at + 4096 > d.bytes.size())
+        if(d.fail_read || block == d.unreadable_block || at + 4096 > d.bytes.size())
             return false;
+        if(block == d.counted_block)
+            ++d.counted_reads;
         std::memcpy(out, d.bytes.data() + at, 4096);
         return true;
     }
@@ -125,6 +130,45 @@ TEST_F(Ext2, CreateIndirectSparseTruncateAndReload)
     EXPECT_EQ(reboot->write(number, file, ext2::max_file_bytes, "x", 1), OS1_ERR_RANGE);
     EXPECT_EQ(reboot->sync(), 0);
 }
+TEST_F(Ext2, IndirectMappingIsReadOncePerMultiBlockRead)
+{
+    uint32_t number = 0;
+    ext2::Inode file{};
+    ASSERT_EQ(fs->create(2, root, "cached", 6, false, number, file), 0);
+    constexpr size_t first_indirect = 12 * ext2::block_bytes;
+    std::vector<uint8_t> data(3 * ext2::block_bytes, 0x6d);
+    ASSERT_EQ(data.size(), fs->write(number, file, first_indirect, data.data(), data.size()));
+    disk.counted_block = ext2::u32(file.bytes + 88);
+    ASSERT_NE(0u, disk.counted_block);
+
+    std::vector<uint8_t> actual(data.size());
+    ASSERT_EQ(data.size(), fs->read(file, first_indirect, actual.data(), actual.size()));
+    EXPECT_EQ(data, actual);
+    EXPECT_EQ(1u, disk.counted_reads);
+
+    ASSERT_EQ(data.size(), fs->read(file, first_indirect, actual.data(), actual.size()));
+    EXPECT_EQ(data, actual);
+    EXPECT_EQ(2u, disk.counted_reads);
+}
+
+TEST_F(Ext2, AlignedFullBlockOverwriteDoesNotReadOldData)
+{
+    uint32_t number = 0;
+    ext2::Inode file{};
+    ASSERT_EQ(fs->create(2, root, "block", 5, false, number, file), 0);
+    std::array<uint8_t, ext2::block_bytes> data{};
+    ASSERT_EQ(fs->write(number, file, 0, data.data(), data.size()), data.size());
+    ASSERT_EQ(fs->get_block(file, 0, disk.unreadable_block), 0);
+    ASSERT_NE(0u, disk.unreadable_block);
+
+    data.fill(0x6d);
+    ASSERT_EQ(fs->write(number, file, 0, data.data(), data.size()), data.size());
+    disk.unreadable_block = UINT32_MAX;
+    std::array<uint8_t, ext2::block_bytes> actual{};
+    ASSERT_EQ(fs->read(file, 0, actual.data(), actual.size()), actual.size());
+    EXPECT_EQ(data, actual);
+}
+
 TEST_F(Ext2, RejectsFeaturesGeometryDirtyStateAndBitmapCounters)
 {
     const auto original = disk.bytes;
@@ -645,6 +689,36 @@ TEST_F(Ext2, MetadataCountsIndirectBlocksAndReportsAllocatorCapacity)
     EXPECT_EQ(metadata.allocated_bytes, 0u);
     instance_release(opened);
     ASSERT_EQ(0, mount->operations->remove(mount, "sparse", 6, OS1_OBJECT_FILE));
+    object_release(mount);
+}
+
+TEST_F(Ext2, AppendBatchUsesCurrentEndUnderVolumeGuard)
+{
+    os1::host_test::PhysicalMemoryArena arena{16 * 1024 * 1024};
+    PageFrameContainer frames;
+    std::array<BootMemoryRegion, 1> regions{{{0, arena.size(), BootMemoryType::Usable, 0}}};
+    ASSERT_TRUE(frames.initialize(regions, 0x300000, kPageFrameBitmapQwordLimit));
+    kmem_init(frames);
+    VfsNode root{};
+    root.kind = OS1_OBJECT_DIRECTORY;
+    auto device = disk.device();
+    ASSERT_EQ(0, ext2_mount(&root, device));
+    auto* mount = root.children;
+    OpenInstance* opened = nullptr;
+    ASSERT_EQ(0, mount->operations->create(mount, "append", 6, OS1_OBJECT_FILE, opened));
+    auto* file = static_cast<VfsNode*>(opened->object);
+    std::array<uint8_t, ext2::block_bytes> data{};
+    ASSERT_EQ(data.size(),
+              file->operations->write(file, 0, data.data(), data.size(), false, nullptr));
+    ASSERT_EQ(256, file->operations->write(file, 0, data.data(), 256, true, nullptr));
+
+    uint64_t end = 0;
+    ASSERT_EQ(data.size() - 256,
+              file->operations->write(file, data.size(), data.data(), data.size(), true, &end));
+    EXPECT_EQ(2 * data.size(), end);
+    EXPECT_EQ(end, file->byte_size);
+    instance_release(opened);
+    ASSERT_EQ(0, mount->operations->remove(mount, "append", 6, OS1_OBJECT_FILE));
     object_release(mount);
 }
 

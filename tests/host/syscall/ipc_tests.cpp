@@ -262,6 +262,28 @@ TEST_F(Ipc, WaitRegistrationSurvivesCloseAndDefersWakeUntilOffCpu)
     EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
     EXPECT_EQ(0u, thread->io_pins);
 }
+TEST_F(Ipc, CancelLastSignalledWaiterThenPublishAnotherWake)
+{
+    ASSERT_EQ(kIpcBlocked, sys_ipc(frames, thread, OS1_IPC_WAIT, pair.client, 0));
+    ASSERT_EQ(0, ready());
+    ASSERT_EQ(ThreadState::Blocked, thread->state);
+    cancel_ipc_wait(thread);
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+    ipc_drain_wakeups();
+
+    thread->state = ThreadState::Running;
+    os1_ipc_pair next{};
+    ASSERT_EQ(0, call(OS1_IPC_CREATE, 0, next));
+    ASSERT_EQ(kIpcBlocked, sys_ipc(frames, thread, OS1_IPC_WAIT, next.client, 0));
+    os1_ipc_info info{1, sizeof(info), 0, 42, 1, 1};
+    ASSERT_EQ(0, call(OS1_IPC_READY, next.provider, info));
+    ASSERT_EQ(ThreadState::Blocked, thread->state);
+    set_current_thread(nullptr);
+    ipc_drain_wakeups();
+    EXPECT_EQ(ThreadState::Ready, thread->state);
+    EXPECT_EQ(ThreadWaitReason::None, thread->wait.reason);
+    EXPECT_EQ(0u, thread->io_pins);
+}
 TEST_F(Ipc, WaitCancellationAndProviderAliasesPreserveLifetime)
 {
     long duplicate = alias(pair.provider, OS1_RIGHT_READ | OS1_RIGHT_WRITE);

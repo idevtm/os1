@@ -134,7 +134,7 @@ long Volume::inode_write(uint32_t n, const Inode& inode)
     memcpy(meta + ((n - 1) % 32) * 128, inode.bytes, 128);
     return write_block(table + (n - 1) / 32, meta) ? 0 : OS1_ERR_IO;
 }
-long Volume::get_block(const Inode& inode, uint32_t index, uint32_t& b)
+long Volume::get_block(const Inode& inode, uint32_t index, uint32_t& b, bool* indirect_loaded)
 {
     if(index >= 12 + 1024)
         return OS1_ERR_RANGE;
@@ -150,8 +150,13 @@ long Volume::get_block(const Inode& inode, uint32_t index, uint32_t& b)
         }
         if(indirect < table_end || indirect >= blocks || !bit(allocated, indirect))
             return OS1_ERR_BAD_IMAGE;
-        if(!read_block(indirect, meta))
-            return OS1_ERR_IO;
+        if(!indirect_loaded || !*indirect_loaded)
+        {
+            if(!read_block(indirect, meta))
+                return OS1_ERR_IO;
+            if(indirect_loaded)
+                *indirect_loaded = true;
+        }
         b = u32(meta + (index - 12) * 4);
     }
     if(b && (b < table_end || b >= blocks || !bit(allocated, b)))
@@ -303,10 +308,11 @@ long Volume::read(Inode& inode, uint64_t offset, void* out, size_t length)
         length = size(inode) - offset;
     auto* dst = static_cast<uint8_t*>(out);
     size_t done = 0;
+    bool indirect_loaded = false;
     while(done < length)
     {
         uint32_t b = 0;
-        long r = get_block(inode, (offset + done) / 4096, b);
+        long r = get_block(inode, (offset + done) / 4096, b, &indirect_loaded);
         if(r < 0)
             return r;
         size_t at = (offset + done) % 4096, chunk = 4096 - at;
@@ -411,10 +417,15 @@ long Volume::write(uint32_t n, Inode& inode, uint64_t offset, const void* in, si
         size_t at = (offset + done) % 4096, chunk = 4096 - at;
         if(chunk > length - done)
             chunk = length - done;
-        if(!read_block(b, data))
-            return OS1_ERR_IO;
-        memcpy(data + at, src + done, chunk);
-        if(!write_block(b, data))
+        const void* block = src + done;
+        if(chunk != block_bytes)
+        {
+            if(!read_block(b, data))
+                return OS1_ERR_IO;
+            memcpy(data + at, src + done, chunk);
+            block = data;
+        }
+        if(!write_block(b, block))
             return OS1_ERR_IO;
         done += chunk;
     }

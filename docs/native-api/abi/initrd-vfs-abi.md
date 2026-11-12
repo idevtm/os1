@@ -107,8 +107,9 @@ progress returns FAULT; a partially written failed destination region must be
 ignored. Seeking past EOF is allowed and subsequent reads return zero.
 
 Cursor ownership is reserved atomically across read/seek/enumeration. Contenders
-sleep on a retained request; no spinlock is held during user copies. BSP IRQs
-retry queued operations, so registration after a release cannot lose a wakeup.
+sleep on a retained request. The kernel releases spinlocks before user copies.
+The BSP scheduler tick wakes a worker to retry queued operations.
+The worker performs the I/O in thread context. Registration after a release still receives a retry.
 This descriptor path is separate from the implemented [IPC wait-many transport](client-sessions-abi.md#bounded-wait-many).
 It does not expose general file readiness polling.
 Close/reuse does not retarget accepted work; completion pins the thread/address

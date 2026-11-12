@@ -1,15 +1,15 @@
-#include "arch/x86_64/interrupt/interrupt.hpp"
-#include "handoff/memory_layout.h"
-#include "core/timer_source.hpp"
-#include "mm/kmem.hpp"
-#include "platform/irq_registry.hpp"
-#include "platform/state.hpp"
-#include "support/physical_memory.hpp"
-
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstring>
+
+#include "arch/x86_64/interrupt/interrupt.hpp"
+#include "core/timer_source.hpp"
+#include "handoff/memory_layout.h"
+#include "mm/kmem.hpp"
+#include "platform/irq_registry.hpp"
+#include "platform/state.hpp"
+#include "support/physical_memory.hpp"
 
 namespace
 {
@@ -36,14 +36,14 @@ void reset_state()
 {
     platform_reset_state();
     timer_source_set_scheduler(SchedulerTimerSource::Pit);
+    timer_source_set_lapic_calibration(0, 0, 1000);
 }
 
 struct ScopedTimerSourceCleanup
 {
     ~ScopedTimerSourceCleanup()
     {
-        platform_reset_state();
-        timer_source_set_scheduler(SchedulerTimerSource::Pit);
+        reset_state();
     }
 };
 }  // namespace
@@ -60,34 +60,37 @@ TEST(TimerSource, PitModeMatchesLegacyTimerOnly)
     EXPECT_FALSE(timer_vector_is_scheduler_tick(T_LTIMER));
 }
 
-TEST(TimerSource, LapicModeMatchesLocalApicTimerRoute)
+TEST(TimerSource, LapicModeMatchesOnlyTheCalibratedVector)
 {
     os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
     PageFrameContainer frames = make_frames();
     kmem_init(frames);
     ScopedTimerSourceCleanup cleanup;
     reset_state();
-    timer_source_set_scheduler(SchedulerTimerSource::Lapic);
 
     uint8_t vector = 0;
     ASSERT_TRUE(
         platform_allocate_local_apic_irq_route(DeviceId{DeviceBus::Platform, 2}, T_LTIMER, vector));
+    uint8_t other_timer = 0;
+    ASSERT_TRUE(platform_allocate_local_apic_irq_route(
+        DeviceId{DeviceBus::Platform, 3}, T_LTIMER, other_timer));
+    timer_source_set_lapic_calibration(vector, 12345, 1000);
+    timer_source_set_scheduler(SchedulerTimerSource::Lapic);
     EXPECT_TRUE(timer_vector_is_scheduler_tick(vector));
+    EXPECT_FALSE(timer_vector_is_scheduler_tick(other_timer));
     EXPECT_FALSE(timer_vector_is_scheduler_tick(T_LTIMER));
     EXPECT_FALSE(timer_vector_is_scheduler_tick(static_cast<uint8_t>(T_IRQ0 + IRQ_TIMER)));
 }
 
-TEST(TimerSource, LapicModeRejectsNonTimerLocalApicRoute)
+TEST(TimerSource, LapicModeRequiresValidCalibration)
 {
-    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
-    PageFrameContainer frames = make_frames();
-    kmem_init(frames);
-    ScopedTimerSourceCleanup cleanup;
-    reset_state();
     timer_source_set_scheduler(SchedulerTimerSource::Lapic);
-
-    ASSERT_TRUE(platform_register_local_apic_irq_route(DeviceId{DeviceBus::Platform, 3}, T_LERROR, T_LERROR));
-    EXPECT_FALSE(timer_vector_is_scheduler_tick(T_LERROR));
+    timer_source_set_lapic_calibration(0xA0, 0, 1000);
+    EXPECT_FALSE(timer_vector_is_scheduler_tick(0xA0));
+    EXPECT_FALSE(timer_vector_is_scheduler_tick(0));
+    timer_source_set_scheduler(SchedulerTimerSource::Pit);
+    EXPECT_TRUE(timer_vector_is_scheduler_tick(static_cast<uint8_t>(T_IRQ0 + IRQ_TIMER)));
+    timer_source_set_lapic_calibration(0, 0, 1000);
 }
 
 TEST(TimerSource, LapicCalibrationCacheRoundTrips)

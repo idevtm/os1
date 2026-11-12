@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <os1/buffer.h>
 #include <os1/input.h>
 #include <os1/observe.h>
 #include <os1/syscall_numbers.h>
@@ -25,11 +26,15 @@
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "platform/system_control.hpp"
+#include "proc/process.hpp"
 #include "proc/startup.hpp"
 #include "proc/user_program.hpp"
 #include "storage/block_device.hpp"
 #include "support/initrd_builder.hpp"
 #include "support/physical_memory.hpp"
+#include "syscall/console_read.hpp"
+#include "syscall/process.hpp"
+#include "syscall/vfs.hpp"
 #include "vfs/ext2.hpp"
 #include "vfs/filesystem.hpp"
 #include "vfs/namespace.hpp"
@@ -977,7 +982,10 @@ TEST_F(LogExport, ShortAppendRetainsPrefixAndUsesNewSegment)
     VfsOperations partial = *saved_operations;
     partial.write =
         [](VfsNode* n, uint64_t offset, const void* bytes, size_t size, bool append, uint64_t* end)
-        -> long { return saved_operations->write(n, offset, bytes, size / 2, append, end); };
+        -> long {
+        const size_t prefix = size > 128 ? 128 : size / 2;
+        return saved_operations->write(n, offset, bytes, prefix, append, end);
+    };
     node->operations = &partial;
     events(3);
     EXPECT_EQ(OS1_ERR_IO, log_export::run(OS1_LOG_EXPORT_DISK));
@@ -1133,6 +1141,89 @@ TEST(LogExportAuthority, RequiresControlForExportButNotStatus)
 }
 }  // namespace
 
+TEST_F(LogExport, VfsTickWakesWorkerWithoutReadingStorage)
+{
+    mount();
+    shell();
+    Process* kernel = create_kernel_process(0);
+    ASSERT_NE(nullptr, kernel);
+    ASSERT_TRUE(start_vfs_worker(kernel, frames));
+    Thread* worker = first_thread();
+    while(worker && worker->process != kernel)
+        worker = next_thread(worker);
+    ASSERT_NE(nullptr, worker);
+    ASSERT_EQ(ThreadState::Blocked, worker->state);
+
+    auto* disk_root = static_cast<VfsNode*>(open("/disk"));
+    ASSERT_NE(nullptr, disk_root);
+    OpenInstance* opened = nullptr;
+    ASSERT_EQ(0, disk_root->operations->create(disk_root, "test", 4, OS1_OBJECT_FILE, opened));
+    InstanceRef file(opened);
+    auto* node = static_cast<VfsNode*>(opened->object);
+    ASSERT_EQ(1, node->operations->write(node, 0, "x", 1, false, nullptr));
+
+    atomic_store_release(&opened->cursor_busy, true);
+    ASSERT_EQ(kVfsBlocked, vfs_read_or_block(frames, thread, opened, kUserImageBase, 1));
+    atomic_store_release(&opened->cursor_busy, false);
+    read_bytes = 0;
+    worker->wait.reason = ThreadWaitReason::BlockIo;
+    wake_vfs_worker_on_tick();
+    EXPECT_EQ(ThreadState::Blocked, worker->state);
+    EXPECT_EQ(ThreadWaitReason::BlockIo, worker->wait.reason);
+    worker->wait.reason = ThreadWaitReason::VfsWorker;
+    wake_vfs_worker_on_tick();
+    EXPECT_EQ(ThreadState::Ready, worker->state);
+    EXPECT_EQ(ThreadState::Blocked, thread->state);
+    EXPECT_EQ(0u, read_bytes);
+
+    service_vfs_waiters(frames);
+    EXPECT_EQ(ThreadState::Ready, thread->state);
+    EXPECT_EQ(1u, thread->frame.rax);
+    EXPECT_EQ(4096u, read_bytes);
+    char result = 0;
+    EXPECT_TRUE(copy_from_user(frames, thread, kUserImageBase, &result, sizeof(result)));
+    EXPECT_EQ('x', result);
+    object_release(disk_root);
+}
+
+TEST_F(LogExport, ConsoleWriteContinuesWhileFileIoDefers)
+{
+    mount();
+    shell();
+    ASSERT_EQ(0, descriptor_bootstrap_console(thread->process->descriptors));
+    auto* disk_root = static_cast<VfsNode*>(open("/disk"));
+    ASSERT_NE(nullptr, disk_root);
+    OpenInstance* opened = nullptr;
+    ASSERT_EQ(0, disk_root->operations->create(disk_root, "test", 4, OS1_OBJECT_FILE, opened));
+    InstanceRef file(opened);
+    const int fd = descriptor_install(
+        thread->process->descriptors, file.get(), OS1_RIGHT_READ | OS1_RIGHT_WRITE, 0);
+    ASSERT_GE(fd, 0);
+    const char value = 'x';
+    ASSERT_TRUE(copy_to_user(frames, thread, kUserImageBase, &value, sizeof(value)));
+    auto* previous = current_thread();
+    set_current_thread(thread);
+    {
+        log_export::FinalDrainGuard guard;
+        EXPECT_TRUE(guard.try_acquire());
+        EXPECT_EQ(0, sys_write({.frames = &frames}, 1, 0, 0, true));
+        EXPECT_TRUE(thread->log_pending);
+        diagnostic_log::syscall_end(thread, 0);
+
+        EXPECT_EQ(kVfsRetry, sys_write({.frames = &frames}, fd, kUserImageBase, 1, true));
+        EXPECT_FALSE(thread->log_pending);
+        long result = 0;
+        EXPECT_TRUE(read_or_block(frames, thread, fd, kUserImageBase, 1, result, true));
+        EXPECT_EQ(kVfsRetry, result);
+        EXPECT_FALSE(thread->log_pending);
+        EXPECT_EQ(0u, file.get()->cursor);
+    }
+    EXPECT_EQ(1, sys_write({.frames = &frames}, fd, kUserImageBase, 1));
+    EXPECT_EQ(1u, file.get()->cursor);
+    set_current_thread(previous);
+    object_release(disk_root);
+}
+
 TEST_F(LogExport, ServiceLaneRemainsAvailableInsideExport)
 {
     shell();
@@ -1147,14 +1238,17 @@ TEST_F(LogExport, ServiceLaneRemainsAvailableInsideExport)
                          std::pair{os1_sys_ipc, int(OS1_IPC_RESULT)},
                          std::pair{os1_sys_ipc, int(OS1_IPC_WAIT_MANY)},
                          std::pair{os1_sys_ipc, int(OS1_IPC_CREATE)},
-                         std::pair{os1_sys_resource, int(OS1_RESOURCE_CLOSE)}})
+                         std::pair{os1_sys_resource, int(OS1_RESOURCE_CLOSE)},
+                         std::pair{os1_sys_resource, int(OS1_RESOURCE_BUFFER_MAP)},
+                         std::pair{os1_sys_read, 0},
+                         std::pair{os1_sys_write, 0},
+                         std::pair{os1_sys_exit, 0}})
         {
             log_export::ForegroundGuard allowed(
                 log_export::syscall_needs_filesystem(pair.first, pair.second));
             EXPECT_TRUE(allowed.held);
         }
         for(auto pair : {std::pair{os1_sys_spawn, 0},
-                         std::pair{os1_sys_write, 0},
                          std::pair{os1_sys_launch, 0},
                          std::pair{os1_sys_resource, int(OS1_RESOURCE_OPEN_AT)}})
         {

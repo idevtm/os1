@@ -14,6 +14,7 @@
 #include "drivers/timer/tsc_clock.hpp"
 #include "drivers/usb/hid_keyboard.hpp"
 #include "drivers/usb/mass_storage.hpp"
+#include "drivers/usb/worker.hpp"
 #include "drivers/usb/xhci.hpp"
 #include "drivers/usb/xhci_controller.hpp"
 #include "handoff/memory_layout.h"
@@ -231,6 +232,7 @@ struct XhciControllerState
     bool dma_published = false;
     uint8_t storage_busy = 0;
     bool port_changed[256]{};
+    usb::ReconnectDelay reconnect[256]{};
     unsigned catalog_ports[256]{};
     DeviceId owner{DeviceBus::Platform, 0};
     uint16_t pci_index = 0;
@@ -1645,12 +1647,17 @@ bool initialize_storage(PageFrameContainer& frames,
 bool initialize_port(PageFrameContainer& frames,
                      XhciControllerState& controller,
                      uint8_t port_id,
-                     unsigned catalog_port)
+                     unsigned catalog_port,
+                     bool require_stable = false)
 {
     xhci::PortStatus status{};
     {
         IrqSpinGuard guard(g_event_lock);
         if(!xhci::read_port_status(controller.controller, port_id, status) || !status.connected)
+            return false;
+
+        if(require_stable &&
+           (controller.port_changed[port_id] || (status.raw & xhci::kPortScConnectStatusChange)))
             return false;
 
         // Consume the attachment being enumerated, even if hardware enabled the port.
@@ -2324,10 +2331,23 @@ void xhci_poll_devices(PageFrameContainer& frames)
             {
                 IrqSpinGuard guard(g_event_lock);
                 changed = c->port_changed[port];
+                xhci::PortStatus status{};
+                if(xhci::read_port_status(c->controller, port, status) &&
+                   (status.raw & xhci::kPortScConnectStatusChange))
+                {
+                    (void)drain_controller_port_changes(*c, port);
+                    changed = true;
+                }
                 c->port_changed[port] = false;
             }
+            const auto now = tsc_clock_now_100ns();
             if(!changed)
+            {
+                if(c->reconnect[port].take_ready(now))
+                    (void)initialize_port(frames, *c, uint8_t(port), c->catalog_ports[port], true);
                 continue;
+            }
+            c->reconnect[port].changed(false, now);
             auto disabled = SlotDisableResult::Disabled;
             for(auto& d : c->devices)
             {
@@ -2359,14 +2379,12 @@ void xhci_poll_devices(PageFrameContainer& frames)
             }
             if(disabled == SlotDisableResult::Aborted)
                 debug("xhci: slot disable aborted; device quarantined port=")(port)();
-            else
-                tsc_clock_delay_us(100000);
             xhci::PortStatus status{};
             if(!xhci::read_port_status(c->controller, port, status))
                 continue;
             hardware_catalog::port_state(c->catalog_ports[port], status.connected);
-            if(status.connected && disabled == SlotDisableResult::Disabled)
-                (void)initialize_port(frames, *c, uint8_t(port), c->catalog_ports[port]);
+            if(disabled == SlotDisableResult::Disabled)
+                c->reconnect[port].changed(status.connected, tsc_clock_now_100ns());
         }
         if(!__atomic_load_n(&c->failed, __ATOMIC_ACQUIRE))
             recover_hid_inputs(*c);

@@ -1,7 +1,9 @@
 #include "syscall/vfs.hpp"
 
+#include "arch/x86_64/apic/ipi.hpp"
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "debug/log_export.hpp"
+#include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "util/memory.h"
@@ -12,6 +14,29 @@
 namespace
 {
 WaitQueue waiters{"vfs-cursor"};
+bool vfs_wait_pending = false;
+Thread* vfs_worker_thread = nullptr;
+PageFrameContainer* vfs_worker_frames = nullptr;
+
+void vfs_worker()
+{
+#ifndef OS1_HOST_TEST
+    Thread* thread = current_thread();
+    for(;;)
+    {
+        service_vfs_waiters(*vfs_worker_frames);
+        IrqGuard irq;
+        thread->wait.reason = ThreadWaitReason::VfsWorker;
+        thread->state = ThreadState::Blocked;
+        while(thread->state == ThreadState::Blocked)
+        {
+            (void)ipi_send_reschedule(cpu_cur());
+            asm volatile("sti; hlt; cli" ::: "memory");
+        }
+    }
+#endif
+}
+
 constexpr long kCursorBusy = -4097;
 struct CursorReservation
 {
@@ -19,6 +44,27 @@ struct CursorReservation
     ~CursorReservation()
     {
         atomic_store_release(&instance->cursor_busy, false);
+    }
+};
+constexpr size_t kUserCopyChunkBytes = 256;
+struct IoBuffer
+{
+    PageFrameContainer& frames;
+    uint8_t small[OS1_DIRECTORY_RECORD_MAX]{};
+    uint64_t physical = 0;
+    uint8_t* large = nullptr;
+
+    IoBuffer(PageFrameContainer& frames, size_t preferred, size_t length) : frames(frames)
+    {
+        if(preferred > sizeof(small) && preferred <= kPageSize && length > kUserCopyChunkBytes &&
+           frames.allocate(physical))
+            large = kernel_physical_pointer<uint8_t>(physical);
+    }
+
+    ~IoBuffer()
+    {
+        if(large)
+            (void)frames.free(physical);
     }
 };
 long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& request)
@@ -39,39 +85,77 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
                 instance->cursor = result;
             return result;
         }
+        const bool file_io = request.operation == kVfsRead || request.operation == kVfsWrite;
+        const size_t preferred =
+            file_io ? node->operations->preferred_io_bytes : kUserCopyChunkBytes;
+        IoBuffer buffer(frames, preferred, request.length);
+        auto* bytes = buffer.large ? buffer.large : buffer.small;
         size_t delivered = 0;
         while(delivered < request.length)
         {
-            uint8_t bytes[OS1_DIRECTORY_RECORD_MAX]{};
+            size_t limit = kUserCopyChunkBytes;
+            const bool append = request.operation == kVfsWrite &&
+                                (atomic_load_acquire(&instance->status_flags) & OS1_STATUS_APPEND);
+            if(buffer.large)
+            {
+                // Append chooses the actual offset under the backend guard.
+                const size_t remaining =
+                    append ? preferred : preferred - instance->cursor % preferred;
+                // Keep the user-copy commit boundaries when the file offset is unaligned.
+                const size_t aligned = remaining / kUserCopyChunkBytes * kUserCopyChunkBytes;
+                if(aligned > limit)
+                    limit = aligned;
+            }
             size_t count = request.length - delivered;
-            if(count > 256)
-                count = 256;
+            if(count > limit)
+                count = limit;
             uint64_t next = instance->cursor;
             if(request.operation == kVfsRead)
             {
                 long result = node->operations->read(node, instance->cursor, bytes, count);
                 if(result < 0)
                     return delivered ? static_cast<long>(delivered) : result;
-                count = result;
-                if(!count)
+                if(!result)
                     break;
-                next += count;
+                const size_t read = static_cast<size_t>(result);
+                for(size_t copied = 0; copied < read;)
+                {
+                    const size_t remaining = read - copied;
+                    const size_t chunk =
+                        remaining > kUserCopyChunkBytes ? kUserCopyChunkBytes : remaining;
+                    if(request.buffer > UINT64_MAX - delivered ||
+                       !copy_to_user(
+                           frames, thread, request.buffer + delivered, bytes + copied, chunk))
+                        return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
+                    instance->cursor += chunk;
+                    delivered += chunk;
+                    copied += chunk;
+                }
+                continue;
             }
             else if(request.operation == kVfsWrite)
             {
-                if(request.buffer > UINT64_MAX - delivered ||
-                   !copy_from_user(frames, thread, request.buffer + delivered, bytes, count))
+                if(request.buffer > UINT64_MAX - delivered)
                     return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
+                const auto address = request.buffer + delivered;
+                if(!copy_from_user(frames, thread, address, bytes, count))
+                {
+                    if(count <= kUserCopyChunkBytes ||
+                       !copy_from_user(frames, thread, address, bytes, kUserCopyChunkBytes))
+                        return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
+                    count = kUserCopyChunkBytes;
+                }
                 uint64_t end = instance->cursor;
-                long result = node->operations->write(
-                    node,
-                    instance->cursor,
-                    bytes,
-                    count,
-                    atomic_load_acquire(&instance->status_flags) & OS1_STATUS_APPEND,
-                    &end);
+                long result =
+                    node->operations->write(node, instance->cursor, bytes, count, append, &end);
+                if(count > kUserCopyChunkBytes &&
+                   (result == OS1_ERR_LIMIT || result == OS1_ERR_RANGE))
+                    result = node->operations->write(
+                        node, instance->cursor, bytes, kUserCopyChunkBytes, append, &end);
                 if(result < 0)
                     return delivered ? static_cast<long>(delivered) : result;
+                if(!result)
+                    break;
                 instance->cursor = end;
                 delivered += result;
                 continue;
@@ -93,6 +177,7 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
                         return OS1_ERR_FAULT;
                     return OS1_ERR_BUFFER_TOO_SMALL;
                 }
+                memset(bytes, 0, required);
                 os1_directory_record header{OS1_VFS_ABI_VERSION,
                                             required,
                                             static_cast<uint16_t>(entry.name_bytes),
@@ -189,8 +274,8 @@ long perform_or_block(PageFrameContainer& frames, Thread* thread, const VfsIoWai
     const long result = perform(frames, thread, request);
     if(result != kCursorBusy)
         return result;
-    // The BSP retries registered cursor operations on every IRQ. Registration
-    // after a release cannot lose a notification: readiness is checked again.
+    // The BSP tick wakes the VFS worker while cursor operations remain queued.
+    // Registration after a cursor release still receives a retry.
     IrqSpinGuard process_guard(g_process_table_lock);
     IrqSpinGuard queue_guard(waiters.lock);
     instance_retain(request.instance);
@@ -201,6 +286,7 @@ long perform_or_block(PageFrameContainer& frames, Thread* thread, const VfsIoWai
     thread->state = ThreadState::Blocked;
     thread->process->state = ProcessState::Ready;
     wait_queue_enqueue_locked(waiters, thread);
+    atomic_store_release(&vfs_wait_pending, true);
     return kVfsBlocked;
 }
 }  // namespace
@@ -454,6 +540,24 @@ long sys_vfs(
         thread,
         {entry.instance, 0, 0, 0, request.offset, OS1_RESOURCE_SEEK, request.origin});
 }
+bool start_vfs_worker(Process* process, PageFrameContainer& frames)
+{
+    vfs_worker_frames = &frames;
+    vfs_worker_thread = create_kernel_thread(process, vfs_worker, frames, g_cpu_boot, false);
+    if(!vfs_worker_thread)
+        return false;
+    vfs_worker_thread->wait.reason = ThreadWaitReason::VfsWorker;
+    return true;
+}
+
+void wake_vfs_worker_on_tick()
+{
+    if(atomic_load_acquire(&vfs_wait_pending) && vfs_worker_thread &&
+       vfs_worker_thread->state == ThreadState::Blocked &&
+       vfs_worker_thread->wait.reason == ThreadWaitReason::VfsWorker)
+        wake_blocked_thread(vfs_worker_thread, g_cpu_boot);
+}
+
 void cancel_vfs_wait(Thread* thread)
 {
     if(!thread)
@@ -471,6 +575,8 @@ void cancel_vfs_wait(Thread* thread)
         {
             *link = thread->wait_link;
             thread->wait_link = nullptr;
+            if(!waiters.head)
+                atomic_store_release(&vfs_wait_pending, false);
         }
         if(!atomic_load_acquire(&thread->io_pins))
         {
@@ -480,7 +586,7 @@ void cancel_vfs_wait(Thread* thread)
     }
     instance_release(released);
 }
-void wake_vfs_waiters(PageFrameContainer& frames)
+void service_vfs_waiters(PageFrameContainer& frames)
 {
     log_export::ForegroundGuard foreground;
     if(!foreground.held)
@@ -504,6 +610,8 @@ void wake_vfs_waiters(PageFrameContainer& frames)
             if(current || thread->state == ThreadState::Dying)
                 return;
             (void)wait_queue_dequeue_locked(waiters);
+            if(!waiters.head)
+                atomic_store_release(&vfs_wait_pending, false);
             (void)atomic_fetch_add(&thread->io_pins, 1u);
             request = thread->wait.vfs;
         }
@@ -522,7 +630,10 @@ void wake_vfs_waiters(PageFrameContainer& frames)
                     thread->frame.rax = static_cast<uint64_t>(result);
             }
             else
+            {
                 wait_queue_enqueue_locked(waiters, thread);
+                atomic_store_release(&vfs_wait_pending, true);
+            }
         }
         instance_release(released);
         if(wake)
