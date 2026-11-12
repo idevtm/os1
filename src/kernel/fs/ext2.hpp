@@ -39,6 +39,8 @@ struct Volume
     uint8_t super[1024]{}, group[32]{}, allocated[4096]{}, inode_bits[4096]{};
     uint16_t owners[max_blocks]{};
     uint8_t data[4096]{}, meta[4096]{};
+    uint32_t inode_write_block{};
+    uint8_t inode_write_data[block_bytes]{};
     long mount(Io source);
     long inode_read(uint32_t number, Inode& inode);
     long inode_write(uint32_t number, const Inode& inode);

@@ -106,6 +106,10 @@ Descriptor I/O and log export can transfer up to one ext2 block per backend call
 A full aligned write replaces the data block without reading it first.
 A partial write preserves the bytes outside the written range.
 Each backend read loads the file's indirect block at most once.
+After a successful inode table write, ext2 retains that block.
+Later updates to the same table block use the retained data and write the block before they return.
+A write reuses the first block mapping if its capacity check found it.
+Small writes keep their immediate data and metadata writes.
 File `info` reports cached size and diagnostic counts; ext2 does not expose a tmpfs page quota.
 Its `data_pages` and `open_instances` fields are zero, and `max_pages` reports filesystem blocks.
 Counts are individual observations rather than a transaction snapshot.

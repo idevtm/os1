@@ -782,6 +782,46 @@ TEST_F(Ext2, TimestampsPersistAndReadsDoNotWrite)
     EXPECT_TRUE(fs->failed);
 }
 
+TEST_F(Ext2, AppendReusesMetadataAndWritesThroughNeighboringInodes)
+{
+    uint32_t first_number = 0, second_number = 0;
+    ext2::Inode first{}, second{};
+    ASSERT_EQ(0, fs->create(2, root, "first", 5, false, first_number, first));
+    ASSERT_EQ(0, fs->create(2, root, "second", 6, false, second_number, second));
+    ASSERT_EQ((first_number - 1) / 32, (second_number - 1) / 32);
+
+    std::vector<char> initial(12 * ext2::block_bytes + 256, 'x');
+    ASSERT_EQ(initial.size(), fs->write(first_number, first, 0, initial.data(), initial.size()));
+    ASSERT_EQ(1, fs->write(second_number, second, 0, "a", 1));
+
+    disk.counted_block = ext2::u32(first.bytes + 88);
+    ASSERT_NE(0u, disk.counted_block);
+    disk.counted_reads = 0;
+    EXPECT_EQ(1, fs->write(first_number, first, initial.size(), "b", 1));
+    EXPECT_EQ(1u, disk.counted_reads);
+
+    const uint32_t table = 4 + (first_number - 1) / 32;
+    disk.counted_block = table;
+    disk.counted_reads = 0;
+    ASSERT_EQ(1, fs->write(second_number, second, 1, "c", 1));
+    EXPECT_EQ(0u, disk.counted_reads);
+    const auto* block = disk.bytes.data() + start + table * ext2::block_bytes;
+    EXPECT_EQ(initial.size() + 1, ext2::u32(block + ((first_number - 1) % 32) * 128 + 4));
+    EXPECT_EQ(2u, ext2::u32(block + ((second_number - 1) % 32) * 128 + 4));
+
+    ASSERT_EQ(0, fs->sync());
+    auto remount = std::make_unique<ext2::Volume>();
+    ASSERT_EQ(0, remount->mount(disk.io()));
+    ASSERT_EQ(0, remount->inode_read(first_number, first));
+    ASSERT_EQ(0, remount->inode_read(second_number, second));
+    char tail = 0;
+    ASSERT_EQ(1, remount->read(first, initial.size(), &tail, 1));
+    EXPECT_EQ('b', tail);
+    std::array<char, 2> data{};
+    ASSERT_EQ(data.size(), remount->read(second, 0, data.data(), data.size()));
+    EXPECT_EQ((std::array<char, 2>{'a', 'c'}), data);
+}
+
 TEST_F(Ext2, TimestampMutationAndWriteCost)
 {
     auto workload = [](bool timed) {
