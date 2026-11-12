@@ -397,6 +397,11 @@ TEST_F(AcpiDiscovery, HpetTableIsOptional)
 {
     os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
     build_acpi_tables(arena, false);
+    auto& legacy_fadt = *reinterpret_cast<TestFadt*>(arena.data() + kFadtPhysical);
+    legacy_fadt.header.length = offsetof(TestFadt, reset_register);
+    legacy_fadt.dsdt = kDsdtPhysical;
+    legacy_fadt.header.checksum = 0;
+    legacy_fadt.header.checksum = checksum_value(&legacy_fadt, legacy_fadt.header.length);
     PageFrameContainer frames = make_frames();
     kmem_init(frames);
     VirtualMemory vm(frames);
@@ -439,6 +444,7 @@ TEST_F(AcpiDiscovery, HpetTableIsOptional)
     EXPECT_EQ(1u, ecam_region_count);
     EXPECT_FALSE(hpet.present);
     EXPECT_TRUE(acpi_fixed.present);
+    EXPECT_EQ(0u, acpi_fixed.boot_architecture_flags);
     EXPECT_EQ(9u, acpi_fixed.sci_interrupt);
     EXPECT_EQ(kDsdtPhysical, acpi_fixed.dsdt_physical);
     ASSERT_EQ(2u, definition_block_count);
@@ -504,6 +510,7 @@ TEST_F(AcpiDiscovery, ParsesHpetTableAndReadsMainCounter)
                                         definition_blocks.data(),
                                         definition_block_count));
 
+    EXPECT_EQ(3u, acpi_fixed.boot_architecture_flags);
     EXPECT_EQ(kDsdtPhysical, definition_blocks[0].physical_address);
     EXPECT_EQ(0, std::memcmp(definition_blocks[0].signature, "DSDT", 4));
     EXPECT_EQ(kSsdtPhysical, definition_blocks[1].physical_address);

@@ -263,7 +263,9 @@ template<typename T>
     output.acpi_fixed.present = true;
     output.acpi_fixed.preferred_pm_profile = fadt->preferred_pm_profile;
     output.acpi_fixed.sci_interrupt = fadt->sci_interrupt;
-    output.acpi_fixed.boot_architecture_flags = fadt->boot_architecture_flags;
+    // Legacy FADTs reserve these bytes. Match ACPICA's length-based normalization.
+    if(header->length > offsetof(AcpiFadt, x_firmware_control))
+        output.acpi_fixed.boot_architecture_flags = fadt->boot_architecture_flags;
     output.acpi_fixed.century = fadt->century;
     output.acpi_fixed.flags = fadt->flags;
     output.acpi_fixed.firmware_ctrl = firmware_ctrl;

@@ -83,6 +83,7 @@ struct cpu
     uint8_t id;
     uint32_t booted;
     uint32_t magic;
+    uint64_t power_park_ack;
     char kstacklo[1];
     char kstackhi[0] __attribute__((aligned(4096)));
 };

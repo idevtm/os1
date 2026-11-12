@@ -3,6 +3,7 @@
 #include <os1/system.h>
 #include <os1/tmpfs.h>
 
+#include "arch/x86_64/apic/ipi.hpp"
 #include "console/console.hpp"
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
@@ -88,12 +89,22 @@ long system_control(unsigned member, unsigned argument)
         else
         {
             IrqGuard interrupts;
-            const bool accepted = member == OS1_SYSTEM_SHUTDOWN ? acpica_enter_shutdown(diagnostic)
-                                                                : acpica_reset_system(diagnostic);
-            if(accepted)
-                diagnostic = {"power-entry", "returned-without-transition"};
-            // A successful platform transition does not return to this kernel.
-            result = OS1_ERR_IO;
+            if(!ipi_quiesce_for_power())
+            {
+                diagnostic = {"cpu-quiescence", "timeout-or-unavailable"};
+                result = OS1_ERR_WOULD_BLOCK;
+            }
+            else
+            {
+                const bool accepted = member == OS1_SYSTEM_SHUTDOWN
+                                          ? acpica_enter_shutdown(diagnostic)
+                                          : platform_reset_system(diagnostic);
+                // A successful platform transition does not return to this kernel.
+                ipi_resume_after_power();
+                if(accepted)
+                    diagnostic = {"power-entry", "returned-without-transition"};
+                result = OS1_ERR_IO;
+            }
         }
         ext2_system_thaw();
     }

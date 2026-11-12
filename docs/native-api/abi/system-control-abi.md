@@ -5,7 +5,7 @@ SystemControl synchronizes persistent storage, requests power transitions, and c
 ```text
 bootstrap root grant: SYSTEM_CONTROL
     -> bind SystemControl -> copied empty request -> serialized transition
-    -> exclusive log drain -> ext2 sync and freeze -> explicit ACPI power operation
+    -> exclusive log drain -> ext2 sync and freeze -> park peer CPUs -> power operation
 ```
 
 ## Authority and methods
@@ -21,7 +21,7 @@ This bootstrap policy grants system control to ordinary children of the administ
 | ---: | --- | --- | --- |
 | 1 | `sync` | Empty | Synchronize a dirty persistent volume. A clean volume requires no extra flush. |
 | 2 | `shutdown` | Empty | Synchronize and freeze storage, then request ACPI S5. |
-| 3 | `reboot` | Empty | Synchronize and freeze storage, then use the ACPI reset register. |
+| 3 | `reboot` | Empty | Synchronize and freeze storage, then request a platform reset. |
 | 4 | `ehci_trace_start` | u32 input identity | Start an [EHCI stall trace](input-abi.md#ehci-stall-trace) and return a positive ticket as application status. |
 | 5 | `ehci_trace_stop` | u32 ticket | Stop the matching trace. |
 
@@ -52,7 +52,15 @@ Required Global Lock ownership, SCI queries, and early ECDT activation remain un
 The current ACPICA build omits legacy sleep entry. This provider uses firmware-supplied PM1 control registers through ACPICA GAS helpers.
 Hardware-reduced shutdown returns UNSUPPORTED; its current ACPICA entry path can poll indefinitely. A bounded implementation remains future work.
 Legacy preparation enables ACPI mode through the FADT command when required. This check has a bounded polling interval.
-Reset requires a supported FADT reset register. Other reset mechanisms remain future work.
+After successful preparation, the kernel asks all other online CPUs to park.
+If a CPU fails to acknowledge the request, the kernel resumes the parked CPUs and returns WOULD_BLOCK.
+After PM1a accepts the S5 enable write, the kernel waits 100 ms for the platform to remove power.
+The wait also applies if the subsequent PM1b enable write fails.
+Reboot tries the FADT reset register first. If execution continues, it tries the reset control register on supported Intel LPC bridges.
+It then tries the 8042 reset command when the FADT declares that controller.
+The kernel treats these bytes as reserved in legacy FADTs.
+After each accepted reset write, the kernel waits 100 ms for the platform.
+If execution continues, the kernel resumes the parked CPUs and thaws storage.
 The [initial physical test report](../../kernel/system-lifecycle-plan.md#physical-test-report--2026-11-08) records reboot success on both systems and desktop shutdown success.
 The [EC hardware retest](../../kernel/acpi-embedded-controller.md#hardware-result--2026-11-08) records subsequent successful Asus G74SX shutdown.
 Broader physical-platform qualification remains incomplete.
@@ -88,6 +96,7 @@ shell: system command failed: shutdown status=-5; machine remains running
 | `transition-admission` | Another system request is active. |
 | `log-drain-admission` | The wait for exclusive log-export admission expired. |
 | `storage-sync` | Storage synchronization or filesystem admission failed. |
+| `cpu-quiescence` | One or more peer CPUs could not park before power entry. |
 | `acpi-tables`, `fadt-lookup`, `fadt-length`, `fadt-profile` | ACPI tables are unavailable, invalid, or unsupported. |
 | `pm1a-control`, `pm1b-control` | A control register description is invalid. |
 | `pm1a-read`, `acpi-enable*` | Reading or enabling ACPI mode failed. |
@@ -95,7 +104,7 @@ shell: system command failed: shutdown status=-5; machine remains running
 | `ec-initialization` | EC discovery, resource validation, handler installation, or region connection failed. |
 | `s5-types`, `s5-preparation` | Sleep-type lookup or sleep preparation failed. |
 | `pm1*-entry-read`, `pm1*-type-write`, `pm1*-enable-write` | A power-entry register operation failed. |
-| `reset-register` | The ACPI reset request failed. |
+| `reset-register` | The ACPI reset request failed, and no fallback write succeeded. |
 | `power-entry` | Register operations returned success, but execution continued. |
 
 ACPICA failures retain their exception names. Local validation failures use descriptive detail strings instead.

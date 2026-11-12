@@ -61,6 +61,12 @@ void account_scheduler_tick()
 Thread* handle_irq(TrapFrame* frame)
 {
     const uint8_t vector = static_cast<uint8_t>(frame->vector);
+    if(vector == kPowerParkVector)
+    {
+        acknowledge_irq_vector(vector);
+        ipi_handle_power_park();
+        return current_thread();
+    }
     if(ipi_is_tlb_shootdown_vector(vector))
     {
         ipi_handle_tlb_shootdown();

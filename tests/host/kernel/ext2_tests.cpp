@@ -9,11 +9,13 @@
 #include <memory>
 #include <vector>
 
+#include "arch/x86_64/cpu/cpu.hpp"
 #include "fs/ext2.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "platform/system_control.hpp"
 #include "storage/block_device.hpp"
+#include "support/lapic_stub.hpp"
 #include "support/physical_memory.hpp"
 #include "vfs/ext2.hpp"
 #include "vfs/filesystem.hpp"
@@ -835,6 +837,24 @@ TEST_F(Ext2, SystemSyncFreezesWritesAndCanThawAfterFailedTransition)
     EXPECT_EQ("system: shutdown stage=acpi-tables detail=not-initialized\n", host_console_output());
     EXPECT_EQ(0, mount->operations->remove(mount, "lifecycle", 9, 0));
     EXPECT_EQ(0, ext2::u16(disk.bytes.data() + start + 1082));
+    cpu boot{}, peer{};
+    peer.id = 1;
+    peer.booted = static_cast<uint32_t>(ApStartupState::Online);
+    boot.next = &peer;
+    auto* saved_boot = g_cpu_boot;
+    auto* saved_current = g_cpu_host_current;
+    g_cpu_boot = &boot;
+    g_cpu_host_current = &boot;
+    lapic_stub_reset();
+    host_console_output_clear();
+    const long result = system_control(OS1_SYSTEM_REBOOT);
+    g_cpu_host_current = saved_current;
+    g_cpu_boot = saved_boot;
+    EXPECT_EQ(OS1_ERR_WOULD_BLOCK, result);
+    EXPECT_EQ("system: reboot stage=cpu-quiescence detail=timeout-or-unavailable\n",
+              host_console_output());
+    ASSERT_EQ(0, mount->operations->create(mount, "after-park", 10, OS1_OBJECT_FILE, opened));
+    instance_release(opened);
     disk.fail_flush = true;
     host_console_output_clear();
     EXPECT_EQ(OS1_ERR_IO, system_control(OS1_SYSTEM_SHUTDOWN));

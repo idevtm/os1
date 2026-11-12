@@ -557,6 +557,50 @@ TEST_F(AcpicaIntegration, ShutdownDiagnosticsPreserveMissingS5Exception)
     EXPECT_STREQ("AE_NOT_FOUND", diagnostic.detail);
 }
 
+extern bool (*host_acpica_memory_write_fault)(ACPI_PHYSICAL_ADDRESS, UINT64, UINT32);
+extern void (*host_acpica_stall_observer)(UINT32);
+
+TEST_F(AcpicaIntegration, WaitsAfterPm1aEnableEvenIfPm1bEnableFails)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames();
+    kmem_init(frames);
+    VirtualMemory vm(frames);
+    AcpicaScopedReset cleanup;
+    build_tables(arena, true, false);
+    auto* table = reinterpret_cast<ACPI_TABLE_FADT*>(arena.data() + kFadtPhysical);
+    table->Header.Length = sizeof(*table);
+    table->Pm1ControlLength = 2;
+    table->XPm1aControlBlock = {ACPI_ADR_SPACE_SYSTEM_MEMORY, 16, 0, 2, kOslMemoryPhysical};
+    table->XPm1bControlBlock = {ACPI_ADR_SPACE_SYSTEM_MEMORY, 16, 0, 2, kOslMemoryPhysical + 2};
+    *kernel_physical_pointer<uint16_t>(kOslMemoryPhysical) = 1;  // SCI_EN
+    finalize_sdt(*reinterpret_cast<TestSdtHeader*>(table));
+    const uint8_t s5[] = {0x08, '_', 'S', '5', '_', 0x12, 0x06, 0x02, 0x0A, 5, 0x0A, 5};
+    auto* dsdt = reinterpret_cast<TestSdtHeader*>(arena.data() + kDsdtPhysical);
+    dsdt->length = sizeof(*dsdt) + sizeof(s5);
+    std::memcpy(dsdt + 1, s5, sizeof(s5));
+    finalize_sdt(*dsdt);
+    ASSERT_TRUE(acpica_initialize_tables(vm, make_boot_info(kRsdpPhysical)));
+    PowerDiagnostic diagnostic;
+    ASSERT_TRUE(acpica_prepare_shutdown(diagnostic)) << diagnostic.stage;
+    constexpr uint16_t sleep_enable = 1u << 13;
+    static UINT32 wait_us;
+    wait_us = 0;
+    host_acpica_memory_write_fault = [](ACPI_PHYSICAL_ADDRESS address, UINT64 value, UINT32) {
+        return address == kOslMemoryPhysical + 2 && (value & sleep_enable);
+    };
+    host_acpica_stall_observer = [](UINT32 microseconds) {
+        EXPECT_NE(0u, *kernel_physical_pointer<uint16_t>(kOslMemoryPhysical) & sleep_enable);
+        wait_us += microseconds;
+    };
+    EXPECT_FALSE(acpica_enter_shutdown(diagnostic));
+    host_acpica_memory_write_fault = nullptr;
+    host_acpica_stall_observer = nullptr;
+    EXPECT_STREQ("pm1b-enable-write", diagnostic.stage);
+    EXPECT_STREQ("AE_ERROR", diagnostic.detail);
+    EXPECT_EQ(100'000u, wait_us);
+}
+
 void host_console_output_clear();
 const std::string& host_console_output();
 

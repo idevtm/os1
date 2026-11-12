@@ -1895,14 +1895,18 @@ No new kernel service, syscall, IPC layout, or process is required.
 The [SystemControl provider](native-api/abi/system-control-abi.md) uses the native kernel adapter for synchronization, shutdown, and reboot.
 
 ```text
-shell -> SystemControl capability -> exclusive log drain -> ext2 sync and freeze -> firmware transition
+shell -> SystemControl capability -> exclusive log drain -> ext2 sync and freeze -> park peer CPUs -> power operation
 init -> shell child -> wait and reap -> fresh shell
 ```
 
 Only the bootstrap root grant contains the new system-control right. Child launch can attenuate that right.
 Power requests use a 250 ms scheduler-time deadline for exclusive log-export admission.
 The request holds this admission through the final log drain and ext2 synchronization.
-Ext2 freezes the volume before it releases the volume guard. Failed transitions reopen admission and report failure.
+Ext2 freezes the volume before it releases the volume guard.
+After firmware preparation, a dedicated IPI parks the other online CPUs.
+The requesting CPU checks acknowledgments before power entry.
+If a CPU fails to acknowledge, or the power operation returns, the requesting CPU resumes its peers and thaws storage.
+The [SystemControl ABI](native-api/abi/system-control-abi.md) gives the reset fallback order.
 Shell command completion synchronizes possible writes. Reads leave ext2 timestamps unchanged under the existing noatime policy.
 Init stays alive to supervise the primary shell. Nested shells retain ordinary child-process behavior.
 
