@@ -140,6 +140,28 @@ TEST(VirtualMemory, FailedMappingReturnsUnlinkedDataFrame)
         EXPECT_TRUE(frames.free(held[--count]));
 }
 
+TEST(VirtualMemory, ReservedUserPageRequiresAnExistingSmallPageTable)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames(arena);
+    VirtualMemory vm(frames);
+    constexpr uint64_t large_base = 0x800000;
+    constexpr uint64_t replacement = 0xc00000;
+    const auto before = frames.free_page_count();
+    EXPECT_FALSE(vm.map_reserved_user_page(kUserImageBase, replacement, PageFlags::Write));
+    EXPECT_EQ(frames.free_page_count(), before);
+
+    ASSERT_TRUE(
+        vm.map_physical_2m(kUserImageBase, large_base, 1, PageFlags::User | PageFlags::Write));
+    auto* large_bytes = kernel_physical_pointer<uint64_t>(large_base);
+    *large_bytes = 0;
+    EXPECT_FALSE(vm.map_reserved_user_page(kUserImageBase, replacement, PageFlags::Write));
+    EXPECT_EQ(*large_bytes, 0u);
+    uint64_t physical = 0, flags = 0;
+    ASSERT_TRUE(vm.translate(kUserImageBase, physical, flags));
+    EXPECT_EQ(physical, large_base);
+}
+
 TEST(VirtualMemory, TeardownNeverInterpretsUserBytesAsPageTableEntries)
 {
     os1::host_test::PhysicalMemoryArena arena(kArenaBytes);

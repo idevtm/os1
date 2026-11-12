@@ -1333,7 +1333,8 @@ General shared address spaces, copy-on-write, and user DMA pinning remain outsid
 ### Exclusive Buffer Ownership
 
 The Buffer module transfers exclusive access to dedicated pages through retained Operations.
-It preserves input identity and original mapping addresses across a completed loan.
+It preserves input identity and restores valid original mappings at their reserved addresses.
+If an alias cannot be restored, the module rolls it back and releases its reservation.
 
 ```text
 Buffer: pages + budget + mapping reservations

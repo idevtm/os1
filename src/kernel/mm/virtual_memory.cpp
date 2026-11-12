@@ -131,6 +131,8 @@ bool VirtualMemory::walk_to_leaf(uint64_t virtual_address,
     uint64_t* pml3 = nullptr;
     uint64_t* pml2 = nullptr;
     uint64_t* pml1 = nullptr;
+    const uint64_t required = user_visible ? table_entry_flags(true) : 0;
+    const uint64_t table_mask = user_visible ? required | kEntryLargePage : 0;
 
     uint64_t& pml4e = pml4[page_index(virtual_address, 39)];
     if(create)
@@ -140,7 +142,7 @@ bool VirtualMemory::walk_to_leaf(uint64_t virtual_address,
             return false;
         }
     }
-    else if(0 == pml4e)
+    else if(pml4e == 0 || (pml4e & required) != required)
     {
         return false;
     }
@@ -154,7 +156,7 @@ bool VirtualMemory::walk_to_leaf(uint64_t virtual_address,
             return false;
         }
     }
-    else if(0 == pml3e)
+    else if(pml3e == 0 || (pml3e & table_mask) != required)
     {
         return false;
     }
@@ -168,7 +170,7 @@ bool VirtualMemory::walk_to_leaf(uint64_t virtual_address,
             return false;
         }
     }
-    else if(0 == pml2e)
+    else if(pml2e == 0 || (pml2e & table_mask) != required)
     {
         return false;
     }
@@ -201,6 +203,21 @@ bool VirtualMemory::map_physical(uint64_t virtual_address,
                       flags_to_entry(flags | PageFlags::Present);
     }
 
+    return true;
+}
+
+bool VirtualMemory::map_reserved_user_page(uint64_t virtual_address,
+                                           uint64_t physical_address,
+                                           PageFlags flags)
+{
+    if(!initialized_ || ((virtual_address | physical_address) & (kPageSize - 1)))
+        return false;
+
+    uint64_t* leaf = nullptr;
+    if(!walk_to_leaf(virtual_address, false, true, &leaf) || *leaf)
+        return false;
+    *leaf = (physical_address & kEntryAddressMask) |
+            flags_to_entry(flags | PageFlags::Present | PageFlags::User);
     return true;
 }
 

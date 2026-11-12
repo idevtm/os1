@@ -49,6 +49,10 @@ public:
                       uint64_t physical_address,
                       uint64_t num_pages,
                       PageFlags flags);
+    // Fill an empty user leaf without allocating page tables or replacing a mapping.
+    bool map_reserved_user_page(uint64_t virtual_address,
+                                uint64_t physical_address,
+                                PageFlags flags);
     // Map existing physical memory with 2 MiB leaves for early large ranges.
     bool map_physical_2m(uint64_t virtual_address,
                          uint64_t physical_address,
