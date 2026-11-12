@@ -69,6 +69,13 @@ No MODE SELECT command changes the device's settings.
 The xHCI event consumer reads the cycle bit with acquire ordering.
 It reads the event payload only after the cycle bit matches the consumer cycle state.
 
+The driver checks each xHCI DMA range against the controller's AC64 capability before publication.
+A controller without AC64 accepts only ranges below 4 GiB.
+The driver requires a calibrated clock for xHCI reset timing.
+After writing HCRST on Intel xHCI, the driver waits 1 ms before the next register access.
+After an xHCI port reset, the driver waits 10 ms and checks the port again before enumeration.
+EHCI periodic queue heads use a zero NAK reload value.
+
 The driver checks CBW/CSW lengths, signatures, tags, status, residue, and actual transferred bytes.
 A stalled status read permits one retry after endpoint halt recovery.
 Malformed protocol status triggers bounded reset recovery while the transport remains usable.
