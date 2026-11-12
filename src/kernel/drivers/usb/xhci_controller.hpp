@@ -340,6 +340,28 @@ struct PortStatus
     bool has_changes = false;
 };
 
+enum class PortResetResult : uint8_t
+{
+    Pending,
+    Ready,
+    Failed
+};
+
+class RuntimePortReset
+{
+public:
+    void start(uint64_t now);
+    PortResetResult poll(const PortStatus& status, uint64_t now);
+
+private:
+    static constexpr unsigned kStalledPollLimit = 200;
+    uint64_t deadline_ = 0;
+    uint64_t previous_time_ = 0;
+    unsigned remaining_polls_ = 0;
+    uint8_t speed_ = 0;
+    bool recovering_ = false;
+};
+
 // A new change can arrive while the port's event generation is still gated.
 template<typename Read, typename Acknowledge>
 bool drain_port_changes(Read read, Acknowledge acknowledge)
@@ -418,6 +440,7 @@ bool clear_port_change_bits(const ControllerLayout& controller,
                             uint8_t port_id,
                             uint32_t clear_mask = kPortScChangeBits);
 bool power_on_port(const ControllerLayout& controller, uint8_t port_id);
+void request_controller_stop(const ControllerLayout& controller);
 bool controller_stop(const ControllerLayout& controller,
                      PollLimits limits,
                      PollHook poll_hook = nullptr,

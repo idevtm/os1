@@ -233,6 +233,8 @@ struct XhciControllerState
     uint8_t storage_busy = 0;
     bool port_changed[256]{};
     usb::ReconnectDelay reconnect[256]{};
+    uint8_t resetting_port = 0;
+    xhci::RuntimePortReset port_reset{};
     unsigned catalog_ports[256]{};
     DeviceId owner{DeviceBus::Platform, 0};
     uint16_t pci_index = 0;
@@ -476,7 +478,9 @@ xhci::PollLimits controller_wait_limits()
             kXhciStalledClockPolls};
 }
 
-void release_controller(PageFrameContainer& frames, XhciControllerState& controller)
+void release_controller(PageFrameContainer& frames,
+                        XhciControllerState& controller,
+                        bool wait_for_stop = true)
 {
     if(controller.dma_published)
     {
@@ -487,11 +491,21 @@ void release_controller(PageFrameContainer& frames, XhciControllerState& control
             fail_device(device);
             hardware_catalog::unavailable(device.catalog_id);
         }
-        (void)xhci::controller_stop(controller.controller, controller_wait_limits());
+        if(wait_for_stop)
+            (void)xhci::controller_stop(controller.controller, controller_wait_limits());
+        else
+        {
+            // Drain any in-flight acknowledgment before masking the controller.
+            IrqSpinGuard guard(g_event_lock);
+            xhci::disable_interrupts(controller.controller);
+            xhci::request_controller_stop(controller.controller);
+        }
         if(controller.pci_index < kPlatformMaxPciDevices)
         {
             const auto& pci = g_platform.devices[controller.pci_index];
-            pci_set_command_bits(pci, 0, 4);  // Stop bus mastering even if halt timed out.
+            // Disable legacy INTx before the handler can be removed.
+            const uint16_t disable_intx = wait_for_stop ? 0 : (1u << 10);
+            pci_set_command_bits(pci, disable_intx, 4);
             pci_release_interrupt(pci, controller.interrupt);
         }
         controller.present = true;  // Reserve the quarantined slot; never recycle handles.
@@ -1233,6 +1247,18 @@ bool usb_set_boot_protocol(XhciControllerState& controller,
     return submit_control_transfer(controller, device, setup, nullptr, nullptr, 0u, actual_length);
 }
 
+void request_port_reset(XhciControllerState& controller,
+                        uint8_t port_id,
+                        const xhci::PortStatus& status)
+{
+    const size_t port_offset = xhci::kOperationalPortRegisterBase +
+                               (static_cast<size_t>(port_id) - 1u) * xhci::kPortRegisterStride +
+                               xhci::kPortSc;
+    *reinterpret_cast<volatile uint32_t*>(controller.controller.operational + port_offset) =
+        (status.raw & (xhci::kPortScPreservedBits | xhci::kPortScChangeBits)) |
+        xhci::kPortScPortPower | xhci::kPortScPortReset;
+}
+
 bool reset_port(XhciControllerState& controller, uint8_t port_id, xhci::PortStatus& status)
 {
     {
@@ -1241,12 +1267,7 @@ bool reset_port(XhciControllerState& controller, uint8_t port_id, xhci::PortStat
            controller.port_changed[port_id] || (status.raw & xhci::kPortScConnectStatusChange))
             return false;
 
-        const size_t port_offset = xhci::kOperationalPortRegisterBase +
-                                   (static_cast<size_t>(port_id) - 1u) * xhci::kPortRegisterStride +
-                                   xhci::kPortSc;
-        *reinterpret_cast<volatile uint32_t*>(controller.controller.operational + port_offset) =
-            (status.raw & (xhci::kPortScPreservedBits | xhci::kPortScChangeBits)) |
-            xhci::kPortScPortPower | xhci::kPortScPortReset;
+        request_port_reset(controller, port_id, status);
     }
 
     auto deadline = operation_deadline(kXhciPortTimeout100ns);
@@ -1655,7 +1676,7 @@ bool initialize_port(PageFrameContainer& frames,
                      XhciControllerState& controller,
                      uint8_t port_id,
                      unsigned catalog_port,
-                     bool require_stable = false)
+                     const xhci::PortStatus* stable = nullptr)
 {
     xhci::PortStatus status{};
     {
@@ -1663,8 +1684,8 @@ bool initialize_port(PageFrameContainer& frames,
         if(!xhci::read_port_status(controller.controller, port_id, status) || !status.connected)
             return false;
 
-        if(require_stable &&
-           (controller.port_changed[port_id] || (status.raw & xhci::kPortScConnectStatusChange)))
+        if(stable &&
+           !xhci::port_reset_recovered(status, stable->speed, controller.port_changed[port_id]))
             return false;
 
         // Consume the attachment being enumerated, even if hardware enabled the port.
@@ -2324,21 +2345,51 @@ void xhci_diagnostic_summary()
     debug("usbdiag: configured keyboards=")(ready)();
 }
 
-void xhci_poll_devices(PageFrameContainer& frames)
+namespace
+{
+void start_runtime_port(PageFrameContainer& frames, XhciControllerState& controller, uint8_t port)
+{
+    xhci::PortStatus status{};
+    {
+        IrqSpinGuard guard(g_event_lock);
+        if(!xhci::read_port_status(controller.controller, port, status) || !status.connected ||
+           controller.port_changed[port] || (status.raw & xhci::kPortScConnectStatusChange))
+            return;
+
+        if(!status.enabled || status.reset)
+        {
+            if(!status.powered)
+                (void)xhci::power_on_port(controller.controller, port);
+            if(!status.reset)
+                request_port_reset(controller, port, status);
+            controller.resetting_port = port;
+            controller.port_reset.start(tsc_clock_now_100ns());
+            return;
+        }
+    }
+    (void)initialize_port(frames, controller, port, controller.catalog_ports[port], &status);
+}
+}  // namespace
+
+void xhci_poll_devices(PageFrameContainer& frames, bool topology)
 {
     for(auto* c : g_xhci_controllers)
     {
+        if(!c || (!topology && !c->resetting_port))
+            continue;
         SchedulingGuard scheduling;
-        if(!c || __atomic_load_n(&c->failed, __ATOMIC_ACQUIRE) ||
+        if(__atomic_load_n(&c->failed, __ATOMIC_ACQUIRE) ||
            __atomic_exchange_n(&c->storage_busy, 1, __ATOMIC_ACQUIRE))
             continue;
-        for(unsigned port = 1; port <= c->controller.capability.max_ports; ++port)
+        const unsigned first = topology ? 1 : c->resetting_port;
+        const unsigned last = topology ? c->controller.capability.max_ports : first;
+        for(unsigned port = first; port <= last; ++port)
         {
             bool changed = false;
+            xhci::PortStatus status{};
             {
                 IrqSpinGuard guard(g_event_lock);
                 changed = c->port_changed[port];
-                xhci::PortStatus status{};
                 if(xhci::read_port_status(c->controller, port, status) &&
                    (status.raw & xhci::kPortScConnectStatusChange))
                 {
@@ -2350,10 +2401,24 @@ void xhci_poll_devices(PageFrameContainer& frames)
             const auto now = tsc_clock_now_100ns();
             if(!changed)
             {
-                if(c->reconnect[port].take_ready(now))
-                    (void)initialize_port(frames, *c, uint8_t(port), c->catalog_ports[port], true);
+                if(c->resetting_port == port)
+                {
+                    const auto result = c->port_reset.poll(status, now);
+                    if(result == xhci::PortResetResult::Pending)
+                        continue;
+                    c->resetting_port = 0;
+                    if(result == xhci::PortResetResult::Ready)
+                        (void)initialize_port(
+                            frames, *c, uint8_t(port), c->catalog_ports[port], &status);
+                    else
+                        debug("xhci: port reset failed port=")(port)();
+                }
+                else if(!c->resetting_port && c->reconnect[port].take_ready(now))
+                    start_runtime_port(frames, *c, uint8_t(port));
                 continue;
             }
+            if(c->resetting_port == port)
+                c->resetting_port = 0;
             c->reconnect[port].changed(false, now);
             auto disabled = SlotDisableResult::Disabled;
             for(auto& d : c->devices)
@@ -2381,19 +2446,18 @@ void xhci_poll_devices(PageFrameContainer& frames)
             }
             if(disabled == SlotDisableResult::Failed)
             {
-                release_controller(frames, *c);
+                release_controller(frames, *c, false);
                 break;
             }
             if(disabled == SlotDisableResult::Aborted)
                 debug("xhci: slot disable aborted; device quarantined port=")(port)();
-            xhci::PortStatus status{};
             if(!xhci::read_port_status(c->controller, port, status))
                 continue;
             hardware_catalog::port_state(c->catalog_ports[port], status.connected);
             if(disabled == SlotDisableResult::Disabled)
                 c->reconnect[port].changed(status.connected, tsc_clock_now_100ns());
         }
-        if(!__atomic_load_n(&c->failed, __ATOMIC_ACQUIRE))
+        if(topology && !__atomic_load_n(&c->failed, __ATOMIC_ACQUIRE))
             recover_hid_inputs(*c);
         __atomic_store_n(&c->storage_busy, 0, __ATOMIC_RELEASE);
     }

@@ -1015,6 +1015,90 @@ uint64_t read_fake_xhci_clock()
 }
 }  // namespace
 
+TEST(XhciController, RuntimePortResetWaitsAcrossPollsAndRevalidatesRecovery)
+{
+    xhci::RuntimePortReset reset;
+    xhci::PortStatus port{.speed = 3, .connected = true, .reset = true};
+    using Result = xhci::PortResetResult;
+    reset.start(100);
+    EXPECT_EQ(Result::Pending, reset.poll(port, 1'000));
+    port.enabled = true;
+    port.reset = false;
+    EXPECT_EQ(Result::Pending, reset.poll(port, 2'000));
+    EXPECT_EQ(Result::Pending, reset.poll(port, 101'999));
+    EXPECT_EQ(Result::Ready, reset.poll(port, 102'000));
+
+    reset.start(200);
+    EXPECT_EQ(Result::Pending, reset.poll(port, 300));
+    port.speed = 4;
+    EXPECT_EQ(Result::Failed, reset.poll(port, 400));
+    port.raw = xhci::kPortScConnectStatusChange;
+    EXPECT_EQ(Result::Failed, reset.poll(port, 401));
+
+    port = {.connected = true, .reset = true};
+    reset.start(500);
+    EXPECT_EQ(Result::Pending, reset.poll(port, 10'000'499));
+    EXPECT_EQ(Result::Failed, reset.poll(port, 10'000'500));
+    port.enabled = true;
+    port.reset = false;
+    EXPECT_EQ(Result::Failed, reset.poll(port, 10'000'500));
+    port.connected = false;
+    EXPECT_EQ(Result::Failed, reset.poll(port, 501));
+}
+
+TEST(XhciController, RuntimePortResetBoundsAStalledClockInBothPhases)
+{
+    xhci::RuntimePortReset reset;
+    xhci::PortStatus port{.speed = 3, .connected = true, .reset = true};
+    using Result = xhci::PortResetResult;
+    for(bool recovering : {false, true})
+    {
+        uint64_t now = 100;
+        reset.start(now);
+        if(recovering)
+        {
+            port.enabled = true;
+            port.reset = false;
+            EXPECT_EQ(Result::Pending, reset.poll(port, ++now));
+        }
+        for(unsigned poll = 0; poll < 199; ++poll)
+            ASSERT_EQ(Result::Pending, reset.poll(port, now));
+        EXPECT_EQ(Result::Failed, reset.poll(port, now));
+    }
+}
+
+TEST(XhciController, RuntimePortResetKeepsRecoveryIntervalAfterClockMovesBackward)
+{
+    xhci::RuntimePortReset reset;
+    const xhci::PortStatus ready{.speed = 3, .connected = true, .enabled = true};
+    using Result = xhci::PortResetResult;
+    reset.start(500'000);
+    EXPECT_EQ(Result::Pending, reset.poll(ready, 100));
+    EXPECT_EQ(Result::Pending, reset.poll(ready, 500'001));
+    EXPECT_EQ(Result::Pending, reset.poll(ready, 599'999));
+    EXPECT_EQ(Result::Ready, reset.poll(ready, 600'000));
+}
+
+TEST(XhciController, RequestStopClearsRunWithoutWaitingForHalt)
+{
+    std::array<uint8_t, 0x400> mmio{};
+    populate_capability_block(mmio);
+    xhci::ControllerLayout layout{};
+    ASSERT_TRUE(xhci::parse_capability(mmio.data(), mmio.size(), layout));
+    const auto command = layout.capability.cap_length + xhci::kOperationalUsbcmd;
+    const auto status = layout.capability.cap_length + xhci::kOperationalUsbsts;
+    write32(mmio, command, xhci::kUsbcmdRunStop | xhci::kUsbcmdInterrupterEnable);
+    xhci::request_controller_stop(layout);
+    EXPECT_EQ(xhci::kUsbcmdInterrupterEnable, read32(mmio, command));
+    EXPECT_EQ(0u, read32(mmio, status) & xhci::kUsbstsHalted);
+
+    write32(mmio, command, xhci::kUsbcmdRunStop | xhci::kUsbcmdInterrupterEnable);
+    xhci::disable_interrupts(layout);
+    xhci::request_controller_stop(layout);
+    EXPECT_EQ(0u, read32(mmio, command));
+    EXPECT_EQ(0u, read32(mmio, status) & xhci::kUsbstsHalted);
+}
+
 TEST(XhciTimeout, ControllerStopUsesElapsedTimeAndStalledClockBound)
 {
     std::array<uint8_t, 0x400> mmio{};
