@@ -141,13 +141,13 @@ The BIOS/UEFI firmware's ability to boot a stick does not prove kernel controlle
 
 ```text
 ls /
-/diskutil seed
-/diskutil verify
+/bin/diskutil seed
+/bin/diskutil verify
 echo saved > /note
-/diskutil sync
+/bin/diskutil sync
 ```
 
-Run `/diskutil sync` before shutdown or removal after writes.
+Run `/bin/diskutil sync` before shutdown or removal after writes.
 Then reconnect the stick to the development computer for updates.
 A dirty or unsupported filesystem prevents update staging; the tool does not repair or format it automatically.
 
@@ -187,7 +187,7 @@ A synchronization or readback failure leaves the backup available and does not r
 ## Program selection and privilege boundaries
 
 `OS1_STORAGE_MANIFEST` selects programs for initial creation and deployment.
-The USB build directory defaults to its generated manifest containing `/diskutil`.
+The USB build directory defaults to its generated manifest containing `/bin/diskutil`.
 Set a custom manifest in that build directory to deploy additional programs.
 See [program deployment](../filesystems/program-deployment.md) for its format and preservation rules.
 The old standalone QEMU deployment command still rejects combined USB images.

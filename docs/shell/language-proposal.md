@@ -169,8 +169,7 @@ process source.stdin
 ```
 
 The last form selects a declared payload-free variant case. The generic names above
-remain illustrative; runnable `paramdemo` constructor and `call paramdemo render`
-examples are in the [rich ABI](../native-api/abi/rich-parameters-abi.md). Counter retains its scalar
+remain illustrative. For runnable `paramdemo` constructors, see the [rich ABI](../native-api/abi/rich-parameters-abi.md). Counter retains its scalar
 `--name value` converter. Rich tails preserve single/double quoting, braces and dot
 paths before whitespace tokenization loses structure. Resolution itself executes no
 object code. Optional values, typed defaults, conflicts and diagnostics must

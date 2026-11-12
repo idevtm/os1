@@ -58,7 +58,7 @@ class Images(unittest.TestCase):
         self.manifest = self.root / 'manifest.json'
         self.utility.write_bytes(elf(b'version1'))
         self.manifest.write_text(json.dumps({'version': 3, 'programs': [
-            {'source': str(self.utility), 'destination': '/diskutil'}]}))
+            {'source': str(self.utility), 'destination': '/bin/diskutil'}]}))
         boot_fixture(self.boot)
         usb.create(self.boot, self.utility, self.manifest, self.image, 4)
         self.end = self.image.stat().st_size
@@ -111,8 +111,8 @@ class Images(unittest.TestCase):
         for mode in ('programs', 'all'):
             usb.stage(self.image, self.output, mode, self.boot, self.manifest)
             after = self.inspect_files(self.output)
-            self.assertEqual(after['/readme'], before['/readme'])
-            self.assertNotEqual(after['/diskutil'][1], before['/diskutil'][1])
+            self.assertEqual(after['/etc/readme'], before['/etc/readme'])
+            self.assertNotEqual(after['/bin/diskutil'][1], before['/bin/diskutil'][1])
             with self.output.open('rb') as source, self.image.open('r+b') as target:
                 old_hash = usb.digest(target, 0, self.end)
                 usb.apply(source, target, mode, old_hash)

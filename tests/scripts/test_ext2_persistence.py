@@ -186,18 +186,18 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 out = run(command, marker)
                 assert b'unknown command:' not in out and b'redirection failed' not in out, out
         elif phase == 'write':
-            run('/diskutil seed', b'diskutil seed ok')
+            run('/bin/diskutil seed', b'diskutil seed ok')
             run('echo "persistent shell file" > /note')
             run('echo appended >> /note')
-            run('/diskutil sync', b'diskutil sync ok')
+            run('/bin/diskutil sync', b'diskutil sync ok')
         else:
-            run('/diskutil verify', b'diskutil verify ok')
+            run('/bin/diskutil verify', b'diskutil verify ok')
             out = run('cat /note')
             assert b'persistent shell file\nappended\n' in out, out
             # A disk executable is immutable while ordinary data remains writable.
-            out = run('echo damage > /diskutil')
+            out = run('echo damage > /bin/diskutil')
             assert b'failed' in out or b'error' in out, out
-            run('/diskutil verify', b'diskutil verify ok')
+            run('/bin/diskutil verify', b'diskutil verify ok')
         if getattr(args, 'poweroff', False):
             child.stdin.write(b'shutdown\n')
             child.stdin.flush()
@@ -260,11 +260,11 @@ def main():
     if args.readonly:
         def exercise_readonly(run, _expect):
             contents = b'Persistent ext2 storage.'
-            run('cat /readme', contents)
-            run('echo damage > /readme', b'redirection failed', allow_errors=True)
+            run('cat /etc/readme', contents)
+            run('echo damage > /etc/readme', b'redirection failed', allow_errors=True)
             run('echo damage > /new', b'redirection failed', allow_errors=True)
-            run('cat /readme', contents)
-            run('/diskutil', b'diskutil: seed | verify | sync', allow_errors=True)
+            run('cat /etc/readme', contents)
+            run('/bin/diskutil', b'diskutil: seed | verify | sync', allow_errors=True)
 
         original = disk.read_bytes()
         boot(args, disk, 'readonly', exercise=exercise_readonly)

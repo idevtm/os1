@@ -368,7 +368,8 @@ Historical BIOS failures remain separate evidence.
 
 The shell provides typed navigation, aliases, basic file operations, interactive `write`, and the line editor `edit`.
 Use `context` to inspect live bindings, or press Tab to explore them interactively.
-Up/Down selects; Tab descends; Enter accepts a selection before a later Enter executes it.
+Tab inserts a single match or opens a list of choices.
+Use Up and Down to select a choice. Press Enter to accept it. Press Enter again to run the command.
 See the [context discovery guide](docs/native-api/context-discovery.md) for the current scope and input controls.
 See [typed context and basic commands](docs/shell/typed-context.md) for cwd, path configuration, strict scripts, and same-filesystem moves.
 See [metadata and recursive tools](docs/shell/filesystem-tools.md) for `stat`, `df`, `find`, `du`, `cp -r`, and `rm -r`.
@@ -564,8 +565,8 @@ See [program deployment](docs/filesystems/program-deployment.md) for manifests a
 cmake --build build --target run_persistent
 ```
 
-Inside the guest, run `/diskutil seed`, then `/diskutil verify`.
-Run `/diskutil sync` after shell writes and before stopping QEMU.
+Inside the guest, run `/bin/diskutil seed`, then `/bin/diskutil verify`.
+Run `/bin/diskutil sync` after shell writes and before stopping QEMU.
 Use `run_usb_storage` or `run_usb_storage_bios` to attach the same disk through xHCI USB mass storage.
 Use `run_ehci_storage_uefi` or `run_ehci_storage_bios` for EHCI USB 2 storage.
 The USB persistence checks cover both controllers; high-speed EHCI hubs still need physical qualification.

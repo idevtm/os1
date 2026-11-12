@@ -77,6 +77,89 @@ inline long inspect(const char* path, int fd)
     } while(!page.end);
     return children || output(fd, "(no children)\n") ? 0 : OS1_ERR_FAULT;
 }
+template<class Emit>
+inline bool describe_alias(const shell_runtime::Alias& alias, Emit emit)
+{
+    if(!emit(alias.name) || !emit(" -> ") || !emit(alias.target))
+        return false;
+    const char* field = shell_runtime::boolean_parameter(shell_runtime::method_for(alias.target));
+    auto show_value = [&](bool value) {
+        return field && emit(field) && emit(":") && emit(value ? "true" : "false");
+    };
+    if(alias.has_default && (!emit(" ") || !show_value(alias.default_value)))
+        return false;
+    if(alias.option)
+    {
+        const char option[] = {' ', '-', alias.option, 0};
+        if(!emit(option) || !emit(" -> ") || !show_value(alias.option_value))
+            return false;
+    }
+    return emit("\n");
+}
+
+inline bool describe_alias(int fd, const shell_runtime::Alias& alias)
+{
+    return describe_alias(alias, [fd](const char* value) { return output(fd, value); });
+}
+
+inline long help(const char* path, int fd)
+{
+    if(*path)
+    {
+        if(const auto* alias = shell_runtime::find_alias(path))
+            return describe_alias(fd, *alias) ? 0 : OS1_ERR_IO;
+        for(const auto& builtin : shell_runtime::builtins)
+            if(os1::discovery::same(path, builtin.name))
+                return output(fd, builtin.usage) && output(fd, "\n") ? 0 : OS1_ERR_IO;
+        return inspect(path, fd);
+    }
+    if(!discovery::refresh(view, true))
+        return OS1_ERR_LIMIT;
+
+    char buffer[1024];
+    size_t used = 0;
+    auto flush = [&]() {
+        const bool written = !used || files::put(fd, buffer, used);
+        used = 0;
+        return written;
+    };
+    auto emit = [&](const char* value) {
+        const size_t bytes = files::length(value);
+        if(bytes > sizeof(buffer))
+            return flush() && files::put(fd, value, bytes);
+        if(used + bytes > sizeof(buffer) && !flush())
+            return false;
+        __builtin_memcpy(buffer + used, value, bytes);
+        used += bytes;
+        return true;
+    };
+    if(!emit("Shell commands\n"))
+        return OS1_ERR_IO;
+    for(const auto& builtin : shell_runtime::builtins)
+        if(!emit(builtin.usage) || !emit("\n"))
+            return OS1_ERR_IO;
+    if(!emit("Active aliases\n"))
+        return OS1_ERR_IO;
+    for(const auto& alias : shell_runtime::aliases)
+        if(alias.name[0] && !describe_alias(alias, emit))
+            return OS1_ERR_IO;
+    if(!emit("Reflected methods and properties\n"))
+        return OS1_ERR_IO;
+    for(unsigned id = 1; id < view.count; ++id)
+    {
+        const auto& member = view.nodes[id];
+        if(member.kind != os1::discovery::Kind::Method &&
+           member.kind != os1::discovery::Kind::Property)
+            continue;
+        char name[os1::discovery::path_limit]{};
+        if(!os1::discovery::member_path(view, id, name, sizeof(name)))
+            return OS1_ERR_LIMIT;
+        if(!emit(name) || !emit(" [") || !emit(os1::discovery::kind_name(member.kind)) ||
+           !emit("] ") || !emit(member.signature) || !emit("\n"))
+            return OS1_ERR_IO;
+    }
+    return flush() ? 0 : OS1_ERR_IO;
+}
 // Names are valid only while this prompt owns its completion menu.
 inline constexpr unsigned completion_path_limit = 256;
 inline char file_choices[64][completion_path_limit * 2 + 3]{};
@@ -283,8 +366,16 @@ inline bool path_choices(os1::discovery::Completion& state, unsigned first, unsi
     const bool explicit_command = state.cursor <= command_end && state.cursor > first;
     if(state.cursor < command_end && !explicit_command)
         return false;
+    char command[64]{};
+    if(command_end - first >= sizeof(command) || command_end == first)
+        return false;
+    __builtin_memcpy(command, state.line + first, command_end - first);
+    const auto method = shell_runtime::method_for(command);
+    const bool interface_image =
+        method == shell_runtime::Method::Unknown &&
+        (os1::discovery::same(command, "intf") || os1::discovery::same(command, "/bin/intf"));
     unsigned begin = first, slot = 0;
-    bool redirected = false, in_word = false, named = false, options = true;
+    bool redirected = false, in_word = false, named = false, options = !interface_image;
     char quote = 0;
     for(unsigned i = command_end; i < state.cursor; ++i)
     {
@@ -329,17 +420,13 @@ inline bool path_choices(os1::discovery::Completion& state, unsigned first, unsi
         else
         {
             in_word = true;
-            if(c == ':' && os1::context::identifier(state.line + begin, i - begin))
+            if(!interface_image && c == ':' &&
+               os1::context::identifier(state.line + begin, i - begin))
                 named = true;
             else if(c == '"' || c == '\'')
                 quote = c;
         }
     }
-    char command[64]{};
-    if(command_end - first >= sizeof(command) || command_end == first)
-        return false;
-    __builtin_memcpy(command, state.line + first, command_end - first);
-    const auto method = shell_runtime::method_for(command);
     if(explicit_command)
     {
         bool slash = false;
@@ -350,6 +437,11 @@ inline bool path_choices(os1::discovery::Completion& state, unsigned first, unsi
             slash |= state.line[i] == '/';
         }
         if(!slash)
+            return false;
+    }
+    else if(!redirected && interface_image)
+    {
+        if(slot != 0)
             return false;
     }
     else if(!redirected)
@@ -424,6 +516,7 @@ inline bool parameter_choices(os1::discovery::Completion& state,
     {
         if(alias->option && state.cursor == start + 1 && state.line[start] == '-')
         {
+            state.matches = state.selected = state.command_count = 0;
             file_choices[0][0] = '-';
             file_choices[0][1] = alias->option;
             file_choices[0][2] = 0;
@@ -543,8 +636,8 @@ inline void begin_choices(os1::discovery::Completion& state)
     for(const auto& alias : shell_runtime::aliases)
         if(alias.name[0])
             offer(alias.name);
-    for(const char* name : shell_runtime::builtins)
-        offer(name);
+    for(const auto& builtin : shell_runtime::builtins)
+        offer(builtin.name);
     state.prefix = first;
     state.replace_end = end;
     executable_choices(state, first);
@@ -838,6 +931,8 @@ inline long read(files::Reader& fallback, files::Line& line)
                     begin_choices(state);
                 else if(key == OS1_CONSOLE_KEY_BACKTAB)
                     state.step_field(view, -1);
+                if(key == '\t' && state.open && state.matches == 1)
+                    state.accept(view, true);
             }
             if(!display.paint(state))
                 return OS1_ERR_FAULT;

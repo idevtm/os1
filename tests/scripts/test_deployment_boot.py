@@ -56,16 +56,16 @@ def main():
 
     boot(args, disk, 'version1', [
         ('probe', b'deployed program version 1'),
-        ('cat /readme', b'Persistent ext2 storage.'),
-        ('call absent_provider render', b'call: cannot open image'),
+        ('cat /etc/readme', b'Persistent ext2 storage.'),
+        ('exec absent_provider', b'exec failed: absent_provider'),
         ('./bin/probe', b'deployed program version 1'),
         ('counter --initial 7 --ceiling 20', b'counter initial=7 ceiling=20'),
         ('intf /bin/textprocessor', b'interface TextProcessor'),
-        ('/diskutil seed', b'diskutil seed ok'),
+        ('/bin/diskutil seed', b'diskutil seed ok'),
         ('echo "my file survives deployment" > /bin/note', None),
         ('echo appended >> /bin/note', None),
         ('cat /bin/note', b'my file survives deployment\nappended\n'),
-        ('/diskutil sync', b'diskutil sync ok')], on_boot=active_image_is_locked)
+        ('/bin/diskutil sync', b'diskutil sync ok')], on_boot=active_image_is_locked)
     upgrade_shell = args.code and args.transport == 'virtio'
     if upgrade_shell:
         # An older shell uses the argv entry and cannot accept init's constructor.
@@ -125,7 +125,7 @@ def main():
     commands = [('probe', b'deployed program version 2'),
                 ('/bin/probe', b'deployed program version 2'),
                 ('counter --initial 8 --ceiling 20', b'counter initial=8 ceiling=20'),
-                ('/diskutil verify', b'diskutil verify ok'),
+                ('/bin/diskutil verify', b'diskutil verify ok'),
                 ('cat /bin/note', b'my file survives deployment\nappended\n')]
     if upgrade_shell:
         commands.append(('boot_custom "profile preserved"', b'profile preserved\n'))

@@ -17,10 +17,9 @@ TEST(ShellCommand, QuotesOperatorsAndRawTypedArguments)
     EXPECT_EQ(Output::Append, c.output);
     EXPECT_STREQ("/tmp/a b", c.output_name);
     EXPECT_STREQ("echo 'hello > world'", c.raw);
-    ASSERT_TRUE(parse(
-        "call paramdemo render source.text:'a\"b' options:{limit:5,suffix:'>'} > /tmp/out", c));
-    EXPECT_STREQ("call paramdemo render source.text:'a\"b' options:{limit:5,suffix:'>'}", c.raw);
-    EXPECT_EQ(5u, c.argc);
+    ASSERT_TRUE(parse("paramdemo source.text:'a\"b' options:{limit:5,suffix:'>'} > /tmp/out", c));
+    EXPECT_STREQ("paramdemo source.text:'a\"b' options:{limit:5,suffix:'>'}", c.raw);
+    EXPECT_EQ(3u, c.argc);
     ASSERT_TRUE(parse("cat<<END>/tmp/a", c));
     EXPECT_EQ(Input::Here, c.input);
     EXPECT_STREQ("END", c.input_name);

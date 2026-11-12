@@ -68,9 +68,10 @@ process.shell.aliases.remove(name:"cp")
 process.shell.aliases.list()
 ```
 
-An alias names a qualified shell method.
-An alias can define one short switch for a supported Boolean input.
-Duplicate assignments fail before invocation.
+An alias names a qualified shell method or a supported property.
+An alias can set a default for a supported Boolean input.
+It can also define one short switch.
+An explicit input overrides the alias default. Duplicate explicit assignments fail before invocation.
 Explicit paths bypass the alias table.
 
 ## Commands and arguments
@@ -80,7 +81,7 @@ Explicit paths bypass the alias table.
 | `echo` | `out.print` | Optional String `text`, positional slot 1; default empty |
 | `pwd` | `out.print fs.cwd` | None |
 | `cd` | `fs.change_directory` | Required String `path`, slot 1 |
-| `ls` | `fs.list` | Optional String `path`, slot 1; default cwd |
+| `ls`, `ll` | `os.fs.list` | Optional String `path` and Boolean `list`. `ls -l` and `ll` set `list:true`. |
 | `touch` | Ensure file, then native `set_times` | Required String `path`, slot 1; create if absent, then update access and modification times |
 | `cp` | `fs.copy` | `source` slot 1, `destination` slot 2, named `mode`; default replace |
 | `cat` | `fs.copy` | Same parameters; default input stream and output stream, append policy |
@@ -88,6 +89,66 @@ Explicit paths bypass the alias table.
 | `rm` | `fs.remove_file` | Required String `path`, slot 1 |
 | `mkdir` | `fs.create_directory` | Required String `path`, slot 1 |
 | `rmdir` | `fs.remove_directory` | Required String `path`, slot 1; empty directories only |
+
+`os.fs.list` uses the current directory when you omit `path`.
+With `list:true`, it prints the file type, size in bytes, modification time in nanoseconds, and name.
+The shell prints `modify_ns:unsupported` when the file has no modification time.
+The detailed format requires lookup and inspect access for directory entries.
+
+```text
+ls -l /tmp
+ll /tmp
+os.fs.list(path:"/tmp", list:true)
+```
+
+## Diagnostic aliases
+
+```text
+startup profile -> short alias -> os.system.diagnostics method -> report
+```
+
+| Alias | Method under `os.system.diagnostics` |
+| --- | --- |
+| `sys` | `summary` |
+| `ps` | `processes` |
+| `cpu` | `processors` |
+| `pci` | `pci` |
+| `initrd` | `initrd` |
+| `devices` | `devices` |
+| `usb` | `usb` |
+| `resources` | `resources` |
+| `kmem` | `memory` |
+| `events` | `events` |
+| `irqs` | `interrupts` |
+
+The methods print the existing reports and use the current observation permissions.
+Run `context os.system.diagnostics` to see the methods.
+Call `os.system.diagnostics.summary()` to print the system report without an alias.
+Existing disk profiles keep their contents during deployment.
+To add these aliases to an existing profile, copy the new declarations from the [default profile](../../src/user/data/shell-init.sh).
+
+## Process, logs, and power
+
+```text
+help -> active aliases and reflected methods
+pid -> process.pid
+history -> process.shell.history.print
+dmesg -> os.system.log.print
+sync, shutdown, reboot -> os.system methods
+```
+
+Read `process.pid` to get the current shell process ID as an Integer.
+The default `pid` alias prints the same ID with its CLI label.
+The log aliases accept the existing filters. `history on` and `history off` control command capture.
+The power aliases require the system-control right.
+
+Run `help` to list built-in commands, active aliases, and methods and properties in the shell registry.
+Run `help ls` to show an alias and its settings.
+Run `help exec` to show the syntax for a built-in command.
+Run `help os.system.diagnostics` to inspect an object.
+Use the object path to see methods on reflected hardware objects.
+
+## Filesystem commands
 
 `fs.create_file` uses exclusive creation. `fs.ensure_file` preserves existing contents.
 The disk startup profile installs the default aliases. Alias changes apply only to the current shell.
@@ -147,10 +208,10 @@ Unhandled command failure stops the script; an interactive session continues aft
 Bare property expressions display results only interactively. Listing, content commands, and explicit output work in both modes.
 
 Legacy executables receive String arguments or serialized Integer/Boolean values through argv.
-Native constructor and `call` parameter tails retain their separate versioned metadata parser.
-Existing diagnostic commands, `write`, and `edit` retain their original command parsers.
-Legacy `exec` and `call` prepare their arguments after redirection; ordinary external commands validate arguments first.
-This stage does not claim that all legacy commands use reflective argument binding.
+Native constructor parameter tails use the versioned metadata parser.
+`write` and `edit` use their own command parsers.
+`exec` prepares its arguments after redirection. Ordinary external commands validate arguments first.
+The historical `call` command is retired. `paramcheck` still exercises rich provider calls.
 
 ## Limits and next stages
 

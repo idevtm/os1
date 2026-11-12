@@ -106,7 +106,7 @@ def main():
                 rejected = expect(allowed_errors=(b'command failed:', b'system command failed'))
                 assert (b'shell: system command failed: shutdown status=-4; '
                         b'machine remains running') in rejected, rejected
-                assert b'system: shutdown stage=' not in rejected  # Never reached the provider.
+                assert b'system: shutdown stage=' not in rejected
                 run('echo "after rejected shutdown" > "/rejected-shutdown"')
                 clean()
                 run('cat "/rejected-shutdown"', b'after rejected shutdown')

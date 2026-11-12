@@ -46,7 +46,7 @@ def exercise(run, expect):
         ('file "sample"', b'ASCII text\n'),
         ('fs.identify "/tmp"', b'directory\n'),
         ('file "/sbin/init"', b'ELF64\n'),
-        ('file "/diskutil"', b'ELF64\n'),
+        ('file "/bin/diskutil"', b'ELF64\n'),
     ]:
         ok(command + ' > "out"')
         content('out', expected)
@@ -100,7 +100,7 @@ def exercise(run, expect):
     # A native parent can grant READ on descriptor 1; redirection must retain that source.
     result = run('textcheck', b'[user/textcheck] readable stdout input retained ok')
     assert b'[user/textcheck] fail' not in result, result
-    ok('/diskutil sync', b'sync ok')
+    ok('/bin/diskutil sync', b'sync ok')
     ok('kmem', b'kmem complete')
 
 

@@ -12,7 +12,7 @@
 #include <os1/system.hpp>
 #include <os1/vfs.hpp>
 
-#include "interface/parameter_demo.hpp"
+#include "interface/parameter_fixture.hpp"
 #include "interface/shell_startup.hpp"
 #include "shell/program_path.hpp"
 
@@ -488,36 +488,6 @@ bool observe(uint32_t kind, const Record*& records, uint32_t& record_count)
     record_count = header->record_count;
     records = reinterpret_cast<const Record*>(g_observe_buffer + sizeof(Os1ObserveHeader));
     return true;
-}
-
-void run_help()
-{
-    write_string("context [object.path]; Tab explores, Up/Down selects, Enter accepts\n");
-    write_string("files: touch path; write [--append|--replace] path; edit path\n");
-    write_string(
-        "text: head source lines:10; tail source lines:10; grep pattern source; wc source; file "
-        "path\n");
-    write_string("pager: less path; space/enter/f next page, b previous page, q quit\n");
-    write_string("streams: < file, > file, >> file, << delimiter; Ctrl-D ends input\n");
-    write_string(
-        "help echo pid sys ps cpu pci initrd devices usb irqs resources kmem events exec exit sync "
-        "shutdown reboot\n");
-    write_string(
-        "call <image> <method> [field:value | field.case | field:{...}]\nintf <image>: offline "
-        "constructor/method parameter help\n");
-}
-
-void run_pid()
-{
-    write_string("pid: ");
-    const long pid = os1::user::getpid();
-    if(pid < 0)
-    {
-        write_string("error\n");
-        return;
-    }
-    write_unsigned(static_cast<uint64_t>(pid));
-    write_char('\n');
 }
 
 void run_sys()
@@ -996,6 +966,51 @@ void run_events()
     write_string("events complete\n");
 }
 
+long run_diagnostic(int report)
+{
+    switch(report)
+    {
+        case OS1_OBSERVE_SYSTEM:
+            run_sys();
+            break;
+        case OS1_OBSERVE_PROCESSES:
+            run_ps();
+            break;
+        case OS1_OBSERVE_CPUS:
+            run_cpu();
+            break;
+        case OS1_OBSERVE_PCI:
+            run_pci();
+            break;
+        case OS1_OBSERVE_INITRD:
+            run_initrd();
+            break;
+        case OS1_OBSERVE_DEVICES:
+            run_devices();
+            break;
+        case OS1_OBSERVE_USB:
+            run_usb();
+            break;
+        case OS1_OBSERVE_RESOURCES:
+            run_resources();
+            break;
+        case OS1_OBSERVE_KMEM:
+            run_kmem();
+            break;
+        case OS1_OBSERVE_EVENTS:
+            run_events();
+            break;
+        case OS1_OBSERVE_IRQS:
+            run_irqs();
+            break;
+        default:
+            return OS1_ERR_INVALID;
+    }
+    if(output_failed)
+        return OS1_ERR_IO;
+    return command_failed ? OS1_ERR_INVALID : 0;
+}
+
 void run_unknown(const char* command)
 {
     command_failed = true;
@@ -1094,84 +1109,6 @@ const char* raw_tail(const char* raw, unsigned words)
         ++raw;
     return raw;
 }
-void run_call(size_t argc, char** argv, const char* raw)
-{
-    command_failed = true;
-    DiagnosticOutput diagnostic_output;
-    if(argc < 3)
-    {
-        write_string("usage: call <image> <method> [raw named parameters]\n");
-        return;
-    }
-    char path[OS1_PATH_MAX];
-    long image = resolve_command_path(argv[1], path, sizeof(path));
-    if(image < 0)
-    {
-        write_string("call: cannot open image\n");
-        return;
-    }
-    static os1::parameters::Metadata schema, scratch;
-    os1::parameters::Diagnostic d{};
-    os1_constructor_args args{};
-    if(os1::user::parameter_metadata(image, schema, scratch) != 1)
-    {
-        os1::user::close(image);
-        write_string("call: invalid or absent rich metadata\n");
-        return;
-    }
-    if(!os1::user::parameter_arguments(schema, raw_tail(raw, 3), args, d))
-    {
-        os1::user::close(image);
-        parameter_diagnostic(d);
-        return;
-    }
-    os1::user::ParameterClient client;
-    long status = client.start(image, schema, d);
-    os1::user::close(image);
-    unsigned member = 0;
-    if(status >= 0)
-        for(unsigned i = 0; i < client.interface.member_count; ++i)
-        {
-            const auto& m = client.interface.members[i];
-            if(m.kind == os1::interface::Method && m.flags && strings_equal(m.name, argv[2]))
-                member = m.id;
-        }
-    os1_ipc_result result{};
-    if(status >= 0)
-        status =
-            member ? client.call(member, args.payload, args.size, result) : OS1_ERR_UNSUPPORTED;
-    client.stop();
-    if(status < 0 || result.transport_status || result.application_status)
-    {
-        write_string("call failed status=");
-        write_signed(status < 0                ? status
-                     : result.transport_status ? result.transport_status
-                                               : result.application_status);
-        write_char('\n');
-        return;
-    }
-    command_failed = false;
-    output_fd = diagnostic_output.saved;
-    if(client.interface.interface_id == os1::parameter_demo::interface_id &&
-       member == os1::parameter_demo::Render && result.payload_bytes >= 8)
-    {
-        write_string("parameter method count=");
-        write_unsigned(os1::constructor::decode(result.payload, 8));
-        write_string(" text=");
-        write_bytes(reinterpret_cast<const char*>(result.payload + 8), result.payload_bytes - 8);
-        write_char('\n');
-    }
-    else
-    {
-        write_string("call result bytes=");
-        write_unsigned(result.payload_bytes);
-        write_string(" hex=");
-        for(unsigned i = 0; i < result.payload_bytes; ++i)
-            write_hex(result.payload[i], 2);
-        write_char('\n');
-    }
-}
-
 void run_external(size_t argc,
                   char** argv,
                   const char* raw,
@@ -1555,7 +1492,7 @@ bool load_shell_profile()
     if(profile.fd == OS1_ERR_NOT_FOUND)
         return true;
     static os1::context::Data saved_environment;
-    static Alias saved_aliases[32];
+    static decltype(aliases) saved_aliases;
     saved_environment = u::environment_data;
     __builtin_memcpy(saved_aliases, aliases, sizeof(aliases));
     files::Reader reader;
@@ -1649,11 +1586,16 @@ static int shell_main(int argc_main, char** argv_main)
     os1::user::commands::initialize();
     os1::user::discovery::extend = os1::user::commands::extend;
     os1::user::commands::extra_call = [](const char* name, const char* text) -> long {
+        const int report = os1::user::shell_runtime::diagnostic_kind(name);
+        if(report >= 0)
+            return run_diagnostic(report);
         static os1::shell::Command command;
         if(!os1::shell::parse(text, command))
             return OS1_ERR_INVALID;
         run_log(
             os1::discovery::same(name, "process.shell.history.print"), command.argc, command.argv);
+        if(output_failed)
+            return OS1_ERR_IO;
         return command_failed ? OS1_ERR_INVALID : 0;
     };
     if(!load_shell_profile())
@@ -1845,12 +1787,6 @@ static int shell_main(int argc_main, char** argv_main)
         {
             continue;
         }
-        // These are existing system-control commands under their discovery paths.
-        if(os1::user::shell_runtime::prefix(tokens[0], "os.system.") &&
-           (strings_equal(tokens[0] + 10, "sync") || strings_equal(tokens[0] + 10, "shutdown") ||
-            strings_equal(tokens[0] + 10, "reboot")))
-            tokens[0] += 10;
-
         static os1::user::shell_runtime::Call call;
         if(!call.prepare(parsed, !console_input))
         {
@@ -1870,15 +1806,13 @@ static int shell_main(int argc_main, char** argv_main)
                 return 1;
             continue;
         }
-        const bool log_command = strings_equal(tokens[0], "dmesg") ||
-                                 strings_equal(tokens[0], "context") ||
-                                 strings_equal(tokens[0], "process.context.list") ||
-                                 strings_equal(tokens[0], "os.system.log.print") ||
-                                 strings_equal(tokens[0], "history") ||
-                                 strings_equal(tokens[0], "process.shell.history.print");
+        using Method = os1::user::shell_runtime::Method;
+        const bool inspection = strings_equal(tokens[0], "help") ||
+                                strings_equal(tokens[0], "context") ||
+                                strings_equal(tokens[0], "process.context.list");
         bool external = call.method == os1::user::shell_runtime::Method::Unknown;
-        for(const char* builtin : os1::user::shell_runtime::builtins)
-            if(strings_equal(tokens[0], builtin))
+        for(const auto& builtin : os1::user::shell_runtime::builtins)
+            if(strings_equal(tokens[0], builtin.name))
                 external = false;
         os1::user::files::Handle executable;
         char executable_path[OS1_PATH_MAX]{};
@@ -1966,7 +1900,7 @@ static int shell_main(int argc_main, char** argv_main)
                 return 1;
             continue;
         }
-        CommandSync command_sync((may_write(call.method) && !log_command) || parsed.output_name[0]);
+        CommandSync command_sync((may_write(call.method) && !inspection) || parsed.output_name[0]);
         os1::user::files::Streams streams;
         if(!streams.apply(parsed, here, copy_source, call.recursive))
         {
@@ -1995,14 +1929,26 @@ static int shell_main(int argc_main, char** argv_main)
                 command_failed = true;
             }
         }
-        else if(strings_equal(tokens[0], "dmesg") ||
-                strings_equal(tokens[0], "os.system.log.print") ||
-                strings_equal(tokens[0], "history") ||
-                strings_equal(tokens[0], "process.shell.history.print"))
-            run_log(strings_equal(tokens[0], "history") ||
-                        strings_equal(tokens[0], "process.shell.history.print"),
-                    argc,
-                    tokens);
+        else if(call.method == Method::Log)
+            run_log(strings_equal(call.target, "process.shell.history.print"), argc, tokens);
+        else if(call.method == Method::SystemControl)
+        {
+            const unsigned member = os1::user::shell_runtime::system_member(call.target);
+            const long status = argc == 1 ? os1::user::system_control(member) : OS1_ERR_INVALID;
+            if(status < 0)
+            {
+                os1::user::files::message("shell: system command failed: ");
+                os1::user::files::message(tokens[0]);
+                os1::user::files::message(" status=-");
+                os1::user::files::number(2, uint64_t(0) - static_cast<uint64_t>(status));
+                os1::user::files::message("; machine remains running\n");
+                command_failed = true;
+            }
+        }
+        else if(call.method == os1::user::shell_runtime::Method::Diagnostic)
+        {
+            run_diagnostic(os1::user::shell_runtime::diagnostic_kind(call.target));
+        }
         else if(call.method != os1::user::shell_runtime::Method::Unknown)
         {
             long result = os1::user::shell_runtime::execute(call);
@@ -2041,57 +1987,11 @@ static int shell_main(int argc_main, char** argv_main)
         }
         else if(strings_equal(tokens[0], "help"))
         {
-            run_help();
-        }
-        else if(strings_equal(tokens[0], "pid"))
-        {
-            run_pid();
-        }
-        else if(strings_equal(tokens[0], "sys"))
-        {
-            run_sys();
-        }
-        else if(strings_equal(tokens[0], "ps"))
-        {
-            run_ps();
-        }
-        else if(strings_equal(tokens[0], "cpu"))
-        {
-            run_cpu();
-        }
-        else if(strings_equal(tokens[0], "pci"))
-        {
-            run_pci();
-        }
-        else if(strings_equal(tokens[0], "initrd"))
-        {
-            run_initrd();
-        }
-        else if(strings_equal(tokens[0], "usb"))
-            run_usb();
-        else if(strings_equal(tokens[0], "devices"))
-        {
-            run_devices();
-        }
-        else if(strings_equal(tokens[0], "irqs"))
-        {
-            run_irqs();
-        }
-        else if(strings_equal(tokens[0], "resources"))
-        {
-            run_resources();
-        }
-        else if(strings_equal(tokens[0], "kmem"))
-        {
-            run_kmem();
-        }
-        else if(strings_equal(tokens[0], "events"))
-        {
-            run_events();
-        }
-        else if(strings_equal(tokens[0], "call"))
-        {
-            run_call(argc, tokens, raw);
+            if(argc > 2 || os1::user::prompt::help(argc == 2 ? tokens[1] : "", output_fd) < 0)
+            {
+                os1::user::files::message("help: unavailable or invalid path\n");
+                command_failed = true;
+            }
         }
         else if(strings_equal(tokens[0], "exec"))
         {
@@ -2099,28 +1999,6 @@ static int shell_main(int argc_main, char** argv_main)
                 run_exec(argc, tokens, raw);
             else
                 command_failed = true;
-        }
-        else if(strings_equal(tokens[0], "sync") || strings_equal(tokens[0], "system.sync") ||
-                strings_equal(tokens[0], "shutdown") ||
-                strings_equal(tokens[0], "system.shutdown") || strings_equal(tokens[0], "reboot") ||
-                strings_equal(tokens[0], "system.reboot"))
-        {
-            unsigned member =
-                strings_equal(tokens[0], "shutdown") || strings_equal(tokens[0], "system.shutdown")
-                    ? OS1_SYSTEM_SHUTDOWN
-                : strings_equal(tokens[0], "reboot") || strings_equal(tokens[0], "system.reboot")
-                    ? OS1_SYSTEM_REBOOT
-                    : OS1_SYSTEM_SYNC;
-            long status = argc == 1 ? os1::user::system_control(member) : OS1_ERR_INVALID;
-            if(status < 0)
-            {
-                os1::user::files::message("shell: system command failed: ");
-                os1::user::files::message(tokens[0]);
-                os1::user::files::message(" status=-");
-                os1::user::files::number(2, uint64_t(0) - static_cast<uint64_t>(status));
-                os1::user::files::message("; machine remains running\n");
-                command_failed = true;
-            }
         }
         else if(strings_equal(tokens[0], "exit"))
         {

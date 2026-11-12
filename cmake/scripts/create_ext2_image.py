@@ -77,20 +77,27 @@ def create(output, utility, mib=32, reset=False, manifest=None, *, update_existi
         table[(number - 1) * 128:number * 128] = record
         inode_map[(number - 1) // 8] |= 1 << ((number - 1) % 8)
 
-    directory = bytearray(BLOCK)
-    entries = [(2, '.', 2), (2, '..', 2), (11, 'diskutil', 1), (12, 'readme', 1)]
-    offset = 0
-    for i, (number, name, kind) in enumerate(entries):
-        encoded = name.encode()
-        length = BLOCK - offset if i == len(entries) - 1 else (8 + len(encoded) + 3) & ~3
-        struct.pack_into('<IHBB', directory, offset, number, length, len(encoded), kind)
-        directory[offset + 8:offset + 8 + len(encoded)] = encoded
-        offset += length
-    inode(2, 0o40755, directory, 2)
+    def directory(number, parent, children):
+        content = bytearray(BLOCK)
+        entries = [(number, '.', 2), (parent, '..', 2), *children]
+        offset = 0
+        for i, (child, name, kind) in enumerate(entries):
+            encoded = name.encode()
+            length = BLOCK - offset if i == len(entries) - 1 else (8 + len(encoded) + 3) & ~3
+            struct.pack_into('<IHBB', content, offset, child, length, len(encoded), kind)
+            content[offset + 8:offset + 8 + len(encoded)] = encoded
+            offset += length
+        inode(number, 0o40755, content, 2 + sum(kind == 2 for _, _, kind in children))
+
+    directory(2, 2, [(13, 'bin', 2), (14, 'etc', 2)])
+    directory(13, 2, [(11, 'diskutil', 1)])
+    directory(14, 2, [(12, 'readme', 1)])
     inode(11, 0o100755, Path(utility).read_bytes())
-    inode(12, 0o100644, b'Persistent ext2 storage. Run /diskutil sync before stopping QEMU.\n')
+    readme = Path(__file__).resolve().parents[2] / 'src/user/data/readme'
+    inode(12, 0o100644, readme.read_bytes())
+    free_inodes = inodes - 14  # Reserved inodes and the four seed entries.
     superblock = bytearray(1024)
-    for offset, value in {0: inodes, 4: blocks, 12: blocks - next_block, 16: inodes - 12,
+    for offset, value in {0: inodes, 4: blocks, 12: blocks - next_block, 16: free_inodes,
                           24: 2, 28: 2, 32: 32768, 36: 32768, 40: inodes,
                           76: 1, 84: 11, 96: 2}.items():
         put32(superblock, offset, value)
@@ -101,7 +108,7 @@ def create(output, utility, mib=32, reset=False, manifest=None, *, update_existi
     group = bytearray(BLOCK)
     for offset, value in {0: 2, 4: 3, 8: 4}.items():
         put32(group, offset, value)
-    for offset, value in {12: blocks - next_block, 14: inodes - 12, 16: 1}.items():
+    for offset, value in {12: blocks - next_block, 14: free_inodes, 16: 3}.items():
         put16(group, offset, value)
     mbr = bytearray(512)
     mbr[450] = 0x83

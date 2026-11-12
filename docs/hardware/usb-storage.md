@@ -28,10 +28,10 @@ The [deployment workflow](../filesystems/program-deployment.md) preserves other 
 Inside the guest, run these commands:
 
 ```text
-/diskutil seed
-/diskutil verify
+/bin/diskutil seed
+/bin/diskutil verify
 echo persistent > /note
-/diskutil sync
+/bin/diskutil sync
 ```
 
 Select **Checks > Storage > USB persistence and removal** to run the USB checks.

@@ -42,8 +42,9 @@ with tempfile.TemporaryDirectory() as temporary:
         path = entry['destination']
         assert installed[path][0] == (0o100644 if entry in resources else 0o100755), path
         assert installed[path][1] == hashlib.sha256(Path(entry['source']).read_bytes()).hexdigest(), path
+assert '/diskutil' not in installed and '/readme' not in installed
 assert not any('/bin/' + name in [e['destination'] for e in programs] for name in ('init', 'rescue'))
-assert {'/bin/sh', '/bin/ls', '/bin/cat', '/bin/textprocessor', '/bin/counter', '/bin/activation', '/bin/intf',
+assert {'/bin/sh', '/bin/ls', '/bin/cat', '/bin/textprocessor', '/bin/counter', '/bin/activation', '/bin/intf', '/bin/diskutil',
         '/bin/paramdemo', '/bin/buffercheck', '/bin/lshw', '/bin/lspci', '/bin/lsusb', '/bin/lsblk', '/bin/gfxdemo'} <= {e['destination'] for e in programs}
 packages = [e for e in resources if e['destination'].startswith('/system/drivers/')]
 expected = {'virtio-net', 'firmware-framebuffer'}
@@ -67,5 +68,7 @@ for entry in packages:
         assert package['match'] == 'validated firmware framebuffer'
         assert 'pci' not in package
 assert seen == expected
-assert {e['destination'] for e in resources} == {'/etc/motd', '/etc/shell/init.sh', *(e['destination'] for e in packages)}
+assert {e['destination'] for e in resources} == {
+    '/etc/motd', '/etc/readme', '/etc/shell/init.sh', *(e['destination'] for e in packages)
+}
 print(f'Two recovery executables; {len(programs)} complete disk ELFs; {len(resources)} resource defaults')

@@ -33,7 +33,7 @@ def main():
                     ('echo "measurement" > "/note"', None)]
         for _ in range(20):
             commands.extend([('touch "/tmp/note"', None), ('touch "/note"', None)])
-    commands.extend([('/diskutil "sync"', b'sync ok'), ('kmem', b'kmem complete')])
+    commands.extend([('/bin/diskutil "sync"', b'sync ok'), ('kmem', b'kmem complete')])
     results = []
     for firmware in ('bios', 'uefi'):
         for repeat in range(3):

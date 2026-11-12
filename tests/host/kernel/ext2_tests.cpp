@@ -239,10 +239,10 @@ TEST_F(Ext2, DirectoryMutationAndCapacity)
     uint32_t number = 0;
     ext2::Inode directory{};
     ASSERT_EQ(fs->create(2, root, "sub", 3, true, number, directory), 0);
-    EXPECT_EQ(ext2::u16(root.bytes + 26), 3);
+    EXPECT_EQ(ext2::u16(root.bytes + 26), 5);
     ASSERT_EQ(fs->rename(2, root, number, directory, "sub", 3, "renamed", 7), 0);
     ASSERT_EQ(fs->remove(2, root, "renamed", 7, number, directory), 0);
-    EXPECT_EQ(ext2::u16(root.bytes + 26), 2);
+    EXPECT_EQ(ext2::u16(root.bytes + 26), 4);
     ASSERT_EQ(fs->sync(), 0);
     auto reload = std::make_unique<ext2::Volume>();
     ASSERT_EQ(reload->mount(disk.io()), 0);
@@ -259,7 +259,7 @@ TEST_F(Ext2, DirectoryMutationAndCapacity)
         ASSERT_EQ(r, 0);
         ++count;
     }
-    EXPECT_EQ(count, 116u);  // 128 inodes minus 10 reserved and two seed files.
+    EXPECT_EQ(count, 114u);  // 128 inodes minus 10 reserved, two directories, and two files.
 }
 TEST_F(Ext2, DiskFullRejectsWriteWithoutChangingSize)
 {
@@ -309,8 +309,13 @@ TEST_F(Ext2, VfsMountAuthoritySnapshotAndUnlinkPolicy)
     ASSERT_EQ(ext2_mount(&root_node, device), 0);
     auto* mount = root_node.children;
     ASSERT_NE(mount, nullptr);
+    NativeObject* directory = nullptr;
+    ASSERT_EQ(mount->operations->lookup(mount, "bin", 3, directory), 0);
+    auto* bin = static_cast<VfsNode*>(directory);
     NativeObject* object = nullptr;
-    ASSERT_EQ(mount->operations->lookup(mount, "diskutil", 8, object), 0);
+    const long lookup = bin->operations->lookup(bin, "diskutil", 8, object);
+    object_release(directory);
+    ASSERT_EQ(lookup, 0);
     auto* executable = static_cast<VfsNode*>(object);
     EXPECT_TRUE(object->allowed_rights & OS1_RIGHT_EXECUTE);
     EXPECT_FALSE(object->allowed_rights & OS1_RIGHT_WRITE);
@@ -360,8 +365,13 @@ TEST_F(Ext2, ReadOnlyMountKeepsReadsAndSkipsDeviceFlush)
     OpenInstance* opened = nullptr;
     EXPECT_EQ(mount->operations->create(mount, "new", 3, OS1_OBJECT_FILE, opened), OS1_ERR_ACCESS);
     EXPECT_EQ(opened, nullptr);
+    NativeObject* directory = nullptr;
+    ASSERT_EQ(mount->operations->lookup(mount, "etc", 3, directory), 0);
+    auto* etc = static_cast<VfsNode*>(directory);
     NativeObject* object = nullptr;
-    ASSERT_EQ(mount->operations->lookup(mount, "readme", 6, object), 0);
+    const long lookup = etc->operations->lookup(etc, "readme", 6, object);
+    object_release(directory);
+    ASSERT_EQ(lookup, 0);
     auto* file = static_cast<VfsNode*>(object);
     EXPECT_FALSE(file->allowed_rights & OS1_RIGHT_WRITE);
     EXPECT_FALSE(file->interfaces & OS1_INTERFACE_BYTE_OUTPUT);

@@ -43,7 +43,7 @@ sudo apt install e2fsprogs
 
 The deployment tool finds `debugfs` and `e2fsck` through PATH and standard Homebrew or Linux locations.
 The QEMU image operation itself needs no sudo.
-Stop QEMU before deployment. Synchronize guest writes with `/diskutil sync` before stopping it.
+Stop QEMU before deployment. Synchronize guest writes with `/bin/diskutil sync` before stopping it.
 The tool rejects an image with an active conflicting lock.
 Do not access the image through a host filesystem mount during deployment.
 
@@ -87,10 +87,10 @@ Kernel drivers remain built into the kernel. Moving programs does not change sto
 ## Program manifest
 
 The default manifest installs the full shell and bundled programs under `/bin`.
-It also retains `/diskutil` for existing synchronization workflows.
+Use `/bin/diskutil` to synchronize storage.
 Initrd contains only `init` and `rescue`.
-The manifest installs `/etc/motd` and `/etc/shell/init.sh` when they are absent.
-Deployment preserves existing copies of both files.
+The manifest installs missing defaults for `/etc/motd`, `/etc/readme`, and `/etc/shell/init.sh`.
+Deployment preserves existing copies. It also preserves unlisted files, including old copies at `/diskutil` and `/readme`.
 The default shell profile adds `/bin` to the search list.
 Names containing `/` bypass search. Providers in verification programs use explicit `/bin` paths.
 New QEMU images receive the manifest during creation.
@@ -105,7 +105,7 @@ For additional programs, save this example as `build/my-programs.json`:
 {
   "version": 3,
   "programs": [
-    {"source": "artifacts/user/diskutil.elf", "destination": "/diskutil"},
+    {"source": "artifacts/user/diskutil.elf", "destination": "/bin/diskutil"},
     {"source": "artifacts/user/buffercheck.elf", "destination": "/bin/buffercheck"},
     {"source": "artifacts/user/textprocessor.elf", "destination": "/bin/textprocessor"}
   ],

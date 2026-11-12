@@ -226,11 +226,11 @@ def main():
         expect(b'edit> ')
         send(b'\x04')
         expect()
-        # Errors stay on stderr; only successful method output enters the file.
-        assert b'call: cannot open image' in run('call absent render > /tmp/call-error')
-        content('/tmp/call-error', '')
-        expected_error = b'parameter error' if args.program_disk else b'call: cannot open image'
-        assert expected_error in run('call paramdemo render unknown:1 > /tmp/param-error')
+        # Exec errors stay on stderr when the shell redirects stdout.
+        assert b'exec failed: absent' in run('exec absent > /tmp/exec-error')
+        content('/tmp/exec-error', '')
+        expected_error = b'parameter error' if args.program_disk else b'exec failed: paramdemo'
+        assert expected_error in run('exec paramdemo unknown:1 > /tmp/param-error')
         content('/tmp/param-error', '')
         assert b'command failed:' not in run('cat - < /tmp/writer > /tmp/dash')
         content('/tmp/dash', 'replaced\n')

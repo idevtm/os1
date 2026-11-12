@@ -831,6 +831,20 @@ inline bool evaluate(const Tree&, unsigned, Value&, unsigned, bool = false);
         return fail("unknown native member");
     return status < 0 ? fail("console method failed", status) : true;
 }
+inline bool boolean_assignment(Frame& f, unsigned slot, shell_runtime::Method method, bool& result)
+{
+    const char* expected = shell_runtime::boolean_parameter(method);
+    if(!expected || f.nodes[slot] < 0)
+        return false;
+    const int parameter = os1::context::child(f.data, f.nodes[slot], "parameter");
+    const int value = os1::context::child(f.data, f.nodes[slot], "value");
+    char field[64]{};
+    if(parameter < 0 || value < 0 || f.data.nodes[value].kind != OS1_VALUE_BOOLEAN ||
+       !os1::context::string(f.data, parameter, field, sizeof(field)) || !same(field, expected))
+        return false;
+    result = f.data.nodes[value].integer != 0;
+    return true;
+}
 inline bool alias_call(const char* operation, Frame& f)
 {
     using namespace shell_runtime;
@@ -853,8 +867,13 @@ inline bool alias_call(const char* operation, Frame& f)
         bool qualified = false;
         for(const char* c = target; *c; ++c)
             qualified |= *c == '.';
-        if(!qualified || method_for(target) == Method::Unknown)
+        const auto method = method_for(target);
+        if(!qualified || method == Method::Unknown)
             return fail("invalid alias target");
+        bool default_value = false;
+        const bool has_default = f.nodes[2] >= 0;
+        if(has_default && !boolean_assignment(f, 2, method, default_value))
+            return fail("invalid Boolean default assignment");
         if(!alias)
             for(auto& entry : aliases)
                 if(!entry.name[0])
@@ -867,6 +886,8 @@ inline bool alias_call(const char* operation, Frame& f)
         *alias = {};
         os1::discovery::copy(alias->name, sizeof(alias->name), name);
         os1::discovery::copy(alias->target, sizeof(alias->target), target);
+        alias->has_default = has_default;
+        alias->default_value = default_value;
         return true;
     }
     if(!alias)
@@ -877,22 +898,7 @@ inline bool alias_call(const char* operation, Frame& f)
         return true;
     }
     if(same(operation, "show"))
-    {
-        if(!prompt::output(1, alias->name) || !prompt::output(1, " -> ") ||
-           !prompt::output(1, alias->target))
-            return fail("alias output failed");
-        if(alias->option)
-        {
-            char option[] = {' ', '-', alias->option, 0};
-            if(!prompt::output(1, option) ||
-               !prompt::output(1,
-                               method_for(alias->target) == Method::Usage ? " -> logical:"
-                                                                          : " -> recursive:") ||
-               !prompt::output(1, alias->option_value ? "true" : "false"))
-                return fail("alias output failed");
-        }
-        return prompt::output(1, "\n") || fail("alias output failed");
-    }
+        return prompt::describe_alias(1, *alias) || fail("alias output failed");
     char spelling[4]{};
     if(!f.string(1, spelling, sizeof(spelling)) || spelling[0] != '-' || spelling[1] < 'a' ||
        spelling[1] > 'z' || spelling[2])
@@ -906,19 +912,11 @@ inline bool alias_call(const char* operation, Frame& f)
     }
     if(alias->option)
         return fail("alias already has a switch");
-    int parameter = os1::context::child(f.data, f.nodes[2], "parameter");
-    int value = os1::context::child(f.data, f.nodes[2], "value");
-    char field[64]{};
-    const auto method = method_for(alias->target);
-    const bool recursive =
-        method == Method::Copy || method == Method::Remove || method == Method::RemoveDirectory;
-    if(parameter < 0 || value < 0 || f.data.nodes[value].kind != OS1_VALUE_BOOLEAN ||
-       !os1::context::string(f.data, parameter, field, sizeof(field)) ||
-       !((recursive && same(field, "recursive")) ||
-         (method == Method::Usage && same(field, "logical"))))
+    bool value = false;
+    if(!boolean_assignment(f, 2, method_for(alias->target), value))
         return fail("invalid Boolean switch assignment");
     alias->option = spelling[1];
-    alias->option_value = f.data.nodes[value].integer != 0;
+    alias->option_value = value;
     return true;
 }
 [[gnu::noinline]] inline bool execute_prepared(const char* path,
@@ -964,6 +962,11 @@ inline bool alias_call(const char* operation, Frame& f)
         return list >= 0 &&
                os1::shell::copy_value(environment_data, list, out.data, 0, "value", 5) >= 0;
     }
+    if(same(canonical, "process.pid"))
+    {
+        const long pid = getpid();
+        return pid < 0 ? fail("process ID unavailable", pid) : out.integer(pid);
+    }
     if(same(canonical, "os.fs.cwd"))
     {
         char cwd_path[OS1_PATH_MAX + 1];
@@ -998,6 +1001,11 @@ inline bool alias_call(const char* operation, Frame& f)
         if(status < 0)
             return fail("context path unavailable", status);
         return true;
+    }
+    if(shell_runtime::diagnostic_kind(canonical) >= 0)
+    {
+        long status = extra_call ? extra_call(canonical, f.legacy.bytes) : OS1_ERR_UNSUPPORTED;
+        return status >= 0 || fail("diagnostic report failed", status);
     }
     if(same(canonical, "process.shell.history.print") || same(canonical, "os.system.log.print"))
     {

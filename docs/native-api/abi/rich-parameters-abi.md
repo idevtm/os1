@@ -101,25 +101,21 @@ to that retained object. No second full schema appears in `.rodata`.
 intf /bin/paramdemo
 paramdemo
 paramdemo initial:4 source.text:'Hi there' options.suffix:null
-call paramdemo render mode.thorough source.text:"hello world" options:{limit:5,suffix:null}
-call paramdemo render source.text:'a"b' options.suffix:null
-call paramdemo render label:null source.none
+paramdemo mode.thorough source.text:"hello world" options:{limit:5,suffix:null}
+paramdemo source.text:'a"b' options.suffix:null
+paramdemo label:null source.none
 paramdemo mode:bogus
-call paramdemo render source.bogus
+paramdemo source.bogus
 paramcheck
 ```
 
-Expected results, respectively: offline help; constructor count 1/text `!`;
-constructor count 12/text `Hi there`; method count 5/text `HELLO`; method count
-3/text `a"b`; method count 1/text `!`; structured enum error; structured unknown
-case error; `[user/paramcheck] ok`.
+The valid constructors print the rendered count and text.
+The invalid inputs report an unknown enumerator and an unknown variant case.
+`paramcheck` checks provider method calls and prints `[user/paramcheck] ok`.
 
-The shell snapshots the **original raw line before whitespace tokenization**.
-Only command/image/method prefixes are skipped. The exact remaining byte span
-reaches the shared parser for rich constructors, `exec`, and `call`. Ordinary
-program argv and legacy `counter --initial 10 --ceiling 100` remain unchanged.
-Quotes are deliberately meaningful only in the rich parameter tail; this does
-not add general shell quoting, pipelines, expansion, or evaluation.
+The shell passes the original parameter text to the rich constructor parser.
+The parser also handles rich constructor parameters for `exec`.
+Programs with legacy constructors can still use options such as `counter --initial 10 --ceiling 100`.
 
 The existing console/shell accepts at most 127 bytes per line. Keep interactive
 commands below this bound. Common parser callers can supply up to 4096 bytes;
@@ -173,20 +169,14 @@ enumeration identities, optional omission/nullability, canonical typed defaults,
 bounds, summaries, descriptions, units and formats. A malformed binding fails
 inspection. `.os.constructor` v1 and its old display remain supported.
 
-`call <image> <method> <raw arguments>` reads metadata from the same retained
-EXECUTE|READ|SEEK|INSPECT executable handle used to launch. `ParameterClient`
-validates interface/binding metadata, sends normalized constructor defaults,
-creates a private endpoint pair, and grants only the provider endpoint as fd 3.
-The child receives no root, cwd, standard streams, extra images, or ambient path
-authority. Ready identity is checked. Startup and each call have a two-second
-monotonic deadline. On completion/failure the caller closes its endpoint,
-requests kernel-supervised private-child stop, and reaps. Operations are closed.
+`ParameterClient` uses a retained EXECUTE|READ|SEEK|INSPECT executable handle.
+It validates interface and binding metadata, sends normalized constructor defaults, and creates a private endpoint pair.
+It grants only the provider endpoint as fd 3 and checks the provider identity at startup.
+Startup and each call have a two-second monotonic deadline.
+The caller closes the endpoint, stops the private child, reaps it, and closes its operations.
 
-The reusable client supports any implemented method explicitly bound to this
-single-schema profile. For `paramdemo.render`, shell output decodes count/text;
-other bound interfaces display response bytes as hex. These response presentation
-choices do not determine input layout. `ParameterClient` and VFS normalization
-scratch buffers are intended for this single-threaded synchronous userspace.
-
+The client supports implemented methods bound to this single-schema profile.
+`paramcheck` exercises this profile through the reusable client.
+The historical shell command `call` is retired.
 
 See the [implementation record](../../archive/native-api/2026-11-05-client-sessions-and-parameters.md) for validation.

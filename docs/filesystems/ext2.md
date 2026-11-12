@@ -45,11 +45,11 @@ Do not mount the backing filesystem on the host while QEMU uses it.
 
 ```text
 ls /
-/diskutil seed
-/diskutil verify
+/bin/diskutil seed
+/bin/diskutil verify
 echo "persistent note" > /note
 cat /note
-/diskutil sync
+/bin/diskutil sync
 ```
 
 `seed` creates a deterministic 128 KiB file and synchronizes it.
