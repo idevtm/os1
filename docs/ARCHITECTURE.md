@@ -442,7 +442,9 @@ Both boot paths combine consecutive descriptors when the ranges touch and have e
 They combine ranges in either direction and preserve firmware order.
 If more than 128 ranges remain, the boot path reports that it omitted ranges.
 It keeps disjoint usable ranges and removes overlaps with retained and omitted non-usable ranges.
-If an omitted range splits a usable range, the boot path keeps its lower part.
+If a non-usable range splits a usable range, the boot path keeps its lower part.
+After truncation, BIOS checks usable coverage of the temporary page tables before it writes them.
+It also checks the fixed kernel, bootstrap, and page-frame bitmap window.
 
 The shim translates the framebuffer, RSDP, SMBIOS, and initrd pointers into physical addresses.
 It copies the normalized map and builds `LowHandoffBootInfoStorage` after the loaded kernel image.

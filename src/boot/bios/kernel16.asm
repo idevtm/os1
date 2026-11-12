@@ -250,6 +250,20 @@ loader_full_main16:
     mov si, str_e820_truncated
     call print16
     pop bp
+    mov eax, KERNEL_RESERVED_PHYSICAL_START
+    mov edx, KERNEL_RESERVED_PHYSICAL_END + PAGE_FRAME_BITMAP_SIZE_BYTES
+    call e820_usable32
+    jc .map_invalid
+    mov eax, EARLY_LONG_MODE_PAGE_TABLES_ADDRESS
+    mov edx, EARLY_LONG_MODE_PAGE_TABLES_ADDRESS + EARLY_PAGE_TABLE_BYTES
+    call e820_usable32
+    jnc .map_ready
+.map_invalid:
+    mov si, str_e820_destinations
+    call print16
+    cli
+    hlt
+    jmp $
 .map_ready:
 	; e820 success
 	xor eax, eax
@@ -361,6 +375,7 @@ newline			db 10, 0
 space		   	db " ", 0
 str_loader16_hello   	db "[loader16] hello", 13, 10, 0
 str_no_long_mode   		db "[loader16] 64bit mode not available", 13, 10, 0
+str_e820_destinations   db "[loader16] Retained memory map does not cover bootstrap RAM", 13, 10, 0
 str_e820_truncated      db "[loader16] Memory map capacity reached; extra ranges omitted", 13, 10, 0
 str_e820_failed			db "[loader16] Memory detection failed", 13, 10, 0
 str_elf_fail_disk    	db "[loader16] ELF load disk error", 13, 10, 0
@@ -474,15 +489,20 @@ loader_main64:
 	ja .elf_program_error
 
 	mov rax, [p_paddr]
+	cmp rax, KERNEL_RESERVED_PHYSICAL_START
+	jb .elf_program_error
+	mov rcx, rax
+	add rcx, [p_memsz]
+	jc .elf_program_error
+	cmp rcx, KERNEL_RESERVED_PHYSICAL_END - KERNEL_POST_IMAGE_RESERVE_BYTES
+	ja .elf_program_error
 	cmp rax, [kernel_load_start]
 	jae .load_start_ok
 	mov [kernel_load_start], rax
 .load_start_ok:
-	mov rax, [p_paddr]
-	add rax, [p_memsz]
-	cmp rax, [kernel_load_end]
+	cmp rcx, [kernel_load_end]
 	jbe .load_end_ok
-	mov [kernel_load_end], rax
+	mov [kernel_load_end], rcx
 .load_end_ok:
 
 	mov rdi, [p_paddr]

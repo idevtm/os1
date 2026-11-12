@@ -194,6 +194,59 @@ do_e820:
 .truncated: db 0
 .reserved_end: dq 0
 
+; CF clear when the retained usable ranges cover [EAX, EDX).
+; BP is the retained record count. The input map has excluded reservations.
+e820_usable32:
+    push eax
+    push ebx
+    push ecx
+    push edi
+    push si
+    mov ebx, eax
+.scan:
+    mov edi, ebx
+    mov si, [cs:do_e820.map_start]
+    mov cx, bp
+.next:
+    jcxz .pass_done
+    cmp dword [es:si + 16], 1
+    jne .skip
+    cmp dword [es:si + 4], 0
+    jne .skip
+    mov eax, [es:si]
+    cmp eax, ebx
+    ja .skip
+    cmp dword [es:si + 12], 0
+    jne .covered
+    add eax, [es:si + 8]
+    jc .covered
+    cmp eax, edx
+    jae .covered
+    cmp eax, edi
+    jbe .skip
+    mov edi, eax
+.skip:
+    add si, 24
+    dec cx
+    jmp .next
+.pass_done:
+    cmp edi, ebx
+    jbe .uncovered
+    mov ebx, edi
+    jmp .scan
+.uncovered:
+    stc
+    jmp .restore
+.covered:
+    clc
+.restore:
+    pop si
+    pop edi
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
 ; Function: check_a20
 ;
 ; Purpose: to check the status of the a20 line in a completely self-contained state-preserving way.

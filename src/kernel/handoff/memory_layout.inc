@@ -22,6 +22,7 @@
 
 ; After BIOS disk and boot-log I/O, reuse their scratch page for page tables.
 %define EARLY_LONG_MODE_PAGE_TABLES_ADDRESS 0x9000
+%define EARLY_PAGE_TABLE_BYTES (5 * PAGE_SIZE)
 %include "kernel_layout.inc"
 
 %define AP_STARTUP_CPU_PAGES_ADDRESS (AP_TRAMPOLINE_ADDRESS + PAGE_SIZE / 2)
@@ -31,6 +32,8 @@
 %define AP_STARTUP_IDT_SIZE_BYTES 6
 
 %define EARLY_RESERVED_PHYSICAL_END 0x20000
+; Keep in sync with kPageFrameBitmapSizeBytes in memory_layout.h.
+%define PAGE_FRAME_BITMAP_SIZE_BYTES 0x80000
 
 ; Persistent RAM boot log for BIOS bring-up on real hardware. The BIOS loader
 ; saves the previous boot's log from this window onto the boot disk, re-arms the
