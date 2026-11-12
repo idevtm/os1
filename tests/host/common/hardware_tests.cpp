@@ -370,7 +370,7 @@ TEST_F(NormalizedHardware, StorageForwardAndReverseIdentityAndLiveGeneration)
     ASSERT_EQ(1u, mounts.count);
     unsigned current = mounts.nodes[0].id;
     auto name = inspect(current + 2, OS1_HARDWARE_DESCRIBE);
-    EXPECT_STREQ("/disk", name.nodes[0].text);
+    EXPECT_STREQ("/", name.nodes[0].text);
     for(unsigned i = 0; i < 4; ++i)
     {
         auto backing = inspect(current + 33);

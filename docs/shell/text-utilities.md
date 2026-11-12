@@ -29,13 +29,13 @@ Named and positional arguments use the [existing binder](typed-context.md#comman
 Interactive unresolved text produces a warning; scripts reject it.
 
 ```text
-head "/disk/log" lines:5
-text.tail lines:20 source:"/disk/log"
-grep "warning" "/disk/log"
-text.search source:"/disk/log" "warning"
-wc < "/disk/log"
-text.count process.streams.input < "/disk/log"
-file "/disk/bin/counter"
+head "/log" lines:5
+text.tail lines:20 source:"/log"
+grep "warning" "/log"
+text.search source:"/log" "warning"
+wc < "/log"
+text.count process.streams.input < "/log"
+file "/bin/counter"
 ```
 
 Line counts must be nonnegative Integers; zero selects no content and consumes no input.

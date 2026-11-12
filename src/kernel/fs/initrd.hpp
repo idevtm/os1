@@ -25,5 +25,7 @@ struct NativeObject;
 long initialize_initrd_namespace();
 NativeObject* initrd_namespace_root();  // trusted bootstrap only, borrowed
 #if defined(OS1_HOST_TEST)
+struct BlockDevice;
+long mount_ext2_root_for_test(BlockDevice& device);
 void reset_initrd_namespace_for_test();
 #endif

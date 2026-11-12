@@ -32,8 +32,8 @@ def main():
     create(disk, args.utility, reset=True, manifest=args.programs_manifest)
 
     def install(program):
-        manifest.write_text(json.dumps({'version': 1, 'programs': [
-            {'source': str(Path(program).resolve()), 'destination': '/disk/bin/probe'}]}))
+        manifest.write_text(json.dumps({'version': 3, 'programs': [
+            {'source': str(Path(program).resolve()), 'destination': '/bin/probe'}]}))
         deploy(disk, manifest)
 
     def inspect():
@@ -55,16 +55,16 @@ def main():
 
     boot(args, disk, 'version1', [
         ('probe', b'deployed program version 1'),
-        ('cat /disk/readme', b'Persistent ext2 storage.'),
+        ('cat /readme', b'Persistent ext2 storage.'),
         ('call absent_provider render', b'call: cannot open image'),
-        ('disk/bin/probe', b'deployed program version 1'),
+        ('./bin/probe', b'deployed program version 1'),
         ('counter --initial 7 --ceiling 20', b'counter initial=7 ceiling=20'),
-        ('intf /disk/bin/textprocessor', b'interface TextProcessor'),
-        ('/disk/diskutil seed', b'diskutil seed ok'),
-        ('echo "my file survives deployment" > /disk/bin/note', None),
-        ('echo appended >> /disk/bin/note', None),
-        ('cat /disk/bin/note', b'my file survives deployment\nappended\n'),
-        ('/disk/diskutil sync', b'diskutil sync ok')], on_boot=active_image_is_locked)
+        ('intf /bin/textprocessor', b'interface TextProcessor'),
+        ('/diskutil seed', b'diskutil seed ok'),
+        ('echo "my file survives deployment" > /bin/note', None),
+        ('echo appended >> /bin/note', None),
+        ('cat /bin/note', b'my file survives deployment\nappended\n'),
+        ('/diskutil sync', b'diskutil sync ok')], on_boot=active_image_is_locked)
     before = inspect()
     prefix = disk.read_bytes()[:2048*512]
     install(args.version2)
@@ -75,10 +75,10 @@ def main():
     assert after['/bin/probe'][1] != before['/bin/probe'][1]
     assert disk.read_bytes()[:2048*512] == prefix
     commands = [('probe', b'deployed program version 2'),
-                ('/disk/bin/probe', b'deployed program version 2'),
+                ('/bin/probe', b'deployed program version 2'),
                 ('counter --initial 8 --ceiling 20', b'counter initial=8 ceiling=20'),
-                ('/disk/diskutil verify', b'diskutil verify ok'),
-                ('cat /disk/bin/note', b'my file survives deployment\nappended\n')]
+                ('/diskutil verify', b'diskutil verify ok'),
+                ('cat /bin/note', b'my file survives deployment\nappended\n')]
     boot(args, disk, 'version2', commands)
     inspect()
     boot(args, disk, 'reboot', commands)

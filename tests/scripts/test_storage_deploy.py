@@ -37,11 +37,11 @@ class Deployment(unittest.TestCase):
         self.program.write_bytes(elf(b'old'))
         builder.create(self.image, self.program, 4)
         self.manifest = self.root / 'manifest.json'
-        self.set_manifest('/disk/diskutil')
+        self.set_manifest('/diskutil')
         self.original = self.image.read_bytes()
 
     def set_manifest(self, destination):
-        self.manifest.write_text(json.dumps({'version': 1, 'programs': [
+        self.manifest.write_text(json.dumps({'version': 3, 'programs': [
             {'source': self.program.name, 'destination': destination}]}))
 
     def inspect(self):
@@ -53,15 +53,15 @@ class Deployment(unittest.TestCase):
     def test_resource_defaults_are_create_only_and_preserve_metadata(self):
         resource = self.root / 'motd'
         resource.write_text('original default\n')
-        data = {'version': 2, 'programs': [], 'resources': [
-            {'source': resource.name, 'destination': '/disk/etc/motd'}]}
+        data = {'version': 3, 'programs': [], 'resources': [
+            {'source': resource.name, 'destination': '/etc/motd'}]}
         self.manifest.write_text(json.dumps(data))
         self.assertTrue(deploy.deploy(self.image, self.manifest))
         before = self.inspect()
         self.assertEqual(before['/etc/motd'][0], 0o100644)
         resource.write_text('new default must not overwrite installed data\n')
         self.program.write_bytes(elf(b'updated'))
-        data['programs'].append({'source': self.program.name, 'destination': '/disk/diskutil'})
+        data['programs'].append({'source': self.program.name, 'destination': '/diskutil'})
         self.manifest.write_text(json.dumps(data))
         self.assertTrue(deploy.deploy(self.image, self.manifest))
         self.assertEqual(self.inspect()['/etc/motd'], before['/etc/motd'])
@@ -70,14 +70,14 @@ class Deployment(unittest.TestCase):
         self.assertEqual(self.image.read_bytes(), unchanged)
 
     def test_resource_conflicts_and_cross_kind_duplicate_are_rejected(self):
-        data = {'version': 2, 'programs': [
-            {'source': self.program.name, 'destination': '/disk/new'}], 'resources': [
-            {'source': self.program.name, 'destination': '/disk/new'}]}
+        data = {'version': 3, 'programs': [
+            {'source': self.program.name, 'destination': '/new'}], 'resources': [
+            {'source': self.program.name, 'destination': '/new'}]}
         self.manifest.write_text(json.dumps(data))
         with self.assertRaisesRegex(ValueError, 'duplicate'):
             deploy.deploy(self.image, self.manifest)
         data['programs'] = []
-        data['resources'][0]['destination'] = '/disk/readme/child'
+        data['resources'][0]['destination'] = '/readme/child'
         self.manifest.write_text(json.dumps(data))
         with self.assertRaisesRegex(ValueError, 'parent is a file'):
             deploy.deploy(self.image, self.manifest)
@@ -97,24 +97,36 @@ class Deployment(unittest.TestCase):
 
     def test_new_nested_program_preserves_all_existing_entries(self):
         before = self.inspect()
-        self.set_manifest('/disk/bin/tools/probe')
+        self.set_manifest('/bin/tools/probe')
         deploy.deploy(self.image, self.manifest)
         after = self.inspect()
         for name, value in before.items():
             self.assertEqual(after[name], value)
         self.assertEqual(after['/bin/tools/probe'][0], 0o100755)
 
+    def test_legacy_destinations_and_reserved_mounts(self):
+        self.manifest.write_text(json.dumps({'version': 1, 'programs': [
+            {'source': self.program.name, 'destination': '/disk/bin/legacy'}]}))
+        self.assertTrue(deploy.deploy(self.image, self.manifest))
+        self.assertIn('/bin/legacy', self.inspect())
+        previous = self.image.read_bytes()
+        for path in ('/sbin/init', '/tmp/probe'):
+            self.set_manifest(path)
+            with self.assertRaisesRegex(ValueError, 'reserved mount'):
+                deploy.deploy(self.image, self.manifest)
+        self.assertEqual(self.image.read_bytes(), previous)
+
     def test_data_collision_dirty_media_invalid_manifest_and_missing_input_leave_original(self):
-        self.set_manifest('/disk/readme')
+        self.set_manifest('/readme')
         with self.assertRaisesRegex(ValueError, 'data file'):
             deploy.deploy(self.image, self.manifest)
         self.assertEqual(self.image.read_bytes(), self.original)
-        for path in ['/disk/../readme', '/disk/a b', '/disk/a;rm', '/tmp/file', '/disk/']:
+        for path in ['/../readme', '/a b', '/a;rm', '/tmp/file', '/']:
             self.set_manifest(path)
             with self.assertRaises(ValueError):
                 deploy.deploy(self.image, self.manifest)
             self.assertEqual(self.image.read_bytes(), self.original)
-        self.set_manifest('/disk/diskutil')
+        self.set_manifest('/diskutil')
         changed = bytearray(self.original)
         struct.pack_into('<H', changed, 2048*512+1024+58, 0)
         self.image.write_bytes(changed)
@@ -156,11 +168,11 @@ class Deployment(unittest.TestCase):
         self.assertEqual(self.image.read_bytes(), self.original)
 
     def test_unsupported_depth_and_inode_flags_leave_original(self):
-        self.set_manifest('/disk/' + 'a/' * 32 + 'probe')
+        self.set_manifest('/' + 'a/' * 32 + 'probe')
         with self.assertRaisesRegex(ValueError, 'depth'):
             deploy.deploy(self.image, self.manifest)
         self.assertEqual(self.image.read_bytes(), self.original)
-        self.set_manifest('/disk/diskutil')
+        self.set_manifest('/diskutil')
         changed = bytearray(self.original)
         # Immutable inode flags are valid ext2, but unsupported by the os1 profile.
         struct.pack_into('<I', changed, 2048*512 + 4*4096 + 10*128 + 32, 0x10)

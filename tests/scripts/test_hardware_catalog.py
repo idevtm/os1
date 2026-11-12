@@ -41,7 +41,7 @@ def main():
             assert integer(lower + '.id') == integer(upper + '.backing_id')
             assert name.encode() in context(lower + '.consumers')
             assert b'[object]' in context(upper + '.backing')
-        assert b'name [field] String = /disk' in context(mount)
+        assert b'name [field] String = /' in context(mount)
         assert b'name [field] String = ext2' in context(fs)
         assert integer(block + '.sector_size') == 512
         assert integer(block + '.size_bytes') > integer(part + '.size_bytes') > 0
@@ -50,7 +50,7 @@ def main():
         assert b'512\n' in run(block + '.sector_si\t')
         assert b'4096\n' in run(mount + '.backing.filesystem_0.block_si\t')
         output = run('lsblk -v')
-        for marker in (b'BlockDeviceInfo', b'PartitionInfo', b'FilesystemInfo', b'MountInfo', b'name=/disk'):
+        for marker in (b'BlockDeviceInfo', b'PartitionInfo', b'FilesystemInfo', b'MountInfo', b'name=/'):
             assert marker in output, output
         pci_output = run('lspci')
         assert b'PciFunction' in pci_output
@@ -84,7 +84,7 @@ def main():
             break
         assert associations > 0, pci_records
         run('lsblk > /tmp/catalog-output')
-        assert b'name=/disk' in run('cat /tmp/catalog-output')
+        assert b'name=/' in run('cat /tmp/catalog-output')
         if args.transport != 'virtio':
             backing = context(block + '.backing')
             interface_name = re.search(rb'(interface_\d+) \[object\]', backing)[1].decode()
@@ -119,7 +119,7 @@ def main():
             assert b'pci_' in context(block + '.backing')
         invalid = run('lsblk --invalid', allow_errors=True)
         assert b'status=2' in invalid, invalid
-        run('/disk/diskutil sync')
+        run('/diskutil sync')
 
     boot(args, disk, 'catalog', commands=[], exercise=exercise)
     print('hardware catalog checks passed')

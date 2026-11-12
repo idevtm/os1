@@ -28,10 +28,10 @@ The [deployment workflow](../filesystems/program-deployment.md) preserves other 
 Inside the guest, run these commands:
 
 ```text
-/disk/diskutil seed
-/disk/diskutil verify
-echo persistent > /disk/note
-/disk/diskutil sync
+/diskutil seed
+/diskutil verify
+echo persistent > /note
+/diskutil sync
 ```
 
 Select **Checks > Storage > USB persistence and removal** to run the USB checks.
@@ -49,7 +49,7 @@ The direct target is `smoke_usb_storage`.
 | Geometry | 512-byte sectors; READ CAPACITY(10) must report an exact capacity |
 | Requests | At most eight sectors, or 4096 bytes; one admitted storage request per controller |
 | Admission | Require writable media and successful cache synchronization, or confirmed write-through operation after unsupported flush |
-| Mount | Try virtio first, then published USB devices; mount the first supported ext2 partition at `/disk` |
+| Mount | Try virtio first, then published USB devices; mount the first supported ext2 partition at `/` |
 | Limits | xHCI: four controllers and four devices each. EHCI: four controllers and sixteen addresses each, including hubs. |
 | DMA | Driver-owned bounce buffers; no direct mapping of caller pages to hardware |
 
@@ -163,7 +163,7 @@ Reconnection creates new records; it does not revive or replace an existing moun
 
 `devices` reports a started EHCI controller when probing succeeds.
 Boot diagnostics report hub addresses, root and downstream ports, storage capacity, and failures.
-An initialized controller does not guarantee that `/disk` mounted.
+An initialized controller does not guarantee that `/` mounted.
 Use `devices > /tmp/devices` and `edit /tmp/devices` to inspect long output with `p first last`.
 
 The [EHCI implementation record](../archive/filesystems/2026-11-06-ehci-storage.md) tracks validation and hardware limitations.

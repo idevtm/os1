@@ -69,7 +69,7 @@ Console, writable `/tmp`, and persistent ext2 use a bounded kernel provider adap
 | Console | Descriptor I/O plus copied IPC `write`, `try_read`, and `info` | Input events and scoped service discovery |
 | Initrd | Immutable descriptor/resource syscalls | Native bindings for immutable resources |
 | `/tmp` | Native Directory/File methods and descriptor I/O, mutation rights, quotas, retained unlinked files | Kernel Buffer transfers and additional mount semantics |
-| `/disk` | Native File/Directory methods, synchronization, and immutable executable snapshots over virtio/USB ext2 | Larger filesystem profiles, kernel Buffer I/O, and public mount lifecycle |
+| Ext2 root `/` | Native File/Directory methods, synchronization, and immutable executable snapshots over virtio/USB ext2 | Larger filesystem profiles, kernel Buffer I/O, and public mount lifecycle |
 | User providers | Copied calls, Operations, capabilities, sessions, volatile events, and exclusive Buffer loans | Reusable scoped service bootstrap and discovery |
 | Hardware drivers | Kernel-resident C++ interfaces and request/completion mechanisms | Kernel-hosted BlockDevice and input service objects |
 
@@ -143,7 +143,7 @@ Its separate discovery generation changes on attachment or removal, but not on i
 Collection indexes and short aliases compact after removal; retained handles keep their original attachment identity.
 
 The [device test runner](hardware/device-test-runner-plan.md) uses these native interfaces to collect physical test evidence.
-It writes separate machine, build, boot, and run directories under `/disk/tests`.
+It writes separate machine, build, boot, and run directories under `/tests`.
 A progress journal records completed stages; a tar archive contains bounded snapshots and kernel logs.
 Inventory reports stream through a 4096-byte buffer, with a 256 KiB limit per archive member.
 xHCI negotiates control packet sizes and supports two boot HID interfaces on each attachment.
@@ -380,7 +380,7 @@ The diagram below is the end-to-end picture of a running `os1` system: the two b
 |                                                                             |
 |  kmem-backed Process/Thread registries + remote wakeups + round-robin       |
 |                                                                             |
-|  initrd --> ELF64 load /bin/init --> spawn /disk/bin/sh                    |
+|  initrd --> ELF64 load /sbin/init --> spawn /bin/sh                    |
 +--------------------------------+----------------+---------------------------+
                                  |                |
                       SYSCALL    |                |   reads from console_input
@@ -389,12 +389,12 @@ The diagram below is the end-to-end picture of a running `os1` system: the two b
                          +-------+----------------+-------+
                          |  Ring-3 user processes          |
                          |                                 |
-                         |  /bin/init -> /disk/bin/sh       |
-                         |  /disk/bin/yield  /disk/bin/fault         |
-                         |  /disk/bin/balanceworker            |
-                         |  /disk/bin/busyyield /disk/bin/smpcheck  |
-                         |  /disk/bin/balancecheck             |
-                         |  /disk/bin/copycheck /disk/bin/ascii     |
+                         |  /sbin/init -> /bin/sh       |
+                         |  /bin/yield  /bin/fault         |
+                         |  /bin/balanceworker            |
+                         |  /bin/busyyield /bin/smpcheck  |
+                         |  /bin/balancecheck             |
+                         |  /bin/copycheck /bin/ascii     |
                          |                                 |
                          |  syscalls:  write, read, exit,  |
                          |    yield, getpid, observe,      |
@@ -498,8 +498,8 @@ The shared entry runs one deterministic sequence:
   local LAPIC timer when enabled, and records AP-online / AP-tick events.
 16. `enter_first_thread(...)` enters the boot-sequence kernel thread. That thread
   runs the threaded block smoke, spawns the kernel SMP ping threads, loads
-  `/bin/init` from the initrd, marks the first user thread ready, and exits.
-  `/bin/init` starts `/disk/bin/sh` and waits for its exit.
+  `/sbin/init` from the initrd, marks the first user thread ready, and exits.
+  `/sbin/init` starts `/bin/sh` and waits for its exit.
   It restarts the shell after exit. It starts rescue after a launch error or repeated rapid exits.
 
 ### Phase 4 — ACPI, PCIe, driver binding, and storage probe
@@ -578,10 +578,10 @@ The shell runs a line-buffered REPL:
 3. The shell binds aliases and arguments, validates values, and prepares stream redirection.
    Local `path` and `fs` helpers use typed context and granted namespace resources.
    Observer commands call `observe(kind, buf, len)` and render fixed-record tables.
-   External commands search the inherited path list, initially `/bin` then `/disk/bin`.
+   External commands search the inherited path list, initially `/bin`.
    Native launch receives a copied environment and explicit stream/root/cwd grants; the shell waits for the child.
    `exec` replaces the shell image instead of creating a child.
-4. User exceptions (e.g. `/disk/bin/fault`) are caught in `HandleException`, the thread is marked `Dying`, `ScheduleNext(false)` runs, and `reapDeadThreads` reclaims the thread stack and address space from a different stack on a later trap.
+4. User exceptions (e.g. `/bin/fault`) are caught in `HandleException`, the thread is marked `Dying`, `ScheduleNext(false)` runs, and `reapDeadThreads` reclaims the thread stack and address space from a different stack on a later trap.
 
 ### Phase 6 — exec and in-place image replacement
 
@@ -1298,7 +1298,7 @@ These events clear `OS1_KERNEL_EVENT_FLAG_USER`.
 At the shell prompt, `events` prints an event snapshot.
 Continuous event streaming and its cancellation remain deferred.
 
-The ring-3 shell consumes most records through built-ins such as `sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, and `irqs`; `/disk/bin/acpiprobe` consumes the ACPICA snapshot. Keeping these paths explicit avoids turning observability into parsed boot logs.
+The ring-3 shell consumes most records through built-ins such as `sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, and `irqs`; `/bin/acpiprobe` consumes the ACPICA snapshot. Keeping these paths explicit avoids turning observability into parsed boot logs.
 
 ### Performance measurement clock
 
@@ -1403,41 +1403,41 @@ The [deployment guide](filesystems/program-deployment.md#boot-and-recovery) defi
 
 | Location | Contents |
 | --- | --- |
-| Initrd `/bin` | `init` and `rescue` |
-| Ext2 `/disk/etc` | Default `motd` resource |
-| Ext2 `/disk/bin` | Full shell, file utilities, verification programs, providers, examples, `intf`, and `diskutil` |
-| Ext2 `/disk/diskutil` | Compatibility copy for existing synchronization commands |
+| Initrd `/sbin` | `init` and `rescue` |
+| Ext2 `/etc` | Default `motd` resource |
+| Ext2 `/bin` | Full shell, file utilities, verification programs, providers, examples, `intf`, and `diskutil` |
+| Ext2 `/diskutil` | Compatibility copy for existing synchronization commands |
 
 The full shell requires ext2. Rescue remains available without storage.
 The kernel initializes storage and its namespace before it starts init.
-Bare external commands search `/bin` first, then `/disk/bin`.
+Bare external commands initially search `/bin`.
 Names containing `/` are explicit paths and bypass search.
 An access or I/O failure stops search; only NOT_FOUND permits the next directory.
 
 Current user programs:
 
-- `/bin/init` — supervisor for the normal shell and rescue console
-- `/bin/rescue` — independent recovery console
-- `/disk/bin/sh` — the ring-3 shell built from [`src/user/programs/sh.cpp`](../src/user/programs/sh.cpp)
-- `/disk/bin/yield` — cooperative yield probe built from [`src/user/programs/yield.cpp`](../src/user/programs/yield.cpp)
-- `/disk/bin/balanceworker` — busy worker used by the SMP balance smoke, built from [`src/user/programs/balanceworker.cpp`](../src/user/programs/balanceworker.cpp)
-- `/disk/bin/busyyield` — mixed busy/yield probe used by SMP observability smokes, built from [`src/user/programs/busyyield.cpp`](../src/user/programs/busyyield.cpp)
-- `/disk/bin/balancecheck` — user-visible run-queue balance verifier built from [`src/user/programs/balancecheck.cpp`](../src/user/programs/balancecheck.cpp)
-- `/disk/bin/smpcheck` — observe-driven SMP state verifier built from [`src/user/programs/smpcheck.cpp`](../src/user/programs/smpcheck.cpp)
-- `/disk/bin/fault` — deliberate page-fault probe built from [`src/user/programs/fault.cpp`](../src/user/programs/fault.cpp)
-- `/disk/bin/textprocessor`, `/disk/bin/ipccheck`, and `/disk/bin/intf` provide private copied IPC, retained Operations, methods/properties, and offline interface inspection. See [the concrete ABI](native-api/abi/copied-ipc-abi.md).
-- `/disk/bin/buffercheck` exercises exclusive loans, same-buffer processing, distinct outputs, and recovery. See [the Buffer ABI](native-api/abi/buffer-loans-abi.md).
-- `/disk/bin/activation` and `/disk/bin/activationcheck` — explicitly registered Counter activation, copied capability transfer, class-controlled singleton construction, and independent clients. See [the shared activation ABI](native-api/abi/shared-activation-abi.md).
-- `/disk/bin/counter` and `/disk/bin/countercheck` — a second IPC protocol, typed constructor metadata/CLI conversion, event broadcast/overflow/unsubscribe, deadline waits, and restricted provider supervision. See [the phase ABI](native-api/abi/counter-events-abi.md).
-- `/disk/bin/ls`, `/disk/bin/cat`, and `/disk/bin/vfscheck` — directory/file operations, argument forwarding, and restricted native child launch.
-- `/disk/bin/fdcheck` and `/disk/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
-- `/disk/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
-- `/disk/bin/acpiprobe` — ACPICA observe probe built from [`src/user/programs/acpiprobe.cpp`](../src/user/programs/acpiprobe.cpp)
-- `/disk/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify 8x16 font rendering on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
+- `/sbin/init` — supervisor for the normal shell and rescue console
+- `/sbin/rescue` — independent recovery console
+- `/bin/sh` — the ring-3 shell built from [`src/user/programs/sh.cpp`](../src/user/programs/sh.cpp)
+- `/bin/yield` — cooperative yield probe built from [`src/user/programs/yield.cpp`](../src/user/programs/yield.cpp)
+- `/bin/balanceworker` — busy worker used by the SMP balance smoke, built from [`src/user/programs/balanceworker.cpp`](../src/user/programs/balanceworker.cpp)
+- `/bin/busyyield` — mixed busy/yield probe used by SMP observability smokes, built from [`src/user/programs/busyyield.cpp`](../src/user/programs/busyyield.cpp)
+- `/bin/balancecheck` — user-visible run-queue balance verifier built from [`src/user/programs/balancecheck.cpp`](../src/user/programs/balancecheck.cpp)
+- `/bin/smpcheck` — observe-driven SMP state verifier built from [`src/user/programs/smpcheck.cpp`](../src/user/programs/smpcheck.cpp)
+- `/bin/fault` — deliberate page-fault probe built from [`src/user/programs/fault.cpp`](../src/user/programs/fault.cpp)
+- `/bin/textprocessor`, `/bin/ipccheck`, and `/bin/intf` provide private copied IPC, retained Operations, methods/properties, and offline interface inspection. See [the concrete ABI](native-api/abi/copied-ipc-abi.md).
+- `/bin/buffercheck` exercises exclusive loans, same-buffer processing, distinct outputs, and recovery. See [the Buffer ABI](native-api/abi/buffer-loans-abi.md).
+- `/bin/activation` and `/bin/activationcheck` — explicitly registered Counter activation, copied capability transfer, class-controlled singleton construction, and independent clients. See [the shared activation ABI](native-api/abi/shared-activation-abi.md).
+- `/bin/counter` and `/bin/countercheck` — a second IPC protocol, typed constructor metadata/CLI conversion, event broadcast/overflow/unsubscribe, deadline waits, and restricted provider supervision. See [the phase ABI](native-api/abi/counter-events-abi.md).
+- `/bin/ls`, `/bin/cat`, and `/bin/vfscheck` — directory/file operations, argument forwarding, and restricted native child launch.
+- `/bin/fdcheck` and `/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
+- `/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
+- `/bin/acpiprobe` — ACPICA observe probe built from [`src/user/programs/acpiprobe.cpp`](../src/user/programs/acpiprobe.cpp)
+- `/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify 8x16 font rendering on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
 
-The kernel retains its fixed `/bin/init` boot contract.
-Init starts `/disk/bin/sh` through the existing filesystem-backed loader.
-If launch fails or the shell exits rapidly three times, init reports the error and starts `/bin/rescue`.
+The kernel retains its fixed `/sbin/init` boot contract.
+Init starts `/bin/sh` through the existing filesystem-backed loader.
+If launch fails or the shell exits rapidly three times, init reports the error and starts `/sbin/rescue`.
 See [Boot program placement](native-api/abi/initrd-vfs-abi.md#boot-program-placement) for the restart delays.
 Rescue retry returns to init; it does not mount storage or probe hardware.
 The loader accepts ELF64 `ET_EXEC` images with `PT_LOAD` segments.
@@ -1471,7 +1471,8 @@ Host manifest -> locked image copy -> debugfs -> validation -> atomic image repl
 ```
 
 The [ext2 profile](filesystems/ext2.md) defines exact limits, sync authority, failure behavior, and deployment targets.
-The namespace mounts `/disk` before publication when a supported partition exists.
+The kernel selects ext2 as the root before it publishes the namespace.
+The reserved `/sbin` and `/tmp` mounts take precedence over disk entries with those names.
 It tries the virtio device first, then published USB devices.
 Virtio read-only media mount with read and execute access. Disk log export skips those mounts.
 [USB mass storage](hardware/usb-storage.md) adds bounded SCSI commands over xHCI bulk endpoints.
@@ -1783,7 +1784,7 @@ Major constraints that remain:
 
 - the broad final-kernel identity map is gone, but boot still retains narrow low bootstrap identity exceptions for the live handoff stack and AP startup state until early stack handoff and AP startup are redesigned
 - the framebuffer path is a text presenter, not a graphics stack
-- userland uses immutable initrd files, volatile `/tmp`, and optional persistent ext2 at `/disk`; multiuser policy remains unimplemented
+- userland uses immutable initrd files, volatile `/tmp`, and persistent ext2 as the root when available; multiuser policy remains unimplemented
 - console/file/directory descriptors and native `launch` are implemented; legacy pathname spawn/exec resolve through existing namespace grants, while native launch accepts argv/environment data and explicit child maps
 - block I/O is request-shaped, interrupt-completed, and supports bounded multi-sector requests up to `kVirtioBlkMaxSectorsPerRequest = 8` (4 KiB per request) through a single contiguous data descriptor; the synchronous wrappers chunk by `BlockDevice::max_sectors_per_request`; Flush is implemented; filesystem `sync` establishes durability; there is still no block scheduler, request merging, filesystem-facing buffer cache, or per-page user-buffer scatter-gather (which awaits user-DMA pinning)
 - PCI INTx fallback now resolves through ACPICA `_PRT` data when firmware
@@ -1977,7 +1978,7 @@ No log capture performs filesystem I/O. General provider reflection remains a la
 The [log export ABI](native-api/abi/log-export-abi.md) defines temporary snapshots and persistent segments.
 
 ```text
-capture storage -> record copies -> 64 KiB staging -> /tmp/log or /disk/log
+capture storage -> record copies -> 64 KiB staging -> /tmp/log or /log
 kernel provider worker -> timed drain -> bounded rotation -> periodic synchronization
 process reaping -> retained closing history -> export or counted loss -> release
 ```

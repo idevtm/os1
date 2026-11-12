@@ -26,7 +26,7 @@ def main():
     if not build:
         raise ValueError('missing kernel build identity')
     digest = hashlib.sha256(Path(args.image).read_bytes()).digest()
-    directory = '/disk/system/drivers/' + build[1][:16] + '/virtio-net'
+    directory = '/system/drivers/' + build[1][:16] + '/virtio-net'
     metadata = {'version': 1, 'driver': 'virtio-net', 'kernel_build': build[1],
                 'sha256': digest.hex(), 'abi': 1, 'pci': {'vendor': 0x1af4, 'device': 0x1041},
                 'dependencies': ['kernel.virtio_queue.v1'], 'firmware': [],

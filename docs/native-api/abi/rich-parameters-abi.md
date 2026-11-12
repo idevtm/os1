@@ -98,7 +98,7 @@ to that retained object. No second full schema appears in `.rodata`.
 ## Commands in the booted native shell
 
 ```
-intf /disk/bin/paramdemo
+intf /bin/paramdemo
 paramdemo
 paramdemo initial:4 source.text:'Hi there' options.suffix:null
 call paramdemo render mode.thorough source.text:"hello world" options:{limit:5,suffix:null}

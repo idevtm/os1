@@ -39,7 +39,7 @@ def main():
     for entry in manifest['programs']:
         entry['source'] = str((manifest_path.parent / entry['source']).resolve())
     manifest['programs'].append({'source': str(Path(args.utility).resolve()),
-                                 'destination': '/disk/log'})
+                                 'destination': '/log'})
     with tempfile.TemporaryDirectory() as temporary:
         fixture_manifest = Path(temporary) / 'programs.json'
         fixture_manifest.write_text(json.dumps(manifest))
@@ -100,32 +100,32 @@ def main():
         started = time.monotonic()
         try:
             startup = expect()
-            assert b'shell started' in startup and b'ext2 mounted /disk' in startup, startup[-4000:]
+            assert b'shell started' in startup and b'ext2 mounted /' in startup, startup[-4000:]
             if phase == 'interrupt':
                 send('shutdown "invalid"')
                 rejected = expect(allowed_errors=(b'command failed:', b'system command failed'))
                 assert (b'shell: system command failed: shutdown status=-4; '
                         b'machine remains running') in rejected, rejected
                 assert b'system: shutdown stage=' not in rejected  # Never reached the provider.
-                run('echo "after rejected shutdown" > "/disk/rejected-shutdown"')
+                run('echo "after rejected shutdown" > "/rejected-shutdown"')
                 clean()
-                run('cat "/disk/rejected-shutdown"', b'after rejected shutdown')
+                run('cat "/rejected-shutdown"', b'after rejected shutdown')
                 begin = time.monotonic()
                 for i in range(5):
-                    run(f'echo "durable {i}" > "/disk/lifecycle"')
+                    run(f'echo "durable {i}" > "/lifecycle"')
                     clean()
                 print(f'five_writes_seconds={time.monotonic()-begin:.6f}', flush=True)
-                send('/disk/bin/vfscheck "system"')
+                send('/bin/vfscheck "system"')
                 expect(b'[user/vfscheck] no-inspect child complete\n')
                 clean()  # The parent shell has not synchronized this external command yet.
                 send('')
                 expect()
-                run('touch "/disk/lifecycle"'); clean()
-                run('mkdir "/disk/lifecycle-dir"'); clean()
-                run('rmdir "/disk/lifecycle-dir"'); clean()
+                run('touch "/lifecycle"'); clean()
+                run('mkdir "/lifecycle-dir"'); clean()
+                run('rmdir "/lifecycle-dir"'); clean()
                 restarted = run('exit', b'shell ended')
                 assert b'shell started' in restarted
-                run('/disk/bin/sh', b'shell started')
+                run('/bin/sh', b'shell started')
                 run('exit', b'shell ended')
                 run('echo "parent alive"', b'parent alive')
                 clean()
@@ -133,13 +133,13 @@ def main():
                 child.wait(timeout=10)
                 clean()
             else:
-                run('cat "/disk/lifecycle"', b'durable 4')
+                run('cat "/lifecycle"', b'durable 4')
                 run('diskutil sync', b'diskutil sync ok')
                 menu.reset()
                 send('reboot')
                 restarted = expect(timeout=60)
-                assert b'shell started' in restarted and b'ext2 mounted /disk' in restarted
-                run('cat "/disk/lifecycle"', b'durable 4')
+                assert b'shell started' in restarted and b'ext2 mounted /' in restarted
+                run('cat "/lifecycle"', b'durable 4')
                 clean()
                 send('shutdown')
                 # Poweroff exits QEMU; drain output so an error cannot hide behind a full pipe.

@@ -38,7 +38,7 @@ int main(int argc, char** argv)
         u::write(1, "diskutil: seed | verify | sync\n", 31);
         return 1;
     }
-    long directory = u::open("/disk", fs::directory_rights, fs::descendant_rights);
+    long directory = u::open("/", fs::directory_rights, fs::descendant_rights);
     if(directory < 0)
         return fail("open disk", directory);
     long client = fs::bind(directory, true, fs::directory_rights);

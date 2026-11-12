@@ -20,7 +20,7 @@ parser.add_argument('--code')
 parser.add_argument('--vars')
 args = parser.parse_args()
 metadata = json.loads(Path(args.metadata).read_text())
-module_path = metadata['image'].removeprefix('/disk')
+module_path = metadata['image']
 log = Path(args.log)
 log.parent.mkdir(parents=True, exist_ok=True)
 disk = log.with_suffix('.raw')
@@ -59,8 +59,8 @@ for case in ('loaded', 'missing', 'corrupt', 'incompatible', 'unneeded'):
             command('os.system.log.export target:"disk"')
         else:
             assert b'virtio-net' not in listed
-        command('echo "module-survivor" > /disk/module-note')
-        command('cat /disk/module-note', b'module-survivor')
+        command('echo "module-survivor" > /module-note')
+        command('cat /module-note', b'module-survivor')
         command('sync')
     boot(args, disk, case, exercise=exercise)
     capture = log.with_suffix('.' + case + '.log').read_bytes()
@@ -69,7 +69,7 @@ for case in ('loaded', 'missing', 'corrupt', 'incompatible', 'unneeded'):
                 'unneeded': b'virtio-net not needed'}[case]
     assert expected in capture, capture[-3000:]
     if case == 'loaded':
-        assert capture.index(b'ext2 mounted /disk') < capture.index(b'driver: loaded virtio-net')
+        assert capture.index(b'ext2 mounted /') < capture.index(b'driver: loaded virtio-net')
         # The high-frequency observation ring can wrap during shell startup.
         # The persistent log must retain the successful PCI binding event.
         part.write_bytes(disk.read_bytes()[2048 * 512:])

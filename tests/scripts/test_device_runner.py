@@ -38,7 +38,7 @@ def main():
         out = run('run-tests --machine qemu' + extra, allow_errors=not expected)
         assert (b'run-tests: PASS; saved results' if expected else
                 b'run-tests: FAIL; saved results') in out, out
-        match = re.search(rb'run-tests: results (/disk/tests/[^\r\n]+)', out)
+        match = re.search(rb'run-tests: results (/tests/[^\r\n]+)', out)
         assert match, out
         path = match[1].decode()
         assert path not in paths, paths
@@ -46,21 +46,21 @@ def main():
         return path
 
     def first(run, expect):
-        run('echo "preserve-this" > "/disk/sentinel"')
+        run('echo "preserve-this" > "/sentinel"')
         one = run_case(run, True)
         two = run_case(run, True)
         assert one.rsplit('/', 1)[0] == two.rsplit('/', 1)[0]
         run_case(run, False, ' --no-input')
-        run('mv "/disk/tests" "/disk/saved-tests"')
-        run('touch "/disk/tests"')
+        run('mv "/tests" "/saved-tests"')
+        run('touch "/tests"')
         blocked = run('run-tests --machine blocked', allow_errors=True)
-        assert b'cannot create a new /disk/tests run' in blocked, blocked
+        assert b'cannot create a new /tests run' in blocked, blocked
         assert b'run-tests: results ' not in blocked
-        run('rm "/disk/tests"')
-        run('mv "/disk/saved-tests" "/disk/tests"')
+        run('rm "/tests"')
+        run('mv "/saved-tests" "/tests"')
         invalid = run('run-tests --machine "../bad"', allow_errors=True)
         assert b'usage:' in invalid and b'run-tests: results ' not in invalid
-        assert b'preserve-this' in run('cat "/disk/sentinel"')
+        assert b'preserve-this' in run('cat "/sentinel"')
 
     def extract(phase):
         partition = disk.with_suffix('.ext2')
@@ -78,7 +78,7 @@ def main():
     assert b'shell: diagnostic tests starting' not in Path(args.log).with_suffix('.first.log').read_bytes()
     before = extract('first')
     for index, path in enumerate(paths):
-        key = path.removeprefix('/disk/')
+        key = path.removeprefix('/')
         manifest = before[key + '/manifest.txt']
         summary = before[key + '/summary.txt']
         assert b'kernel_revision=' + revision[1] in manifest.splitlines(), manifest
@@ -150,7 +150,7 @@ def main():
     for key, value in before.items():
         assert after[key] == value, key
     assert len(after) > len(before)
-    key = paths[-1].removeprefix('/disk/')
+    key = paths[-1].removeprefix('/')
     assert re.search(rb'movement_events=[1-9][0-9]*\n', after[key + '/progress.txt'])
     assert b'failed=0' in after[key + '/summary.txt'].splitlines()
     assert b'input_observation=1\n' in after[key + '/manifest.txt']
@@ -165,7 +165,7 @@ def main():
 
     print('traceable device results, explicit failure, and reboot preservation passed')
     print('first_run_bytes=' + str(sum(len(v) for k, v in before.items()
-                                      if k.startswith(paths[0].removeprefix('/disk/')))))
+                                      if k.startswith(paths[0].removeprefix('/')))))
 
 
 if __name__ == '__main__':

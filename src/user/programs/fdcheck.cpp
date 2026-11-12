@@ -39,6 +39,6 @@ int main(int, char**)
     CHECK(os1_resource_query(3, &info) == 0, "failed exec preserves descriptors");
     CHECK(os1_duplicate(copy, rights, 0, 4) == 4, "exec survivor");
     // The next image verifies CLOEXEC removal and the unmarked duplicate.
-    os1_exec("/disk/bin/fdexec");
+    os1_exec("/bin/fdexec");
     CHECK(false, "exec returned");
 }

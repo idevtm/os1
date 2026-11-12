@@ -1,12 +1,14 @@
 # Persistent ext2 storage
 
-The QEMU storage profile mounts a persistent ext2 partition at `/disk`.
+The storage profile uses a validated ext2 partition as `/`.
+If no disk mounts, the kernel publishes the initrd root and starts recovery.
+The kernel reserves `/sbin` and `/tmp` in both layouts.
 It uses the native File and Directory interfaces and supports disk-backed executable loading.
 
 ```text
-initrd: /bin/init and /bin/rescue
+/sbin:  read-only initrd init and rescue
 /tmp:   volatile writable files
-/disk:  full shell and programs in bin/, resources in etc/, persistent files
+/:      full shell and programs in bin/, resources in etc/, persistent files
            -> filesystem dispatch -> partition bounds -> virtio or USB block -> host raw file
 ```
 
@@ -40,12 +42,12 @@ Do not mount the backing filesystem on the host while QEMU uses it.
 ## Guest commands
 
 ```text
-ls /disk
-/disk/diskutil seed
-/disk/diskutil verify
-echo "persistent note" > /disk/note
-cat /disk/note
-/disk/diskutil sync
+ls /
+/diskutil seed
+/diskutil verify
+echo "persistent note" > /note
+cat /note
+/diskutil sync
 ```
 
 `seed` creates a deterministic 128 KiB file and synchronizes it.
@@ -78,6 +80,7 @@ Killing QEMU during a command can still leave the volume unclean.
 The profile validates allocation counts, metadata ranges, block ownership, directory records, and inode reachability before publication.
 It rejects dirty filesystems instead of mounting them writable.
 Mount failure leaves the rescue console available and reports `ext2 mount rejected`.
+The reserved mounts hide ext2 entries with the same names.
 The kernel never formats a disk after mount failure.
 General ext2 images can contain unsupported features or layouts even when `e2fsck` considers them valid.
 

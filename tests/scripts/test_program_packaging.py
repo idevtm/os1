@@ -30,7 +30,7 @@ while True:
     if int(header[14:22], 16) & 0xf000 == 0x8000:
         files.add(name)
     offset = (offset + size + 3) & ~3
-assert files == {'bin/init', 'bin/rescue'}, files
+assert files == {'sbin/init', 'sbin/rescue'}, files
 manifest = json.loads(a.manifest.read_text())
 programs = manifest['programs']
 resources = manifest['resources']
@@ -39,13 +39,13 @@ with tempfile.TemporaryDirectory() as temporary:
     part.write_bytes(a.disk.read_bytes()[2048 * 512:])
     installed = snapshot(part)
     for entry in programs + resources:
-        path = entry['destination'].removeprefix('/disk')
+        path = entry['destination']
         assert installed[path][0] == (0o100644 if entry in resources else 0o100755), path
         assert installed[path][1] == hashlib.sha256(Path(entry['source']).read_bytes()).hexdigest(), path
-assert not any('/disk/bin/' + name in [e['destination'] for e in programs] for name in ('init', 'rescue'))
-assert {'/disk/bin/sh', '/disk/bin/ls', '/disk/bin/cat', '/disk/bin/textprocessor', '/disk/bin/counter', '/disk/bin/activation', '/disk/bin/intf',
-        '/disk/bin/paramdemo', '/disk/bin/buffercheck', '/disk/bin/lshw', '/disk/bin/lspci', '/disk/bin/lsusb', '/disk/bin/lsblk', '/disk/bin/gfxdemo'} <= {e['destination'] for e in programs}
-packages = [e for e in resources if e['destination'].startswith('/disk/system/drivers/')]
+assert not any('/bin/' + name in [e['destination'] for e in programs] for name in ('init', 'rescue'))
+assert {'/bin/sh', '/bin/ls', '/bin/cat', '/bin/textprocessor', '/bin/counter', '/bin/activation', '/bin/intf',
+        '/bin/paramdemo', '/bin/buffercheck', '/bin/lshw', '/bin/lspci', '/bin/lsusb', '/bin/lsblk', '/bin/gfxdemo'} <= {e['destination'] for e in programs}
+packages = [e for e in resources if e['destination'].startswith('/system/drivers/')]
 expected = {'virtio-net', 'firmware-framebuffer'}
 assert len(packages) == len(expected)
 seen = set()
@@ -60,12 +60,12 @@ for entry in packages:
     assert package['image'] == image
     assert package['abi'] == (1 if name == 'virtio-net' else 2)
     assert image in program_paths
-    assert installed[image.removeprefix('/disk')][1] == package['sha256']
+    assert installed[image][1] == package['sha256']
     if name == 'virtio-net':
         assert package['pci'] == {'vendor': 0x1af4, 'device': 0x1041}
     else:
         assert package['match'] == 'validated firmware framebuffer'
         assert 'pci' not in package
 assert seen == expected
-assert {e['destination'] for e in resources} == {'/disk/etc/motd', *(e['destination'] for e in packages)}
+assert {e['destination'] for e in resources} == {'/etc/motd', *(e['destination'] for e in packages)}
 print(f'Two recovery executables; {len(programs)} complete disk ELFs; {len(resources)} resource defaults')

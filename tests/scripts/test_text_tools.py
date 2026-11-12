@@ -45,8 +45,8 @@ def exercise(run, expect):
         ('grep "Beta" < "sample"', b'Beta two\n'),
         ('file "sample"', b'ASCII text\n'),
         ('fs.identify "/tmp"', b'directory\n'),
-        ('file "/bin/init"', b'ELF64\n'),
-        ('file "/disk/diskutil"', b'ELF64\n'),
+        ('file "/sbin/init"', b'ELF64\n'),
+        ('file "/diskutil"', b'ELF64\n'),
     ]:
         ok(command + ' > "out"')
         content('out', expected)
@@ -73,34 +73,34 @@ def exercise(run, expect):
     assert b'must-not-run\n' not in result and b'shell:' not in result, result
     result = ok('grep "absent" "sample"')
     assert result.endswith(b'os1> '), result
-    ok('echo "' + 'x' * 80 + '" > "/disk/long"')
+    ok('echo "' + 'x' * 80 + '" > "/long"')
     # Chunk-boundary coverage through a real disk handle and a retained input.
     for _ in range(6):
-        ok('cp "/disk/long" "/disk/chunk"')
-        ok('cat "/disk/chunk" >> "/disk/long"')
-    ok('wc "/disk/long"', b'lines:64 words:64 bytes:5184\n')
-    ok('tail "/disk/long" lines:2 > "two"')
+        ok('cp "/long" "/chunk"')
+        ok('cat "/chunk" >> "/long"')
+    ok('wc "/long"', b'lines:64 words:64 bytes:5184\n')
+    ok('tail "/long" lines:2 > "two"')
     ok('wc "two"', b'lines:2 words:2 bytes:162\n')
-    ok('grep "xxx" "/disk/long" > "matched"')
+    ok('grep "xxx" "/long" > "matched"')
     ok('wc "matched"', b'lines:64 words:64 bytes:5184\n')
     # A redirected regular file must retain SEEK, including lines larger than the stream workspace.
-    ok('write "/disk/fragment"\n' + 'x' * 80 + '\x04\x04')
+    ok('write "/fragment"\n' + 'x' * 80 + '\x04\x04')
     expect()  # run() adds LF after Ctrl-D; consume that empty command's prompt.
-    ok('wc "/disk/fragment"', b'lines:0 words:1 bytes:80\n')
+    ok('wc "/fragment"', b'lines:0 words:1 bytes:80\n')
     for _ in range(10):
-        ok('cp "/disk/fragment" "/disk/chunk"')
-        ok('cat "/disk/chunk" >> "/disk/fragment"')
-    ok('echo "needle" >> "/disk/fragment"')
-    for command in ['tail "/disk/fragment" lines:1', 'tail lines:1 < "/disk/fragment"',
-                    'grep "needle" "/disk/fragment"', 'grep "needle" < "/disk/fragment"']:
-        ok(command + ' > "/disk/large-match"')
-        ok('wc "/disk/large-match"', b'lines:1 words:1 bytes:81927\n')
+        ok('cp "/fragment" "/chunk"')
+        ok('cat "/chunk" >> "/fragment"')
+    ok('echo "needle" >> "/fragment"')
+    for command in ['tail "/fragment" lines:1', 'tail lines:1 < "/fragment"',
+                    'grep "needle" "/fragment"', 'grep "needle" < "/fragment"']:
+        ok(command + ' > "/large-match"')
+        ok('wc "/large-match"', b'lines:1 words:1 bytes:81927\n')
     bad('tail lines:1 < "sample" > "sample"', b'redirection failed')
     content('sample', b'alpha one\nBeta two\nalpha.* three\n')
     # A native parent can grant READ on descriptor 1; redirection must retain that source.
     result = run('textcheck', b'[user/textcheck] readable stdout input retained ok')
     assert b'[user/textcheck] fail' not in result, result
-    ok('/disk/diskutil sync', b'sync ok')
+    ok('/diskutil sync', b'sync ok')
     ok('kmem', b'kmem complete')
 
 

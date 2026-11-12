@@ -62,7 +62,7 @@ TEST_F(Discovery, EnvironmentListsNestedFieldsAndAliasesAreStructural)
     ASSERT_GE(n, 0);
     EXPECT_EQ(OS1_VALUE_BOOLEAN, view.nodes[n].type);
     EXPECT_EQ(1, view.environment.nodes[view.nodes[n].value].integer);
-    EXPECT_GE(view.resolve("process.environment.path.1"), 0);
+    EXPECT_GE(view.resolve("process.environment.path.0"), 0);
     EXPECT_EQ(view.resolve("fs.copy"), view.resolve("os.fs.copy"));
     EXPECT_EQ(view.resolve("out.print"), view.resolve("process.streams.output.print"));
     EXPECT_LT(view.resolve("os..fs"), 0);

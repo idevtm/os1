@@ -83,7 +83,7 @@ int main(int, char**)
         // The bootstrap shell takes argv, not a typed class constructor.
         // Avoid repeated ELF metadata reads before the first interactive prompt.
         const os1_constructor_args constructor{};
-        long child = first ? u::run_program("/disk/bin/sh",
+        long child = first ? u::run_program("/bin/sh",
                                             2,
                                             arguments,
                                             false,
@@ -93,7 +93,7 @@ int main(int, char**)
                                             nullptr,
                                             -1,
                                             &constructor)
-                           : u::spawn("/disk/bin/sh");
+                           : u::spawn("/bin/sh");
         first = false;
         const long started = child >= 0 ? u::ipc_clock() : -1;
         int status = 0;
@@ -116,12 +116,12 @@ int main(int, char**)
         }
         else
         {
-            files::message("init: cannot start /disk/bin/sh; starting rescue\n");
+            files::message("init: cannot start /bin/sh; starting rescue\n");
             report_status("init: launch/wait status=", result);
         }
         files::message("init: deploy programs to ext2 with os1.sh, then boot again\n");
         rapid_exits = 0;
-        child = u::spawn("/bin/rescue");
+        child = u::spawn("/sbin/rescue");
         if(child < 0 || u::waitpid(child, &status) != child)
             files::message("init: rescue unavailable; retrying\n");
         timer.delay(rescue_retry_ns);

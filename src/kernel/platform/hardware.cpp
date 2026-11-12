@@ -528,7 +528,7 @@ void mounted_locked(BlockDevice& b, unsigned partition, const uint8_t* super)
     r.backing = fs;
     r.category = OS1_HARDWARE_STORAGE;
     r.known = 0;
-    copy(r.name, sizeof(r.name), "/disk");
+    copy(r.name, sizeof(r.name), "/");
     copy(r.state, sizeof(r.state), "mounted");
     add_locked(Mount, r);
 }

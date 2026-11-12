@@ -24,7 +24,7 @@ def exercise(run, expect):
     ok('touch "/tmp/src/empty"')
     ok('stat "/tmp/src/sub/a.txt"', b'logical_bytes:8 allocated_bytes:4096')
     ok('stat "/tmp/src/empty"', b'logical_bytes:0 allocated_bytes:0')
-    ok('stat "/bin/init"', b'allocated_bytes:unsupported')
+    ok('stat "/sbin/init"', b'allocated_bytes:unsupported')
     ok('df "/tmp"', b'total_bytes:262144')
     ok('du "/tmp/src"', b'4096 bytes /tmp/src')
     ok('du "/tmp/src" logical:true', b'8 bytes /tmp/src')
@@ -46,36 +46,36 @@ def exercise(run, expect):
     bad('cp -z "/tmp/src" "/tmp/x"', b'unsupported option')
     bad('rm -r "/tmp"')
     bad('rm -r "/"')
-    bad('rm -r "/disk"')
+    bad('rm -r "/sbin"')
     bad('rm "/tmp/src"')
     bad('rmdir "/tmp/src"')
     ok('fs.remove_directory "/tmp/copy" recursive:true')
     bad('stat "/tmp/copy"')
-    ok('cp -r "/tmp/src" "/disk/tree"')
-    ok('cat "/disk/tree/sub/a.txt"', b'payload\n')
-    ok('du "/disk/tree"', b'12288 bytes /disk/tree')
-    ok('df "/disk"', b'total_bytes:33554432')
-    ok('cp -r "/disk/tree" "/disk/second"')
-    ok('rm -r "/disk/second"')
+    ok('cp -r "/tmp/src" "/tree"')
+    ok('cat "/tree/sub/a.txt"', b'payload\n')
+    ok('du "/tree"', b'12288 bytes /tree')
+    ok('df "/"', b'total_bytes:33554432')
+    ok('cp -r "/tree" "/second"')
+    ok('rm -r "/second"')
     ok('find "/" > "/tmp/root-list"')
     root = ok('cat "/tmp/root-list"')
-    assert b'/disk/tree' not in root and b'/tmp/src' not in root, root
+    assert b'/tree' in root and b'/tmp/src' not in root, root
     ok('write "/tmp/tree.sh"\nfs.copy "/tmp/src" "/tmp/script" recursive:true\nfs.usage "/tmp/script" logical:true\nfs.remove_directory "/tmp/script" recursive:true\n.')
     ok('sh "/tmp/tree.sh"', b'8 bytes /tmp/script')
-    ok('mkdir "/disk/large"')
-    ok('echo "' + 'x' * 80 + '" > "/disk/large/blob"')
+    ok('mkdir "/large"')
+    ok('echo "' + 'x' * 80 + '" > "/large/blob"')
     # Double through a separate retained source to make a 41472-byte file.
     for _ in range(9):
-        ok('cp "/disk/large/blob" "/disk/chunk"')
-        ok('cat "/disk/chunk" >> "/disk/large/blob"')
+        ok('cp "/large/blob" "/chunk"')
+        ok('cat "/chunk" >> "/large/blob"')
     for index in range(7):
-        ok(f'cp "/disk/large/blob" "/disk/large/f{index}"')
-    failed = bad('cp -r "/disk/large" "/tmp/partial"', b'tree: stopped;')
+        ok(f'cp "/large/blob" "/large/f{index}"')
+    failed = bad('cp -r "/large" "/tmp/partial"', b'tree: stopped;')
     assert b'earlier effects remain' in failed, failed
-    ok('stat "/disk/large/blob"', b'logical_bytes:41472')
+    ok('stat "/large/blob"', b'logical_bytes:41472')
     ok('rm -r "/tmp/partial"')
-    ok('rm -r "/disk/large"')
-    ok('rm "/disk/chunk"')
+    ok('rm -r "/large"')
+    ok('rm "/chunk"')
     ok('mkdir "/tmp/deep"')
     ok('cd "/tmp/deep"')
     for _ in range(16):
@@ -83,7 +83,7 @@ def exercise(run, expect):
         ok('cd "d"')
     ok('cd "/"')
     bad('find "/tmp/deep"', b'tree: stopped;')
-    ok('/disk/diskutil sync', b'sync ok')
+    ok('/diskutil sync', b'sync ok')
     ok('kmem', b'kmem complete')
 
 
@@ -111,11 +111,11 @@ def main():
     boot(args, disk, 'first', exercise=exercise)
     check('written')
     boot(args, disk, 'reboot', commands=[
-        ('cat "/disk/tree/sub/a.txt"', b'payload\n'),
-        ('stat "/disk/tree/sub/a.txt"', b'logical_bytes:8 allocated_bytes:4096'),
-        ('du "/disk/tree"', b'12288 bytes /disk/tree'),
-        ('rm -r "/disk/tree"', None),
-        ('/disk/diskutil sync', b'sync ok'),
+        ('cat "/tree/sub/a.txt"', b'payload\n'),
+        ('stat "/tree/sub/a.txt"', b'logical_bytes:8 allocated_bytes:4096'),
+        ('du "/tree"', b'12288 bytes /tree'),
+        ('rm -r "/tree"', None),
+        ('/diskutil sync', b'sync ok'),
     ])
     check('removed')
     print('metadata, traversal, recursive tools, and reboot checks passed')

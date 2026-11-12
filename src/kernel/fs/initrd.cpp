@@ -108,7 +108,7 @@ long initialize_initrd_namespace()
                     continue;
                 break;
             }
-            long mounted = ext2_mount(root, *device);
+            long mounted = ext2_mount_root(root, *device);
             if(candidate)
             {
                 Os1ObserveUsbRecord record{};
@@ -124,7 +124,7 @@ long initialize_initrd_namespace()
             }
             if(mounted == 0)
             {
-                debug("ext2 mounted /disk")();
+                debug("ext2 mounted /")();
                 break;
             }
             if(mounted != OS1_ERR_NOT_FOUND)
@@ -142,6 +142,10 @@ NativeObject* initrd_namespace_root()
     return g_initrd_root;
 }
 #if defined(OS1_HOST_TEST)
+long mount_ext2_root_for_test(BlockDevice& device)
+{
+    return ext2_mount_root(g_initrd_root, device);
+}
 void reset_initrd_namespace_for_test()
 {
     object_release(g_initrd_root);

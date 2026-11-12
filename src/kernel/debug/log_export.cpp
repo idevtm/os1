@@ -103,17 +103,19 @@ long directory(const char* mount, Ref& base, Ref& logs)
     auto* root = initrd_namespace_root();
     if(!root)
         return OS1_ERR_NOT_FOUND;
-    long r = vfs_resolve(root, mount + 1, length(mount) - 1, base.object);
+    const bool persistent = mount[1] == 0;
+    long r = persistent ? vfs_resolve(root, ".", 1, base.object)
+                        : vfs_resolve(root, mount + 1, length(mount) - 1, base.object);
     if(r < 0)
         return r;
     if(!base.node()->operations)
-        return OS1_ERR_UNSUPPORTED;
+        return persistent ? OS1_ERR_NOT_FOUND : OS1_ERR_UNSUPPORTED;
     if(!(base.node()->allowed_rights & OS1_RIGHT_CREATE))
         return OS1_ERR_ACCESS;
     r = lookup(base.node(), "log", logs);
     if(r == OS1_ERR_NOT_FOUND)
     {
-        if(mount[1] == 'd')
+        if(persistent)
         {
             r = space(base.node(), 8192);
             if(r < 0)
@@ -536,7 +538,7 @@ void observe_mount(uint64_t identity)
 long disk(bool final, bool synchronize)
 {
     Ref base, dir;
-    long r = directory("/disk", base, dir);
+    long r = directory("/", base, dir);
     if(r < 0)
         return r;
     observe_mount(base.node()->object_id);
@@ -895,8 +897,8 @@ void poll()
     if(!try_begin_exclusive())
         return;
     Ref mount;
-    long mounted = vfs_resolve(initrd_namespace_root(), "disk", 4, mount.object);
-    if(!mounted)
+    long mounted = vfs_resolve(initrd_namespace_root(), ".", 1, mount.object);
+    if(!mounted && mount.node()->operations)
         observe_mount(mount.node()->object_id);
     uint64_t errors = diagnostic_log::error_sequence();
     bool early = errors != last_errors && now - last_error_drain >= second;
@@ -917,7 +919,8 @@ void poll()
     bool due = sync_due ||
                now - status.last_drain_ns >= (info.diagnostic ? second / 4 : 2 * second) ||
                pending_bytes >= 32768 || early || closing;
-    const bool disk_read_only = !mounted && !(mount.node()->allowed_rights & OS1_RIGHT_CREATE);
+    const bool disk_read_only =
+        !mounted && mount.node()->operations && !(mount.node()->allowed_rights & OS1_RIGHT_CREATE);
     if(disk_read_only)
         retire_closed(false);
     else if(due && !suspended)
@@ -951,8 +954,8 @@ void FinalDrainGuard::drain()
     if(!held_ || !atomic_load_acquire(&initialized) || !staging)
         return;
     Ref mount;
-    if(vfs_resolve(initrd_namespace_root(), "disk", 4, mount.object) == 0 &&
-       !(mount.node()->allowed_rights & OS1_RIGHT_CREATE))
+    if(vfs_resolve(initrd_namespace_root(), ".", 1, mount.object) == 0 &&
+       mount.node()->operations && !(mount.node()->allowed_rights & OS1_RIGHT_CREATE))
         return;
     (void)export_disk();
     publish_status();

@@ -23,8 +23,9 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     log = Path(args.log).with_suffix(f'.{phase}.log')
     command = [args.qemu, '-machine', 'q35', '-smp', str(getattr(args, 'cpus', 4)),
                '-m', '128M', '-display', 'none',
-               '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown',
-               '-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
+               '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-no-shutdown']
+    if disk is not None:
+        command += ['-drive', f'if=none,id=data,format=raw,file={disk},cache=writeback']
     if getattr(args, 'vga', None):
         command += ['-vga', args.vga]
     if getattr(args, 'vga_mmio_off', False):
@@ -58,7 +59,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                         '-device', 'usb-hub,bus=ehci.0,port=2']
         if getattr(args, 'coexist', False):
             command += ['-device', 'qemu-xhci,id=xhci', '-device', 'usb-kbd,bus=xhci.0']
-    else:
+    elif disk is not None:
         command += ['-device', 'virtio-blk-pci,drive=data,disable-legacy=on']
     if getattr(args, 'driver_network', False):
         command += ['-netdev', 'user,id=module-net', '-device',
@@ -139,11 +140,11 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             if getattr(args, 'stall_init', False) and args.transport == 'ehci':
                 rejected = b'ehci: controller retired'
             assert rejected in startup, startup[-4000:]
-            assert b'ext2 mounted /disk' not in startup
+            assert b'ext2 mounted /' not in startup
         elif getattr(args, 'missing_disk', False):
-            assert b'ext2 mounted /disk' not in startup
+            assert b'ext2 mounted /' not in startup
         else:
-            assert b'ext2 mounted /disk' in startup, startup[-2000:]
+            assert b'ext2 mounted /' in startup, startup[-2000:]
         if getattr(args, 'transport', 'virtio') == 'usb':
             assert b'xhci: HID keyboard ready' in startup, startup[-4000:]
             if not (getattr(args, 'readonly', False) or getattr(args, 'stall_init', False)):
@@ -173,7 +174,7 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
             repeated = run('usb')
             assert snapshot == repeated, 'USB boot diagnostics must be immutable'
 
-        listed = run('ls /bin')
+        listed = run('ls /sbin')
         assert b'diskutil' not in listed, 'utility must not be installed in initrd'
         if on_boot is not None:
             on_boot()
@@ -185,18 +186,18 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
                 out = run(command, marker)
                 assert b'unknown command:' not in out and b'redirection failed' not in out, out
         elif phase == 'write':
-            run('/disk/diskutil seed', b'diskutil seed ok')
-            run('echo "persistent shell file" > /disk/note')
-            run('echo appended >> /disk/note')
-            run('/disk/diskutil sync', b'diskutil sync ok')
+            run('/diskutil seed', b'diskutil seed ok')
+            run('echo "persistent shell file" > /note')
+            run('echo appended >> /note')
+            run('/diskutil sync', b'diskutil sync ok')
         else:
-            run('/disk/diskutil verify', b'diskutil verify ok')
-            out = run('cat /disk/note')
+            run('/diskutil verify', b'diskutil verify ok')
+            out = run('cat /note')
             assert b'persistent shell file\nappended\n' in out, out
             # A disk executable is immutable while ordinary data remains writable.
-            out = run('echo damage > /disk/diskutil')
+            out = run('echo damage > /diskutil')
             assert b'failed' in out or b'error' in out, out
-            run('/disk/diskutil verify', b'diskutil verify ok')
+            run('/diskutil verify', b'diskutil verify ok')
         if getattr(args, 'poweroff', False):
             child.stdin.write(b'shutdown\n')
             child.stdin.flush()
@@ -259,11 +260,11 @@ def main():
     if args.readonly:
         def exercise_readonly(run, _expect):
             contents = b'Persistent ext2 storage.'
-            run('cat /disk/readme', contents)
-            run('echo damage > /disk/readme', b'redirection failed', allow_errors=True)
-            run('echo damage > /disk/new', b'redirection failed', allow_errors=True)
-            run('cat /disk/readme', contents)
-            run('/disk/diskutil', b'diskutil: seed | verify | sync', allow_errors=True)
+            run('cat /readme', contents)
+            run('echo damage > /readme', b'redirection failed', allow_errors=True)
+            run('echo damage > /new', b'redirection failed', allow_errors=True)
+            run('cat /readme', contents)
+            run('/diskutil', b'diskutil: seed | verify | sync', allow_errors=True)
 
         original = disk.read_bytes()
         boot(args, disk, 'readonly', exercise=exercise_readonly)

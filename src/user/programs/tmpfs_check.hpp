@@ -55,7 +55,7 @@ inline bool run()
     close(observer_file);
     if(observer < 0)
         return false;
-    int image = os1::user::open("/disk/bin/vfscheck", OS1_RIGHT_EXECUTE);
+    int image = os1::user::open("/bin/vfscheck", OS1_RIGHT_EXECUTE);
     if(image < 0)
         return false;
     os1_launch_request launch_args{};

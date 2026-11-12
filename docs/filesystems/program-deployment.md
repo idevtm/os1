@@ -42,7 +42,7 @@ sudo apt install e2fsprogs
 
 The deployment tool finds `debugfs` and `e2fsck` through PATH and standard Homebrew or Linux locations.
 The QEMU image operation itself needs no sudo.
-Stop QEMU before deployment. Synchronize guest writes with `/disk/diskutil sync` before stopping it.
+Stop QEMU before deployment. Synchronize guest writes with `/diskutil sync` before stopping it.
 The tool rejects an image with an active conflicting lock.
 Do not access the image through a host filesystem mount during deployment.
 
@@ -51,16 +51,16 @@ Do not access the image through a host filesystem mount during deployment.
 The normal shell runs from ext2. Initrd provides an independent recovery path.
 
 ```text
-kernel mounts storage -> /bin/init -> /disk/bin/sh -> exit -> restart
+kernel mounts storage -> /sbin/init -> /bin/sh -> exit -> restart
                              |
-                             +-- launch failure or repeated rapid exits -> /bin/rescue -> retry
+                             +-- launch failure or repeated rapid exits -> /sbin/rescue -> retry
 ```
 
 Stop QEMU before you update an existing data image.
 Run `./os1.sh storage_deploy` to install the shell and current programs without erasing other files.
 For a managed USB image, select **Update boot and programs (preserve data)** in the USB menu.
 Create a boot-plus-ext2 image for a new stick.
-A boot-only image starts rescue unless another supported disk supplies `/disk/bin/sh`.
+A boot-only image starts rescue unless another supported disk supplies `/bin/sh`.
 The full shell is not available from initrd.
 
 Init reports the launch, wait, or rapid exit status before it starts rescue.
@@ -73,7 +73,7 @@ An overlong line returns an input error after its newline; rescue does not execu
 Rescue has no aliases, scripts, Tab completion, command history, file editor, or arbitrary program launch.
 The listing and file-reading code is shared with the standalone `ls` and `cat` utilities.
 
-`retry` or end-of-input returns to init and attempts `/disk/bin/sh` again.
+`retry` or end-of-input returns to init and attempts `/bin/sh` again.
 It does not rediscover devices, remount storage, or repair a filesystem.
 Use host deployment to restore a missing or invalid shell, then boot again.
 A shell exit starts a fresh shell unless it reaches the rapid-exit limit.
@@ -81,12 +81,12 @@ Kernel drivers remain built into the kernel. Moving programs does not change sto
 
 ## Program manifest
 
-The default manifest installs the full shell and bundled programs under `/disk/bin`.
-It also retains `/disk/diskutil` for existing synchronization workflows.
+The default manifest installs the full shell and bundled programs under `/bin`.
+It also retains `/diskutil` for existing synchronization workflows.
 Initrd contains only `init` and `rescue`.
-The manifest installs `/disk/etc/motd` as a resource default.
-The shell searches `/bin` before `/disk/bin` for bare command names.
-Names containing `/` bypass search. Providers in verification programs use explicit `/disk/bin` paths.
+The manifest installs `/etc/motd` as a resource default.
+The shell searches `/bin` for bare command names.
+Names containing `/` bypass search. Providers in verification programs use explicit `/bin` paths.
 New QEMU images receive the manifest during creation; an existing image remains unchanged.
 After upgrading an older image, run `storage_deploy` to install the moved programs.
 Ordinary builds and QEMU launches preserve the installed version until deployment runs.
@@ -96,12 +96,13 @@ For additional programs, save this example as `build/my-programs.json`:
 
 ```json
 {
-  "version": 1,
+  "version": 3,
   "programs": [
-    {"source": "artifacts/user/diskutil.elf", "destination": "/disk/diskutil"},
-    {"source": "artifacts/user/buffercheck.elf", "destination": "/disk/bin/buffercheck"},
-    {"source": "artifacts/user/textprocessor.elf", "destination": "/disk/bin/textprocessor"}
-  ]
+    {"source": "artifacts/user/diskutil.elf", "destination": "/diskutil"},
+    {"source": "artifacts/user/buffercheck.elf", "destination": "/bin/buffercheck"},
+    {"source": "artifacts/user/textprocessor.elf", "destination": "/bin/textprocessor"}
+  ],
+  "resources": []
 }
 ```
 
@@ -121,17 +122,17 @@ Build externally supplied programs before deployment. The target cannot infer ex
 ### Resource defaults
 
 Version 1 manifests remain supported for executable deployment.
-Version 2 adds a required `resources` list alongside `programs`.
+Version 3 accepts an optional `resources` list alongside `programs`.
 Both lists share the 64-entry limit and destination validation.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "programs": [
-    {"source": "artifacts/user/sh.elf", "destination": "/disk/bin/sh"}
+    {"source": "artifacts/user/sh.elf", "destination": "/bin/sh"}
   ],
   "resources": [
-    {"source": "motd", "destination": "/disk/etc/motd"}
+    {"source": "motd", "destination": "/etc/motd"}
   ]
 }
 ```
@@ -172,9 +173,12 @@ The [USB menu](../hardware/usb-image-workflow.md) stages the managed data partit
 
 The [ext2 profile](ext2.md#supported-disk-profile) remains unchanged.
 A manifest contains 1 through 64 files, each no larger than 4,243,456 bytes.
-Destinations start with `/disk/` and use letters, digits, underscores, dots, and hyphens.
+Version 3 uses absolute guest paths with letters, digits, underscores, dots, and hyphens.
+The deployer rejects destinations under `/sbin` and `/tmp`.
+Versions 1 and 2 use the historical `/disk/` prefix. The deployer removes that prefix.
+The reserved destination check also applies to these versions. The deployer preserves existing disk entries at these names.
 Each component contains at most 63 characters. The complete destination contains at most 255 characters.
-Dot and dot-dot components are forbidden. A program can have at most 31 parent directories beneath `/disk`.
+Dot and dot-dot components are forbidden. A program can have at most 31 parent directories beneath the root.
 Programs must have an x86-64 little-endian ELF header. The guest loader retains full executable validation.
 Reflection sections are copied with the original program bytes.
 

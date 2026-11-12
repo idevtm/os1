@@ -950,15 +950,15 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "unknown command: nope::copycheck\\n"
   "[user/copycheck] ok::fdcheck\\n"
   "[user/fdcheck] ok::ls /bin\\necho 'smoke-ls-complete'\\n"
-  "\nsmoke-ls-complete\n::cat /disk/etc/motd\\n"
+  "\nsmoke-ls-complete\n::cat /etc/motd\\n"
   "os1: native file reads work.::vfscheck\\n"
   "[user/vfscheck] ok::ipccheck\\n"
   "[user/ipccheck] ok::buffercheck\\n"
-  "[user/buffercheck] ok::intf /disk/bin/textprocessor\\n"
+  "[user/buffercheck] ok::intf /bin/textprocessor\\n"
   "event progress id=6 input=4 output=0 implemented::countercheck\\n"
   "[user/countercheck] ok::activationcheck\\n"
   "[user/activationcheck] ok::counter --initial 10 --ceiling 100\\n"
-  "counter initial=10 ceiling=100::intf /disk/bin/counter\\n"
+  "counter initial=10 ceiling=100::intf /bin/counter\\n"
   "initial: u64 offset=0 default=0 cli=--initial::paramdemo initial:4 source.text:'Hi there' options.suffix:null\\n"
   "parameter constructor count=12 text=Hi there::call paramdemo render mode.thorough source.text:\"hello world\" options:{limit:5,suffix:null}\\n"
   "parameter method count=5 text=HELLO::call paramdemo render source.text:'a\"b' options.suffix:null\\n"
@@ -966,7 +966,7 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "parameter method count=1 text=!::paramdemo mode:bogus\\n"
   "unknown enum name::call paramdemo render source.bogus\\n"
   "unknown field, enumerator or case::paramcheck\\n"
-  "[user/paramcheck] ok::intf /disk/bin/paramdemo\\n"
+  "[user/paramcheck] ok::intf /bin/paramdemo\\n"
 )
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS
@@ -1166,15 +1166,15 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "shell prompt ready"
     "sys boot=limine console=framebuffer"
     "pid tid pstate tstate mode cr3 name"
-    "/bin/init"
+    "/sbin/init"
     "cpu slot apic bsp booted pid tid"
     "cpu 3 03 no yes"
     "pci bdf vendor:device class irq bars"
     "pci 00:03.0 1af4:1042 class=01:00"
     "pci 00:02.0 1af4:1041 class=02:00"
     "initrd path size"
-    "initrd /bin/rescue size="
-    "initrd /bin/init size="
+    "initrd /sbin/rescue size="
+    "initrd /sbin/init size="
     "device bus id state pci driver"
     "device pci 3 started 3 virtio-blk"
     "device pci 2 started 2 virtio-net"
@@ -1371,7 +1371,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEM
     "virtio-net smoke ok"
     "starting first user process"
     "shell prompt ready"
-    "shell exec start /disk/bin/yield"
+    "shell exec start /bin/yield"
     "[user/yield] tick 2"
     "idle thread online"
   )
@@ -1504,15 +1504,15 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "shell prompt ready"
     "sys boot=bios console=vga"
     "pid tid pstate tstate mode cr3 name"
-    "/bin/init"
+    "/sbin/init"
     "cpu slot apic bsp booted pid tid"
     "cpu 3 03 no yes"
     "pci bdf vendor:device class irq bars"
     "pci 00:03.0 1af4:1042 class=01:00"
     "pci 00:02.0 1af4:1041 class=02:00"
     "initrd path size"
-    "initrd /bin/rescue size="
-    "initrd /bin/init size="
+    "initrd /sbin/rescue size="
+    "initrd /sbin/init size="
     "device bus id state pci driver"
     "device pci 3 started 3 virtio-blk"
     "device pci 2 started 2 virtio-net"
@@ -1701,7 +1701,7 @@ if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE)
     "virtio-net smoke ok"
     "starting first user process"
     "shell prompt ready"
-    "shell exec start /disk/bin/yield"
+    "shell exec start /bin/yield"
     "[user/yield] tick 2"
     "idle thread online"
   )
@@ -2111,7 +2111,7 @@ if(OS1_QEMU_EXECUTABLE)
       -device virtio-blk-pci,drive=data,disable-legacy=on
       -serial stdio -monitor none
     DEPENDS os1_bios_image storage_create USES_TERMINAL VERBATIM)
-  os1_register_menu_target(run_persistent_bios "BIOS with persistent ext2 storage" "Boot with /disk. Use shutdown or reboot for a synchronized transition.")
+  os1_register_menu_target(run_persistent_bios "BIOS with persistent ext2 storage" "Boot with ext2 as the root. Use shutdown or reboot for a synchronized transition.")
   if(OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)
     add_custom_target(run_persistent
       COMMAND "${CMAKE_COMMAND}" -E copy "${OS1_OVMF_VARS_TEMPLATE}" "${OS1_ARTIFACT_DIR}/persistent-vars.fd"
@@ -2123,7 +2123,7 @@ if(OS1_QEMU_EXECUTABLE)
         -device virtio-blk-pci,drive=data,disable-legacy=on
         -serial stdio -monitor none
       DEPENDS os1_image storage_create USES_TERMINAL VERBATIM)
-    os1_register_menu_target(run_persistent "UEFI with persistent ext2 storage" "Boot with /disk. Keep files across launches and ordinary rebuilds.")
+    os1_register_menu_target(run_persistent "UEFI with persistent ext2 storage" "Boot with ext2 as the root. Keep files across launches and ordinary rebuilds.")
   endif()
 endif()
 
@@ -2165,8 +2165,8 @@ if(OS1_QEMU_EXECUTABLE)
         --qemu "${OS1_QEMU_EXECUTABLE}" --image "${usb_run_image}" --disk "${OS1_PERSISTENT_DISK}"
         --controller ehci ${usb_run_firmware}
       DEPENDS ${usb_run_dependency} storage_create USES_TERMINAL VERBATIM)
-    os1_register_menu_target(run_ehci_storage_${boot} "EHCI USB 2 storage (${boot})" "Boot with /disk over EHCI; console input uses PS/2 or serial.")
-    os1_register_menu_target(${usb_run_target} "USB storage (${boot})" "Boot with /disk over xHCI USB mass storage and a USB keyboard.")
+    os1_register_menu_target(run_ehci_storage_${boot} "EHCI USB 2 storage (${boot})" "Boot with / over EHCI; console input uses PS/2 or serial.")
+    os1_register_menu_target(${usb_run_target} "USB storage (${boot})" "Boot with / over xHCI USB mass storage and a USB keyboard.")
   endforeach()
 endif()
 if(BUILD_TESTING AND OS1_QEMU_EXECUTABLE AND OS1_OVMF_CODE AND OS1_OVMF_VARS_TEMPLATE)

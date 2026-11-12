@@ -201,6 +201,5 @@ inline void defaults(Data& d)
     add(d, 0, "cwd", 3, OS1_VALUE_STRING, "/", 1);
     const int p = add(d, 0, "path", 4, OS1_VALUE_LIST);
     add(d, p, "", 0, OS1_VALUE_STRING, "/bin", 4);
-    add(d, p, "", 0, OS1_VALUE_STRING, "/disk/bin", 9);
 }
 }  // namespace os1::context

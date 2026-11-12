@@ -306,7 +306,7 @@ int main(int, char**)
     for(unsigned i = 0; i < 4097; ++i)
         bytes[i] = 'A' + i % 26;
     os1_ipc_pair pair{};
-    long pid = provider("/disk/bin/textprocessor", pair);
+    long pid = provider("/bin/textprocessor", pair);
     CHECK(pid > 0, "text provider");
     auto input = request(fd, LowercaseBuffer);
     auto invalid = input;
@@ -390,7 +390,7 @@ int main(int, char**)
     // A notification confirms delivery before each timeout, closure, or failure check.
     for(unsigned mode = 0; mode < 6; ++mode)
     {
-        pid = provider("/disk/bin/buffercheck", pair);
+        pid = provider("/bin/buffercheck", pair);
         CHECK(pid > 0, "held provider");
         long events = ipc_subscribe(pair.client, Progress);
         CHECK(events >= 0, "held subscription");

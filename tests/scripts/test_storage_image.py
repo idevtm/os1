@@ -47,8 +47,8 @@ class StorageImage(unittest.TestCase):
             executable[:6] = b'\x7fELF\x02\x01'
             executable[18:20] = b'\x3e\x00'
             utility.write_bytes(executable)
-            manifest.write_text(json.dumps({'version': 1, 'programs': [
-                {'source': str(utility), 'destination': '/disk/bin/probe'}]}))
+            manifest.write_text(json.dumps({'version': 3, 'programs': [
+                {'source': str(utility), 'destination': '/bin/probe'}]}))
             builder.create(image, utility, 4, manifest=manifest)
             original = image.read_bytes()
             self.assertIn(b'probe', original)

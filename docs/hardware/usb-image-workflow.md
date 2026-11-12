@@ -52,7 +52,7 @@ On macOS, install it with `brew install e2fsprogs`.
 
 Initrd contains only `init` and `rescue`.
 The normal shell and default resources reside on ext2.
-Other programs live under `/disk/bin`; the shell finds them by name.
+Other programs live under `/bin`; the shell finds them by name.
 Select **Update boot and programs (preserve data)** when upgrading an existing managed boot-plus-ext2 stick.
 A boot-only update preserves data but does not install the moved programs.
 Boot-only images provide the rescue console when no usable ext2 shell is available.
@@ -135,19 +135,19 @@ The custom BIOS loader retains its build-selected profile and has no interactive
 
 
 Boot the USB disk through the computer's BIOS or UEFI menu.
-The kernel mounts the data partition at `/disk` when the device matches the [USB storage profile](usb-storage.md).
+The kernel mounts the data partition at `/` when the device matches the [USB storage profile](usb-storage.md).
 It requires an xHCI-connected root-port device; EHCI-only controllers and external USB hubs remain unsupported.
 The BIOS/UEFI firmware's ability to boot a stick does not prove kernel controller support.
 
 ```text
-ls /disk
-/disk/diskutil seed
-/disk/diskutil verify
-echo saved > /disk/note
-/disk/diskutil sync
+ls /
+/diskutil seed
+/diskutil verify
+echo saved > /note
+/diskutil sync
 ```
 
-Run `/disk/diskutil sync` before shutdown or removal after writes.
+Run `/diskutil sync` before shutdown or removal after writes.
 Then reconnect the stick to the development computer for updates.
 A dirty or unsupported filesystem prevents update staging; the tool does not repair or format it automatically.
 
@@ -187,7 +187,7 @@ A synchronization or readback failure leaves the backup available and does not r
 ## Program selection and privilege boundaries
 
 `OS1_STORAGE_MANIFEST` selects programs for initial creation and deployment.
-The USB build directory defaults to its generated manifest containing `/disk/diskutil`.
+The USB build directory defaults to its generated manifest containing `/diskutil`.
 Set a custom manifest in that build directory to deploy additional programs.
 See [program deployment](../filesystems/program-deployment.md) for its format and preservation rules.
 The old standalone QEMU deployment command still rejects combined USB images.

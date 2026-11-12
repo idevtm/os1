@@ -1511,8 +1511,7 @@ int main(int argc_main, char** argv_main)
         {
             os1::user::files::message("shell: diagnostic tests starting\n");
             // Only automatic boot tests use this explicit deployment setting.
-            os1::user::files::Handle mode(
-                os1::user::open("/disk/etc/run-tests-mode", OS1_RIGHT_READ));
+            os1::user::files::Handle mode(os1::user::open("/etc/run-tests-mode", OS1_RIGHT_READ));
             char setting[12]{};
             const bool unattended = mode.fd >= 0 &&
                                     os1::user::read(mode.fd, setting, sizeof(setting)) == 11 &&
@@ -1525,7 +1524,7 @@ int main(int argc_main, char** argv_main)
             record.executed = true;
             const char* arguments[] = {"run-tests", "--no-input", "--no-expect-usb-mouse"};
             const os1_constructor_args constructor{};
-            long child = os1::user::run_program("/disk/bin/run-tests",
+            long child = os1::user::run_program("/bin/run-tests",
                                                 unattended ? 3 : 1,
                                                 arguments,
                                                 false,
@@ -1538,9 +1537,8 @@ int main(int argc_main, char** argv_main)
             int status = 0;
             command_failed = child < 0 || os1::user::waitpid(child, &status) != child || status;
             os1::user::files::message(
-                command_failed
-                    ? "shell: diagnostic tests failed or unavailable; inspect /disk/tests\n"
-                    : "shell: diagnostic tests completed; results in /disk/tests\n");
+                command_failed ? "shell: diagnostic tests failed or unavailable; inspect /tests\n"
+                               : "shell: diagnostic tests completed; results in /tests\n");
         }
     }
     char line[kShellLineBytes];

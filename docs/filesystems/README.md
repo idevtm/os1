@@ -1,7 +1,7 @@
 # Filesystems
 
 The system combines an immutable boot initrd with a bounded writable filesystem at `/tmp`.
-Temporary contents disappear on reboot. A bounded ext2 profile provides persistent QEMU storage at `/disk`.
+Temporary contents disappear on reboot. A bounded ext2 profile provides persistent QEMU storage at `/`.
 
 | Document | Status |
 | --- | --- |
