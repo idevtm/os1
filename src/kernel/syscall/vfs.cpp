@@ -2,6 +2,7 @@
 
 #include "arch/x86_64/cpu/cpu.hpp"
 #include "debug/log_export.hpp"
+#include "handoff/memory_layout.h"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "util/memory.h"
@@ -19,6 +20,27 @@ struct CursorReservation
     ~CursorReservation()
     {
         atomic_store_release(&instance->cursor_busy, false);
+    }
+};
+constexpr size_t kUserCopyChunkBytes = 256;
+struct IoBuffer
+{
+    PageFrameContainer& frames;
+    uint8_t small[OS1_DIRECTORY_RECORD_MAX]{};
+    uint64_t physical = 0;
+    uint8_t* large = nullptr;
+
+    IoBuffer(PageFrameContainer& frames, size_t preferred, size_t length) : frames(frames)
+    {
+        if(preferred > sizeof(small) && preferred <= kPageSize && length > kUserCopyChunkBytes &&
+           frames.allocate(physical))
+            large = kernel_physical_pointer<uint8_t>(physical);
+    }
+
+    ~IoBuffer()
+    {
+        if(large)
+            (void)frames.free(physical);
     }
 };
 long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& request)
@@ -39,39 +61,77 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
                 instance->cursor = result;
             return result;
         }
+        const bool file_io = request.operation == kVfsRead || request.operation == kVfsWrite;
+        const size_t preferred =
+            file_io ? node->operations->preferred_io_bytes : kUserCopyChunkBytes;
+        IoBuffer buffer(frames, preferred, request.length);
+        auto* bytes = buffer.large ? buffer.large : buffer.small;
         size_t delivered = 0;
         while(delivered < request.length)
         {
-            uint8_t bytes[OS1_DIRECTORY_RECORD_MAX]{};
+            size_t limit = kUserCopyChunkBytes;
+            const bool append = request.operation == kVfsWrite &&
+                                (atomic_load_acquire(&instance->status_flags) & OS1_STATUS_APPEND);
+            if(buffer.large)
+            {
+                // Append chooses the actual offset under the backend guard.
+                const size_t remaining =
+                    append ? preferred : preferred - instance->cursor % preferred;
+                // Keep the user-copy commit boundaries when the file offset is unaligned.
+                const size_t aligned = remaining / kUserCopyChunkBytes * kUserCopyChunkBytes;
+                if(aligned > limit)
+                    limit = aligned;
+            }
             size_t count = request.length - delivered;
-            if(count > 256)
-                count = 256;
+            if(count > limit)
+                count = limit;
             uint64_t next = instance->cursor;
             if(request.operation == kVfsRead)
             {
                 long result = node->operations->read(node, instance->cursor, bytes, count);
                 if(result < 0)
                     return delivered ? static_cast<long>(delivered) : result;
-                count = result;
-                if(!count)
+                if(!result)
                     break;
-                next += count;
+                const size_t read = static_cast<size_t>(result);
+                for(size_t copied = 0; copied < read;)
+                {
+                    const size_t remaining = read - copied;
+                    const size_t chunk =
+                        remaining > kUserCopyChunkBytes ? kUserCopyChunkBytes : remaining;
+                    if(request.buffer > UINT64_MAX - delivered ||
+                       !copy_to_user(
+                           frames, thread, request.buffer + delivered, bytes + copied, chunk))
+                        return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
+                    instance->cursor += chunk;
+                    delivered += chunk;
+                    copied += chunk;
+                }
+                continue;
             }
             else if(request.operation == kVfsWrite)
             {
-                if(request.buffer > UINT64_MAX - delivered ||
-                   !copy_from_user(frames, thread, request.buffer + delivered, bytes, count))
+                if(request.buffer > UINT64_MAX - delivered)
                     return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
+                const auto address = request.buffer + delivered;
+                if(!copy_from_user(frames, thread, address, bytes, count))
+                {
+                    if(count <= kUserCopyChunkBytes ||
+                       !copy_from_user(frames, thread, address, bytes, kUserCopyChunkBytes))
+                        return delivered ? static_cast<long>(delivered) : OS1_ERR_FAULT;
+                    count = kUserCopyChunkBytes;
+                }
                 uint64_t end = instance->cursor;
-                long result = node->operations->write(
-                    node,
-                    instance->cursor,
-                    bytes,
-                    count,
-                    atomic_load_acquire(&instance->status_flags) & OS1_STATUS_APPEND,
-                    &end);
+                long result =
+                    node->operations->write(node, instance->cursor, bytes, count, append, &end);
+                if(count > kUserCopyChunkBytes &&
+                   (result == OS1_ERR_LIMIT || result == OS1_ERR_RANGE))
+                    result = node->operations->write(
+                        node, instance->cursor, bytes, kUserCopyChunkBytes, append, &end);
                 if(result < 0)
                     return delivered ? static_cast<long>(delivered) : result;
+                if(!result)
+                    break;
                 instance->cursor = end;
                 delivered += result;
                 continue;
@@ -93,6 +153,7 @@ long perform(PageFrameContainer& frames, Thread* thread, const VfsIoWaitState& r
                         return OS1_ERR_FAULT;
                     return OS1_ERR_BUFFER_TOO_SMALL;
                 }
+                memset(bytes, 0, required);
                 os1_directory_record header{OS1_VFS_ABI_VERSION,
                                             required,
                                             static_cast<uint16_t>(entry.name_bytes),

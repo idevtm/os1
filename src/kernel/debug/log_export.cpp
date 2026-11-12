@@ -184,8 +184,11 @@ long write(VfsNode* file, uint64_t offset, const void* data, size_t bytes)
     for(size_t at = 0; at < bytes;)
     {
         size_t count = bytes - at;
-        if(count > 256)
-            count = 256;
+        const size_t preferred = file->operations->preferred_io_bytes;
+        const size_t remaining =
+            preferred > 256 ? preferred - (offset + at) % preferred : preferred;
+        if(count > remaining)
+            count = remaining;
         long r = file->operations->write(file, offset + at, p + at, count, false, nullptr);
         if(r < 0)
             return r;

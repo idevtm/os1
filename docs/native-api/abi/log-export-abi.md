@@ -112,8 +112,8 @@ If admission is busy at the limit, the power request returns WOULD_BLOCK.
 The system holds admission through the final drain and filesystem synchronization.
 A disk-export error does not prevent the final filesystem synchronization attempt.
 
-File operations use the existing 256-byte backend write limit.
-Each export frame can therefore require several writes.
+Disk export splits each frame at ext2 block boundaries.
+Temporary export uses writes of up to 256 bytes.
 A failed append abandons that segment for subsequent writes.
 The next segment preserves a readable prefix in the previous file.
 Ext2 has no journal; successful synchronization does not guarantee recovery from every sudden power loss.

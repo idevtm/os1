@@ -411,10 +411,15 @@ long Volume::write(uint32_t n, Inode& inode, uint64_t offset, const void* in, si
         size_t at = (offset + done) % 4096, chunk = 4096 - at;
         if(chunk > length - done)
             chunk = length - done;
-        if(!read_block(b, data))
-            return OS1_ERR_IO;
-        memcpy(data + at, src + done, chunk);
-        if(!write_block(b, data))
+        const void* block = src + done;
+        if(chunk != block_bytes)
+        {
+            if(!read_block(b, data))
+                return OS1_ERR_IO;
+            memcpy(data + at, src + done, chunk);
+            block = data;
+        }
+        if(!write_block(b, block))
             return OS1_ERR_IO;
         done += chunk;
     }

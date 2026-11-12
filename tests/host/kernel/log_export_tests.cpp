@@ -977,7 +977,10 @@ TEST_F(LogExport, ShortAppendRetainsPrefixAndUsesNewSegment)
     VfsOperations partial = *saved_operations;
     partial.write =
         [](VfsNode* n, uint64_t offset, const void* bytes, size_t size, bool append, uint64_t* end)
-        -> long { return saved_operations->write(n, offset, bytes, size / 2, append, end); };
+        -> long {
+        const size_t prefix = size > 128 ? 128 : size / 2;
+        return saved_operations->write(n, offset, bytes, prefix, append, end);
+    };
     node->operations = &partial;
     events(3);
     EXPECT_EQ(OS1_ERR_IO, log_export::run(OS1_LOG_EXPORT_DISK));
