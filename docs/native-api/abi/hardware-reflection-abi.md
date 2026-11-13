@@ -396,6 +396,10 @@ A successful GM206 probe also exposes `os.display.gm206.boot_state`.
 The route value comes from BAR 0 offset `0x612488` on the reference board.
 The route flag indicates a match with an observed active DisplayPort SOR and link.
 Head timing and surface register fields appear only after a route match.
+Base channel fields for the matched head also appear only after a route match.
+Fields with the `_next_raw` suffix read the second state copy of the same base channel method.
+The `vbios_display_owner`, `pramin_window`, `bar1_instance`, `bar2_instance`, and `vram_*` fields are raw register values.
+They describe firmware ownership and GPU memory layout. They do not grant ownership to OS1.
 The link read flags are set only when the complete read succeeds.
 The sink link configuration comes from DPCD `0x100` and `0x101`.
 The six status bytes start at `0x202`. The first byte occupies the low eight bits of `link_status_raw`.

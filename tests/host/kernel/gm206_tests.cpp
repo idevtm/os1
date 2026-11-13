@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <string_view>
+#include <vector>
 
 #include "driver/gm206.h"
 #include "drivers/display/reflection.hpp"
@@ -24,13 +26,28 @@ struct AuxFixture
     bool timeout = false, defer_offset = false;
     unsigned offset_updates = 0;
     uint32_t identity = 0x12600000, route = 0x12;
+    unsigned head = 0;
+    mutable std::vector<unsigned> reads;
 
     uint32_t read(unsigned reg) const
     {
+        reads.push_back(reg);
         if(reg == 0x610490)
             return 0x01000013;
         if(reg == 0x64046c)
             return 0x10203040;
+        if(reg == 0x6194e8)
+            return 0x3;
+        if(reg == 0x001704)
+            return 0x80000123;
+        if(reg == 0x11020c)
+            return 2048;
+        if(reg == 0x6104a0 + head * 0x10)
+            return 0x48000088;
+        if(reg == 0x641408 + head * 0x1000)
+            return (768u << 16) | 1024u;
+        if(reg == 0x661408 + head * 0x1000)
+            return (1080u << 16) | 1920u;
         if(reg == gm206::board_route)
             return route;
         if(reg >= 0xd980 && reg <= 0xd9cc)
@@ -40,12 +57,12 @@ struct AuxFixture
         if(reg == 0)
             return identity;
         if(reg == 0x612004)
-            return 0x201;
+            return 0x200 | (1u << head);
         if(reg == 0x640220)
-            return 0x901;
-        if(reg == 0x640414)
+            return 0x900 | (1u << head);
+        if(reg == 0x640414 + head * 0x300)
             return (2222u << 16) | 4000u;
-        if(reg == 0x640450)
+        if(reg == 0x640450 + head * 0x300)
             return 533250000;
         switch(reg)
         {
@@ -289,13 +306,13 @@ TEST(Gm206, PagesTimingFieldsAndKeepsFirmwareModesSeparate)
     EXPECT_EQ(link.nodes[1].integer, 4u);
     auto page = link;
     unsigned fields = boot.count + link.count;
-    bool core_seen = false, storage_seen = false;
+    bool core_seen = false, storage_seen = false, owner_seen = false, base_seen = false;
     while(!page.end)
     {
         const auto start = page.next;
         page = children(probe.nodes[4].id, start);
         ASSERT_GT(page.next, start);
-        ASSERT_LE(page.next, 41u);
+        ASSERT_LE(page.next, 68u);
         fields += page.count;
         for(unsigned i = 0; i < page.count; ++i)
         {
@@ -306,6 +323,16 @@ TEST(Gm206, PagesTimingFieldsAndKeepsFirmwareModesSeparate)
                 EXPECT_EQ(node.integer, 0x01000013u);
                 core_seen = true;
             }
+            if(std::string_view(node.name) == "vbios_display_owner")
+            {
+                EXPECT_EQ(node.integer, 3u);
+                owner_seen = true;
+            }
+            if(std::string_view(node.name) == "base_surface_size_raw")
+            {
+                EXPECT_EQ(node.integer, (768u << 16) | 1024u);
+                base_seen = true;
+            }
             if(std::string_view(node.name) == "head_surface_storage_raw")
             {
                 EXPECT_EQ(node.integer, 0x10203040u);
@@ -313,9 +340,11 @@ TEST(Gm206, PagesTimingFieldsAndKeepsFirmwareModesSeparate)
             }
         }
     }
-    EXPECT_EQ(fields, 41u);
+    EXPECT_EQ(fields, 68u);
     EXPECT_TRUE(core_seen);
     EXPECT_TRUE(storage_seen);
+    EXPECT_TRUE(owner_seen);
+    EXPECT_TRUE(base_seen);
     EXPECT_STREQ(probe.nodes[2].name, "diagnostics");
     auto outputs = children(probe.nodes[0].id);
     ASSERT_EQ(outputs.count, 1u);
@@ -415,4 +444,224 @@ TEST(Gm206, DoesNotAssociateMismatchedRouteWithHead)
     EXPECT_FALSE(state.boot.route_matched);
     EXPECT_EQ(state.boot.sor, 1);
     EXPECT_EQ(state.boot.link, 1);
+}
+
+TEST(Gm206, CapturesOwnershipStateWithoutRegisterWrites)
+{
+    AuxFixture fixture;
+    fixture.status = 0;
+    fixture.head = 3;
+    gm206::Snapshot state{};
+    ASSERT_TRUE(gm206::probe(fixture.io(), state));
+    // No sink is present, so the capture must not write a register.
+    EXPECT_EQ(fixture.writes, 0u);
+    ASSERT_TRUE(state.boot.route_matched);
+    EXPECT_EQ(state.boot.head_index, 3);
+    const auto core = [](const gm206::Snapshot& snapshot, std::string_view name) {
+        for(unsigned i = 0; i < std::size(gm206::boot_registers); ++i)
+            if(name == gm206::boot_registers[i].name)
+                return snapshot.boot.core[i];
+        ADD_FAILURE() << "missing register " << name;
+        return 0u;
+    };
+    const auto base = [&](std::string_view name) {
+        for(unsigned i = 0; i < std::size(gm206::base_registers); ++i)
+            if(name == gm206::base_registers[i].name)
+                return state.boot.base[i];
+        ADD_FAILURE() << "missing register " << name;
+        return 0u;
+    };
+    const auto was_read = [&](unsigned offset) {
+        return std::find(fixture.reads.begin(), fixture.reads.end(), offset) != fixture.reads.end();
+    };
+    EXPECT_EQ(core(state, "vbios_display_owner"), 3u);
+    EXPECT_EQ(core(state, "bar1_instance"), 0x80000123u);
+    EXPECT_EQ(core(state, "vram_fbpa0_mib"), 2048u);
+    // Each offset comes from the Nouveau sources that the plan cites.
+    constexpr unsigned ownership[] = {0x6194e8,
+                                      0x001700,
+                                      0x001704,
+                                      0x001714,
+                                      0x021c14,
+                                      0x021d38,
+                                      0x022438,
+                                      0x022458,
+                                      0x11020c,
+                                      0x11120c,
+                                      0x11220c,
+                                      0x11320c};
+    constexpr unsigned first = std::size(gm206::boot_registers) - std::size(ownership);
+    ASSERT_STREQ(gm206::boot_registers[first].name, "vbios_display_owner");
+    for(unsigned i = 0; i < std::size(ownership); ++i)
+    {
+        EXPECT_EQ(gm206::boot_registers[first + i].offset, ownership[i]);
+        EXPECT_TRUE(was_read(ownership[i])) << gm206::boot_registers[first + i].name;
+    }
+    // Control registers and user areas use the selected head with different strides.
+    EXPECT_EQ(base("base_channel_control"), 0x48000088u);
+    EXPECT_EQ(base("base_surface_size_raw"), (768u << 16) | 1024u);
+    EXPECT_EQ(base("base_surface_size_next_raw"), (1080u << 16) | 1920u);
+    constexpr unsigned selected[] = {0x6104d0,
+                                     0x6104d4,
+                                     0x6104d8,
+                                     0x6104dc,
+                                     0x644000,
+                                     0x6440c0,
+                                     0x644400,
+                                     0x644408,
+                                     0x64440c,
+                                     0x644410,
+                                     0x6640c0,
+                                     0x664400,
+                                     0x664408,
+                                     0x66440c,
+                                     0x664410};
+    ASSERT_EQ(std::size(selected), std::size(gm206::base_registers));
+    for(unsigned i = 0; i < std::size(selected); ++i)
+    {
+        EXPECT_EQ(gm206::base_registers[i].offset + 3 * gm206::base_registers[i].stride,
+                  selected[i]);
+        EXPECT_TRUE(was_read(selected[i])) << gm206::base_registers[i].name;
+    }
+
+    // A route without a matching head must not read or publish base channel state.
+    AuxFixture other;
+    other.status = 0;
+    other.route = 0x02;
+    gm206::Snapshot unmatched{};
+    ASSERT_TRUE(gm206::probe(other.io(), unmatched));
+    EXPECT_FALSE(unmatched.boot.route_matched);
+    EXPECT_EQ(core(unmatched, "vbios_display_owner"), 3u);
+    for(const auto value : unmatched.boot.base)
+        EXPECT_EQ(value, 0u);
+    for(const auto offset : other.reads)
+        EXPECT_FALSE((offset >= 0x6104a0 && offset < 0x6104e0) || offset >= 0x641000) << offset;
+    const native_display::Reflection reflection{true, false, 1024, 768, 32, 1, 1, &unmatched};
+    unsigned fields = 0;
+    Os1HardwareQuery page{};
+    do
+    {
+        const auto start = page.next;
+        page = {};
+        page.version = OS1_HARDWARE_VERSION;
+        page.operation = OS1_HARDWARE_CHILDREN;
+        page.id = OS1_HARDWARE_DISPLAY_ROOT + 12;
+        page.start = start;
+        page.generation = 1;
+        ASSERT_EQ(native_display::query_reflection(page, reflection), 0);
+        for(unsigned i = 0; i < page.count; ++i)
+            EXPECT_NE(std::string_view(page.nodes[i].name).substr(0, 5), "base_");
+        fields += page.count;
+    } while(!page.end && page.count);
+    EXPECT_EQ(fields, 16u + std::size(gm206::boot_registers));
+}
+
+TEST(Gm206, ReadsOnlyMappedRegisterRanges)
+{
+    for(unsigned head = 0; head < gm206::heads; ++head)
+    {
+        AuxFixture fixture;
+        fixture.make_edid();
+        fixture.head = head;
+        gm206::Snapshot state{};
+        ASSERT_TRUE(gm206::probe(fixture.io(), state));
+        ASSERT_TRUE(state.boot.route_matched);
+        ASSERT_EQ(state.output_count, 1u);
+        for(const auto offset : fixture.reads)
+        {
+            bool mapped = false;
+            for(const auto& range : gm206::register_ranges)
+                mapped |= offset >= range.offset && offset - range.offset <= range.bytes - 4;
+            EXPECT_TRUE(mapped) << "unmapped read " << offset;
+        }
+    }
+    for(const auto& range : gm206::register_ranges)
+    {
+        EXPECT_EQ(range.offset % 4096, 0u);
+        EXPECT_EQ(range.bytes % 4096, 0u);
+        EXPECT_LE(range.offset + range.bytes, gm206::register_bytes);
+    }
+    // The table also covers the last AUX channel, SOR, and head that a probe can address.
+    for(const unsigned offset :
+        {0xd930u + 7 * 0x50, 0xd97cu + 7 * 0x50, 0x640200u + 7 * 0x20, 0x6404c8u + 3 * 0x300})
+    {
+        bool mapped = false;
+        for(const auto& range : gm206::register_ranges)
+            mapped |= offset >= range.offset && offset - range.offset <= range.bytes - 4;
+        EXPECT_TRUE(mapped) << offset;
+    }
+}
+
+TEST(Gm206, EncodesProgressive1080pHeadTiming)
+{
+    gm206::Mode mode{
+        1920, 1080, 60000, 148500000, 2200, 1125, 2008, 2052, 1084, 1089, false, true, true};
+    gm206::HeadTiming timing{};
+    ASSERT_TRUE(gm206::prepare_head_timing(mode, timing));
+    EXPECT_EQ(timing.raster, 0x04650898u);
+    EXPECT_EQ(timing.sync_end, 0x0004002bu);
+    EXPECT_EQ(timing.blank_end, 0x002800bfu);
+    EXPECT_EQ(timing.blank_start, 0x0460083fu);
+    EXPECT_EQ(timing.pixel_hz, 148500000u);
+    mode.horizontal_sync_end = mode.horizontal_sync_start;
+    EXPECT_FALSE(gm206::prepare_head_timing(mode, timing));
+    mode.horizontal_sync_end = 2052;
+    mode.vertical_total = 32768;
+    EXPECT_FALSE(gm206::prepare_head_timing(mode, timing));
+    mode.vertical_total = 1125;
+    mode.pixel_hz = 0x80000000u;
+    EXPECT_FALSE(gm206::prepare_head_timing(mode, timing));
+}
+
+TEST(Gm206, EncodesFirmware2160pHeadTimingFromDesktopCapture)
+{
+    // The expected words are the firmware head registers in the desktop boot report.
+    const gm206::Mode mode{
+        3840, 2160, 59997, 533250000, 4000, 2222, 3888, 3920, 2163, 2168, true, true, false};
+    gm206::HeadTiming timing{};
+    ASSERT_TRUE(gm206::prepare_head_timing(mode, timing));
+    EXPECT_EQ(timing.raster, 145624992u);
+    EXPECT_EQ(timing.sync_end, 262175u);
+    EXPECT_EQ(timing.blank_end, 3801199u);
+    EXPECT_EQ(timing.blank_start, 145362799u);
+    EXPECT_EQ(timing.pixel_hz, 533250000u);
+}
+
+TEST(Gm206, RejectsHeadTimingOutsideEachAxisBound)
+{
+    const gm206::Mode valid{
+        1920, 1080, 60000, 148500000, 2200, 1125, 2008, 2052, 1084, 1089, false, true, true};
+    const gm206::HeadTiming untouched{1, 2, 3, 4, 5};
+    const auto rejected = [&](auto change) {
+        auto mode = valid;
+        change(mode);
+        auto timing = untouched;
+        const bool ok = gm206::prepare_head_timing(mode, timing);
+        // A rejected mode must not leave partial register values.
+        return !ok && timing.raster == 1 && timing.sync_end == 2 && timing.blank_end == 3 &&
+               timing.blank_start == 4 && timing.pixel_hz == 5;
+    };
+    EXPECT_TRUE(rejected([](gm206::Mode& m) { m.pixel_hz = 0; }));
+    EXPECT_TRUE(rejected([](gm206::Mode& m) { m.width = 0; }));
+    EXPECT_TRUE(rejected([](gm206::Mode& m) { m.height = 0; }));
+    EXPECT_TRUE(rejected([](gm206::Mode& m) { m.horizontal_sync_start = 1919; }));
+    EXPECT_TRUE(rejected([](gm206::Mode& m) { m.horizontal_sync_end = 2201; }));
+    EXPECT_TRUE(rejected([](gm206::Mode& m) { m.horizontal_total = 32768; }));
+    EXPECT_TRUE(rejected([](gm206::Mode& m) { m.vertical_sync_start = 1079; }));
+    EXPECT_TRUE(rejected([](gm206::Mode& m) { m.vertical_sync_end = 1084; }));
+    EXPECT_TRUE(rejected([](gm206::Mode& m) { m.vertical_sync_end = 1126; }));
+
+    // Zero front and back porches and the largest totals remain valid.
+    auto mode = valid;
+    mode.horizontal_sync_start = 1920;
+    mode.horizontal_sync_end = mode.horizontal_total = 32767;
+    mode.vertical_sync_start = 1080;
+    mode.vertical_sync_end = mode.vertical_total = 32767;
+    mode.pixel_hz = 0x7fffffffu;
+    gm206::HeadTiming timing{};
+    ASSERT_TRUE(gm206::prepare_head_timing(mode, timing));
+    EXPECT_EQ(timing.raster, 0x7fff7fffu);
+    EXPECT_EQ(timing.sync_end, (uint32_t(32767 - 1080 - 1) << 16) | (32767 - 1920 - 1));
+    EXPECT_EQ(timing.blank_end, timing.sync_end);
+    EXPECT_EQ(timing.blank_start, (uint32_t(32766) << 16) | 32766u);
 }

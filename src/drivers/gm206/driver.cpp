@@ -14,6 +14,9 @@ bool block_valid(const uint8_t* block)
 
 void add_mode(Output& out, const Mode& mode)
 {
+    HeadTiming timing{};
+    if(!prepare_head_timing(mode, timing))
+        return;
     for(unsigned i = 0; i < out.mode_count; ++i)
     {
         const auto& old = out.modes[i];
@@ -210,6 +213,34 @@ public:
 };
 }  // namespace
 
+bool prepare_head_timing(const Mode& mode, HeadTiming& timing)
+{
+    const auto valid_axis = [](uint32_t visible, uint32_t start, uint32_t end, uint32_t total) {
+        return visible && visible <= start && start < end && end <= total && total <= 0x7fffu;
+    };
+    if(!mode.pixel_hz || mode.pixel_hz > 0x7fffffffu ||
+       !valid_axis(mode.width,
+                   mode.horizontal_sync_start,
+                   mode.horizontal_sync_end,
+                   mode.horizontal_total) ||
+       !valid_axis(
+           mode.height, mode.vertical_sync_start, mode.vertical_sync_end, mode.vertical_total))
+        return false;
+
+    const auto pack = [](uint32_t h, uint32_t v) { return h | (v << 16); };
+    const auto horizontal_blank_end = mode.horizontal_total - mode.horizontal_sync_start - 1;
+    const auto vertical_blank_end = mode.vertical_total - mode.vertical_sync_start - 1;
+    timing = {
+        pack(mode.horizontal_total, mode.vertical_total),
+        pack(mode.horizontal_sync_end - mode.horizontal_sync_start - 1,
+             mode.vertical_sync_end - mode.vertical_sync_start - 1),
+        pack(horizontal_blank_end, vertical_blank_end),
+        pack(horizontal_blank_end + mode.width, vertical_blank_end + mode.height),
+        mode.pixel_hz,
+    };
+    return true;
+}
+
 bool parse_edid(const uint8_t* data, unsigned blocks, Output& out)
 {
     out.mode_count = out.edid_blocks = 0;
@@ -363,6 +394,10 @@ bool probe(const ProbeIo& io, Snapshot& out)
             for(unsigned reg = 0; reg < sizeof(head_registers) / sizeof(*head_registers); ++reg)
                 boot.head[reg] =
                     io.read(io.context, head_registers[reg].offset + boot.head_index * 0x300);
+            for(unsigned reg = 0; reg < sizeof(base_registers) / sizeof(*base_registers); ++reg)
+                boot.base[reg] = io.read(
+                    io.context,
+                    base_registers[reg].offset + boot.head_index * base_registers[reg].stride);
             break;
         }
     }

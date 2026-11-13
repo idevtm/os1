@@ -167,7 +167,10 @@ DisplayNode describe_display(unsigned id, const Reflection& display)
     constexpr unsigned base_count = sizeof(boot_names) / sizeof(*boot_names);
     constexpr unsigned core_count = sizeof(gm206::boot_registers) / sizeof(*gm206::boot_registers);
     constexpr unsigned head_count = sizeof(gm206::head_registers) / sizeof(*gm206::head_registers);
-    const unsigned boot_count = base_count + core_count + (boot.route_matched ? head_count : 0);
+    constexpr unsigned channel_count =
+        sizeof(gm206::base_registers) / sizeof(*gm206::base_registers);
+    const unsigned boot_count =
+        base_count + core_count + (boot.route_matched ? head_count + channel_count : 0);
     if(id == boot_root)
         return object_node(gm206_root, "boot_state", boot_fields, boot_count);
     if(id >= boot_fields)
@@ -181,7 +184,10 @@ DisplayNode describe_display(unsigned id, const Reflection& display)
         if(field < core_count)
             return integer_node(boot_root, gm206::boot_registers[field].name, boot.core[field]);
         field -= core_count;
-        return integer_node(boot_root, gm206::head_registers[field].name, boot.head[field]);
+        if(field < head_count)
+            return integer_node(boot_root, gm206::head_registers[field].name, boot.head[field]);
+        field -= head_count;
+        return integer_node(boot_root, gm206::base_registers[field].name, boot.base[field]);
     }
     if(id >= edid_fields)
     {

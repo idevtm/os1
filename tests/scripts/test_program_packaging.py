@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -47,6 +48,9 @@ assert not any('/bin/' + name in [e['destination'] for e in programs] for name i
 assert {'/bin/sh', '/bin/ls', '/bin/cat', '/bin/textprocessor', '/bin/counter', '/bin/activation', '/bin/diskutil',
         '/bin/paramdemo', '/bin/buffercheck', '/bin/lshw', '/bin/lspci', '/bin/lsusb', '/bin/lsblk', '/bin/gsh'} <= {e['destination'] for e in programs}
 packages = [e for e in resources if e['destination'].startswith('/system/drivers/')]
+# The package manifest must state the ABI that the module header exports.
+gm206_header = Path(__file__).resolve().parents[2] / 'src/common/driver/gm206.h'
+gm206_abi = int(re.search(r'^#define OS1_GM206_ABI (\d+)u$', gm206_header.read_text(), re.M).group(1))
 expected = {'virtio-net', 'firmware-framebuffer', 'gm206'}
 assert len(packages) == len(expected)
 seen = set()
@@ -59,12 +63,13 @@ for entry in packages:
     assert entry['destination'].endswith(f'/{name}/manifest.json')
     image = str(Path(entry['destination']).with_name('driver.elf'))
     assert package['image'] == image
-    assert package['abi'] == {'virtio-net': 1, 'firmware-framebuffer': 2, 'gm206': 3}[name]
+    assert package['abi'] == {'virtio-net': 1, 'firmware-framebuffer': 2, 'gm206': gm206_abi}[name]
     assert image in program_paths
     assert installed[image][1] == package['sha256']
     if name == 'virtio-net':
         assert package['pci'] == {'vendor': 0x1af4, 'device': 0x1041}
     elif name == 'gm206':
+        assert package['dependencies'] == [f'kernel.gm206_probe.v{gm206_abi}']
         assert package['pci'] == {'vendor': 0x10de, 'device': 0x1402}
     else:
         assert package['match'] == 'validated firmware framebuffer'

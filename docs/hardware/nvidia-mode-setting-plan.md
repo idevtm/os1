@@ -390,6 +390,7 @@ Independent review verified the corrected tests and the indexed ABI behavior.
 ### GTX 950 VBIOS route evidence
 
 The captured ROM (`reference-captures/desktop/linux/os1-gtx950-capture/gtx950.rom`) identifies the DisplayPort route selector for AUX channel 1.
+The ROM is vendor firmware and stays outside the repository. The table below records its size and digest.
 The live route register still needs an OS1 capture.
 
 ```text
@@ -470,3 +471,144 @@ The profile times were 30.19 s, 406.56 s, and 9.73 s.
 See `build/gm206-boot-state/full-local.log` for the full run and `field-count-failure.log` for the corrected test expectation.
 Independent review verified the route decode, register bounds, AUX read gating, snapshot lifetime, and pagination corrections.
 The QEMU guests exercise the firmware path. Desktop hardware must verify the new register values.
+
+### Native 1080p timing preparation
+
+This stage adds a validated encoder for GM206 head timing. It changes no register and no selectable mode.
+
+```text
+Sink timing -> validate and encode head timing -> display channel -> scanout
+               implemented                       pending          pending
+```
+
+The reference sink reports 1920 × 1080 at 60.000 Hz with a 148.5 MHz pixel clock.
+The timing encoder checks sync bounds and converts each axis to the GM206 head register format.
+See [Nouveau head timing](https://codebrowser.dev/linux/linux/drivers/gpu/drm/nouveau/dispnv50/head.c.html#291).
+The encoder reproduces the four firmware timing words of the desktop boot report for 3840 × 2160.
+The discovery mode list keeps only timings that the encoder accepts.
+Each timing that the EDID parser or the CTA table can produce passes this check.
+The encoder accepts a zero back porch. No hardware test covers that timing.
+
+The next implementation step is display channel ownership.
+Allocate a new scanout surface before the first mode transition.
+Allocate a command buffer for the display channel.
+Pin both areas for the full session.
+Verify channel completion, head timing, and link status before publishing the session.
+The captured firmware surface fields cannot establish ownership of a native scanout buffer.
+The timing encoder adds no MMIO writes or DMA allocations.
+
+GM206 uses the GM200 display engine with the GK104 core channel implementation.
+The firmware capture shows supervisor status `0x100` and display instance `1`.
+Treat these as firmware-owned state. Acquire the display engine before submitting native commands.
+Allocate a display instance area.
+Establish a DMA context for scanout.
+The new RGB32 surface needs at least 8,294,400 bytes before pitch and alignment padding.
+For the first switch, verify the trained four-lane HBR2 link.
+Admit only the captured DisplayPort route.
+Process supervisor events during the update. Confirm the new timing before the desktop draws.
+
+See [GM200 engine selection](https://codebrowser.dev/linux/linux/drivers/gpu/drm/nouveau/nvkm/engine/disp/gm200.c.html#169)
+and [display engine ownership](https://codebrowser.dev/linux/linux/drivers/gpu/drm/nouveau/nvkm/engine/disp/gf119.c.html#1200).
+
+### Display ownership capture
+
+This stage collects firmware ownership and GPU memory layout inputs during the existing boot probe.
+It adds register reads only. The firmware framebuffer continues to drive the display.
+
+```text
+boot probe -> ownership, memory, and base channel registers -> boot_state report
+report from the desktop -> memory design -> display engine acquisition (pending)
+```
+
+The earlier desktop report shows zero core surface offset, size, storage, and context fields.
+The firmware image thus possibly uses the base channel of head 0. No evidence confirms this.
+The core channel control value was `0x48070088`. No source in this plan decodes that value.
+That report does not show the firmware instance memory or the video memory size.
+Without these values, a native instance area or scanout surface can overwrite firmware state.
+
+| Field | BAR 0 offset | Purpose |
+| --- | --- | --- |
+| `vbios_display_owner` | `0x6194e8` | Firmware ownership handshake of the display engine. |
+| `pramin_window` | `0x001700` | Current instance memory window. |
+| `bar1_instance` | `0x001704` | Instance block of the BAR 1 address space. |
+| `bar2_instance` | `0x001714` | Instance block of the BAR 2 address space. |
+| `vram_fbpa_disable` | `0x021c14` | Mask of disabled video memory partitions. |
+| `vram_fbp_disable` | `0x021d38` | Mask of disabled partition groups. |
+| `vram_fbp_count` | `0x022438` | Number of partition groups. |
+| `vram_fbpa_per_fbp` | `0x022458` | Number of partitions in each group. |
+| `vram_fbpa0_mib` to `vram_fbpa3_mib` | `0x11020c` + n × `0x1000` | Size of partitions 0 through 3 in mebibytes. |
+| `base_channel_control` | `0x6104a0` + head × `0x10` | Base channel control of the matched head. |
+| `base_channel_push` | `0x6104a4` + head × `0x10` | Base channel push buffer. |
+| `base_channel_config` | `0x6104a8` + head × `0x10` | Base channel configuration. |
+| `base_channel_target` | `0x6104ac` + head × `0x10` | Base channel target. |
+| `base_channel_put` | `0x641000` + head × `0x1000` | Base channel user area. |
+| `base_context_raw` | `0x6410c0` + head × `0x1000` | Base surface context handle. |
+| `base_surface_offset_raw` | `0x641400` + head × `0x1000` | Base surface offset. |
+| `base_surface_size_raw` | `0x641408` + head × `0x1000` | Base surface size. |
+| `base_surface_storage_raw` | `0x64140c` + head × `0x1000` | Base surface storage. |
+| `base_surface_params_raw` | `0x641410` + head × `0x1000` | Base surface format. |
+
+The five `base_context_next_raw` and `base_surface_*_next_raw` fields read the same methods at `0x6610c0` and `0x661400` through `0x661410`, each plus head × `0x1000`.
+Nouveau reports the `0x64xxxx` copy as the previous state and the `0x66xxxx` copy as the next state.
+The existing head fields use the `0x64xxxx` copy.
+
+The offsets follow the Nouveau [display engine](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/engine/disp/gf119.c),
+[BAR](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/subdev/bar/gf100.c),
+and [video memory](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/subdev/fb/ramgm200.c) sources.
+GM200 uses base channel class 927C.
+The base surface methods follow [NVIDIA class 927C](https://github.com/NVIDIA/open-gpu-doc/blob/master/classes/display/cl927c.h).
+The probe reads four partition sizes without a check of the disable masks.
+Compare the masks and counts with the sizes before you use a size.
+An absent partition or an unused base channel can return zero, `0xffffffff`, or an unrelated value.
+The desktop run must confirm these reads.
+The report does not show the video memory ranges that the firmware uses.
+
+| Area | Impact |
+| --- | --- |
+| Scope | Add evidence for the memory design. Add no ownership change. |
+| Boot and platform | Read 12 more registers after the chip match and 15 more after a route match. Map 16 more BAR 0 pages. The minimum BAR 0 size is `0x665000` bytes. |
+| Memory and isolation | Add 108 bytes to the boot snapshot. The module still uses no DMA and adds no register writes. |
+| Concurrency | Capture before user processes start. Reflection reads the cached records. |
+| Interfaces | Add `boot_state` fields to hardware reflection. Change the internal module ABI to 4. Preserve Display v1. |
+| Runtime resources | Compare image and module sizes with the preceding build. |
+| Validation and documents | Check the capture, head selection, mapped ranges, and paging with host tests. Run the full local suite. |
+
+One table in [gm206.h](../../src/common/driver/gm206.h) defines the mapped BAR 0 ranges.
+A host test checks each probe read against that table for heads 0 through 3.
+
+Boot the updated USB image on the desktop with the monitor on the same port.
+Save the report before you run `gsh "--menu"`.
+
+```text
+os.display.gm206.diagnostics > /gm206.txt
+```
+
+The report supplies inputs for the instance area and scanout surface design.
+Do not enable display engine acquisition before this report exists.
+
+The size comparison uses `52dda10` plus the timing encoder as the baseline and the final capture diff as the candidate.
+The source, test, and build script diff SHA-256 is `903cfef9665d5fa69a8621d92970ae13f015ce1cd9c9dd88910c618ed5a524c5`.
+Both builds use the normal profile of `./scripts/check-local.sh` on the same toolchain.
+
+| Resource | Baseline bytes | Candidate bytes | Change |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 666,032 | 667,160 | +1,128 bytes (+0.17%) |
+| BIOS kernel ELF | 493,992 | 495,016 | +1,024 bytes (+0.21%) |
+| UEFI ISO | 4,409,344 | 4,409,344 | 0 bytes (0%) |
+| Initrd | 10,240 | 10,240 | 0 bytes (0%) |
+| USB image | 35,651,584 | 35,651,584 | 0 bytes (0%) |
+| GM206 ELF | 10,856 | 11,864 | +1,008 bytes (+9.29%) |
+
+The QEMU guests have no matching GPU. They do not run the new reads.
+Physical probe latency and the new register values remain unmeasured. The desktop retest must supply them.
+
+The final `./scripts/check-local.sh` run passed 817 host, 104 normal-image, and three diagnostic-image checks.
+The profile times were 30.29 s, 413.82 s, and 10.34 s.
+See `build/gm206-ownership/full-local.log` for the full run.
+The timing encoder alone passed 813, 104, and three checks. See `build/gm206-head-timing/full-local.log`.
+Three independent reviews examined the diff. The first review found a package manifest that declared ABI 3 for the ABI 4 module.
+It also found base surface fields that read one state copy only, and weak offset and route tests.
+The corrections added both state copies, the shared range table, and the pinned offset tests.
+The second and third reviews found no blocking defect.
+The `add_mode` rejection path has no test because no parser input can reach it.
+The prose follows the project rules. Full ASD-STE100 dictionary verification was unavailable.

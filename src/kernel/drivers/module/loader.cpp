@@ -251,12 +251,11 @@ void load_gm206()
         PciBarResource registers{};
         if(!claim_pci_bar(owner, index, 0, registers))
             return;
-        // Only these register pages are used by the probe.
-        if(map_mmio_range(vm, registers.base, 4096) &&
-           map_mmio_range(vm, registers.base + 0xd000, 4096) &&
-           map_mmio_range(vm, registers.base + 0x610000, 4096) &&
-           map_mmio_range(vm, registers.base + 0x612000, 4096) &&
-           map_mmio_range(vm, registers.base + 0x640000, 0x1000))
+        // Only the listed register ranges are used by the probe.
+        bool mapped = true;
+        for(const auto& range : gm206::register_ranges)
+            mapped = mapped && map_mmio_range(vm, registers.base + range.offset, range.bytes);
+        if(mapped)
         {
             const gm206::ProbeIo io{kernel_physical_pointer<void>(registers.base),
                                     [](void* context, unsigned offset) -> uint32_t {
