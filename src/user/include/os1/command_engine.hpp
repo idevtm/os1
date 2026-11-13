@@ -114,6 +114,20 @@ inline int find(const char* name)
             return i;
     return -1;
 }
+// Environment nodes occupy the first range of Member::value.
+inline unsigned binding_value(unsigned binding, unsigned node)
+{
+    return (binding + 1) * OS1_CONTEXT_NODES + node;
+}
+inline const Data* inspect_binding_value(unsigned value, unsigned& node)
+{
+    const unsigned slot = value / OS1_CONTEXT_NODES;
+    if(!slot || slot > binding_limit || !bindings[slot - 1].name[0])
+        return nullptr;
+    const auto& data = bindings[slot - 1].value.data;
+    node = value % OS1_CONTEXT_NODES;
+    return node < data.count ? &data : nullptr;
+}
 inline bool add_data(
     os1::discovery::View& v, unsigned parent, const Data& d, unsigned node, unsigned binding)
 {
@@ -148,6 +162,7 @@ inline bool add_data(
             if(v.failed)
                 return false;
             v.nodes[at].type = d.nodes[i].kind;
+            v.nodes[at].value = binding_value(binding, i);
             if(!add_data(v, at, d, i, binding))
                 return false;
         }
@@ -287,6 +302,7 @@ inline bool extend(os1::discovery::View& v)
             if(value.fd < 0)
             {
                 v.nodes[at].type = value.data.nodes[1].kind;
+                v.nodes[at].value = binding_value(i, 1);
                 if(!add_data(v, at, value.data, 1, i))
                     return false;
                 if(value.clock_snapshot)

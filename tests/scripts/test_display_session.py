@@ -128,7 +128,7 @@ def main():
         args.qmp = str(Path(temporary) / 'qmp.sock')
 
         def exercise(run, expect):
-            out = run('inspect os.display')
+            out = run('inspect --details os.display')
             assert (b'available [field] Integer = ' + (b'1' if args.code else b'0')) in out, out
             if args.code:
                 assert b'bochs-display' in out and b'mode_count [field] Integer = 3' in out
@@ -176,7 +176,7 @@ def main():
             args.qmp = None
 
             def fallback(run, expect):
-                run('inspect os.display', b'available [field] Integer = 0')
+                run('inspect --details os.display', b'available [field] Integer = 0')
                 run('echo "display fallback works"', b'display fallback works')
 
             boot(args, disk, 'corrupt', exercise=fallback)
@@ -187,7 +187,7 @@ def main():
             args.vga_mmio_off = True
 
             def fixed(run, expect):
-                out = run('inspect os.display')
+                out = run('inspect --details os.display')
                 assert b'firmware-framebuffer' in out and b'mode_count [field] Integer = 1' in out, out
                 run('gfxdemo "--check"', b'gfxdemo: session checks passed')
 

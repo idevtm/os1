@@ -2037,6 +2037,8 @@ The [catalog plan](native-api/hardware-catalog-plan.md) records scope, validatio
 
 ## Live context exploration
 
+The [shell syntax reference](shell/syntax.md) defines declarations for live objects and executable classes.
+
 The [runtime discovery profile](native-api/context-discovery.md) exposes fixed bindings and copied environment data without activation.
 The shell uses this profile for `inspect`, `context`, `help`, and Tab completion.
 The prompt offers live members, configured aliases, executable names, and file paths.

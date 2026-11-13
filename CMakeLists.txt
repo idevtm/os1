@@ -961,11 +961,11 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "os1: native file reads work.::vfscheck\\n"
   "[user/vfscheck] ok::ipccheck\\n"
   "[user/ipccheck] ok::buffercheck\\n"
-  "[user/buffercheck] ok::inspect /bin/textprocessor\\n"
+  "[user/buffercheck] ok::inspect --details /bin/textprocessor\\n"
   "progress [event] id=6 input=4 output=0 implemented::countercheck\\n"
   "[user/countercheck] ok::activationcheck\\n"
   "[user/activationcheck] ok::counter --initial 10 --ceiling 100\\n"
-  "counter initial=10 ceiling=100::inspect /bin/counter\\n"
+  "counter initial=10 ceiling=100::inspect --details /bin/counter\\n"
   "initial [field] u64 offset=0 default=0 cli=--initial::paramdemo initial:4 source.text:'Hi there' options.suffix:null\\n"
   "parameter constructor count=12 text=Hi there::paramdemo mode.thorough source.text:\"hello world\" options:{limit:5,suffix:null}\\n"
   "parameter constructor count=5 text=HELLO::paramdemo source.text:'a\"b' options.suffix:null\\n"
@@ -973,7 +973,7 @@ set(OS1_SHELL_SPAWN_INPUT_EVENTS
   "parameter constructor count=1 text=!::paramdemo mode:bogus\\n"
   "unknown enum name::paramdemo source.bogus\\n"
   "unknown field, enumerator or case::paramcheck\\n"
-  "[user/paramcheck] ok::inspect /bin/paramdemo\\n"
+  "[user/paramcheck] ok::inspect --details /bin/paramdemo\\n"
 )
 
 set(OS1_SHELL_EXEC_INPUT_EVENTS

@@ -111,7 +111,7 @@ struct Builtin
 inline constexpr Builtin builtins[] = {{"write", "write [--append|--replace] path"},
                                        {"edit", "edit path"},
                                        {"help", "help [command|object.path]"},
-                                       {"inspect", "inspect [object.path|image]"},
+                                       {"inspect", "inspect [--details] [object.path|image]"},
                                        {"exec", "exec image [arguments]"},
                                        {"exit", "exit"}};
 

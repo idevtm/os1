@@ -105,6 +105,8 @@ bitmask type, not implicit enum behavior.
 
 ## 2. Optional values, absence, and defaults
 
+The [shell syntax reference](../shell/syntax.md) describes how inspection displays schema types and defaults.
+
 Keep three distinctions: whether a caller supplied a field; the field's resulting
 typed value; and whether its type can represent absence. Optional does not mean
 “zero,” and defaulted does not mean “nullable.”

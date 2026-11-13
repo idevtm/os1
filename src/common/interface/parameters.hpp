@@ -1278,6 +1278,7 @@ struct Printer
     const Value& v;
     char* output;
     unsigned size{};
+    bool declaration = false;
     void ch(char c)
     {
         if(output)
@@ -1355,6 +1356,11 @@ struct Printer
                 literal(a.number ? "true" : "false");
                 break;
             case Kind::Enum:
+                if(declaration)
+                {
+                    text(t.text.name);
+                    ch('.');
+                }
                 text(m.entries[entry_number(m, t, a.number)].text.name);
                 break;
             case Kind::Optional:
@@ -1379,6 +1385,13 @@ struct Printer
                         literal("\\r");
                     else if(c == '\t')
                         literal("\\t");
+                    else if(declaration && (static_cast<unsigned char>(c) < 32 || c == 127))
+                    {
+                        constexpr char hex[] = "0123456789abcdef";
+                        literal("\\x");
+                        ch(hex[static_cast<unsigned char>(c) >> 4]);
+                        ch(hex[c & 15]);
+                    }
                     else
                         ch(c);
                 }
@@ -1390,7 +1403,21 @@ struct Printer
                 ch('}');
                 break;
             case Kind::Variant:
-                named(n);
+                if(declaration)
+                {
+                    text(t.text.name);
+                    ch('.');
+                    const auto& e = m.entries[entry_id(m, t, a.number)];
+                    text(e.text.name);
+                    if(e.type != no_index)
+                    {
+                        ch('(');
+                        value(a.first);
+                        ch(')');
+                    }
+                }
+                else
+                    named(n);
                 break;
             case Kind::List:
                 ch('[');
@@ -1414,7 +1441,13 @@ struct Printer
             if(i)
                 ch(separator);
             text(m.entries[t.first + i].text.name);
-            named(c);
+            if(declaration)
+            {
+                ch(':');
+                value(c);
+            }
+            else
+                named(c);
             c = v.nodes[c].next;
         }
     }

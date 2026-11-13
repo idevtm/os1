@@ -44,6 +44,8 @@ Only NOT_FOUND advances to the next directory. Explicit paths bypass search and 
 
 ## Name resolution and inspection
 
+See the [shell syntax reference](syntax.md) for declaration syntax and executable examples.
+
 The shell selects aliases, live bindings, and filesystem entries by position and spelling.
 An explicit spelling keeps its meaning when names collide.
 
@@ -77,7 +79,8 @@ In a path or stream operand, `process.streams.input` selects the live stream.
 
 Inspection reads descriptions and image metadata without invoking methods or starting programs.
 The live context listing contains roots and bindings.
-Live objects and image classes use the same `name [kind] details` listing style.
+Live objects and image classes use the same declaration style.
+Use `inspect --details TARGET` for the detailed metadata view.
 Use `inspect` in scripts that used the retired `context` or `intf` commands.
 
 Tab browses the applicable domains at the cursor.

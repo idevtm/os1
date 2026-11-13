@@ -60,7 +60,7 @@ def main():
         ('exec absent_provider', b'exec failed: absent_provider'),
         ('./bin/probe', b'deployed program version 1'),
         ('counter --initial 7 --ceiling 20', b'counter initial=7 ceiling=20'),
-        ('inspect /bin/textprocessor', b'TextProcessor [interface]'),
+        ('inspect /bin/textprocessor', b'implements TextProcessor'),
         ('/bin/diskutil seed', b'diskutil seed ok'),
         ('echo "my file survives deployment" > /bin/note', None),
         ('echo appended >> /bin/note', None),
