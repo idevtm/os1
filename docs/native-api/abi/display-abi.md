@@ -12,6 +12,7 @@ last session reference closes -> restore boot mode -> redraw active text termina
 | --- | --- | --- | --- |
 | Display v1 | `mode` | Empty | Boot `os1_display_mode` |
 | Display v1 | `list_modes` | Empty | `os1_display_modes` with up to three entries |
+| Display v1 | `mode_at` | Zero-based 32-bit index | One mode or empty result at end |
 | Display v1 | `open` | 32-bit mode ID | One owned DisplaySession descriptor |
 | DisplaySession v1 | `fill` | `os1_display_fill` | Empty |
 
@@ -52,7 +53,8 @@ The service reports the boot geometry and the number of modes. It reports `bochs
 BIOS VGA text exposes no graphics mode.
 
 Run `gfxdemo` from the disk shell.
-Press the listed number to select a mode. Press Enter to use the boot mode.
+Use Up and Down to highlight a mode. Press Enter to apply the highlighted mode.
+The boot mode is highlighted first.
 Move the mouse to move the pointer.
 Press Escape or `q` to restore the console.
 The demo selects the first USB pointer or falls back to the first non-USB pointer.
@@ -66,3 +68,14 @@ On exit, it reports event publication gaps, event age, and cursor draw duration.
 The report counts samples at or above 50 ms and includes maximum values and sample counts.
 A zero sample count means no timing result for that measure.
 Publication gaps can include time when the pointer was stationary.
+
+### Indexed mode enumeration
+
+Display v1 method `mode_at` (member 4) accepts a copied 32-bit zero-based index.
+It returns one `os1_display_mode` record. The index equal to the mode count returns an empty result.
+A larger index returns an invalid-argument error. Use the returned ID to open a session.
+The older `list_modes` reply retains its fixed layout.
+
+The `bits_per_pixel` field describes framebuffer storage.
+The firmware renderer supports packed 24-bit and 32-bit RGB or BGR storage.
+A 32-bit RGB pixel uses 24 color bits. The remaining bits do not increase link color depth.

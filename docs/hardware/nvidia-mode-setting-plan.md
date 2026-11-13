@@ -144,8 +144,9 @@ Linux's DRM mode list includes driver validation. Compare it with EDID and the a
 8. If restoration fails, withdraw the mode list. Disable pixel output and further acquires. Keep serial recovery available.
 9. Qualify the second GPU family separately. Publish only verified modes that fit the current Display ABI.
 
-The existing [Display session ABI](../native-api/abi/display-abi.md) allows three entries including the boot mode, with geometry up to 4096 by 2160.
-A larger list, broader geometry, or a connector and timing API requires a separate contract decision.
+The legacy `list_modes` reply allows three entries including the boot mode.
+The [Display session ABI](../native-api/abi/display-abi.md) also supports indexed enumeration.
+Broader geometry or a connector and timing API requires a separate contract decision.
 Preserve the existing VGA text and serial paths on boots without a supported framebuffer.
 
 ## Impact and validation
@@ -319,3 +320,66 @@ The EDID SHA-256 is `c4281007d08aff4fd911cef485d5ffc8d1fd0516949820857b14ef1d6de
 The scanout clock and totals match the preferred sink timing. The firmware framebuffer geometry differs from that timing.
 The report does not associate the AUX channel with the scanout route.
 The local USB report is `build/gm206-diagnostics/desktop-retest/gm206.txt`.
+
+### Native switch prerequisites
+
+The desktop retest qualifies discovery. The mode-switch path needs a verified route from the sink to the active scanout.
+The recorded scanout has 4K timing while the firmware framebuffer has 1024 × 768 pixels.
+
+```text
+live sink timing -> validate route and surface -> save boot state -> switch
+failed switch or final release -> restore timing, link, and surface -> redraw
+```
+
+Nouveau uses a display core command channel and supervisor stages for display transitions.
+Its GM200 implementation supplies encoder routing and DisplayPort link operations.
+Use these sources to verify channel ownership and restoration before enabling a switch. [Display core](https://code.googlesource.com/linux/torvalds/linux/+/826c484166f0f74bd8fc09220f99dc937c9297cf/drivers/gpu/drm/nouveau/nvkm/engine/disp/gf119.c) · [GM200 backend](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/engine/disp/gm200.c)
+
+The first target remains 1920 × 1080 at 60.000 Hz with 32-bit RGB storage and eight bits per color component.
+Keep memory format and link depth separate in the backend. Qualify the active route and link before exposing the mode.
+Keep the firmware framebuffer available until the native path can save and restore its boot state.
+
+| Area | Indexed enumeration impact |
+| --- | --- |
+| Scope and interfaces | Add one Display v1 member. Preserve the fixed list reply and exclusive session contract. |
+| Boot and platform | Preserve firmware and QEMU display backends. The change adds no hardware register access. |
+| Memory and isolation | Limit the demo to 64 records. Reject malformed records and duplicate IDs. The menu lists all selectable records and uses arrow keys. |
+| Concurrency | Read the existing boot mode list. Preserve session and console ownership. |
+| Resources and validation | Measure kernel and demo sizes. Run the full local suite and display smokes. |
+
+Before enabling register writes, verify the VBIOS Display Configuration Block output and AUX mapping.
+Join that mapping with the live encoder route and head.
+Capture the negotiated lane state and the firmware surface address, pitch, format, and scaling.
+Verify display channel ownership and the procedure to restore the captured state after a failed transition.
+The current diagnostic report gives the sink's maximum link capability. It does not give the negotiated link configuration.
+
+The demo lists all selectable mode records and highlights the boot mode first.
+Use Up or Down to move the selection. Press Enter to acquire the selected mode.
+The menu shows framebuffer bits per pixel. Sink timings alone do not establish a selectable mode.
+
+The next hardware evidence should identify the board VBIOS and the live DisplayPort route.
+Use the firmware image to decode the Display Configuration Block and its I²C table.
+Use OS1 to compare the decoded route with the boot register state.
+This evidence supports the implementation of display channel ownership, link validation, and restoration.
+The current GM206 module remains a discovery backend.
+
+The menu and indexed enumeration use base `2b30477` plus the final source and test diff.
+The diff SHA-256 is `e844f0f342721421bdf64bace03c40d9b8c8b6e173ebc667a65b7915145c428d`.
+The normal image ID is `315901c78719d74752c7eec568499dee68887ed7046d728a7d62ac3d93864a80`.
+The normal build uses the same toolchain and settings as the discovery comparison.
+
+| Resource | Baseline bytes | Candidate bytes | Change |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 662,408 | 662,664 | +256 bytes (+0.04%) |
+| gfxdemo ELF | 11,528 | 12,568 | +1,040 bytes (+9.02%) |
+| UEFI ISO | 4,405,248 | 4,405,248 | 0 bytes (0%) |
+| BIOS image | 1,474,560 | 1,474,560 | 0 bytes (0%) |
+
+Enumeration uses one call per mode and one end check. The legacy enumeration uses one call.
+Menu startup latency and serial arrow input remain unmeasured. The QEMU graphics test uses emulated keyboard events.
+
+`./scripts/check-local.sh` passed 810 host, 104 normal-image, and three diagnostic-image checks.
+The profile times were 29.99 s, 415.94 s, and 9.74 s.
+See `build/gm206-modes/full-local.log` for the complete run.
+The UEFI smoke verifies Up and Down selection, actual Bochs resolutions, and boot console restoration.
+Independent review verified the corrected tests and the indexed ABI behavior.

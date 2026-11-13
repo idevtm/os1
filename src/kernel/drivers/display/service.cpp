@@ -161,12 +161,29 @@ void invoke(OpenInstance& instance,
             memcpy(result.payload, &modes, sizeof(modes));
             result.payload_bytes = sizeof(modes);
         }
+        else if(request.member == OS1_DISPLAY_MODE_AT && request.payload_bytes == sizeof(uint32_t))
+        {
+            uint32_t index;
+            memcpy(&index, request.payload, sizeof(index));
+            if(index > modes.count)
+                status = OS1_ERR_INVALID;
+            else if(index < modes.count)
+            {
+                memcpy(result.payload, &modes.modes[index], sizeof(os1_display_mode));
+                result.payload_bytes = sizeof(os1_display_mode);
+            }
+        }
         else if(request.member == OS1_DISPLAY_OPEN && request.payload_bytes == sizeof(uint32_t))
         {
             uint32_t mode;
             memcpy(&mode, request.payload, sizeof(mode));
-            status = mode && mode <= modes.count ? acquire(modes.modes[mode - 1], output)
-                                                 : OS1_ERR_INVALID;
+            status = OS1_ERR_INVALID;
+            for(unsigned i = 0; i < modes.count; ++i)
+                if(modes.modes[i].id == mode)
+                {
+                    status = acquire(modes.modes[i], output);
+                    break;
+                }
         }
         else
             status = OS1_ERR_INVALID;

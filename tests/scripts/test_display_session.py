@@ -63,12 +63,13 @@ def exercise_graphics(args, run, expect):
             raise AssertionError('graphics cursor did not appear at expected position')
 
         boot_width, boot_height, _ = screenshot()
-        for choice, resolution in [('2', (800, 600)), ('3', (1280, 720))]:
+        for arrow, resolution in [('down', (800, 600)), ('up', (1280, 720))]:
             # Emulated keys allow observation before the next shell prompt.
             for code in ('g', 'f', 'x', 'd', 'e', 'm', 'o', 'ret'):
                 key(code)
             expect(b'Choose a mode.', timeout=15)
-            key(choice)
+            key(arrow)
+            key('ret')
             before = await_cursor(lambda _: True)
             assert screenshot()[:2] == resolution
             qmp.execute('input-send-event', {'events': [
@@ -88,7 +89,7 @@ def exercise_graphics(args, run, expect):
 
         def trace_demo():
             trace_demo.prefix = expect(b'Choose a mode.', timeout=40)
-            key('1')
+            key('ret')
             before = await_cursor(lambda _: True)
             for step in (1, 2):
                 qmp.execute('input-send-event', {'events': [

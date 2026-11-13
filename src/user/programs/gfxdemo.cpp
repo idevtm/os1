@@ -364,21 +364,29 @@ long run(bool check, int menu)
     if(display.fd < 0)
         return display.fd;
     os1_ipc_result r{};
-    long status = display_call(display.fd, OS1_DISPLAY_LIST_MODES, nullptr, 0, r);
-    if(status < 0)
-        return status;
-    os1_display_modes modes{};
-    if(r.payload_bytes != sizeof(modes))
-        return OS1_ERR_INVALID;
-    __builtin_memcpy(&modes, r.payload, sizeof(modes));
-    if(!modes.count || modes.count > OS1_DISPLAY_MODE_LIMIT)
-        return OS1_ERR_INVALID;
-    for(unsigned i = 0; i < modes.count; ++i)
+    constexpr unsigned mode_limit = 64;
+    os1_display_mode modes[mode_limit]{};
+    unsigned count = 0;
+    long status = 0;
+    for(;;)
     {
-        const auto& mode = modes.modes[i];
-        if(mode.id != i + 1 || mode.width < cursor_size || mode.height < cursor_size ||
-           mode.width > OS1_DISPLAY_FILL_LIMIT)
+        const uint32_t index = count;
+        status = display_call(display.fd, OS1_DISPLAY_MODE_AT, &index, sizeof(index), r);
+        if(status < 0)
+            return status;
+        if(!r.payload_bytes)
+            break;
+        if(count == mode_limit || r.payload_bytes != sizeof(os1_display_mode))
+            return OS1_ERR_LIMIT;
+        auto& mode = modes[count++];
+        __builtin_memcpy(&mode, r.payload, sizeof(mode));
+        if(!mode.id || mode.width < cursor_size || mode.height < cursor_size ||
+           mode.width > OS1_DISPLAY_FILL_LIMIT ||
+           (mode.bits_per_pixel != 24 && mode.bits_per_pixel != 32))
             return OS1_ERR_INVALID;
+        for(unsigned i = 0; i + 1 < count; ++i)
+            if(modes[i].id == mode.id)
+                return OS1_ERR_INVALID;
         if(check)
         {
             status = check_session(display.fd, mode);
@@ -386,8 +394,32 @@ long run(bool check, int menu)
                 return status;
         }
     }
+    if(!count || modes[0].id != OS1_DISPLAY_FIXED_MODE)
+        return OS1_ERR_INVALID;
     if(check)
+    {
+        const uint32_t invalid_index = count + 1;
+        if(display_call(
+               display.fd, OS1_DISPLAY_MODE_AT, &invalid_index, sizeof(invalid_index), r) !=
+               OS1_ERR_INVALID ||
+           display_call(display.fd, OS1_DISPLAY_MODE_AT, nullptr, 0, r) != OS1_ERR_INVALID)
+            return OS1_ERR_INVALID;
+        status = display_call(display.fd, OS1_DISPLAY_LIST_MODES, nullptr, 0, r);
+        if(status < 0 || r.payload_bytes != sizeof(os1_display_modes))
+            return OS1_ERR_INVALID;
+        os1_display_modes legacy{};
+        __builtin_memcpy(&legacy, r.payload, sizeof(legacy));
+        const unsigned legacy_count =
+            count < OS1_DISPLAY_MODE_LIMIT ? count : OS1_DISPLAY_MODE_LIMIT;
+        if(legacy.count != legacy_count)
+            return OS1_ERR_INVALID;
+        for(unsigned i = 0; i < legacy_count; ++i)
+            if(legacy.modes[i].id != modes[i].id || legacy.modes[i].width != modes[i].width ||
+               legacy.modes[i].height != modes[i].height ||
+               legacy.modes[i].bits_per_pixel != modes[i].bits_per_pixel)
+                return OS1_ERR_INVALID;
         return 0;
+    }
     f::Handle pointer(find_pointer());
     if(pointer.fd < 0)
         return pointer.fd;
@@ -401,38 +433,67 @@ long run(bool check, int menu)
     f::Handle key_client(u::console_input_bind(keys.fd));
     if(key_client.fd < 0)
         return key_client.fd;
-    print(menu, "Video modes\n");
-    for(unsigned i = 0; i < modes.count; ++i)
-    {
-        const auto& mode = modes.modes[i];
-        f::number(menu, i + 1);
+    auto print_mode = [&](unsigned index) {
+        const auto& mode = modes[index];
+        f::number(menu, index + 1);
         print(menu, ". ");
         f::number(menu, mode.width);
         print(menu, " x ");
         f::number(menu, mode.height);
-        print(menu, " x ");
+        print(menu, ", ");
         f::number(menu, mode.bits_per_pixel);
-        print(menu, i ? "\n" : " (boot mode)\n");
-    }
-    print(menu, "Choose a mode. Enter uses the boot mode. Esc or q exits.\n");
+        print(menu, index ? " bpp\n" : " bpp (boot mode)\n");
+    };
+    print(menu, "Video modes\n");
+    for(unsigned i = 0; i < count; ++i)
+        print_mode(i);
+    print(menu, "Choose a mode. Up/Down selects. Enter applies. Esc or q exits.\n");
     unsigned selected = 0;
+    auto highlight = [&] {
+        print(menu, "> ");
+        print_mode(selected);
+    };
+    highlight();
     for(;;)
     {
         unsigned key = 0;
         status = u::console_read_key(keys.fd, key_client.fd, key);
         if(status < 0)
             return status;
-        if(key == 'q' || key == 'Q' || key == 27 || key == 3)
+        if(key == 27)
+        {
+            // Serial consoles send escape sequences instead of native arrow key codes.
+            const long now = u::ipc_clock();
+            if(now < 0)
+                return now;
+            const auto deadline = uint64_t(now) + 50'000'000;
+            status = u::console_read_key(keys.fd, key_client.fd, key, deadline);
+            if(status == OS1_ERR_TIMED_OUT)
+                return 0;
+            if(status < 0)
+                return status;
+            if(key != '[' && key != 'O')
+                return 0;
+            status = u::console_read_key(keys.fd, key_client.fd, key, deadline);
+            if(status == OS1_ERR_TIMED_OUT)
+                continue;
+            if(status < 0)
+                return status;
+            key = key == 'A' ? OS1_CONSOLE_KEY_UP : key == 'B' ? OS1_CONSOLE_KEY_DOWN : 0;
+        }
+        if(key == 'q' || key == 'Q' || key == 3)
             return 0;
         if(key == '\r' || key == '\n')
             break;
-        if(key >= '1' && key < '1' + modes.count)
-        {
-            selected = key - '1';
-            break;
-        }
+        if(key == OS1_CONSOLE_KEY_UP)
+            selected = selected ? selected - 1 : count - 1;
+        else if(key == OS1_CONSOLE_KEY_DOWN)
+            selected = selected + 1 == count ? 0 : selected + 1;
+        else
+            continue;
+        highlight();
     }
-    const auto& mode = modes.modes[selected];
+    const auto& mode = modes[selected];
     f::Handle session(
         display_call(display.fd, OS1_DISPLAY_OPEN, &mode.id, sizeof(mode.id), r, true));
     if(session.fd < 0)
