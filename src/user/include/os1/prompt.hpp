@@ -76,6 +76,33 @@ inline long inspect_node(const char* path, unsigned id, int fd)
     } while(!page.end);
     return children || output(fd, "(no children)\n") ? 0 : OS1_ERR_FAULT;
 }
+inline long report_display_node(unsigned id, int fd, unsigned depth = 0)
+{
+    if(depth > 6)
+        return OS1_ERR_LIMIT;
+    if(!describe(fd, id))
+        return OS1_ERR_IO;
+    if(!view.container(id))
+        return 0;
+    os1::discovery::Cursor cursor{};
+    os1::discovery::Page page{};
+    do
+    {
+        const long status = view.enumerate(id, cursor, page);
+        if(status < 0)
+            return status;
+        for(unsigned i = 0; i < page.count; ++i)
+        {
+            for(unsigned indent = 0; indent <= depth; ++indent)
+                if(!output(fd, "  "))
+                    return OS1_ERR_IO;
+            const long child = report_display_node(page.ids[i], fd, depth + 1);
+            if(child < 0)
+                return child;
+        }
+    } while(!page.end);
+    return 0;
+}
 inline long inspect(const char* path, int fd)
 {
     if(!discovery::refresh(view, true))

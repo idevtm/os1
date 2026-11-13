@@ -145,7 +145,15 @@ struct AuxFixture
                                    0x1a};
         for(unsigned i = 1; i < 7; ++i)
             edid[i] = 255;
+        edid[8] = 0x10;
+        edid[9] = 0xac;
         edid[24] = 2;
+        edid[75] = 0xfc;
+        edid[77] = 'D';
+        edid[78] = 'E';
+        edid[79] = 'L';
+        edid[80] = 'L';
+        edid[81] = '\n';
         edid[126] = 1;
         for(unsigned i = 0; i < sizeof(dtd); ++i)
             edid[54 + i] = dtd[i];
@@ -175,6 +183,9 @@ TEST(Gm206, ReportsLiveScanoutAndBoundedSinkModes)
     const auto& output = state.outputs[0];
     EXPECT_EQ(output.dpcd_revision, 0x12);
     EXPECT_EQ(output.max_lanes, 4);
+    EXPECT_STREQ(output.manufacturer, "DEL");
+    EXPECT_STREQ(output.name, "DELL");
+    EXPECT_EQ(output.edid_read_blocks, 2);
     ASSERT_EQ(output.mode_count, 5);
     EXPECT_EQ(output.modes[0].width, 3840u);
     EXPECT_EQ(output.modes[0].height, 2160u);
@@ -241,11 +252,36 @@ TEST(Gm206, PagesTimingFieldsAndKeepsFirmwareModesSeparate)
     EXPECT_EQ(root.nodes[5].integer, 1u);
     ASSERT_STREQ(root.nodes[6].name, "gm206");
     auto probe = children(root.nodes[6].id);
-    ASSERT_EQ(probe.count, 2u);
+    ASSERT_EQ(probe.count, 4u);
+    EXPECT_STREQ(probe.nodes[2].name, "diagnostics");
     auto outputs = children(probe.nodes[0].id);
     ASSERT_EQ(outputs.count, 1u);
     auto output = children(outputs.nodes[0].id);
-    ASSERT_EQ(output.count, 6u);
+    ASSERT_EQ(output.count, 8u);
+    EXPECT_STREQ(output.nodes[6].name, "manufacturer");
+    auto tail = children(outputs.nodes[0].id, output.next);
+    ASSERT_EQ(tail.count, 3u);
+    auto edid = children(tail.nodes[2].id);
+    ASSERT_EQ(edid.count, 8u);
+    EXPECT_EQ(edid.nodes[0].integer, 2u);
+    EXPECT_STREQ(edid.nodes[1].name, "hex_0");
+    EXPECT_EQ(edid.nodes[1].text[0], '0');
+    auto edid_tail = children(tail.nodes[2].id, edid.next);
+    ASSERT_EQ(edid_tail.count, 1u);
+    EXPECT_STREQ(edid_tail.nodes[0].name, "hex_7");
+    constexpr char digits[] = "0123456789abcdef";
+    for(unsigned chunk = 0; chunk < 8; ++chunk)
+    {
+        const auto& node = chunk < 7 ? edid.nodes[chunk + 1] : edid_tail.nodes[0];
+        char expected[65]{};
+        for(unsigned i = 0; i < 32; ++i)
+        {
+            const auto byte = fixture.edid[chunk * 32 + i];
+            expected[i * 2] = digits[byte >> 4];
+            expected[i * 2 + 1] = digits[byte & 15];
+        }
+        EXPECT_STREQ(node.text, expected);
+    }
     auto modes = children(output.nodes[5].id);
     ASSERT_EQ(modes.count, 5u);
     const auto mode = modes.nodes[0].id;
@@ -265,4 +301,43 @@ TEST(Gm206, PagesTimingFieldsAndKeepsFirmwareModesSeparate)
     describe.id = rest.nodes[4].id;
     ASSERT_EQ(native_display::query_reflection(describe, reflection), 0);
     EXPECT_EQ(describe.nodes[0].integer, rest.nodes[4].integer);
+}
+
+TEST(Gm206, ReportsRejectedChipRegisterWithoutPublishingSinkData)
+{
+    AuxFixture fixture;
+    fixture.identity = 0x125000a1;
+    gm206::Snapshot snapshot{};
+    ASSERT_FALSE(gm206::probe(fixture.io(), snapshot));
+    EXPECT_EQ(snapshot.boot0, fixture.identity);
+    native_display::Gm206Identity identity{};
+    identity.status = "chip identity rejected";
+    identity.boot0 = snapshot.boot0;
+    identity.boot0_read = true;
+    const native_display::Reflection reflection{
+        true, false, 1024, 768, 32, 1, 1, nullptr, &identity};
+    auto children = [&](unsigned id, unsigned start = 0) {
+        Os1HardwareQuery query{};
+        query.version = OS1_HARDWARE_VERSION;
+        query.operation = OS1_HARDWARE_CHILDREN;
+        query.id = id;
+        query.start = start;
+        EXPECT_EQ(native_display::query_reflection(query, reflection), 0);
+        return query;
+    };
+    auto probe = children(OS1_HARDWARE_GM206_ROOT);
+    ASSERT_EQ(probe.count, 4u);
+    EXPECT_EQ(children(probe.nodes[0].id).count, 0u);
+    const auto gpu = probe.nodes[3].id;
+    auto first = children(gpu);
+    ASSERT_EQ(first.count, 8u);
+    EXPECT_STREQ(first.nodes[0].text, identity.status);
+    auto second = children(gpu, first.next);
+    ASSERT_EQ(second.count, 8u);
+    EXPECT_STREQ(second.nodes[3].name, "boot0");
+    EXPECT_EQ(second.nodes[3].integer, fixture.identity);
+    auto third = children(gpu, second.next);
+    ASSERT_EQ(third.count, 1u);
+    EXPECT_STREQ(third.nodes[0].name, "boot0_read");
+    EXPECT_EQ(third.nodes[0].integer, 1u);
 }

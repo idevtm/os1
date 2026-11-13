@@ -28,6 +28,7 @@ os1_bochs_mode boot_mode;
 bool failed;
 gm206::Snapshot gm206_snapshot;
 bool gm206_present;
+Gm206Identity gm206_identity;
 struct Session : NativeObject
 {
     os1_framebuffer_surface target;
@@ -238,9 +239,31 @@ const KernelProvider* provider(uint64_t id, unsigned version)
     return id == OS1_DISPLAY_SESSION_INTERFACE_ID ? &session_provider : nullptr;
 }
 
+void gm206_detected(const PciDevice& pci, uint32_t subsystem)
+{
+    gm206_identity = {"PCI device detected",
+                      pci.vendor_id,
+                      pci.device_id,
+                      subsystem & 0xffff,
+                      subsystem >> 16,
+                      pci.revision,
+                      pci.segment_group,
+                      pci.bus,
+                      pci.slot,
+                      pci.function,
+                      pci.bars[0].size};
+}
+
+void gm206_status(const char* status)
+{
+    gm206_identity.status = status;
+}
+
 bool discover_gm206(const gm206::Exports& exports, const gm206::ProbeIo& io)
 {
     gm206_present = exports.probe(io, gm206_snapshot);
+    gm206_identity.boot0 = gm206_snapshot.boot0;
+    gm206_identity.boot0_read = true;
     return gm206_present;
 }
 
@@ -255,6 +278,7 @@ long query(Os1HardwareQuery& q)
                              surface.pixel_bytes * 8,
                              modes.count,
                              driver && !available ? 2u : 1u,
-                             gm206_present ? &gm206_snapshot : nullptr});
+                             gm206_present ? &gm206_snapshot : nullptr,
+                             &gm206_identity});
 }
 }  // namespace native_display

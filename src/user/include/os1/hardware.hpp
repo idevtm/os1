@@ -46,7 +46,9 @@ inline bool member(const os1::discovery::View& view, unsigned id, os1::discovery
         out.parent = view.resolve("os.system");
     out.kind = node.type == OS1_HARDWARE_OBJECT ? os1::discovery::Kind::Object
                                                 : os1::discovery::Kind::Field;
-    if(node.type == OS1_HARDWARE_METHOD)
+    if(id == OS1_HARDWARE_GM206_DIAGNOSTICS)
+        out.kind = os1::discovery::Kind::Method;
+    else if(node.type == OS1_HARDWARE_METHOD)
     {
         if(id < OS1_HARDWARE_INPUT_ROOT || id >= OS1_HARDWARE_INPUT_END)
             return false;
@@ -60,8 +62,10 @@ inline bool member(const os1::discovery::View& view, unsigned id, os1::discovery
     out.type = node.type == OS1_HARDWARE_STRING    ? OS1_VALUE_STRING
                : node.type == OS1_HARDWARE_INTEGER ? OS1_VALUE_INTEGER
                                                    : 0;
-    out.flags =
-        os1::discovery::External | (node.type == OS1_HARDWARE_METHOD ? os1::discovery::Native : 0);
+    out.flags = os1::discovery::External |
+                (node.type == OS1_HARDWARE_METHOD && id != OS1_HARDWARE_GM206_DIAGNOSTICS
+                     ? os1::discovery::Native
+                     : 0);
     os1::discovery::copy(out.name, sizeof(out.name), node.name);
     os1::discovery::copy(out.signature,
                          sizeof(out.signature),

@@ -123,7 +123,7 @@ A failed probe leaves the fixed framebuffer backend available.
 
 The kernel matches PCI `10de:1402` and subsystem `1458:36c5` before it loads the package.
 The trusted ELF uses the 128 KiB slot at `0xffffffffa0040000`.
-The internal [GM206 probe table](../../src/common/driver/gm206.h) uses ABI 1.
+The internal [GM206 probe table](../../src/common/driver/gm206.h) uses ABI 2.
 
 ```text
 PCI match -> trusted ext2 ELF -> bounded BAR 0 access -> boot snapshot

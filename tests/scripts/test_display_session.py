@@ -128,6 +128,10 @@ def main():
         args.qmp = str(Path(temporary) / 'qmp.sock')
 
         def exercise(run, expect):
+            run("os.display.gm206.diagnostics > /gm206.txt")
+            report = run('cat "/gm206.txt"', b'no matching PCI device')
+            assert b'probe_status' in report and b'available' in report, report
+            run("os.display.gm206.diagnostics()", b"no matching PCI device")
             out = run('inspect --details os.display')
             assert (b'available [field] Integer = ' + (b'1' if args.code else b'0')) in out, out
             if args.code:

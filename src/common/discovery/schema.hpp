@@ -166,7 +166,8 @@ inline Definition definition(const char* path, uint64_t interface = 0, unsigned 
         d.add("iso", T::Boolean, "false");
         return d;
     }
-    if(starts(path, "os.system.diagnostics.") || same(path, "process.pid"))
+    if(starts(path, "os.system.diagnostics.") || same(path, "process.pid") ||
+       same(path, "os.display.gm206.diagnostics"))
         return d;
     if(same(path, "process.shell.bindings.remove"))
     {

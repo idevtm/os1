@@ -971,6 +971,10 @@ long run_diagnostic(int report)
 {
     switch(report)
     {
+        case os1::user::shell_runtime::gm206_diagnostic:
+            if(!os1::user::discovery::refresh(os1::user::prompt::view, true))
+                return OS1_ERR_LIMIT;
+            return os1::user::prompt::report_display_node(OS1_HARDWARE_DISPLAY_ROOT, output_fd);
         case OS1_OBSERVE_SYSTEM:
             run_sys();
             break;
@@ -2016,7 +2020,11 @@ static int shell_main(int argc_main, char** argv_main)
         }
         else if(call.method == os1::user::shell_runtime::Method::Diagnostic)
         {
-            run_diagnostic(os1::user::shell_runtime::diagnostic_kind(call.target));
+            if(run_diagnostic(os1::user::shell_runtime::diagnostic_kind(call.target)) < 0)
+            {
+                os1::user::shell_runtime::diagnostic("diagnostics failed");
+                command_failed = true;
+            }
         }
         else if(call.method != os1::user::shell_runtime::Method::Unknown)
         {

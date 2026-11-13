@@ -361,12 +361,16 @@ Platform capture runs before publication and uses bounded memory. Runtime USB pu
 
 ## GM206 display discovery
 
-After a matching boot probe succeeds, `inspect os.display.gm206` reports a cached discovery snapshot.
+The `os.display.gm206` subtree reports the cached boot probe status even if the probe fails or the GPU is absent.
 The existing display backend and the Display v1 mode list stay in effect.
 
 ```text
 os.display.gm206
-  outputs.output_N.modes.mode_N
+  diagnostics
+  gpu
+  outputs.output_N
+    edid.hex_N
+    modes.mode_N
   scanouts.scanout_N
 ```
 
@@ -378,3 +382,12 @@ Timing fields include active geometry, refresh in millihertz, pixel clock in her
 The preferred flag identifies a preferred EDID base timing.
 Scanout records report head, encoder index, link index, totals, and pixel clock. They do not associate a head with an AUX channel.
 No hardware query triggers a new probe. Connector hotplug does not refresh this snapshot.
+
+The GPU record includes PCI identity, BAR 0 size, and raw chip and display resource registers.
+The `boot0_read` flag distinguishes a captured chip register from an unavailable value.
+The AUX masks record sink presence, firmware-enabled pads, and failed DPCD reads.
+Valid EDID supplies monitor manufacturer, model text, product code, and optional serial text.
+The EDID object retains up to two read blocks, including bytes from blocks that fail validation.
+Each `hex_N` field contains 32 consecutive bytes in hexadecimal. Join the fields in index order.
+The shell method `os.display.gm206.diagnostics` prints the display tree to standard output.
+Redirect it to a file to retain the boot report.

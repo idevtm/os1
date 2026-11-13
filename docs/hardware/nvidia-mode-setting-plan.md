@@ -252,3 +252,70 @@ See `build/gm206/comparison.json` for the samples.
 | BIOS | 0.475527 s | 0.477254 s | +1.727 ms (+0.36%) |
 
 These samples measure boots without a matching GPU. They do not establish a performance trend or measure physical discovery.
+
+### One-command hardware diagnostics
+
+The shell report reads the cached display snapshot and writes to standard output.
+The GPU record identifies the admitted PCI function and the chip revision.
+Each detected sink retains EDID identity fields and the original bytes of up to two blocks.
+
+| Area | Impact |
+| --- | --- |
+| Scope and interfaces | Add a shell diagnostics method and extend passive reflection. Preserve Display v1. |
+| Boot and platform | Preserve the existing PCI match, probe order, and framebuffer fallback. |
+| Memory and isolation | Bound EDID storage and report traversal. Escape control characters from monitor descriptors. |
+| Concurrency | Read the immutable boot snapshot. Use the existing shell redirection path. |
+| Resources and validation | Measure image and snapshot size. Test EDID identity, reflection, and redirected output. |
+
+When the USB ext2 partition is the root filesystem, run this command to save the report.
+
+```text
+os.display.gm206.diagnostics > /gm206.txt
+```
+
+The report includes the current framebuffer backend, GPU probe result, AUX masks, sink identity, EDID bytes, timings, and scanout records.
+It reports the absence of a matching device and identifies the probe stage that failed.
+
+If the data partition is mounted at `/disk`, use `/disk/gm206.txt` as the destination.
+
+The comparison uses the PR baseline `0d6d182` and the final diagnostics diff.
+The source and test diff SHA-256 is `58649d4810072a67452af7a75edc1f45adb5a1ddf52572de15c8c3c26f0ff5a0`.
+The normal image ID is `0d62845e941a7aea4746b6c1f1db0b981e320869c4548d74951242f0a65f9821`.
+
+| Resource | Baseline bytes | Candidate bytes | Change |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 659,776 | 662,408 | +2,632 bytes (+0.40%) |
+| UEFI ISO | 4,403,200 | 4,405,248 | +2,048 bytes (+0.05%) |
+| BIOS image | 1,474,560 | 1,474,560 | 0 bytes (0%) |
+| Initrd | 9,728 | 9,728 | 0 bytes (0%) |
+| GM206 snapshot | 5,768 | 8,084 | +2,316 bytes (+40.15%) |
+
+Use the normal build settings above. Physical probe and report latency remain unmeasured.
+The report reads cached data. No new AUX transactions occur when the shell writes the report.
+The focused QEMU display checks verify redirection to the ext2 root and the typed call on BIOS and UEFI.
+The earlier attempt used the former `/disk` mount path. See `build/gm206-diagnostics/focused.log`.
+
+The final `./scripts/check-local.sh` run passed 810 host, 104 normal-image, and three diagnostic-image checks.
+The profile times were 29.10 s, 411.38 s, and 9.75 s.
+See `build/gm206-diagnostics/full-local.log` for the complete run.
+Independent review verified the dispatch corrections, EDID paging, and rejected-chip regression. No blockers remained.
+
+### Desktop discovery acceptance
+
+On November 13, 2026, the reference GTX 950 completed the boot probe with the Dell P2715Q attached.
+The saved report identifies PCI `10de:1402`, subsystem `1458:36c5`, and chip register `0x126020a1`.
+AUX channel 1 returned DPCD revision 1.2, maximum link-rate code 20, and four lanes.
+Both 128-byte EDID blocks passed validation and matched the Linux capture byte for byte.
+The EDID SHA-256 is `c4281007d08aff4fd911cef485d5ffc8d1fd0516949820857b14ef1d6deb4bf3`.
+
+| Observation | Result |
+| --- | --- |
+| Preferred sink timing | 3840 × 2160 at 59.997 Hz |
+| Alternate target | 1920 × 1080 at 60.000 Hz, separate from 59.940 Hz |
+| Boot scanout registers | Head 0, SOR 1, link 2, 533.25 MHz, totals 4000 × 2222 |
+| Firmware framebuffer | 1024 × 768, 32 bits per pixel, one selectable mode |
+| Visual result | The user reports that `gfxdemo` worked. |
+
+The scanout clock and totals match the preferred sink timing. The firmware framebuffer geometry differs from that timing.
+The report does not associate the AUX channel with the scanout route.
+The local USB report is `build/gm206-diagnostics/desktop-retest/gm206.txt`.

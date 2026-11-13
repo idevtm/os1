@@ -117,11 +117,15 @@ class Aux
 public:
     Aux(const ProbeIo& io, unsigned channel) : io(io), base(channel * 0x50) {}
 
-    bool connected() const
+    bool present() const
     {
         const auto state = read(status);
-        return state != UINT32_MAX && (state & 0x10000000) && (read(0xd970) & 0xc003) == 2 &&
-               !(read(0xd97c) & 1);
+        return state != UINT32_MAX && (state & 0x10000000);
+    }
+
+    bool enabled() const
+    {
+        return (read(0xd970) & 0xc003) == 2 && !(read(0xd97c) & 1);
     }
 
     int transfer(unsigned command, unsigned target, uint8_t* data, unsigned size) const
@@ -210,12 +214,48 @@ bool parse_edid(const uint8_t* data, unsigned blocks, Output& out)
 {
     out.mode_count = out.edid_blocks = 0;
     constexpr uint8_t header[] = {0, 255, 255, 255, 255, 255, 255, 0};
-    if(!blocks || blocks > 2 || !block_valid(data))
+    out.edid_read_blocks = 0;
+    out.manufacturer[0] = out.name[0] = out.serial_text[0] = 0;
+    if(!blocks || blocks > 2)
+        return false;
+    out.edid_read_blocks = uint8_t(blocks);
+    for(unsigned i = 0; i < blocks * 128; ++i)
+        out.edid[i] = data[i];
+    if(!block_valid(data))
         return false;
     for(unsigned i = 0; i < sizeof(header); ++i)
         if(data[i] != header[i])
             return false;
     out.edid_blocks = 1;
+    const unsigned vendor = (unsigned(data[8]) << 8) | data[9];
+    bool valid_vendor = !(vendor & 0x8000);
+    for(unsigned i = 0; i < 3; ++i)
+    {
+        const unsigned letter = (vendor >> (10 - i * 5)) & 31;
+        valid_vendor &= letter >= 1 && letter <= 26;
+        out.manufacturer[i] = char('A' + letter - 1);
+    }
+    out.manufacturer[valid_vendor ? 3 : 0] = 0;
+    for(unsigned offset = 54; offset < 126; offset += 18)
+    {
+        const auto* descriptor = data + offset;
+        if(descriptor[0] || descriptor[1] || descriptor[2] || descriptor[4])
+            continue;
+        char* text = descriptor[3] == 0xfc   ? out.name
+                     : descriptor[3] == 0xff ? out.serial_text
+                                             : nullptr;
+        if(!text)
+            continue;
+        unsigned i = 0;
+        for(; i < 13 && descriptor[5 + i] != '\n'; ++i)
+        {
+            const auto c = descriptor[5 + i];
+            text[i] = c >= 32 && c < 127 ? char(c) : '?';
+        }
+        while(i && text[i - 1] == ' ')
+            --i;
+        text[i] = 0;
+    }
     for(unsigned offset = 54; offset < 126; offset += 18)
         detailed_timing(out, data + offset, offset == 54 && (data[24] & 2));
     if(blocks == 2 && data[126] && block_valid(data + 128))
@@ -245,10 +285,12 @@ bool parse_edid(const uint8_t* data, unsigned blocks, Output& out)
 
 bool probe(const ProbeIo& io, Snapshot& out)
 {
-    if(((io.read(io.context, 0) >> 20) & 0x1ff) != 0x126)
+    out.boot0 = io.read(io.context, 0);
+    if(((out.boot0 >> 20) & 0x1ff) != 0x126)
         return false;
     out.output_count = out.head_count = 0;
-    const auto resources = io.read(io.context, 0x612004);
+    out.aux_present_mask = out.aux_enabled_mask = out.dpcd_failed_mask = 0;
+    const auto resources = out.resources = io.read(io.context, 0x612004);
     for(unsigned sor = 0; sor < 8 && out.head_count < heads; ++sor)
     {
         if(!(resources & (0x100u << sor)))
@@ -273,13 +315,22 @@ bool probe(const ProbeIo& io, Snapshot& out)
     for(unsigned ch = 0; ch < channels; ++ch)
     {
         const Aux aux(io, ch);
-        if(!aux.connected())
+        if(aux.enabled())
+            out.aux_enabled_mask |= uint8_t(1u << ch);
+        if(!aux.present())
+            continue;
+        out.aux_present_mask |= uint8_t(1u << ch);
+        if(!(out.aux_enabled_mask & (1u << ch)))
             continue;
         uint8_t caps[3];
         if(aux.transfer(9, 0, caps, sizeof(caps)) != int(sizeof(caps)) || caps[0] < 0x10 ||
            !caps[1] || !(caps[2] & 31))
+        {
+            out.dpcd_failed_mask |= uint8_t(1u << ch);
             continue;
+        }
         auto& output = out.outputs[out.output_count++];
+        output.edid_read_blocks = output.edid_blocks = output.mode_count = 0;
         output.channel = uint8_t(ch);
         output.dpcd_revision = caps[0];
         output.max_link_rate = caps[1];

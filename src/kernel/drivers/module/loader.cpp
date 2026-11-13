@@ -212,13 +212,23 @@ void load_gm206()
     {
         const auto& pci = platform_pci_devices()[index];
         if(pci.vendor_id != 0x10de || pci.device_id != 0x1402 || pci.class_code != 3 ||
-           pci.subclass != 0 || pci_config_read32(pci, 0x2c) != 0x36c51458 ||
-           !(pci_read_command(pci) & 2))
+           pci.subclass != 0)
             continue;
+        const auto subsystem = pci_config_read32(pci, 0x2c);
+        native_display::gm206_detected(pci, subsystem);
+        if(subsystem != 0x36c51458 || !(pci_read_command(pci) & 2))
+        {
+            native_display::gm206_status("unsupported subsystem or MMIO disabled");
+            continue;
+        }
         const auto& bar = pci.bars[0];
         if((bar.type != PciBarType::Mmio32 && bar.type != PciBarType::Mmio64) || !bar.base ||
            bar.size < gm206::register_bytes)
+        {
+            native_display::gm206_status("invalid BAR 0");
             continue;
+        }
+        native_display::gm206_status("trusted package unavailable or rejected");
         VirtualMemory vm(page_frames, g_kernel_root_cr3);
         driver::Image image;
         uint64_t size = 0;
@@ -230,11 +240,13 @@ void load_gm206()
                        image,
                        size))
             return;
+        native_display::gm206_status("module exports rejected");
         const auto* exports = reinterpret_cast<gm206::Entry>(image.entry)();
         if(!driver::contains(image, reinterpret_cast<uint64_t>(exports), sizeof(*exports), 4) ||
            exports->version != OS1_GM206_ABI || exports->bytes != sizeof(*exports) ||
            !driver::contains(image, reinterpret_cast<uint64_t>(exports->probe), 1, 5))
             return;
+        native_display::gm206_status("BAR 0 claim or mapping failed");
         const DeviceId owner{DeviceBus::Pci, index};
         PciBarResource registers{};
         if(!claim_pci_bar(owner, index, 0, registers))
@@ -254,7 +266,9 @@ void load_gm206()
                                             value;
                                     },
                                     tsc_clock_delay_us};
-            if(native_display::discover_gm206(*exports, io))
+            const bool ready = native_display::discover_gm206(*exports, io);
+            native_display::gm206_status(ready ? "probe complete" : "chip identity rejected");
+            if(ready)
                 debug("driver: loaded gm206 discovery from ")(kGm206DriverPath)();
             else
                 debug("driver: gm206 probe rejected")();

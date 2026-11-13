@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #define OS1_GM206_MODULE_BASE UINT64_C(0xffffffffa0040000)
-#define OS1_GM206_ABI 1u
+#define OS1_GM206_ABI 2u
 
 namespace gm206
 {
@@ -19,6 +19,9 @@ struct Output
 {
     uint8_t channel, dpcd_revision, max_link_rate, max_lanes;
     uint8_t edid_blocks, mode_count;
+    uint8_t edid_read_blocks;
+    char manufacturer[4], name[14], serial_text[14];
+    uint8_t edid[256];
     Mode modes[mode_limit];
 };
 struct Head
@@ -29,6 +32,8 @@ struct Head
 struct Snapshot
 {
     unsigned output_count, head_count;
+    uint32_t boot0, resources;
+    uint8_t aux_present_mask, aux_enabled_mask, dpcd_failed_mask;
     Output outputs[channels];
     Head scanouts[heads];
 };
