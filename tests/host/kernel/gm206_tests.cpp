@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
+#include <os1/resource.h>
+#include <os1/vfs.h>
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <string_view>
 #include <vector>
 
@@ -10,6 +13,18 @@
 
 namespace
 {
+// The display state that the kernel passes to the reflection of the module.
+constexpr os1_display_summary summary{
+    true, "firmware-framebuffer", "Fixed firmware display", 1024, 768, 32, 1, 1, 0, 0, 0};
+struct Reflection
+{
+    const gm206::Snapshot* snapshot;
+    const gm206::Identity* identity = nullptr;
+};
+long query_reflection(Os1HardwareQuery& query, const Reflection& reflection)
+{
+    return gm206::reflect(query, summary, reflection.snapshot, reflection.identity);
+}
 void checksum(uint8_t* block)
 {
     uint8_t sum = 0;
@@ -280,7 +295,7 @@ TEST(Gm206, PagesTimingFieldsAndKeepsFirmwareModesSeparate)
     fixture.make_edid();
     gm206::Snapshot state{};
     ASSERT_TRUE(gm206::probe(fixture.io(), state));
-    const native_display::Reflection reflection{true, false, 1024, 768, 32, 1, 1, &state};
+    const Reflection reflection{&state};
     auto children = [&](unsigned id, unsigned start = 0) {
         Os1HardwareQuery query{};
         query.version = OS1_HARDWARE_VERSION;
@@ -288,7 +303,7 @@ TEST(Gm206, PagesTimingFieldsAndKeepsFirmwareModesSeparate)
         query.id = id;
         query.start = start;
         query.generation = 1;
-        EXPECT_EQ(native_display::query_reflection(query, reflection), 0);
+        EXPECT_EQ(query_reflection(query, reflection), 0);
         return query;
     };
     auto root = children(OS1_HARDWARE_DISPLAY_ROOT);
@@ -392,7 +407,7 @@ TEST(Gm206, PagesTimingFieldsAndKeepsFirmwareModesSeparate)
     describe.version = OS1_HARDWARE_VERSION;
     describe.operation = OS1_HARDWARE_DESCRIBE;
     describe.id = rest.nodes[4].id;
-    ASSERT_EQ(native_display::query_reflection(describe, reflection), 0);
+    ASSERT_EQ(query_reflection(describe, reflection), 0);
     EXPECT_EQ(describe.nodes[0].integer, rest.nodes[4].integer);
 }
 
@@ -403,19 +418,18 @@ TEST(Gm206, ReportsRejectedChipRegisterWithoutPublishingSinkData)
     gm206::Snapshot snapshot{};
     ASSERT_FALSE(gm206::probe(fixture.io(), snapshot));
     EXPECT_EQ(snapshot.boot0, fixture.identity);
-    native_display::Gm206Identity identity{};
+    gm206::Identity identity{};
     identity.status = "chip identity rejected";
     identity.boot0 = snapshot.boot0;
     identity.boot0_read = true;
-    const native_display::Reflection reflection{
-        true, false, 1024, 768, 32, 1, 1, nullptr, &identity};
+    const Reflection reflection{nullptr, &identity};
     auto children = [&](unsigned id, unsigned start = 0) {
         Os1HardwareQuery query{};
         query.version = OS1_HARDWARE_VERSION;
         query.operation = OS1_HARDWARE_CHILDREN;
         query.id = id;
         query.start = start;
-        EXPECT_EQ(native_display::query_reflection(query, reflection), 0);
+        EXPECT_EQ(query_reflection(query, reflection), 0);
         return query;
     };
     auto probe = children(OS1_HARDWARE_GM206_ROOT);
@@ -537,7 +551,7 @@ TEST(Gm206, CapturesOwnershipStateWithoutRegisterWrites)
         EXPECT_EQ(value, 0u);
     for(const auto offset : other.reads)
         EXPECT_FALSE((offset >= 0x6104a0 && offset < 0x6104e0) || offset >= 0x641000) << offset;
-    const native_display::Reflection reflection{true, false, 1024, 768, 32, 1, 1, &unmatched};
+    const Reflection reflection{&unmatched};
     unsigned fields = 0;
     Os1HardwareQuery page{};
     do
@@ -549,7 +563,7 @@ TEST(Gm206, CapturesOwnershipStateWithoutRegisterWrites)
         page.id = OS1_HARDWARE_DISPLAY_ROOT + 12;
         page.start = start;
         page.generation = 1;
-        ASSERT_EQ(native_display::query_reflection(page, reflection), 0);
+        ASSERT_EQ(query_reflection(page, reflection), 0);
         for(unsigned i = 0; i < page.count; ++i)
             EXPECT_NE(std::string_view(page.nodes[i].name).substr(0, 5), "base_");
         fields += page.count;
@@ -1355,5 +1369,305 @@ TEST(Gm206, ScanoutUsesOnlyMappedRegisterRanges)
         for(const auto& range : gm206::register_ranges)
             mapped |= offset >= range.offset && offset - range.offset <= range.bytes - 4;
         EXPECT_TRUE(mapped) << "unmapped access " << offset;
+    }
+}
+
+TEST(Gm206, OffersTheNativeModeAndSmallerMonitorModesAsScaledModes)
+{
+    gm206::Snapshot snapshot{};
+    snapshot.boot.route_matched = true;
+    snapshot.boot.head[gm206::head_viewport_out] = 0x08700f00;
+    auto& sink = snapshot.outputs[1];
+    const gm206::Mode sizes[] = {{3840, 2160},
+                                 {2560, 1440},
+                                 {1920, 1080},
+                                 {1024, 768},
+                                 {800, 600},
+                                 {1920, 1080},
+                                 {1280, 720},
+                                 {4096, 2160},
+                                 {640, 400},
+                                 {1600, 900}};
+    for(const auto& size : sizes)
+        sink.modes[sink.mode_count++] = size;
+    const os1_framebuffer_surface boot{nullptr, 1024, 768, 4096, 4, 16, 8, 0};
+    os1_display_mode modes[12]{};
+    // The native mode is first. The list has no size two times and no size of the boot mode.
+    // A width of 800 gives a pitch that is not a multiple of 256 bytes.
+    ASSERT_EQ(gm206::offer_modes(snapshot, boot, modes, 12), 5u);
+    const uint32_t expected[][2] = {
+        {3840, 2160}, {2560, 1440}, {1920, 1080}, {1280, 720}, {1600, 900}};
+    for(unsigned i = 0; i < 5; ++i)
+    {
+        EXPECT_EQ(modes[i].width, expected[i][0]) << i;
+        EXPECT_EQ(modes[i].height, expected[i][1]) << i;
+        EXPECT_EQ(modes[i].bits_per_pixel, 32u) << i;
+    }
+    // The capacity limits the list.
+    EXPECT_EQ(gm206::offer_modes(snapshot, boot, modes, 2), 2u);
+    EXPECT_EQ(gm206::offer_modes(snapshot, boot, modes, 0), 0u);
+    // A boot state without support gives no mode.
+    auto refused = [&](auto change) {
+        auto state = snapshot;
+        auto surface = boot;
+        change(state, surface);
+        EXPECT_EQ(gm206::offer_modes(state, surface, modes, 12), 0u);
+    };
+    refused([](auto& state, auto&) { state.boot.route_matched = false; });
+    refused([](auto& state, auto&) { state.boot.head[gm206::head_viewport_out] = 0; });
+    refused([](auto& state, auto&) { state.boot.head[gm206::head_viewport_out] = 0x03000400; });
+    refused([](auto&, auto& surface) { surface.pixel_bytes = 3; });
+    refused([](auto&, auto& surface) { surface.red_shift = 0; });
+    refused([](auto&, auto& surface) { surface.pitch = 4100; });
+    refused([](auto&, auto& surface) { surface.pitch = 4096 * 1024; });
+}
+
+TEST(DisplayReflection, KernelReportsTheGenericNodesWithoutADriverReflection)
+{
+    const auto ask = [](unsigned operation, unsigned id, const os1_display_summary& display) {
+        Os1HardwareQuery query{};
+        query.version = OS1_HARDWARE_VERSION;
+        query.operation = operation;
+        query.id = id;
+        const long status = native_display::query_reflection(query, display);
+        return std::pair{status, query};
+    };
+    const os1_display_summary shown{
+        true, "bochs-display", "QEMU runtime display", 1024, 768, 32, 3, 1, 0, 0, 0};
+    auto [status, root] = ask(OS1_HARDWARE_DESCRIBE, OS1_HARDWARE_DISPLAY_ROOT, shown);
+    ASSERT_EQ(status, 0);
+    EXPECT_STREQ(root.nodes[0].name, "display");
+    EXPECT_STREQ(root.nodes[0].text, "QEMU runtime display");
+    auto [listed, children] = ask(OS1_HARDWARE_CHILDREN, OS1_HARDWARE_DISPLAY_ROOT, shown);
+    ASSERT_EQ(listed, 0);
+    ASSERT_EQ(children.count, 6u);
+    EXPECT_TRUE(children.end);
+    EXPECT_STREQ(children.nodes[0].name, "available");
+    EXPECT_EQ(children.nodes[0].integer, 1u);
+    EXPECT_STREQ(children.nodes[1].name, "driver");
+    EXPECT_STREQ(children.nodes[1].text, "bochs-display");
+    EXPECT_STREQ(children.nodes[5].name, "mode_count");
+    EXPECT_EQ(children.nodes[5].integer, 3u);
+    for(unsigned i = 0; i < children.count; ++i)
+        EXPECT_EQ(children.nodes[i].parent, unsigned(OS1_HARDWARE_DISPLAY_ROOT));
+    // The kernel has no node for one display device.
+    EXPECT_EQ(ask(OS1_HARDWARE_DESCRIBE, OS1_HARDWARE_GM206_ROOT, shown).first, OS1_ERR_NOT_FOUND);
+    // A display that is not available has only the availability node.
+    auto stopped = shown;
+    stopped.available = false;
+    auto [hidden, single] = ask(OS1_HARDWARE_CHILDREN, OS1_HARDWARE_DISPLAY_ROOT, stopped);
+    ASSERT_EQ(hidden, 0);
+    ASSERT_EQ(single.count, 1u);
+    EXPECT_EQ(single.nodes[0].integer, 0u);
+    EXPECT_EQ(ask(OS1_HARDWARE_DESCRIBE, OS1_HARDWARE_DISPLAY_ROOT + 2, stopped).first,
+              OS1_ERR_NOT_FOUND);
+    // A query for a different generation is cancelled.
+    Os1HardwareQuery stale{};
+    stale.version = OS1_HARDWARE_VERSION;
+    stale.operation = OS1_HARDWARE_DESCRIBE;
+    stale.id = OS1_HARDWARE_DISPLAY_ROOT;
+    stale.generation = 7;
+    EXPECT_EQ(native_display::query_reflection(stale, shown), OS1_ERR_CANCELLED);
+}
+
+extern "C" const os1_display_driver* os1_driver_init();
+
+namespace
+{
+// Kernel services for the driver table of the module. The register access goes to a probe model.
+struct ModuleHost
+{
+    static inline ModuleHost* self = nullptr;
+    struct Map
+    {
+        uint32_t bar;
+        uint64_t offset, bytes;
+        uint32_t flags;
+    };
+    AuxFixture card;
+    uint32_t viewport = 0x08700f00;
+    bool present = true;
+    // A bit for each BAR that the kernel refuses to give, and for each BAR without a mapping.
+    unsigned refused_claims = 0, refused_maps = 0;
+    // The BARs that the module holds, as (PCI index, BAR) pairs.
+    std::set<std::pair<uint32_t, uint32_t>> held;
+    // Releases and mappings of a BAR that the module does not hold.
+    unsigned wrong_uses = 0;
+    std::vector<Map> maps;
+    uint8_t memory[16]{};
+    os1_display_pci pci{};
+    os1_display_host host{};
+    gm206::ProbeIo io{};
+    const os1_display_driver* driver = os1_driver_init();
+
+    ModuleHost()
+    {
+        self = this;
+        card.make_edid();
+        pci.vendor = 0x10de;
+        pci.device = 0x1402;
+        pci.class_code = 3;
+        pci.command = 2;
+        pci.subsystem = 0x36c51458;
+        pci.bars[0] = {0xf6000000, 0x1000000, true};
+        pci.bars[1] = {0xe0000000, 0x10000000, true};
+        pci.bars[3] = {0xf0000000, 0x2000000, true};
+        host.version = 1;
+        host.bytes = sizeof(host);
+        host.boot = {memory, 1024, 768, 4096, 4, 16, 8, 0};
+        host.boot_physical = 0xf1000000;
+        host.drawing = true;
+        host.pci_count = 2;
+        host.pci = [](uint32_t index, os1_display_pci* out) {
+            // Index 0 is a device of a different vendor.
+            *out = index == 1 && self->present ? self->pci : os1_display_pci{};
+            return true;
+        };
+        host.claim = [](uint32_t index, uint32_t bar) {
+            return !(self->refused_claims & (1u << bar)) && self->held.insert({index, bar}).second;
+        };
+        host.release = [](uint32_t index, uint32_t bar) {
+            self->wrong_uses += !self->held.erase({index, bar});
+        };
+        host.map = [](uint32_t index, uint32_t bar, uint64_t offset, uint64_t bytes, uint32_t flags)
+                       ->volatile uint8_t*
+        {
+            self->wrong_uses += !self->held.contains({index, bar});
+            self->maps.push_back({bar, offset, bytes, flags});
+            return self->refused_maps & (1u << bar) ? nullptr : self->memory;
+        };
+        host.allocate = [](uint64_t) -> void* { return nullptr; };
+        host.delay_us = [](uint64_t) {};
+        host.log = [](const char*, const uint32_t*, uint32_t) {};
+        // The probe model has no output viewport. The native mode needs one.
+        io = {this,
+              [](void* p, unsigned reg) {
+                  auto& host = *static_cast<ModuleHost*>(p);
+                  return reg == 0x6404c0 ? host.viewport : host.card.read(reg);
+              },
+              [](void* p, unsigned reg, uint32_t value) {
+                  static_cast<ModuleHost*>(p)->card.write(reg, value);
+              },
+              [](uint64_t) {}};
+        gm206::test_io = &io;
+    }
+    ~ModuleHost()
+    {
+        gm206::test_io = nullptr;
+        self = nullptr;
+    }
+    // The probe status of the reflection tree.
+    std::string status() const
+    {
+        Os1HardwareQuery query{};
+        query.version = OS1_HARDWARE_VERSION;
+        query.operation = OS1_HARDWARE_DESCRIBE;
+        query.id = OS1_HARDWARE_DISPLAY_ROOT + 0x900;
+        EXPECT_EQ(driver->reflect(&query, &summary), 0);
+        return query.nodes[0].text;
+    }
+};
+}  // namespace
+
+TEST(Gm206Module, OffersModesOnTheSupportedBoardAndKeepsItsClaims)
+{
+    ModuleHost machine;
+    ASSERT_TRUE(machine.driver->probe(&machine.host));
+    EXPECT_EQ(machine.status(), "probe complete; native mode offered");
+    EXPECT_STREQ(machine.driver->text(0), "gm206");
+    os1_display_mode mode{};
+    ASSERT_TRUE(machine.driver->mode(0, &mode));
+    EXPECT_EQ(mode.width, 3840u);
+    EXPECT_EQ(mode.height, 2160u);
+    EXPECT_EQ(mode.bits_per_pixel, 32u);
+    // The module keeps BAR 0 and BAR 1.
+    const std::set<std::pair<uint32_t, uint32_t>> both{{1, 0}, {1, 1}};
+    EXPECT_EQ(machine.held, both);
+    EXPECT_EQ(machine.wrong_uses, 0u);
+    // It maps each register range, then the surfaces with write combining, then the rest.
+    const auto ranges = std::size(gm206::register_ranges);
+    ASSERT_EQ(machine.maps.size(), ranges + 2);
+    for(unsigned i = 0; i < ranges; ++i)
+    {
+        EXPECT_EQ(machine.maps[i].bar, 0u);
+        EXPECT_EQ(machine.maps[i].offset, gm206::register_ranges[i].offset);
+        EXPECT_EQ(machine.maps[i].bytes, gm206::register_ranges[i].bytes);
+        EXPECT_EQ(machine.maps[i].flags, 0u);
+    }
+    EXPECT_EQ(machine.maps[ranges].bar, 1u);
+    EXPECT_EQ(machine.maps[ranges].offset, 0x04000000u);
+    EXPECT_EQ(machine.maps[ranges].bytes, 0x02400000u);
+    EXPECT_EQ(machine.maps[ranges].flags, uint32_t(OS1_DISPLAY_MAP_WRITE_COMBINE));
+    EXPECT_EQ(machine.maps[ranges + 1].bar, 1u);
+    EXPECT_EQ(machine.maps[ranges + 1].offset, 0x06400000u);
+    EXPECT_EQ(machine.maps[ranges + 1].bytes, 0x16000u);
+    EXPECT_EQ(machine.maps[ranges + 1].flags, 0u);
+    // A request outside the mode list changes nothing. No surface is on the head.
+    os1_framebuffer_surface surface{};
+    EXPECT_EQ(machine.driver->set_mode(99, &surface), OS1_DISPLAY_REFUSED);
+    EXPECT_FALSE(machine.driver->cursor(1, 1, true));
+    // Before the first module surface, the console keeps the boot framebuffer.
+    EXPECT_EQ(machine.driver->restore(&surface), OS1_DISPLAY_DONE);
+    EXPECT_EQ(surface.pixels, machine.memory);
+    EXPECT_EQ(surface.width, 1024u);
+}
+
+TEST(Gm206Module, ReportsEachProbeFailureAndReturnsItsClaims)
+{
+    const auto run = [](auto change, const char* status, bool found = true) {
+        ModuleHost machine;
+        change(machine);
+        EXPECT_EQ(machine.driver->probe(&machine.host), found) << status;
+        if(found)
+            EXPECT_EQ(machine.status(), status);
+        os1_display_mode mode{};
+        EXPECT_FALSE(machine.driver->mode(0, &mode)) << status;
+        EXPECT_TRUE(machine.held.empty()) << status;
+        EXPECT_EQ(machine.wrong_uses, 0u) << status;
+        return machine.maps.size();
+    };
+    run([](auto& machine) { machine.present = false; }, "", false);
+    EXPECT_EQ(run([](auto& machine) { machine.pci.subsystem = 0x36c51043; },
+                  "unsupported subsystem or MMIO disabled"),
+              0u);
+    run([](auto& machine) { machine.pci.command = 0; }, "unsupported subsystem or MMIO disabled");
+    run([](auto& machine) { machine.pci.bars[0].bytes = 0x400000; }, "invalid BAR 0");
+    run([](auto& machine) { machine.refused_claims = 1; }, "BAR 0 claim or mapping failed");
+    EXPECT_EQ(run([](auto& machine) { machine.refused_maps = 1; }, "BAR 0 claim or mapping failed"),
+              1u);
+    run([](auto& machine) { machine.card.identity = 0x125000a1; }, "chip identity rejected");
+    // The module reads the card but offers no mode. It then keeps no BAR.
+    const auto ranges = std::size(gm206::register_ranges);
+    EXPECT_EQ(run([](auto& machine) { machine.pci.bars[1].bytes = 0x4000000; },
+                  "probe complete; BAR 1 not usable"),
+              ranges);
+    EXPECT_EQ(run([](auto& machine) { machine.host.drawing = false; },
+                  "probe complete; no drawing driver"),
+              ranges);
+    // The boot framebuffer is on a different display device, or one byte outside a BAR.
+    for(const uint64_t address : {0xc0000000ull, 0xe0000000ull - 1, 0xf2000000ull, 0ull})
+        EXPECT_EQ(run([&](auto& machine) { machine.host.boot_physical = address; },
+                      "probe complete; boot framebuffer not on the card"),
+                  ranges)
+            << address;
+    EXPECT_EQ(
+        run([](auto& machine) { machine.refused_claims = 2; }, "probe complete; BAR 1 not usable"),
+        ranges);
+    EXPECT_EQ(run([](auto& machine) { machine.refused_maps = 2; },
+                  "probe complete; BAR 1 mapping failed"),
+              ranges + 1);
+    EXPECT_EQ(
+        run([](auto& machine) { machine.viewport = 0; }, "probe complete; native mode not offered"),
+        ranges + 2);
+    EXPECT_EQ(run([](auto& machine) { machine.host.boot.pixel_bytes = 3; },
+                  "probe complete; native mode not offered"),
+              ranges + 2);
+    // The first and the last byte of BAR 3 are on the card.
+    for(const uint64_t address : {0xf0000000ull, 0xf2000000ull - 1})
+    {
+        ModuleHost machine;
+        machine.host.boot_physical = address;
+        ASSERT_TRUE(machine.driver->probe(&machine.host));
+        EXPECT_EQ(machine.status(), "probe complete; native mode offered") << address;
     }
 }

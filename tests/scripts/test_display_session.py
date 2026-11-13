@@ -183,8 +183,11 @@ def main():
     parser.add_argument('--metadata', required=True)
     parser.add_argument('--code')
     parser.add_argument('--vars')
+    # Run the machine without a display device. The system must start and report no display.
+    parser.add_argument('--no-display', action='store_true')
     args = parser.parse_args()
-    args.vga = 'std'
+    args.vga = 'none' if args.no_display else 'std'
+    shown = bool(args.code) and not args.no_display
     args.transport = 'usb' if args.code else 'virtio'
     disk = Path(args.log).with_suffix('.raw')
     shutil.copyfile(args.program_disk, disk)
@@ -192,13 +195,17 @@ def main():
         args.qmp = str(Path(temporary) / 'qmp.sock')
 
         def exercise(run, expect):
+            # This machine has no GTX 950. The kernel has no display device code, so the report
+            # holds only the generic display nodes. The GM206 nodes come from the driver module.
             run("os.display.gm206.diagnostics > /gm206.txt")
-            report = run('cat "/gm206.txt"', b'no matching PCI device')
-            assert b'probe_status' in report and b'available' in report, report
-            run("os.display.gm206.diagnostics()", b"no matching PCI device")
+            report = run('cat "/gm206.txt"', b'available [field] Integer = ')
+            assert b'gm206 [' not in report and b'probe_status' not in report, report
+            if args.no_display:
+                # No display driver module is in use. The kernel reports this state itself.
+                assert b'display [object] No display' in report, report
             out = run('inspect --details os.display')
-            assert (b'available [field] Integer = ' + (b'1' if args.code else b'0')) in out, out
-            if args.code:
+            assert (b'available [field] Integer = ' + (b'1' if shown else b'0')) in out, out
+            if shown:
                 assert b'bochs-display' in out and b'mode_count [field] Integer = 3' in out
                 exercise_graphics(args, run, expect)
             else:
@@ -207,6 +214,8 @@ def main():
             run('echo "display console restored"', b'display console restored')
 
         boot(args, disk, 'display', exercise=exercise)
+        if args.no_display:
+            return
         if args.code:
             trace_part = Path(temporary) / 'trace.ext2'
             trace_tar = Path(temporary) / 'trace.tar'

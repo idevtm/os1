@@ -48,9 +48,9 @@ assert not any('/bin/' + name in [e['destination'] for e in programs] for name i
 assert {'/bin/sh', '/bin/ls', '/bin/cat', '/bin/textprocessor', '/bin/counter', '/bin/activation', '/bin/diskutil',
         '/bin/paramdemo', '/bin/buffercheck', '/bin/lshw', '/bin/lspci', '/bin/lsusb', '/bin/lsblk', '/bin/gsh'} <= {e['destination'] for e in programs}
 packages = [e for e in resources if e['destination'].startswith('/system/drivers/')]
-# The package manifest must state the ABI that the module header exports.
-gm206_header = Path(__file__).resolve().parents[2] / 'src/common/driver/gm206.h'
-gm206_abi = int(re.search(r'^#define OS1_GM206_ABI (\d+)u$', gm206_header.read_text(), re.M).group(1))
+# Each display package manifest must state the ABI of the display driver interface.
+display_header = Path(__file__).resolve().parents[2] / 'src/common/driver/display.h'
+display_abi = int(re.search(r'^#define OS1_DISPLAY_MODULE_ABI (\d+)u$', display_header.read_text(), re.M).group(1))
 expected = {'virtio-net', 'firmware-framebuffer', 'gm206'}
 assert len(packages) == len(expected)
 seen = set()
@@ -63,13 +63,20 @@ for entry in packages:
     assert entry['destination'].endswith(f'/{name}/manifest.json')
     image = str(Path(entry['destination']).with_name('driver.elf'))
     assert package['image'] == image
-    assert package['abi'] == {'virtio-net': 1, 'firmware-framebuffer': 3, 'gm206': gm206_abi}[name]
+    assert package['abi'] == {'virtio-net': 1, 'firmware-framebuffer': display_abi, 'gm206': display_abi}[name]
     assert image in program_paths
     assert installed[image][1] == package['sha256']
+    if 'base' in package:
+        # The loader maps a display module at the address in its manifest. The first loaded
+        # segment of the image must start there.
+        elf = Path(next(e['source'] for e in programs if e['destination'] == image)).read_bytes()
+        program = int.from_bytes(elf[32:40], 'little')
+        assert int.from_bytes(elf[program:program + 4], 'little') == 1, name  # PT_LOAD
+        assert int.from_bytes(elf[program + 16:program + 24], 'little') == int(package['base'], 16), name
     if name == 'virtio-net':
         assert package['pci'] == {'vendor': 0x1af4, 'device': 0x1041}
     elif name == 'gm206':
-        assert package['dependencies'] == [f'kernel.gm206_probe.v{gm206_abi}']
+        assert package['dependencies'] == [f'kernel.display_driver.v{display_abi}']
         assert package['pci'] == {'vendor': 0x10de, 'device': 0x1402}
     else:
         assert package['match'] == 'validated firmware framebuffer'

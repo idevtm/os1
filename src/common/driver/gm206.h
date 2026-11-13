@@ -1,8 +1,10 @@
 #pragma once
 #include <stdint.h>
 
-#define OS1_GM206_MODULE_BASE UINT64_C(0xffffffffa0040000)
-#define OS1_GM206_ABI 6u
+#include "driver/display.h"
+
+// Internal interface of the GM206 display module. The kernel does not include this file.
+// The module exports the generic display driver table of `driver/display.h`.
 
 namespace gm206
 {
@@ -211,21 +213,6 @@ struct ProbeIo
     void (*write)(void*, unsigned, uint32_t);
     void (*delay_us)(uint64_t);
 };
-struct Exports
-{
-    uint32_t version, bytes;
-    bool (*probe)(const ProbeIo&, Snapshot&);
-    bool (*scanout)(
-        const ProbeIo&, const Snapshot&, const ScanoutLayout&, const Surface&, ScanoutState&);
-    bool (*cursor)(const ProbeIo&,
-                   const Snapshot&,
-                   const ScanoutLayout&,
-                   ScanoutState&,
-                   uint32_t x,
-                   uint32_t y,
-                   bool visible);
-};
-using Entry = const Exports* (*)();
 bool probe(const ProbeIo&, Snapshot&);
 // Show one surface on the boot head with the firmware timing. The first call takes the display from
 // firmware.
@@ -240,4 +227,35 @@ bool cursor(const ProbeIo&,
             uint32_t y,
             bool visible);
 bool parse_edid(const uint8_t*, unsigned blocks, Output&);
+
+// Video memory that the module reserves in BAR 1. BAR 1 must have `aperture_bytes` bytes.
+inline constexpr uint32_t native_offset = 0x04000000, console_offset = 0x06000000;
+inline constexpr uint32_t instance_offset = 0x06400000, push_offset = 0x06410000;
+inline constexpr uint32_t check_offset = 0x06411000, cursor_offset = 0x06412000;
+inline constexpr uint32_t aperture_bytes = 0x06416000;
+
+// Write the modes that the module can show: the native mode, then each smaller monitor mode as a
+// scaled surface. Return the number of modes. Zero means that the boot state has no support.
+unsigned offer_modes(const Snapshot&,
+                     const os1_framebuffer_surface& boot,
+                     os1_display_mode* modes,
+                     unsigned capacity);
+
+#if defined(OS1_HOST_TEST)
+// A host test supplies the register access of the module driver table.
+inline const ProbeIo* test_io = nullptr;
+#endif
+
+// PCI identity and probe result for the reflection tree.
+struct Identity
+{
+    const char* status = "no matching PCI device";
+    uint32_t vendor{}, device{}, subsystem_vendor{}, subsystem_device{}, revision{};
+    uint32_t segment{}, bus{}, slot{}, function{};
+    uint64_t bar0_bytes{};
+    uint32_t boot0{};
+    bool boot0_read{};
+};
+// Answer one query for the display subtree. The snapshot and the identity can be null.
+long reflect(Os1HardwareQuery&, const os1_display_summary&, const Snapshot*, const Identity*);
 }  // namespace gm206

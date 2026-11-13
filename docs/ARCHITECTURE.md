@@ -974,6 +974,23 @@ The QEMU Standard VGA backend switches the scanout resolution during session acq
 The final session release restores the boot mode before it redraws the active terminal.
 The demo uses waitable pointer subscriptions. It reports input and draw timing after it releases the display.
 
+### Display driver boundary
+
+The kernel has no code for one display device. It has the display service, the text console, and a loader.
+Each display device has its code in a trusted ext2 module that uses one display driver interface.
+
+```text
+kernel: Display sessions, request checks, console handover, PCI inventory, BAR claims, mapping
+module: device match, registers, mode list, mode change, console restore, pointer, reflection
+no display device -> no display module -> serial console and all other services
+```
+
+A generated table names the display packages. The loader loads a package with a PCI identity only for a device in the PCI inventory.
+The loader loads the package for the boot framebuffer only for a supported framebuffer layout.
+A module gets kernel services through one host table: PCI records, BAR claims, mapping, memory, delay, and log.
+A machine without a display device starts without a display module. The Display service then reports no display.
+See the [display driver interface](hardware/driver-module-abi.md#display-driver-interface).
+
 ### GM206 discovery at boot
 
 A trusted ext2 module probes the matching GM206 display adapter before user processes start.
@@ -992,16 +1009,16 @@ native mode open -> BAR 1 check -> display ownership -> module surface on the bo
 session close -> console surface in video memory -> console redraw
 ```
 
-On the reference board, the display service offers one native mode with the size of the firmware output viewport.
+On the reference board, the module offers one native mode with the size of the firmware output viewport.
 The module then takes the display from firmware and shows a surface in reserved video memory.
 After the first session close that follows a switch, the console and the fixed mode use a second reserved surface.
 The head keeps the firmware timing and DisplayPort link.
 The service also offers smaller monitor modes. The head scales such a surface to the native output.
-The kernel maps the two surfaces with write combining. Each CPU sets page attribute table entry 1 for it.
+The module maps the two surfaces with write combining through the host services. Each CPU sets page attribute table entry 1 for it.
 The framebuffer module draws the `fill_area`, `copy`, and `bitmap` session requests.
 It writes each pixel to a shadow in normal memory and to video memory. A copy reads the shadow.
 The GM206 module shows a hardware pointer through the position channel of the head.
-See the [GM206 module contract](hardware/driver-module-abi.md#gm206-discovery-module).
+See the [GM206 module contract](hardware/driver-module-abi.md#gm206-display-module).
 
 ### Framebuffer Text Rendering
 

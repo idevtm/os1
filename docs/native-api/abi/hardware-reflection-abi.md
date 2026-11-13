@@ -361,7 +361,8 @@ Platform capture runs before publication and uses bounded memory. Runtime USB pu
 
 ## GM206 display discovery
 
-The `os.display.gm206` subtree reports the cached boot probe status even if the probe fails or the GPU is absent.
+The GM206 display module supplies the `os.display.gm206` subtree. It reports the cached boot probe status also if the probe fails.
+A machine without the PCI device does not load the module and has no such subtree.
 The existing display backend and the Display v1 mode list stay in effect.
 
 ```text

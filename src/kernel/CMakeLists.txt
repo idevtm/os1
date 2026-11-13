@@ -285,6 +285,7 @@ add_custom_command(OUTPUT "${OS1_DISPLAY_DRIVER_ELF}"
     "${PROJECT_SOURCE_DIR}/src/common/driver/display.h"
     "${PROJECT_SOURCE_DIR}/src/common/driver/draw.hpp"
     "${PROJECT_SOURCE_DIR}/src/uapi/os1/display.h"
+    "${PROJECT_SOURCE_DIR}/src/uapi/os1/hardware.h"
   VERBATIM)
 add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/display_driver_trust.hpp" "${OS1_DISPLAY_DRIVER_METADATA}"
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
@@ -305,14 +306,24 @@ add_custom_command(OUTPUT "${OS1_GM206_DRIVER_ELF}"
     -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -no-pie -Os
     -fno-stack-protector -fno-exceptions -fno-rtti -fno-threadsafe-statics
     -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nostartfiles
-    "-I${PROJECT_SOURCE_DIR}/src/common" "-I${OS1_GENERATED_DIR}"
+    "-I${PROJECT_SOURCE_DIR}/src/common" "-I${PROJECT_SOURCE_DIR}/src/uapi" "-I${OS1_GENERATED_DIR}"
     "-Wl,-T,${PROJECT_SOURCE_DIR}/src/drivers/gm206/linker.ld"
     -Wl,--build-id=none -Wl,-z,max-page-size=4096
-    "${PROJECT_SOURCE_DIR}/src/drivers/gm206/driver.cpp" -o "${OS1_GM206_DRIVER_ELF}"
+    "${PROJECT_SOURCE_DIR}/src/drivers/gm206/driver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/drivers/gm206/display.cpp"
+    "${PROJECT_SOURCE_DIR}/src/drivers/gm206/reflection.cpp" -o "${OS1_GM206_DRIVER_ELF}"
   DEPENDS os1_log_build_identity "${OS1_GENERATED_DIR}/log_build_identity.hpp"
     "${PROJECT_SOURCE_DIR}/src/drivers/gm206/driver.cpp"
+    "${PROJECT_SOURCE_DIR}/src/drivers/gm206/display.cpp"
+    "${PROJECT_SOURCE_DIR}/src/drivers/gm206/reflection.cpp"
     "${PROJECT_SOURCE_DIR}/src/drivers/gm206/linker.ld"
     "${PROJECT_SOURCE_DIR}/src/common/driver/gm206.h"
+    "${PROJECT_SOURCE_DIR}/src/common/driver/display.h"
+    "${PROJECT_SOURCE_DIR}/src/common/freestanding/string.hpp"
+    "${PROJECT_SOURCE_DIR}/src/uapi/os1/display.h"
+    "${PROJECT_SOURCE_DIR}/src/uapi/os1/hardware.h"
+    "${PROJECT_SOURCE_DIR}/src/uapi/os1/resource.h"
+    "${PROJECT_SOURCE_DIR}/src/uapi/os1/vfs.h"
   VERBATIM)
 add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/gm206_driver_trust.hpp" "${OS1_GM206_DRIVER_METADATA}"
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
@@ -321,8 +332,18 @@ add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/gm206_driver_trust.hpp" "${OS1_G
   DEPENDS "${OS1_GM206_DRIVER_ELF}" "${OS1_GENERATED_DIR}/log_build_identity.hpp"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
   VERBATIM)
+add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/display_modules.hpp"
+  COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/display_module_table.py"
+    --header "${OS1_GENERATED_DIR}/display_modules.hpp"
+    "${OS1_DISPLAY_DRIVER_METADATA}" "${OS1_GM206_DRIVER_METADATA}"
+  DEPENDS "${OS1_DISPLAY_DRIVER_METADATA}" "${OS1_GM206_DRIVER_METADATA}"
+    "${PROJECT_SOURCE_DIR}/cmake/scripts/display_module_table.py"
+  VERBATIM)
 add_custom_target(os1_gm206_driver_package ALL
-  DEPENDS "${OS1_GENERATED_DIR}/gm206_driver_trust.hpp" "${OS1_GM206_DRIVER_METADATA}")
+  DEPENDS "${OS1_GENERATED_DIR}/gm206_driver_trust.hpp" "${OS1_GM206_DRIVER_METADATA}"
+    "${OS1_GENERATED_DIR}/display_modules.hpp")
+# The table rule reads the metadata of the framebuffer package. Its target owns that file.
+add_dependencies(os1_gm206_driver_package os1_display_driver_package)
 set(OS1_GM206_DRIVER_ELF "${OS1_GM206_DRIVER_ELF}" PARENT_SCOPE)
 set(OS1_GM206_DRIVER_METADATA "${OS1_GM206_DRIVER_METADATA}" PARENT_SCOPE)
 add_library(kernel_core_objects OBJECT ${KERNEL_CXX_SOURCES})

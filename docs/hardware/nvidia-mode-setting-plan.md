@@ -815,8 +815,11 @@ In that condition, run `os.display.gm206.diagnostics > /gm206.txt`. Then read th
 | `probe_status` | Meaning |
 | --- | --- |
 | `probe complete; native mode offered` | The mode is in the list. |
-| `probe complete; native mode not offered` | The display service refused the boot state or the firmware framebuffer format. |
-| `probe complete` | The kernel did not claim or map BAR 1, or BAR 1 is too small. |
+| `probe complete; native mode not offered` | The module refused the boot state or the firmware framebuffer format. |
+| `probe complete; no drawing driver` | No drawing module is in use. |
+| `probe complete; boot framebuffer not on the card` | The physical address of the boot framebuffer is not in a memory BAR of the card. |
+| `probe complete; BAR 1 not usable` | BAR 1 is too small, or the kernel refused the claim. |
+| `probe complete; BAR 1 mapping failed` | The kernel did not map the reserved video memory. |
 
 #### First desktop test
 
@@ -1073,7 +1076,7 @@ No CPU uses the two surfaces before this call. Thus the function sends no reques
 The function refuses a range that covers only a part of an existing 2 MiB page.
 The memory type range registers of the desktop are not recorded. Write combining in the page table has priority over an uncached range.
 The desktop test must show the effect. A fast background fill is the evidence.
-The loader uses it for the native surface and the console surface of the GTX 950.
+The GM206 module requests it for its native surface and its console surface through the host `map` service.
 The instance block, the command page, and the check word keep the default attributes.
 The module reads them back through PRAMIN, and a write-combining buffer can delay such a write.
 The framebuffer module sends an `sfence` instruction at the end of each drawing request.
@@ -1099,7 +1102,7 @@ A copy request cannot read back the pixels of the older `fill` member, because t
 
 #### Scaled modes
 
-The display service offers each smaller EDID mode of the GTX 950 monitor as a scaled mode.
+The GM206 module offers each smaller EDID mode of the GTX 950 monitor as a scaled mode.
 The head keeps the native timing and scales the surface to the output viewport.
 The console surface of the [firmware timing scanout](#firmware-timing-scanout) uses the same method.
 A scaled mode must have a width that is a multiple of 64, a minimum width of 640, and a minimum height of 480.
@@ -1266,4 +1269,63 @@ A third independent review examined the correction for the refused method. It fo
 It found that the correction lost the first error words and that no evidence supports a recovery after a refused method.
 The module now keeps the first error words. Only a refused UPDATE is recoverable.
 One finding stays open. A partly covered clock shows no new time until the window leaves it.
+
+### Display driver boundary
+
+This section records the move of all display device code out of the kernel.
+The result is a kernel that knows one display driver interface and no display device.
+The earlier sections of this document describe the same register sequences. They name the kernel for steps that the GM206 module does now.
+
+```text
+before: kernel service -> GM206 layout, state, mode list, log, PCI match, BAR ranges, reflection
+after:  kernel service -> display driver interface -> GM206 module (all of the above)
+```
+
+| Before | Now |
+| --- | --- |
+| The loader had the PCI identity of the GTX 950 and the BAR 0 ranges. | A generated package table has the PCI vendor and device. The module examines the subsystem and maps its ranges. |
+| The display service had the video memory layout, the scanout state, and the mode list. | The module has them. The service has modes and one surface for each session. |
+| The display service had the Bochs PCI match and its modes. | The firmware framebuffer module has them. |
+| The kernel wrote the scanout log lines and the method lines. | The module writes them through the host `log` service. The text is the same. |
+| The kernel built the `os.display.gm206` tree. | The module builds it. The kernel builds only the generic display nodes. |
+| A machine without the card showed `os.display.gm206` with the status "no matching PCI device". | A machine without the card has no such subtree. |
+| A refused package showed a `probe_status` value for the cause. | The subtree is absent. The kernel log has the cause. |
+| The kernel changed the console surface before the console scanout call. | The kernel changes it after the `restore` export returns. The console draws later, when the session releases the display. |
+| A machine without a boot framebuffer driver reported "Fixed firmware display". | It reports the driver `none` and the text "No display". |
+| The service did not offer the mode if QEMU Standard VGA was the runtime display. | The module offers modes only if the boot framebuffer is in a BAR of the card. |
+
+See the [display driver interface](driver-module-abi.md#display-driver-interface) for the driver table and the host services.
+The move changes no register sequence. The fifth desktop test is the last test on the card.
+The desktop has not run the moved code.
+
+| Area | Assessment |
+| --- | --- |
+| Project scope | The move makes the driver boundary clear. The kernel stays usable without a display device. |
+| Boot and platform | The loader loads a display package only for a present device. Two QEMU tests start a machine without a display device on BIOS and UEFI. |
+| Memory and isolation | Each display module now has a writable data segment. The GM206 module keeps the boot snapshot there, and the kernel allocation for it is gone. The image of a refused module stays mapped. A display module is trusted and the kernel does not limit its BAR mapping. |
+| Concurrency | The module state has no lock of its own. The session that owns the display makes the mode, restore, and pointer calls. A reflection query reads the snapshot and the status, which do not change after the probe. |
+| Interfaces | Display module ABI 4 replaces framebuffer module ABI 3 and GM206 module ABI 6. Display v1 and the reflection node names do not change. The load log line of the GM206 module and the cases of the table above change. |
+| Runtime resources | See the size table. The BIOS kernel now ends at `0x1b9000`, three pages before its limit. |
+| Validation and documents | Host tests cover the mode list, the probe results and the BAR claims of the module driver table, and the generic reflection of the kernel. No host test covers the mode change, the console restore, and the pointer through the driver table, or the kernel service with two modules. The next step is one desktop run of the [drawing acceptance procedure](#drawing-acceptance-procedure). |
+
+The sizes compare commit `2e33733` with the working tree, with the same toolchain and build settings.
+
+| Resource | Base bytes | Candidate bytes | Change |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 671,536 | 660,768 | -10,768 bytes (-1.60%) |
+| BIOS kernel ELF | 498,088 | 488,520 | -9,568 bytes (-1.92%) |
+| GM206 ELF | 21,568 | 33,376 | +11,808 bytes (+54.75%) |
+| Framebuffer module ELF | 9,576 | 10,400 | +824 bytes (+8.60%) |
+
+The GM206 module now holds the reflection code, the mode list, and the service glue that the kernel had.
+Boot time and session open time have no measurement for this move. The desktop run is the next measurement.
+
+The final `./scripts/check-local.sh` run passed 848 host, 106 normal-image, and three diagnostic-image checks.
+The profile times were 27.38 s, 479.18 s, and 11.31 s. See `build/display-boundary/full-local.log` for the full run.
+The normal-image profile has two new checks. They start a machine without a display device on BIOS and on UEFI.
+Two independent reviews examined the move. No review found a blocking defect.
+The first review found no automated check of the GM206 driver table. Two host tests now use it with model kernel services.
+It also found a wrong result of the framebuffer module after a failed mode change, and module claims without listed modes.
+The second review found one status for four causes of a missing mode. Each cause now has its own status.
+The corrections after the second review had no further review.
 

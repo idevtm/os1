@@ -4,7 +4,7 @@
 #include "core/kernel_state.hpp"
 #include "crypto/sha256.hpp"
 #include "debug/debug.hpp"
-#include "display_driver_trust.hpp"
+#include "display_modules.hpp"
 #include "driver/image.hpp"
 #include "driver_trust.hpp"
 #include "drivers/bus/driver_registry.hpp"
@@ -14,7 +14,6 @@
 #include "drivers/module/virtio_host.hpp"
 #include "drivers/timer/tsc_clock.hpp"
 #include "fs/initrd.hpp"
-#include "gm206_driver_trust.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/boot_mapping.hpp"
 #include "mm/kmem.hpp"
@@ -177,132 +176,52 @@ bool load_image(VirtualMemory& vm,
     kfree(bytes);
     return true;
 }
-void load_display()
+// Load each display driver package that this machine needs. The generated table names the
+// packages. A package with a PCI identity needs that display device. A package without one
+// drives the boot framebuffer.
+void load_display_modules()
 {
-    if(!native_display::compatible())
-        return;
-    VirtualMemory vm(page_frames, g_kernel_root_cr3);
-    driver::Image image;
-    uint64_t size = 0;
-    if(!load_image(vm,
-                   kDisplayDriverPath,
-                   sizeof(kDisplayDriverPath) - 1,
-                   kDisplayDriverDigest,
-                   OS1_DISPLAY_MODULE_BASE,
-                   image,
-                   size))
-        return;
-    auto* exports = reinterpret_cast<os1_display_entry>(image.entry)();
-    if(!driver::contains(image, reinterpret_cast<uint64_t>(exports), sizeof(*exports), 4) ||
-       exports->version != OS1_DISPLAY_MODULE_ABI || exports->bytes != sizeof(*exports) ||
-       !driver::contains(image, reinterpret_cast<uint64_t>(exports->probe), 1, 5) ||
-       !driver::contains(image, reinterpret_cast<uint64_t>(exports->fill), 1, 5) ||
-       !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_read), 1, 5) ||
-       !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_set), 1, 5) ||
-       !driver::contains(image, reinterpret_cast<uint64_t>(exports->draw), 1, 5) ||
-       !native_display::bind(*exports, vm))
+    for(const auto& package : kDisplayModules)
     {
-        debug("driver: firmware-framebuffer rejected")();
-        return;
-    }
-    debug("driver: loaded firmware-framebuffer from ")(kDisplayDriverPath)(" bytes=")(size)();
-}
-void load_gm206()
-{
-    for(uint16_t index = 0; index < platform_pci_device_count(); ++index)
-    {
-        const auto& pci = platform_pci_devices()[index];
-        if(pci.vendor_id != 0x10de || pci.device_id != 0x1402 || pci.class_code != 3 ||
-           pci.subclass != 0)
-            continue;
-        const auto subsystem = pci_config_read32(pci, 0x2c);
-        native_display::gm206_detected(pci, subsystem);
-        if(subsystem != 0x36c51458 || !(pci_read_command(pci) & 2))
+        bool needed = !package.vendor && native_display::compatible();
+        for(uint16_t i = 0; package.vendor && i < platform_pci_device_count(); ++i)
         {
-            native_display::gm206_status("unsupported subsystem or MMIO disabled");
-            continue;
+            const auto& pci = platform_pci_devices()[i];
+            needed = needed || (pci.vendor_id == package.vendor &&
+                                pci.device_id == package.device && pci.class_code == 3);
         }
-        const auto& bar = pci.bars[0];
-        if((bar.type != PciBarType::Mmio32 && bar.type != PciBarType::Mmio64) || !bar.base ||
-           bar.size < gm206::register_bytes)
-        {
-            native_display::gm206_status("invalid BAR 0");
+        if(!needed)
             continue;
-        }
-        native_display::gm206_status("trusted package unavailable or rejected");
         VirtualMemory vm(page_frames, g_kernel_root_cr3);
         driver::Image image;
         uint64_t size = 0;
-        if(!load_image(vm,
-                       kGm206DriverPath,
-                       sizeof(kGm206DriverPath) - 1,
-                       kGm206DriverDigest,
-                       OS1_GM206_MODULE_BASE,
-                       image,
-                       size))
-            return;
-        native_display::gm206_status("module exports rejected");
-        const auto* exports = reinterpret_cast<gm206::Entry>(image.entry)();
+        size_t path_bytes = 0;
+        while(package.path[path_bytes])
+            ++path_bytes;
+        if(!load_image(vm, package.path, path_bytes, package.digest, package.base, image, size))
+            continue;
+        const auto inside = [&](const void* function, bool optional) {
+            return (optional && !function) ||
+                   driver::contains(image, reinterpret_cast<uint64_t>(function), 1, 5);
+        };
+        auto* exports = reinterpret_cast<os1_display_entry>(image.entry)();
         if(!driver::contains(image, reinterpret_cast<uint64_t>(exports), sizeof(*exports), 4) ||
-           exports->version != OS1_GM206_ABI || exports->bytes != sizeof(*exports) ||
-           !driver::contains(image, reinterpret_cast<uint64_t>(exports->probe), 1, 5))
-            return;
-        native_display::gm206_status("BAR 0 claim or mapping failed");
-        const DeviceId owner{DeviceBus::Pci, index};
-        PciBarResource registers{};
-        if(!claim_pci_bar(owner, index, 0, registers))
-            return;
-        // The module uses only the listed register ranges.
-        bool mapped = true;
-        for(const auto& range : gm206::register_ranges)
-            mapped = mapped && map_mmio_range(vm, registers.base + range.offset, range.bytes);
-        if(mapped)
+           exports->version != OS1_DISPLAY_MODULE_ABI || exports->bytes != sizeof(*exports) ||
+           !inside(reinterpret_cast<const void*>(exports->probe), false) ||
+           !inside(reinterpret_cast<const void*>(exports->text), false) ||
+           !inside(reinterpret_cast<const void*>(exports->mode), false) ||
+           !inside(reinterpret_cast<const void*>(exports->set_mode), false) ||
+           !inside(reinterpret_cast<const void*>(exports->restore), false) ||
+           !inside(reinterpret_cast<const void*>(exports->fill), true) ||
+           !inside(reinterpret_cast<const void*>(exports->draw), true) ||
+           !inside(reinterpret_cast<const void*>(exports->cursor), true) ||
+           !inside(reinterpret_cast<const void*>(exports->reflect), true) ||
+           !native_display::add(*exports))
         {
-            const gm206::ProbeIo io{kernel_physical_pointer<void>(registers.base),
-                                    [](void* context, unsigned offset) -> uint32_t {
-                                        return static_cast<volatile uint32_t*>(context)[offset / 4];
-                                    },
-                                    [](void* context, unsigned offset, uint32_t value) {
-                                        static_cast<volatile uint32_t*>(context)[offset / 4] =
-                                            value;
-                                    },
-                                    tsc_clock_delay_us};
-            const bool ready = native_display::discover_gm206(*exports, io);
-            if(ready)
-            {
-                native_display::gm206_status("probe complete");
-                debug("driver: loaded gm206 discovery from ")(kGm206DriverPath)();
-                // The scanout path needs the reserved video memory through BAR 1.
-                const auto& memory = pci.bars[1];
-                PciBarResource aperture{};
-                if(driver::contains(image, reinterpret_cast<uint64_t>(exports->scanout), 1, 5) &&
-                   driver::contains(image, reinterpret_cast<uint64_t>(exports->cursor), 1, 5) &&
-                   (memory.type == PciBarType::Mmio32 || memory.type == PciBarType::Mmio64) &&
-                   memory.size >= native_display::gm206_aperture_bytes &&
-                   claim_pci_bar(owner, index, 1, aperture))
-                {
-                    // The display service keeps both BAR claims when it offers the mode.
-                    // The two surfaces use write combining. The instance block, the command
-                    // page, and the check word need writes that the device sees at once.
-                    if(map_framebuffer_range(vm,
-                                             aperture.base + native_display::gm206_native_offset,
-                                             native_display::gm206_instance_offset -
-                                                 native_display::gm206_native_offset) &&
-                       map_mmio_range(vm,
-                                      aperture.base + native_display::gm206_instance_offset,
-                                      native_display::gm206_aperture_bytes -
-                                          native_display::gm206_instance_offset) &&
-                       native_display::enable_gm206_scanout(
-                           *exports, io, kernel_physical_pointer<uint8_t>(aperture.base)))
-                        return;
-                    release_pci_bar(owner, index, 1);
-                }
-            }
-            else
-                debug("driver: gm206 probe rejected")();
+            debug("driver: ")(package.name)(" rejected")();
+            continue;
         }
-        release_pci_bar(owner, index, 0);
-        return;
+        debug("driver: loaded ")(package.name)(" from ")(package.path)(" bytes=")(size)();
     }
 }
 }  // namespace
@@ -311,8 +230,7 @@ void load_boot_drivers()
     if(attempted)
         return;
     attempted = true;
-    load_display();
-    load_gm206();
+    load_display_modules();
     bool match = false;
     for(size_t i = 0; i < platform_pci_device_count(); ++i)
         if(pci_driver_matches_device(pci_driver, platform_pci_devices()[i]))

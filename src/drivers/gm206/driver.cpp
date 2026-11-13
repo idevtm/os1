@@ -840,6 +840,43 @@ bool scanout(const ProbeIo& io,
     return ok;
 }
 
+unsigned offer_modes(const Snapshot& snapshot,
+                     const os1_framebuffer_surface& boot,
+                     os1_display_mode* modes,
+                     unsigned capacity)
+{
+    // The head keeps the firmware timing. The native mode has the size of its output viewport.
+    const uint32_t output = snapshot.boot.head[head_viewport_out];
+    const uint32_t width = output & 0x7fff, height = output >> 16 & 0x7fff;
+    // The console surface has the layout of the boot framebuffer. The module shows it as a
+    // 32-bit surface with a pitch that is a multiple of 256 bytes.
+    if(!capacity || !snapshot.boot.route_matched || boot.pixel_bytes != 4 || boot.red_shift != 16 ||
+       boot.pitch & 0xff || boot.pitch > 0x1fff00 || boot.pitch < boot.width * 4 || width > 4096 ||
+       height > 2160 || width <= boot.width || height <= boot.height || width * 4 & 0xff ||
+       uint64_t(boot.pitch) * boot.height > instance_offset - console_offset ||
+       uint64_t(width) * height * 4 > console_offset - native_offset)
+        return 0;
+    unsigned count = 0;
+    modes[count++] = {0, width, height, 32};
+    // Offer each smaller monitor mode as a scaled surface. The size of the boot framebuffer is
+    // the fixed mode of the display service.
+    for(const auto& sink : snapshot.outputs)
+        for(unsigned i = 0; i < sink.mode_count; ++i)
+        {
+            const auto& candidate = sink.modes[i];
+            bool usable = count < capacity && candidate.width >= 640 && candidate.height >= 480 &&
+                          candidate.width <= width && candidate.height <= height &&
+                          !(candidate.width * 4 & 0xff) &&
+                          (candidate.width != boot.width || candidate.height != boot.height);
+            for(unsigned known = 0; known < count; ++known)
+                usable = usable && (modes[known].width != candidate.width ||
+                                    modes[known].height != candidate.height);
+            if(usable)
+                modes[count++] = {0, candidate.width, candidate.height, 32};
+        }
+    return count;
+}
+
 namespace
 {
 // Arrow pointer. 'X' is the outline and '.' is the body. The tip is the top-left pixel.
@@ -958,10 +995,3 @@ bool cursor(const ProbeIo& io,
     return ok;
 }
 }  // namespace gm206
-
-extern "C" const gm206::Exports* os1_driver_init()
-{
-    static constexpr gm206::Exports exports{
-        OS1_GM206_ABI, sizeof(gm206::Exports), gm206::probe, gm206::scanout, gm206::cursor};
-    return &exports;
-}
