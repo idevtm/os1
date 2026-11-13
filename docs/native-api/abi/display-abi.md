@@ -5,7 +5,8 @@ A DisplaySession grants exclusive control of pixel output until its last referen
 
 ```text
 root grant -> Display -> open(mode_id) -> DisplaySession -> fill(rectangle, rgb)
-last session reference closes -> restore boot mode -> redraw active text terminal
+diagnostic session closes -> restore boot mode -> redraw text
+native session closes -> release exclusive ownership -> retain native scanout
 ```
 
 | Interface | Member | Input | Output |
@@ -14,7 +15,9 @@ last session reference closes -> restore boot mode -> redraw active text termina
 | Display v1 | `list_modes` | Empty | `os1_display_modes` with up to three entries |
 | Display v1 | `mode_at` | Zero-based 32-bit index | One mode or empty result at end |
 | Display v1 | `open` | 32-bit mode ID | One owned DisplaySession descriptor |
+| Display v1 | `open_native` | 32-bit runtime mode ID | One owned DisplaySession descriptor |
 | DisplaySession v1 | `fill` | `os1_display_fill` | Empty |
+| DisplaySession v1 | `commit` | Empty | Empty |
 
 The [UAPI header](../../../src/uapi/os1/display.h) defines the copied records.
 The kernel grants `OS1_RIGHT_DISPLAY` on the initial root descriptor.
@@ -44,7 +47,7 @@ A successful call completes the writes. It does not synchronize to display refre
 
 The console continues to update its text cells and serial output during graphics.
 The console output lock also serializes pixel writes, keyboard echo, and terminal switches.
-When the session ends, the kernel redraws the active terminal and clears pixels outside its grid.
+When an `open` session ends, the kernel redraws the active terminal and clears pixels outside its grid.
 The full text redraw holds the console output lock with local interrupts disabled.
 
 Run `inspect os.display` to read availability and capabilities.
@@ -52,7 +55,7 @@ This operation reads the published display binding. A failed restoration withdra
 The service reports the boot geometry and the number of modes. It reports `bochs-display` when runtime switching is available.
 BIOS VGA text exposes no graphics mode.
 
-Run `gfxdemo` from the disk shell.
+Run `gsh "--menu"` from the disk shell for the display diagnostic.
 Use Up and Down to highlight a mode. Press Enter to apply the highlighted mode.
 The boot mode is highlighted first.
 Move the mouse to move the pointer.
@@ -79,3 +82,14 @@ The older `list_modes` reply retains its fixed layout.
 The `bits_per_pixel` field describes framebuffer storage.
 The firmware renderer supports packed 24-bit and 32-bit RGB or BGR storage.
 A 32-bit RGB pixel uses 24 color bits. The remaining bits do not increase link color depth.
+
+
+### Native acquisition
+
+Display v1 method `open_native` (member 5) rejects the boot framebuffer mode.
+The caller uses `commit` (session member 2) after it draws its initial frame.
+Before the first commit in a boot, closing the last reference restores the boot mode.
+After commit, closing the last reference releases ownership and preserves the native scanout.
+The framebuffer text console stays suspended. Serial output remains available.
+Only another native acquisition can claim the display until reboot.
+A failed initial takeover uses the existing mode-switch recovery path.

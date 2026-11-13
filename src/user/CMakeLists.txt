@@ -82,7 +82,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
 endfunction()
 
 os1_add_user_cxx_program(sh "${CMAKE_CURRENT_SOURCE_DIR}/programs/sh.cpp" OS1_USER_SH_ELF)
-os1_add_user_cxx_program(gfxdemo "${CMAKE_CURRENT_SOURCE_DIR}/programs/gfxdemo.cpp" OS1_USER_GFXDEMO_ELF)
+os1_add_user_cxx_program(gsh "${CMAKE_CURRENT_SOURCE_DIR}/programs/gsh.cpp" OS1_USER_GSH_ELF "-I${PROJECT_SOURCE_DIR}/third_party/font8x8")
 os1_add_user_cxx_program(run-tests "${CMAKE_CURRENT_SOURCE_DIR}/programs/run_tests.cpp" OS1_USER_RUN_TESTS_ELF)
 os1_add_user_cxx_program(init "${CMAKE_CURRENT_SOURCE_DIR}/programs/init.cpp" OS1_USER_INIT_ELF)
 os1_add_user_cxx_program(rescue "${CMAKE_CURRENT_SOURCE_DIR}/programs/rescue.cpp" OS1_USER_RESCUE_ELF)

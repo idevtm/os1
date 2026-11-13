@@ -21,6 +21,8 @@ struct Reflection
     uint64_t generation;
     const gm206::Snapshot* gm206;
     const Gm206Identity* identity = nullptr;
+    uint64_t framebuffer_address = 0;
+    uint32_t framebuffer_pitch = 0, framebuffer_format = 0;
 };
 long query_reflection(Os1HardwareQuery&, const Reflection&);
 }  // namespace native_display

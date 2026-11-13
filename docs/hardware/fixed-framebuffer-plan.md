@@ -29,7 +29,7 @@ The demo draws a software pointer with the Native API input service.
 The [Display ABI](../native-api/abi/display-abi.md) defines the session and the demo procedure.
 The [module profile](driver-module-abi.md#firmware-framebuffer-module) defines the package and its trust check.
 Use the USB menu action **Update boot and programs** for a managed stick.
-Boot through UEFI to test graphics. Run `inspect os.display`, then run `gfxdemo`.
+Boot through UEFI to test graphics. Run `inspect os.display`, then run `gsh "--menu"`.
 
 | Check | Evidence |
 | --- | --- |
@@ -165,14 +165,14 @@ Defer NVIDIA mode setting to a separate hardware milestone.
 | Resources | Measure image size, event age, draw duration, and restoration. Keep the diagnostics out of the polling and IRQ paths. |
 | Validation | Cover BIOS, UEFI, two output resolutions, fallback, corrupt packages, and native input readiness. |
 
-Run `gfxdemo` on the same laptop with the same mouse to investigate the reported pauses.
+Run `gsh "--menu"` on the same laptop with the same mouse to investigate the reported pauses.
 Move continuously for at least 20 seconds. Press `q` to stop.
 Record the pointer diagnostics and compare the input gaps with the event age and draw duration.
 Physical testing of the new event path remains pending.
 
 For QEMU with an existing data disk, run `./os1.sh storage_deploy` before `./os1.sh run`.
 Run `inspect os.display` to confirm the backend.
-Select an alternate resolution from the `gfxdemo` menu.
+Select an alternate resolution from the diagnostic mode menu.
 The Standard VGA test verifies the new screenshot dimensions and the return to the boot dimensions.
 
 

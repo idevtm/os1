@@ -254,6 +254,7 @@ void load_gm206()
         // Only these register pages are used by the probe.
         if(map_mmio_range(vm, registers.base, 4096) &&
            map_mmio_range(vm, registers.base + 0xd000, 4096) &&
+           map_mmio_range(vm, registers.base + 0x610000, 4096) &&
            map_mmio_range(vm, registers.base + 0x612000, 4096) &&
            map_mmio_range(vm, registers.base + 0x640000, 0x1000))
         {
@@ -267,9 +268,11 @@ void load_gm206()
                                     },
                                     tsc_clock_delay_us};
             const bool ready = native_display::discover_gm206(*exports, io);
-            native_display::gm206_status(ready ? "probe complete" : "chip identity rejected");
             if(ready)
+            {
+                native_display::gm206_status("probe complete");
                 debug("driver: loaded gm206 discovery from ")(kGm206DriverPath)();
+            }
             else
                 debug("driver: gm206 probe rejected")();
         }

@@ -1,5 +1,7 @@
+#include <font8x8_basic.h>
 #include <os1/display.h>
 
+#include <os1/clock.hpp>
 #include <os1/console.hpp>
 #include <os1/file_tools.hpp>
 #include <os1/input.hpp>
@@ -156,7 +158,7 @@ struct PointerStats
 
     void report() const
     {
-        print(1, "gfxdemo: pointer diagnostics");
+        print(1, "gsh: pointer diagnostics");
         const char* labels[] = {" events=",
                                 " lost_records=",
                                 " gaps_ge_50ms=",
@@ -196,22 +198,131 @@ struct PointerStats
     }
 };
 
+constexpr unsigned desktop_header = 32;
+constexpr unsigned header_color = 0x223d57;
+constexpr uint64_t second_ns = 1'000'000'000;
+
+long draw_text(int client, unsigned x, unsigned y, const char* text)
+{
+    for(; *text; ++text, x += 8)
+    {
+        const auto& glyph = font8x8_basic[static_cast<unsigned char>(*text)];
+        for(unsigned row = 0; row < 8; ++row)
+            for(unsigned first = 0; first < 8;)
+            {
+                if(!(glyph[row] & (1u << first)))
+                {
+                    ++first;
+                    continue;
+                }
+                unsigned end = first + 1;
+                while(end < 8 && (glyph[row] & (1u << end)))
+                    ++end;
+                const long status = fill(client, x + first, y + row, end - first, 1, 0xd9e4f0);
+                if(status < 0)
+                    return status;
+                first = end;
+            }
+    }
+    return 0;
+}
+
+long draw_clock(int client, unsigned width)
+{
+    char time[24]{};
+    uint64_t now;
+    if(u::clock::now(now) == 0)
+        u::clock::format(time, now, false);
+    else
+        __builtin_memcpy(time, "Clock unavailable", sizeof("Clock unavailable"));
+    const unsigned x = width - 200;
+    const long status = fill(client, x, 12, 192, 8, header_color);
+    return status < 0 ? status : draw_text(client, x, 12, time);
+}
+
+bool read_literal(const char*& cursor, const char* literal)
+{
+    for(; *literal; ++literal, ++cursor)
+        if(*cursor != *literal)
+            return false;
+    return true;
+}
+
+bool read_dimension(const char*& cursor, unsigned& dimension)
+{
+    if(*cursor < '1' || *cursor > '9')
+        return false;
+    unsigned value = 0;
+    while(*cursor >= '0' && *cursor <= '9')
+    {
+        value = value * 10 + unsigned(*cursor++ - '0');
+        if(value > OS1_DISPLAY_FILL_LIMIT)
+            return false;
+    }
+    dimension = value;
+    return true;
+}
+
+os1_display_mode preferred_mode(const os1_display_mode* modes, unsigned count)
+{
+    const auto fallback = modes[0];
+    f::Handle config(u::open("/etc/gsh.conf", OS1_RIGHT_READ));
+    if(config.fd < 0)
+        return fallback;
+    char text[64]{};
+    size_t used = 0;
+    while(used < sizeof(text) - 1)
+    {
+        const long n = u::read(config.fd, text + used, sizeof(text) - 1 - used);
+        if(n < 0)
+            return fallback;
+        if(!n)
+            break;
+        used += n;
+    }
+    if(used == sizeof(text) - 1 || f::length(text) != used)
+        return fallback;
+    const char* cursor = text;
+    unsigned width, height;
+    if(read_literal(cursor, "version=1\nwidth=") && read_dimension(cursor, width) &&
+       read_literal(cursor, "\nheight=") && read_dimension(cursor, height) &&
+       read_literal(cursor, "\n") && !*cursor)
+        for(unsigned i = 0; i < count; ++i)
+            if(modes[i].width == width && modes[i].height == height)
+                return modes[i];
+    return fallback;
+}
+
+struct PointerInput
+{
+    f::Handle subscription, reader;
+    os1_input_state state{};
+
+    long prepare(int pointer)
+    {
+        os1_ipc_result result{};
+        subscription.reset(u::input::call(
+            pointer, OS1_POINTER_INTERFACE_ID, OS1_INPUT_SUBSCRIBE, nullptr, 0, result, true));
+        if(subscription.fd < 0)
+            return subscription.fd;
+        reader.reset(u::input::bind(subscription.fd, OS1_INPUT_SUBSCRIPTION_INTERFACE_ID));
+        if(reader.fd < 0)
+            return reader.fd;
+        return pointer_state(pointer, state) ? 0 : OS1_ERR_CLOSED;
+    }
+};
+
 long interactive(int client,
                  const os1_display_mode& mode,
                  int keys,
                  int key_client,
                  int pointer,
+                 const PointerInput& input,
                  PointerStats& stats,
-                 bool trace)
+                 bool trace,
+                 bool desktop)
 {
     os1_ipc_result r{};
-    f::Handle subscription(u::input::call(
-        pointer, OS1_POINTER_INTERFACE_ID, OS1_INPUT_SUBSCRIBE, nullptr, 0, r, true));
-    if(subscription.fd < 0)
-        return subscription.fd;
-    f::Handle reader(u::input::bind(subscription.fd, OS1_INPUT_SUBSCRIPTION_INTERFACE_ID));
-    if(reader.fd < 0)
-        return reader.fd;
     const unsigned rows = OS1_DISPLAY_FILL_LIMIT / mode.width;
     for(unsigned y = 0; y < mode.height; y += rows)
     {
@@ -220,14 +331,41 @@ long interactive(int client,
         if(status < 0)
             return status;
     }
-    os1_input_state previous{};
-    if(!pointer_state(pointer, previous))
+    if(desktop)
+    {
+        long status = 0;
+        for(unsigned y = 0; status >= 0 && y < desktop_header;)
+        {
+            const unsigned height = desktop_header - y < rows ? desktop_header - y : rows;
+            status = fill(client, 0, y, mode.width, height, header_color);
+            y += height;
+        }
+        if(status < 0)
+            return status;
+        status = draw_text(client, 12, 12, "os1  |  R Reboot  S Shut down");
+        if(status < 0)
+            return status;
+    }
+    const unsigned top = desktop ? desktop_header : 0;
+    auto previous = input.state;
+    if(!pointer_state(pointer, previous) && !desktop)
         return OS1_ERR_CLOSED;
     stats.input_id = previous.device;
-    unsigned x = (mode.width - cursor_size) / 2, y = (mode.height - cursor_size) / 2;
-    long status = draw_cursor(client, x, y, previous.buttons ? 0xffcb54 : 0xffffff);
+    unsigned x = (mode.width - cursor_size) / 2, y = (mode.height - top - cursor_size) / 2;
+    long status = draw_cursor(client, x, top + y, previous.buttons ? 0xffcb54 : 0xffffff);
     if(status < 0)
         return status;
+    if(desktop)
+    {
+        status = draw_clock(client, mode.width);
+        if(status < 0)
+            return status;
+        status = u::input::call(
+            client, OS1_DISPLAY_SESSION_INTERFACE_ID, OS1_DISPLAY_COMMIT, nullptr, 0, r);
+        if(status < 0)
+            return status;
+        print(1, "gsh: native display acquired\n");
+    }
     if(trace)
     {
         const long ticket = u::system_control(OS1_SYSTEM_EHCI_TRACE_START, previous.device);
@@ -238,10 +376,24 @@ long interactive(int client,
     os1_measurement start{};
     if(!u::ipc_measure(start) && start.source == OS1_MEASUREMENT_HPET)
         stats.start_ns = start.nanoseconds;
-    const int waits[] = {keys, subscription.fd};
+    const int waits[] = {keys, input.subscription.fd};
+    unsigned wait_count = 2;
+    uint64_t next_clock = 0;
     for(;;)
     {
-        long ready = u::ipc_wait_many(waits, 2);
+        const long now = desktop ? u::ipc_clock() : -1;
+        if(desktop && (!next_clock || (now >= 0 && uint64_t(now) >= next_clock)))
+        {
+            status = draw_clock(client, mode.width);
+            if(status < 0)
+                return status;
+            next_clock = now < 0 || uint64_t(now) > INT64_MAX - second_ns
+                             ? UINT64_MAX
+                             : uint64_t(now) + second_ns;
+        }
+        long ready = u::ipc_wait_many(waits, wait_count, desktop ? next_clock : UINT64_MAX);
+        if(ready == OS1_ERR_TIMED_OUT)
+            continue;
         if(ready < 0)
             return ready;
         if(!ready)
@@ -250,7 +402,21 @@ long interactive(int client,
             status = u::console_read_key(keys, key_client, key);
             if(status < 0)
                 return status;
-            if(key == 27 || key == 'q' || key == 'Q' || key == 3)
+            if(desktop)
+            {
+                if(key == 'r' || key == 'R' || key == 's' || key == 'S')
+                {
+                    const bool reboot = key == 'r' || key == 'R';
+                    status = u::system_control(reboot ? OS1_SYSTEM_REBOOT : OS1_SYSTEM_SHUTDOWN);
+                    if(status < 0)
+                    {
+                        status = draw_text(client, 12, 24, "System command failed");
+                        if(status < 0)
+                            return status;
+                    }
+                }
+            }
+            else if(key == 27 || key == 'q' || key == 'Q' || key == 3)
                 return 0;
             continue;
         }
@@ -258,24 +424,43 @@ long interactive(int client,
         unsigned nx = x, ny = y;
         for(unsigned i = 0; i < 32; ++i)
         {
-            status = u::input::call(
-                reader.fd, OS1_INPUT_SUBSCRIPTION_INTERFACE_ID, OS1_INPUT_TRY_READ, nullptr, 0, r);
+            status = u::input::call(input.reader.fd,
+                                    OS1_INPUT_SUBSCRIPTION_INTERFACE_ID,
+                                    OS1_INPUT_TRY_READ,
+                                    nullptr,
+                                    0,
+                                    r);
             if(status == OS1_ERR_WOULD_BLOCK)
                 break;
+            if(desktop && status == OS1_ERR_CLOSED)
+            {
+                wait_count = 1;
+                break;
+            }
             if(status < 0 || r.payload_bytes != sizeof(os1_input_event))
                 return status < 0 ? status : OS1_ERR_INVALID;
             os1_input_event event{};
             __builtin_memcpy(&event, r.payload, sizeof(event));
             if(event.flags & OS1_INPUT_REMOVED)
-                return OS1_ERR_CLOSED;
+            {
+                if(!desktop)
+                    return OS1_ERR_CLOSED;
+                wait_count = 1;
+                break;
+            }
             if(event.flags & OS1_INPUT_LOST)
             {
                 stats.losses += event.lost;
                 auto snapshot = next;
                 if(!pointer_state(pointer, snapshot))
-                    return OS1_ERR_CLOSED;
+                {
+                    if(!desktop)
+                        return OS1_ERR_CLOSED;
+                    wait_count = 1;
+                    break;
+                }
                 nx = move(nx, int64_t(snapshot.x - next.x), mode.width - cursor_size);
-                ny = move(ny, int64_t(snapshot.y - next.y), mode.height - cursor_size);
+                ny = move(ny, int64_t(snapshot.y - next.y), mode.height - top - cursor_size);
                 next = snapshot;
                 continue;
             }
@@ -283,7 +468,7 @@ long interactive(int client,
                 continue;
             stats.event(event);
             nx = move(nx, event.dx, mode.width - cursor_size);
-            ny = move(ny, event.dy, mode.height - cursor_size);
+            ny = move(ny, event.dy, mode.height - top - cursor_size);
             next.sequence = event.sequence;
             next.x += uint64_t(int64_t(event.dx));
             next.y += uint64_t(int64_t(event.dy));
@@ -295,12 +480,12 @@ long interactive(int client,
             continue;
         os1_measurement before{}, after{};
         const bool measured = !u::ipc_measure(before) && before.source == OS1_MEASUREMENT_HPET;
-        status = fill(client, x, y, cursor_size, cursor_size, background);
+        status = fill(client, x, top + y, cursor_size, cursor_size, background);
         if(status < 0)
             return status;
         x = nx;
         y = ny;
-        status = draw_cursor(client, x, y, next.buttons ? 0xffcb54 : 0xffffff);
+        status = draw_cursor(client, x, top + y, next.buttons ? 0xffcb54 : 0xffffff);
         if(status < 0)
             return status;
         if(measured && !u::ipc_measure(after) && after.source == before.source &&
@@ -346,7 +531,7 @@ long check_session(int display, const os1_display_mode& mode)
         if(measured && opened.nanoseconds >= start.nanoseconds &&
            drawn.nanoseconds >= filling.nanoseconds && released.nanoseconds >= drawn.nanoseconds)
         {
-            print(1, "gfxdemo: ns acquire=");
+            print(1, "gsh: ns acquire=");
             f::number(1, opened.nanoseconds - start.nanoseconds);
             print(1, " fill=");
             f::number(1, drawn.nanoseconds - filling.nanoseconds);
@@ -354,6 +539,18 @@ long check_session(int display, const os1_display_mode& mode)
             f::number(1, released.nanoseconds - drawn.nanoseconds);
             print(1, "\n");
         }
+    }
+    if(mode.id != OS1_DISPLAY_FIXED_MODE)
+    {
+        // An uncommitted native session must leave the diagnostic path usable.
+        f::Handle session(
+            display_call(display, OS1_DISPLAY_OPEN_NATIVE, &mode.id, sizeof(mode.id), r, true));
+        if(session.fd < 0)
+            return session.fd;
+        session.reset();
+        session.reset(display_call(display, OS1_DISPLAY_OPEN, &mode.id, sizeof(mode.id), r, true));
+        if(session.fd < 0)
+            return session.fd;
     }
     return 0;
 }
@@ -420,6 +617,8 @@ long run(bool check, int menu)
                 return OS1_ERR_INVALID;
         return 0;
     }
+    if(!menu && count < 2)
+        return OS1_ERR_UNSUPPORTED;
     f::Handle pointer(find_pointer());
     if(pointer.fd < 0)
         return pointer.fd;
@@ -433,6 +632,24 @@ long run(bool check, int menu)
     f::Handle key_client(u::console_input_bind(keys.fd));
     if(key_client.fd < 0)
         return key_client.fd;
+    if(!menu)
+    {
+        PointerInput input;
+        status = input.prepare(pointer_client.fd);
+        if(status < 0)
+            return status;
+        const auto mode = preferred_mode(modes + 1, count - 1);
+        f::Handle session(
+            display_call(display.fd, OS1_DISPLAY_OPEN_NATIVE, &mode.id, sizeof(mode.id), r, true));
+        if(session.fd < 0)
+            return session.fd;
+        f::Handle client(bind_display(session.fd, OS1_DISPLAY_SESSION_INTERFACE_ID));
+        if(client.fd < 0)
+            return client.fd;
+        PointerStats stats{};
+        return interactive(
+            client.fd, mode, keys.fd, key_client.fd, pointer_client.fd, input, stats, false, true);
+    }
     auto print_mode = [&](unsigned index) {
         const auto& mode = modes[index];
         f::number(menu, index + 1);
@@ -494,6 +711,10 @@ long run(bool check, int menu)
         highlight();
     }
     const auto& mode = modes[selected];
+    PointerInput input;
+    status = input.prepare(pointer_client.fd);
+    if(status < 0)
+        return status;
     f::Handle session(
         display_call(display.fd, OS1_DISPLAY_OPEN, &mode.id, sizeof(mode.id), r, true));
     if(session.fd < 0)
@@ -502,8 +723,8 @@ long run(bool check, int menu)
     if(client.fd < 0)
         return client.fd;
     PointerStats stats{};
-    status =
-        interactive(client.fd, mode, keys.fd, key_client.fd, pointer_client.fd, stats, menu == 2);
+    status = interactive(
+        client.fd, mode, keys.fd, key_client.fd, pointer_client.fd, input, stats, menu == 2, false);
     os1_measurement end{};
     if(!u::ipc_measure(end) && end.source == OS1_MEASUREMENT_HPET)
         stats.end_ns = end.nanoseconds;
@@ -524,21 +745,22 @@ int main(int argc, char** argv)
 {
     const bool check = argc == 2 && equal(argv[1], "--check");
     const bool report = argc == 2 && equal(argv[1], "--stall-report");
-    if(argc != 1 && !check && !report)
+    const bool menu = argc == 2 && equal(argv[1], "--menu");
+    if(argc != 1 && !check && !report && !menu)
     {
-        print(2, "usage: gfxdemo [--check | --stall-report]\n");
+        print(2, "usage: gsh [--check | --menu | --stall-report]\n");
         return 1;
     }
-    long status = run(check, report ? 2 : 1);
+    long status = run(check, report ? 2 : (menu ? 1 : 0));
     if(status < 0)
     {
-        print(2, "gfxdemo: ");
+        print(2, "gsh: ");
         print(2,
               status == OS1_ERR_UNSUPPORTED ? "no compatible graphics driver\n"
                                             : "display or input operation failed\n");
         return 1;
     }
     if(check)
-        print(1, "gfxdemo: session checks passed\n");
+        print(1, "gsh: session checks passed\n");
     return 0;
 }

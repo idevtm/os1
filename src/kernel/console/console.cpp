@@ -131,28 +131,32 @@ void console_mirror_debug_byte(char c)
 namespace
 {
 NativeObject* graphics_owner;
-}
+bool native_display_active;
+}  // namespace
 
-long console_display_acquire(NativeObject* owner)
+long console_display_acquire(NativeObject* owner, bool native)
 {
     IrqSpinGuard guard(g_console_output_lock);
     if(graphics_owner)
         return OS1_ERR_WOULD_BLOCK;
     auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
-    if(!display.available)
+    if(!display.available || (native_display_active && !native))
         return OS1_ERR_UNSUPPORTED;
     graphics_owner = owner;
     display.graphics_owned = true;
-    return 0;
+    return native_display_active ? 1 : 0;
 }
 
-void console_display_release(NativeObject* owner, bool restored)
+void console_display_release(NativeObject* owner, bool restored, bool native)
 {
     IrqSpinGuard guard(g_console_output_lock);
     if(graphics_owner != owner)
         return;
     graphics_owner = nullptr;
     auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
+    native_display_active |= native;
+    if(native_display_active)
+        return;
     display.graphics_owned = false;
     if(!restored)
     {

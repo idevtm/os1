@@ -19,6 +19,9 @@ native session close -> restore boot scanout -> redraw console
 - [Impact and validation](#impact-and-validation)
 - [GM206 discovery implementation](#gm206-discovery-implementation)
 
+The [graphics shell plan](gsh-plan.md) replaces boot scanout restoration as a requirement for native graphics.
+Older entries retain the original diagnostic and restoration procedures as historical evidence.
+
 ## Reference machines
 
 | Machine | GPU | Connected and enabled output | Preferred EDID timing |
@@ -191,7 +194,7 @@ AUX transactions change command state and the EDID address pointer. The probe do
 Use `inspect os.display.gm206` and Tab to explore the snapshot.
 Use `inspect os.display.gm206.outputs.output_0.modes` to list the first sink's timing records.
 Use `inspect os.display.gm206.scanouts` to find active scanout records.
-Compare the preferred timing to the captured EDID. Verify the firmware console and `gfxdemo` remain available.
+Compare the preferred timing to the captured EDID. Verify that the firmware console and `gsh "--menu"` remain available.
 The [reflection ABI](../native-api/abi/hardware-reflection-abi.md#gm206-display-discovery) defines the fields.
 
 Register semantics follow the upstream Nouveau
@@ -383,3 +386,87 @@ The profile times were 29.99 s, 415.94 s, and 9.74 s.
 See `build/gm206-modes/full-local.log` for the complete run.
 The UEFI smoke verifies Up and Down selection, actual Bochs resolutions, and boot console restoration.
 Independent review verified the corrected tests and the indexed ABI behavior.
+
+### GTX 950 VBIOS route evidence
+
+The captured ROM (`reference-captures/desktop/linux/os1-gtx950-capture/gtx950.rom`) identifies the DisplayPort route selector for AUX channel 1.
+The live route register still needs an OS1 capture.
+
+```text
+DCB output 2 -> connector 1
+DCB output 2 -> CCB entry 7 -> AUX channel 1
+DCB OR mask 0x2 + sublink mask 0x2 -> BAR 0 offset 0x612488 -> live SOR and link
+```
+
+| Record | Value |
+| --- | --- |
+| PCI ROM | 58,368 bytes, checksum zero, PCIR device `10de:1402` |
+| ROM SHA-256 | `0ed9d9642e0518bc783e9e728f25649d9b49b50c0f82cb85d525d4f1a863f38f` |
+| DCB table | Version `0x41` at `0x4ffd`, signature `0x4edcbdcb` |
+| DisplayPort output | Entry 2 at `0x5028`, connection word `0x02811f76`, configuration word `0x04400020` |
+| CCB entry 7 | Word `0x10000027`, AUX channel 1 |
+| Connector entry 1 | Table at `0x51af`, type `0x46`, record bytes `46 02 02 00` |
+
+The DCB and CCB fields follow the Nouveau parsers. The GM200 route logic supplies the register offset.
+See [DCB parsing](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/subdev/bios/dcb.c), [CCB parsing](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/subdev/bios/i2c.c), [connector parsing](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/subdev/bios/conn.c), and [GM200 routing](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/engine/disp/gm200.c).
+
+The reported SOR 1 and link 2 predict a low-five-bit route value of `0x12`.
+Compare that prediction with the live register before binding the route to head 0.
+Also capture the negotiated link, active timing registers, firmware surface layout, and display channel state under OS1.
+The current diagnostics do not expose those values. The next diagnostic image must capture them before mode changes.
+
+This evidence update changes the plan only. Boot, memory, concurrency, interfaces, and runtime resource use stay as in the discovery build.
+
+### Boot state capture
+
+Collect the live GM206 route and restoration inputs during the existing boot probe.
+The firmware framebuffer continues to drive the display.
+
+| Area | Impact |
+| --- | --- |
+| Scope | Compare the reference board's ROM route with the live GPU route. |
+| Boot and platform | Read bounded GM206 register pages and DisplayPort link status after the existing PCI match. |
+| Memory and isolation | Use fixed-size records and the existing BAR claim. Read firmware surface metadata from the immutable boot handoff. |
+| Concurrency | Capture before user processes start. Reflection reads the cached records. |
+| Interfaces | Extend hardware reflection and the internal module ABI. Preserve Display v1. |
+| Resources and validation | Compare image and snapshot sizes. Check the route decode and report with host tests and the full local suite. |
+
+The diagnostic report now includes the route register and its match to an active head.
+It records DPCD configuration and status bytes over the existing AUX read path.
+It also records display core channel registers and the boot framebuffer handoff.
+The capture reads a fixed set of head registers after a route match.
+These observations are inputs to a restore design. They do not establish that restoration works.
+
+Boot the updated USB image on the desktop with the monitor on the same port.
+Save the report before you run `gsh "--menu"`.
+
+```text
+os.display.gm206.diagnostics > /gm206.txt
+```
+
+The display register names follow [NVIDIA class 907D](https://github.com/NVIDIA/open-gpu-doc/blob/master/classes/display/cl907d.h).
+The link bytes follow the [Linux DPCD definitions](https://github.com/torvalds/linux/blob/master/include/drm/display/drm_dp.h).
+
+The build comparison uses `45c130d` and the final capture diff.
+The source and test diff SHA-256 is `88b060a0dbae13300a230b80495510fd8f6168184063f69affeec4636c29ea5f`.
+The normal image ID is `a6d6aa83bb35472321c72bd7478546cca60fd3a2931260461b95989818d78e6f`.
+The builds use the same Debug toolchain and settings as the earlier desktop diagnostics comparison.
+
+| Resource | Baseline bytes | Candidate bytes | Change |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 662,664 | 664,488 | +1,824 bytes (+0.28%) |
+| UEFI ISO | 4,405,248 | 4,407,296 | +2,048 bytes (+0.05%) |
+| BIOS image | 1,474,560 | 1,474,560 | 0 bytes (0%) |
+| Initrd | 9,728 | 9,728 | 0 bytes (0%) |
+| GM206 ELF | 9,720 | 10,768 | +1,048 bytes (+10.78%) |
+
+The first build exceeded the BIOS memory window by one page.
+The final build allocates the snapshot only for a matching board.
+See `build/gm206-boot-state/bios-window-failure.log` for the original failure.
+Physical probe latency remains unmeasured. The desktop retest must confirm the route and link reads.
+
+The final `./scripts/check-local.sh` run passed 811 host, 104 normal-image, and three diagnostic-image checks.
+The profile times were 30.19 s, 406.56 s, and 9.73 s.
+See `build/gm206-boot-state/full-local.log` for the full run and `field-count-failure.log` for the corrected test expectation.
+Independent review verified the route decode, register bounds, AUX read gating, snapshot lifetime, and pagination corrections.
+The QEMU guests exercise the firmware path. Desktop hardware must verify the new register values.

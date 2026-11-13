@@ -27,8 +27,8 @@ struct os1_framebuffer_surface;
 struct os1_display_driver;
 struct os1_display_fill;
 struct NativeObject;
-long console_display_acquire(NativeObject*);
-void console_display_release(NativeObject*, bool restored);
+long console_display_acquire(NativeObject*, bool native);
+void console_display_release(NativeObject*, bool restored, bool native);
 long console_display_fill(NativeObject*,
                           const os1_display_driver&,
                           const os1_framebuffer_surface&,

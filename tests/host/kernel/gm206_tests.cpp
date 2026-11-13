@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <string_view>
+
 #include "driver/gm206.h"
 #include "drivers/display/reflection.hpp"
 
@@ -21,16 +23,26 @@ struct AuxFixture
     unsigned chunk_limit = 16;
     bool timeout = false, defer_offset = false;
     unsigned offset_updates = 0;
-    uint32_t identity = 0x12600000;
+    uint32_t identity = 0x12600000, route = 0x12;
 
     uint32_t read(unsigned reg) const
     {
+        if(reg == 0x610490)
+            return 0x01000013;
+        if(reg == 0x64046c)
+            return 0x10203040;
+        if(reg == gm206::board_route)
+            return route;
+        if(reg >= 0xd980 && reg <= 0xd9cc)
+            reg -= 0x50;
+        else if(reg >= 0xd930 && reg <= 0xd97c)
+            return 0;
         if(reg == 0)
             return identity;
         if(reg == 0x612004)
-            return 0x101;
-        if(reg == 0x640200)
-            return 0x801;
+            return 0x201;
+        if(reg == 0x640220)
+            return 0x901;
         if(reg == 0x640414)
             return (2222u << 16) | 4000u;
         if(reg == 0x640450)
@@ -57,6 +69,10 @@ struct AuxFixture
             const unsigned offset = reg - 0xd940;
             if(address == 0)
                 return offset == 0 ? 0x041412 : 0;
+            if(address == 0x100)
+                return 0x8414;
+            if(address == 0x202)
+                return offset == 0 ? 0x01017777 : 0x0000;
             uint32_t word = 0;
             for(unsigned i = 0; i < 4; ++i)
                 word |= uint32_t(edid[position - last_read + offset + i]) << (8 * i);
@@ -68,6 +84,8 @@ struct AuxFixture
     void write(unsigned reg, uint32_t value)
     {
         ++writes;
+        if(reg >= 0xd980 && reg <= 0xd9cc)
+            reg -= 0x50;
         switch(reg)
         {
             case 0xd954: {
@@ -178,6 +196,15 @@ TEST(Gm206, ReportsLiveScanoutAndBoundedSinkModes)
     gm206::Snapshot state{};
     ASSERT_TRUE(gm206::probe(fixture.io(), state));
     ASSERT_EQ(state.head_count, 1u);
+    EXPECT_TRUE(state.boot.route_matched);
+    EXPECT_EQ(state.boot.sor, 1);
+    EXPECT_EQ(state.boot.link, 2);
+    EXPECT_EQ(state.boot.head_index, 0);
+    EXPECT_TRUE(state.boot.link_config_read);
+    EXPECT_EQ(state.boot.link_config[0], 0x14);
+    EXPECT_EQ(state.boot.link_config[1], 0x84);
+    EXPECT_TRUE(state.boot.link_status_read);
+    EXPECT_EQ(state.boot.link_status[0], 0x77);
     EXPECT_EQ(state.scanouts[0].pixel_hz, 533250000u);
     ASSERT_EQ(state.output_count, 1u);
     const auto& output = state.outputs[0];
@@ -252,7 +279,43 @@ TEST(Gm206, PagesTimingFieldsAndKeepsFirmwareModesSeparate)
     EXPECT_EQ(root.nodes[5].integer, 1u);
     ASSERT_STREQ(root.nodes[6].name, "gm206");
     auto probe = children(root.nodes[6].id);
-    ASSERT_EQ(probe.count, 4u);
+    ASSERT_EQ(probe.count, 5u);
+    EXPECT_STREQ(probe.nodes[4].name, "boot_state");
+    auto boot = children(probe.nodes[4].id);
+    ASSERT_EQ(boot.count, 8u);
+    EXPECT_STREQ(boot.nodes[2].name, "route_matched");
+    EXPECT_EQ(boot.nodes[2].integer, 1u);
+    auto link = children(probe.nodes[4].id, boot.next);
+    EXPECT_EQ(link.nodes[1].integer, 4u);
+    auto page = link;
+    unsigned fields = boot.count + link.count;
+    bool core_seen = false, storage_seen = false;
+    while(!page.end)
+    {
+        const auto start = page.next;
+        page = children(probe.nodes[4].id, start);
+        ASSERT_GT(page.next, start);
+        ASSERT_LE(page.next, 41u);
+        fields += page.count;
+        for(unsigned i = 0; i < page.count; ++i)
+        {
+            const auto& node = page.nodes[i];
+            EXPECT_EQ(node.parent, probe.nodes[4].id);
+            if(std::string_view(node.name) == "core_channel_control")
+            {
+                EXPECT_EQ(node.integer, 0x01000013u);
+                core_seen = true;
+            }
+            if(std::string_view(node.name) == "head_surface_storage_raw")
+            {
+                EXPECT_EQ(node.integer, 0x10203040u);
+                storage_seen = true;
+            }
+        }
+    }
+    EXPECT_EQ(fields, 41u);
+    EXPECT_TRUE(core_seen);
+    EXPECT_TRUE(storage_seen);
     EXPECT_STREQ(probe.nodes[2].name, "diagnostics");
     auto outputs = children(probe.nodes[0].id);
     ASSERT_EQ(outputs.count, 1u);
@@ -340,4 +403,16 @@ TEST(Gm206, ReportsRejectedChipRegisterWithoutPublishingSinkData)
     ASSERT_EQ(third.count, 1u);
     EXPECT_STREQ(third.nodes[0].name, "boot0_read");
     EXPECT_EQ(third.nodes[0].integer, 1u);
+}
+
+TEST(Gm206, DoesNotAssociateMismatchedRouteWithHead)
+{
+    AuxFixture fixture;
+    fixture.route = 0x02;
+    gm206::Snapshot state{};
+    ASSERT_TRUE(gm206::probe(fixture.io(), state));
+    ASSERT_EQ(state.head_count, 1u);
+    EXPECT_FALSE(state.boot.route_matched);
+    EXPECT_EQ(state.boot.sor, 1);
+    EXPECT_EQ(state.boot.link, 1);
 }

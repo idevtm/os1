@@ -13,6 +13,8 @@ constexpr unsigned display_base = OS1_HARDWARE_DISPLAY_ROOT;
 constexpr unsigned gm206_root = OS1_HARDWARE_GM206_ROOT;
 constexpr unsigned diagnostics = OS1_HARDWARE_GM206_DIAGNOSTICS;
 constexpr unsigned gpu_root = display_base + 11;
+constexpr unsigned boot_root = display_base + 12;
+constexpr unsigned boot_fields = display_base + 0xa00;
 constexpr unsigned gpu_fields = display_base + 0x900;
 constexpr unsigned edid_fields = display_base + 0x920;
 constexpr unsigned outputs_root = display_base + 8;
@@ -68,7 +70,7 @@ DisplayNode describe_display(unsigned id, const Reflection& display)
                           : integer_node(display_base, names[index], values[index]);
     }
     if(id == gm206_root && (display.identity || display.gm206))
-        return object_node(display_base, "gm206", outputs_root, 4);
+        return object_node(display_base, "gm206", outputs_root, display.gm206 ? 5 : 4);
     if(id == diagnostics)
         return {gm206_root, "diagnostics", OS1_HARDWARE_METHOD, 0, "()"};
     if(id == gpu_root)
@@ -125,6 +127,62 @@ DisplayNode describe_display(unsigned id, const Reflection& display)
             gm206_root, "scanouts", scanout_base, display.gm206 ? display.gm206->head_count : 0);
     if(!display.gm206)
         return {};
+    const auto& boot = display.gm206->boot;
+    const char* boot_names[] = {"route_register",
+                                "route_value",
+                                "route_matched",
+                                "sor",
+                                "link",
+                                "head",
+                                "sor_control",
+                                "link_config_read",
+                                "link_rate_code",
+                                "lane_count",
+                                "lane_count_raw",
+                                "link_status_read",
+                                "link_status_raw",
+                                "framebuffer_address",
+                                "framebuffer_pitch",
+                                "framebuffer_format"};
+    uint64_t link_status = 0;
+    if(boot.link_status_read)
+        for(unsigned i = 0; i < sizeof(boot.link_status); ++i)
+            link_status |= uint64_t(boot.link_status[i]) << (8 * i);
+    const uint64_t boot_values[] = {gm206::board_route,
+                                    boot.route,
+                                    boot.route_matched,
+                                    boot.sor,
+                                    boot.link,
+                                    boot.head_index,
+                                    boot.sor_control,
+                                    boot.link_config_read,
+                                    boot.link_config_read ? boot.link_config[0] : 0u,
+                                    boot.link_config_read ? boot.link_config[1] & 31u : 0u,
+                                    boot.link_config_read ? boot.link_config[1] : 0u,
+                                    boot.link_status_read,
+                                    link_status,
+                                    display.framebuffer_address,
+                                    display.framebuffer_pitch,
+                                    display.framebuffer_format};
+    constexpr unsigned base_count = sizeof(boot_names) / sizeof(*boot_names);
+    constexpr unsigned core_count = sizeof(gm206::boot_registers) / sizeof(*gm206::boot_registers);
+    constexpr unsigned head_count = sizeof(gm206::head_registers) / sizeof(*gm206::head_registers);
+    const unsigned boot_count = base_count + core_count + (boot.route_matched ? head_count : 0);
+    if(id == boot_root)
+        return object_node(gm206_root, "boot_state", boot_fields, boot_count);
+    if(id >= boot_fields)
+    {
+        unsigned field = id - boot_fields;
+        if(field >= boot_count)
+            return {};
+        if(field < base_count)
+            return integer_node(boot_root, boot_names[field], boot_values[field]);
+        field -= base_count;
+        if(field < core_count)
+            return integer_node(boot_root, gm206::boot_registers[field].name, boot.core[field]);
+        field -= core_count;
+        return integer_node(boot_root, gm206::head_registers[field].name, boot.head[field]);
+    }
     if(id >= edid_fields)
     {
         const unsigned index = (id - edid_fields) / 16, field = (id - edid_fields) % 16;

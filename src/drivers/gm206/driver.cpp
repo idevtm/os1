@@ -342,6 +342,40 @@ bool probe(const ProbeIo& io, Snapshot& out)
             (void)parse_edid(edid, blocks, output);
         }
     }
+    auto& boot = out.boot;
+    boot = {};
+    boot.route = io.read(io.context, board_route);
+    for(unsigned i = 0; i < sizeof(boot_registers) / sizeof(*boot_registers); ++i)
+        boot.core[i] = io.read(io.context, boot_registers[i].offset);
+    const unsigned selector = boot.route & 15;
+    if(boot.route != UINT32_MAX && selector && selector <= 8)
+    {
+        boot.sor = uint8_t(selector - 1);
+        boot.link = uint8_t(((boot.route >> 4) & 1) + 1);
+        boot.sor_control = io.read(io.context, 0x640200 + boot.sor * 0x20);
+        for(unsigned i = 0; i < out.head_count; ++i)
+        {
+            const auto& scanout = out.scanouts[i];
+            if(scanout.sor != boot.sor || scanout.link != boot.link)
+                continue;
+            boot.route_matched = true;
+            boot.head_index = scanout.index;
+            for(unsigned reg = 0; reg < sizeof(head_registers) / sizeof(*head_registers); ++reg)
+                boot.head[reg] =
+                    io.read(io.context, head_registers[reg].offset + boot.head_index * 0x300);
+            break;
+        }
+    }
+    if(out.aux_present_mask & out.aux_enabled_mask & (1u << board_aux))
+    {
+        const Aux aux(io, board_aux);
+        boot.link_config_read =
+            aux.transfer(9, 0x100, boot.link_config, sizeof(boot.link_config)) ==
+            int(sizeof(boot.link_config));
+        boot.link_status_read =
+            aux.transfer(9, 0x202, boot.link_status, sizeof(boot.link_status)) ==
+            int(sizeof(boot.link_status));
+    }
     return true;
 }
 }  // namespace gm206

@@ -39,7 +39,7 @@ def main():
                         match='validated firmware framebuffer')
         del metadata['pci']
     if args.gm206:
-        metadata.update(driver='gm206', abi=2, dependencies=['kernel.gm206_probe.v2'],
+        metadata.update(driver='gm206', abi=3, dependencies=['kernel.gm206_probe.v3'],
                         image=directory.replace('/virtio-net', '/gm206') + '/driver.elf',
                         pci={'vendor': 0x10de, 'device': 0x1402})
     write_if_changed(args.metadata, json.dumps(metadata, indent=2) + '\n')

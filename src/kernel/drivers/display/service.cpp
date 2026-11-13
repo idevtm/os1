@@ -26,13 +26,14 @@ os1_display_modes modes;
 volatile uint16_t* bochs;
 os1_bochs_mode boot_mode;
 bool failed;
-gm206::Snapshot gm206_snapshot;
-bool gm206_present;
+gm206::Snapshot* gm206_snapshot;
 Gm206Identity gm206_identity;
 struct Session : NativeObject
 {
     os1_framebuffer_surface target;
     bool switched;
+    bool native_requested;
+    bool preserve_scanout;
 };
 
 void match_bochs(VirtualMemory& vm)
@@ -90,16 +91,17 @@ bool root(const NativeObject* object)
 void destroy(NativeObject* object)
 {
     auto& session = *static_cast<Session*>(object);
-    const bool restored = !session.switched || driver->bochs_set(bochs, &boot_mode);
+    const bool preserve = __atomic_load_n(&session.preserve_scanout, __ATOMIC_ACQUIRE);
+    const bool restored = preserve || !session.switched || driver->bochs_set(bochs, &boot_mode);
     if(!restored)
         __atomic_store_n(&failed, true, __ATOMIC_RELEASE);
-    console_display_release(object, restored);
+    console_display_release(object, restored, preserve);
     if(!restored)
         debug("display: boot mode restore failed, pixel output disabled")();
     kfree(object);
 }
 
-long acquire(const os1_display_mode& mode, DescriptorEntry& output)
+long acquire(const os1_display_mode& mode, bool native, DescriptorEntry& output)
 {
     auto* object = static_cast<Session*>(kcalloc(1, sizeof(Session)));
     if(!object)
@@ -110,12 +112,13 @@ long acquire(const os1_display_mode& mode, DescriptorEntry& output)
     object_release(object);
     if(!instance)
         return OS1_ERR_NO_MEMORY;
-    long status = console_display_acquire(instance->object);
+    long status = console_display_acquire(instance->object, native);
     if(status < 0)
     {
         instance_release(instance);
         return status;
     }
+    object->preserve_scanout = status > 0;
     object->target = surface;
     if(mode.id != OS1_DISPLAY_FIXED_MODE)
     {
@@ -124,6 +127,8 @@ long acquire(const os1_display_mode& mode, DescriptorEntry& output)
             uint16_t(mode.width), uint16_t(mode.height), 32, 0x41, uint16_t(mode.width), 0, 0};
         if(!driver->bochs_set(bochs, &desired))
         {
+            if(object->preserve_scanout)
+                __atomic_store_n(&failed, true, __ATOMIC_RELEASE);
             instance_release(instance);
             return OS1_ERR_IO;
         }
@@ -131,6 +136,7 @@ long acquire(const os1_display_mode& mode, DescriptorEntry& output)
         object->target.height = mode.height;
         object->target.pitch = mode.width * 4;
     }
+    object->native_requested = native;
     output = {instance, OS1_RIGHT_DISPLAY, OS1_DESCRIPTOR_CLOEXEC, 0};
     return 0;
 }
@@ -173,15 +179,19 @@ void invoke(OpenInstance& instance,
                 result.payload_bytes = sizeof(os1_display_mode);
             }
         }
-        else if(request.member == OS1_DISPLAY_OPEN && request.payload_bytes == sizeof(uint32_t))
+        else if((request.member == OS1_DISPLAY_OPEN || request.member == OS1_DISPLAY_OPEN_NATIVE) &&
+                request.payload_bytes == sizeof(uint32_t))
         {
             uint32_t mode;
             memcpy(&mode, request.payload, sizeof(mode));
+            const bool native = request.member == OS1_DISPLAY_OPEN_NATIVE;
             status = OS1_ERR_INVALID;
             for(unsigned i = 0; i < modes.count; ++i)
                 if(modes.modes[i].id == mode)
                 {
-                    status = acquire(modes.modes[i], output);
+                    status = native && mode == OS1_DISPLAY_FIXED_MODE
+                                 ? OS1_ERR_UNSUPPORTED
+                                 : acquire(modes.modes[i], native, output);
                     break;
                 }
         }
@@ -199,6 +209,14 @@ void invoke(OpenInstance& instance,
             status = OS1_ERR_INVALID;
         else
             status = console_display_fill(instance.object, *driver, target, fill);
+    }
+    else if(request.member == OS1_DISPLAY_COMMIT && !request.payload_bytes)
+    {
+        auto& session = *static_cast<Session*>(instance.object);
+        if(!session.native_requested)
+            status = OS1_ERR_UNSUPPORTED;
+        else
+            __atomic_store_n(&session.preserve_scanout, true, __ATOMIC_RELEASE);
     }
     else
         status = OS1_ERR_INVALID;
@@ -278,10 +296,23 @@ void gm206_status(const char* status)
 
 bool discover_gm206(const gm206::Exports& exports, const gm206::ProbeIo& io)
 {
-    gm206_present = exports.probe(io, gm206_snapshot);
-    gm206_identity.boot0 = gm206_snapshot.boot0;
+    auto* snapshot = static_cast<gm206::Snapshot*>(kcalloc(1, sizeof(gm206::Snapshot)));
+    if(!snapshot)
+    {
+        gm206_status("snapshot allocation failed");
+        return false;
+    }
+    const bool ready = exports.probe(io, *snapshot);
+    gm206_identity.boot0 = snapshot->boot0;
     gm206_identity.boot0_read = true;
-    return gm206_present;
+    if(ready)
+        gm206_snapshot = snapshot;
+    else
+    {
+        gm206_status("chip identity rejected");
+        kfree(snapshot);
+    }
+    return ready;
 }
 
 long query(Os1HardwareQuery& q)
@@ -295,7 +326,10 @@ long query(Os1HardwareQuery& q)
                              surface.pixel_bytes * 8,
                              modes.count,
                              driver && !available ? 2u : 1u,
-                             gm206_present ? &gm206_snapshot : nullptr,
-                             &gm206_identity});
+                             gm206_snapshot,
+                             &gm206_identity,
+                             g_boot_info ? g_boot_info->framebuffer.physical_address : 0,
+                             g_boot_info ? g_boot_info->framebuffer.pitch_bytes : 0,
+                             g_boot_info ? uint32_t(g_boot_info->framebuffer.pixel_format) : 0});
 }
 }  // namespace native_display

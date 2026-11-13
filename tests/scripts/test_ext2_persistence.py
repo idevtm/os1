@@ -16,7 +16,7 @@ from boot_menu import BootMenu
 sys.dont_write_bytecode = True
 
 
-def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_boot=None):
+def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_boot=None, graphical_boot=None):
     entered = time.monotonic()
     timings = {'phase': phase, 'commands': [], 'completed': False}
     startup_finished = operation = None
@@ -132,6 +132,10 @@ def boot(args, disk, phase, commands=None, on_boot=None, exercise=None, before_b
     try:
         if before_boot is not None:
             before_boot()
+        if graphical_boot is not None:
+            graphical_boot(expect, child.stdin)
+            timings['completed'] = True
+            return
         startup = expect(timeout=getattr(args, 'startup_timeout', 60))
         if args.code and getattr(args, 'boot_menu_entry', 1) is not None:
             assert menu.selected, 'shell started without selecting the requested menu entry'

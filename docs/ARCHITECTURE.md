@@ -59,6 +59,12 @@ Capture-image builds additionally pass `os1.bootdiag` for their reset-and-harves
 The custom BIOS loader retains build-selected diagnostics without an interactive menu.
 See the [boot-menu record](archive/boot/2026-11-09-boot-menu.md) for limits and validation.
 
+On a normal boot, init starts `gsh` directly if `/etc/gsh.boot` exists.
+A diagnostic boot starts `sh`.
+A pre-takeover failure leaves the text console available and init starts `sh`.
+The graphics shell requires a runtime mode from a driver.
+See the [graphics shell plan](hardware/gsh-plan.md) for startup, preferences, and session behavior.
+
 ## Native objects and OS services
 
 The Native API has implemented descriptor authority and bounded IPC between user programs.

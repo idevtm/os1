@@ -391,3 +391,12 @@ The EDID object retains up to two read blocks, including bytes from blocks that 
 Each `hex_N` field contains 32 consecutive bytes in hexadecimal. Join the fields in index order.
 The shell method `os.display.gm206.diagnostics` prints the display tree to standard output.
 Redirect it to a file to retain the boot report.
+
+A successful GM206 probe also exposes `os.display.gm206.boot_state`.
+The route value comes from BAR 0 offset `0x612488` on the reference board.
+The route flag indicates a match with an observed active DisplayPort SOR and link.
+Head timing and surface register fields appear only after a route match.
+The link read flags are set only when the complete read succeeds.
+The sink link configuration comes from DPCD `0x100` and `0x101`.
+The six status bytes start at `0x202`. The first byte occupies the low eight bits of `link_status_raw`.
+Framebuffer fields describe the boot handoff. GPU surface and viewport fields are raw observations.

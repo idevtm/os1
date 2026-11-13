@@ -20,7 +20,7 @@ from test_usb_storage_failures import Qmp
 
 
 def exercise_graphics(args, run, expect):
-    run('gfxdemo "--check"', b'gfxdemo: session checks passed')
+    run('gsh "--check"', b'gsh: session checks passed')
     qmp = Qmp(args.qmp)
     try:
         qmp.execute('device_add', {'driver': 'usb-mouse', 'id': 'pointer', 'bus': 'xhci.0'})
@@ -64,28 +64,29 @@ def exercise_graphics(args, run, expect):
 
         boot_width, boot_height, _ = screenshot()
         for arrow, resolution in [('down', (800, 600)), ('up', (1280, 720))]:
-            # Emulated keys allow observation before the next shell prompt.
-            for code in ('g', 'f', 'x', 'd', 'e', 'm', 'o', 'ret'):
-                key(code)
-            expect(b'Choose a mode.', timeout=15)
-            key(arrow)
-            key('ret')
-            before = await_cursor(lambda _: True)
-            assert screenshot()[:2] == resolution
-            qmp.execute('input-send-event', {'events': [
-                {'type': 'rel', 'data': {'axis': 'x', 'value': 19}},
-                {'type': 'rel', 'data': {'axis': 'y', 'value': 13}},
-            ]})
-            await_cursor(lambda p: p == (before[0] + 19, before[1] + 13))
-            key('q')
-            output = expect()
+            def move_pointer():
+                expect(b'Choose a mode.', timeout=15)
+                expect(b'> 1.', timeout=5)
+                key(arrow)
+                expect((b'> 2.' if arrow == 'down' else b'> 3.'), timeout=5)
+                key('ret')
+                before = await_cursor(lambda _: True)
+                assert screenshot()[:2] == resolution
+                qmp.execute('input-send-event', {'events': [
+                    {'type': 'rel', 'data': {'axis': 'x', 'value': 19}},
+                    {'type': 'rel', 'data': {'axis': 'y', 'value': 13}},
+                ]})
+                await_cursor(lambda p: p == (before[0] + 19, before[1] + 13))
+                key('q')
+
+            output = run('gsh "--menu"', action=move_pointer)
             match = re.search(rb'pointer diagnostics events=(\d+)', output)
             assert match and int(match[1]) > 0, output
             width, height, pixels = screenshot()
             assert (width, height) == (boot_width, boot_height)
             assert pixels[:3] != bytes.fromhex('14283e'), 'graphics background remains after release'
             assert b'\xaa\xaa\xaa' in pixels, 'console text did not redraw after release'
-        run('gfxdemo "--check"', b'gfxdemo: session checks passed')
+        run('gsh "--check"', b'gsh: session checks passed')
 
         def trace_demo():
             trace_demo.prefix = expect(b'Choose a mode.', timeout=40)
@@ -139,7 +140,7 @@ def main():
                 assert b'bochs-display' in out and b'mode_count [field] Integer = 3' in out
                 exercise_graphics(args, run, expect)
             else:
-                out = run('gfxdemo "--check"', allow_errors=True)
+                out = run('gsh "--check"', allow_errors=True)
                 assert b'no compatible graphics driver' in out, out
             run('echo "display console restored"', b'display console restored')
 
@@ -194,9 +195,110 @@ def main():
             def fixed(run, expect):
                 out = run('inspect --details os.display')
                 assert b'firmware-framebuffer' in out and b'mode_count [field] Integer = 1' in out, out
-                run('gfxdemo "--check"', b'gfxdemo: session checks passed')
+                run('gsh "--check"', b'gsh: session checks passed')
+
+            def configure_graphical_boot(preferences):
+                offset = 2048 * 512
+                part.write_bytes(Path(args.program_disk).read_bytes()[offset:])
+                marker = Path(temporary) / 'gsh.boot'
+                config = Path(temporary) / 'gsh.conf'
+                marker.write_bytes(b'')
+                config.write_text(preferences)
+                for source in (marker, config):
+                    subprocess.run([debugfs, '-w', '-R', f'write {source} /etc/{source.name}',
+                                    str(part)], check=True, capture_output=True)
+                with disk.open('r+b') as image:
+                    image.seek(offset)
+                    image.write(part.read_bytes())
 
             boot(args, disk, 'fixed', exercise=fixed)
+            configure_graphical_boot('version=1\nwidth=1280\nheight=720\n')
+
+            # Capture the rejection before the ordinary shell prompt.
+            def capture_fallback(expect, _stdin):
+                fallback_startup = expect(b'os1> ')
+                assert b'gsh: no compatible graphics driver' in fallback_startup
+                assert b'init: gsh ended; starting sh' in fallback_startup
+
+            boot(args, disk, 'graphical-fallback', graphical_boot=capture_fallback)
+
+            args.vga_mmio_off = False
+            args.qmp = str(Path(temporary) / 'gsh.sock')
+
+            def check_desktop(resolution):
+                def exercise(expect, _stdin):
+                    startup = expect(b'gsh: native display acquired')
+                    assert b'os1> ' not in startup
+                    qmp = Qmp(args.qmp)
+                    try:
+                        picture = Path(temporary) / 'desktop.ppm'
+
+                        def screen():
+                            qmp.execute('screendump', {'filename': str(picture)})
+                            _, dimensions, _, pixels = picture.read_bytes().split(b'\n', 3)
+                            return tuple(map(int, dimensions.split())), pixels
+
+                        deadline = time.monotonic() + 15
+                        while time.monotonic() < deadline:
+                            size, pixels = screen()
+                            if (size == resolution and pixels[:3] == bytes.fromhex('223d57')
+                                    and b'\xff\xff\xff' in pixels
+                                    and b'\xd9\xe4\xf0' in pixels):
+                                break
+                            time.sleep(.05)
+                        else:
+                            raise AssertionError('desktop did not render')
+
+                        def clock(pixels):
+                            width = resolution[0]
+                            return b''.join(pixels[(row * width + width - 200) * 3:
+                                                   (row * width + width - 8) * 3]
+                                            for row in range(12, 20))
+
+                        def stable_clock(timeout):
+                            deadline = time.monotonic() + timeout
+                            previous = b''
+                            while time.monotonic() < deadline:
+                                current = clock(screen()[1])
+                                if current == previous and b'\xd9\xe4\xf0' in current:
+                                    return current
+                                previous = current
+                                time.sleep(.1)
+                            raise AssertionError('desktop clock did not render a stable frame')
+
+                        previous = stable_clock(5)
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline:
+                            if stable_clock(2) != previous:
+                                break
+                            time.sleep(.2)
+                        else:
+                            raise AssertionError('desktop clock did not update')
+
+                        def pointer_x(pixels):
+                            width = resolution[0]
+                            offset = pixels.find(b'\xff\xff\xff', width * 32 * 3)
+                            return (offset // 3) % width if offset >= 0 else None
+
+                        before = pointer_x(screen()[1])
+                        assert before is not None
+                        qmp.execute('input-send-event', {'events': [
+                            {'type': 'rel', 'data': {'axis': 'x', 'value': 19}},
+                        ]})
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline:
+                            if pointer_x(screen()[1]) == before + 19:
+                                break
+                            time.sleep(.05)
+                        else:
+                            raise AssertionError('desktop pointer did not move')
+                    finally:
+                        qmp.close()
+                return exercise
+
+            boot(args, disk, 'graphical-preference', graphical_boot=check_desktop((1280, 720)))
+            configure_graphical_boot('version=1\nwidth=999\nheight=999\n')
+            boot(args, disk, 'graphical-default', graphical_boot=check_desktop((800, 600)))
     disk.unlink()
 
 
