@@ -1840,7 +1840,7 @@ Drivers marked `probe_early` finish before ordinary PCI probes, independent of P
 xHCI uses this phase to request firmware ownership before reset and DMA setup.
 An ownership timeout leaves BIOS ownership intact and rejects that controller.
 After xHCI starts, Intel `8086:8c31` routing enables supported SuperSpeed ports before switching supported USB 2.0 ports.
-A 100 ms settling delay follows changed routing; device enumeration then precedes EHCI probing.
+After controller start and the routing check, xHCI waits 100 ms before it enumerates devices. EHCI probing follows.
 Other PCI IDs receive no Intel routing-register writes.
 See the [hardware evidence and validation plan](hardware/2026-11-06-usb-keyboard-handoff.md).
 

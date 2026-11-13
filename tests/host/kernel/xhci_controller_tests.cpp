@@ -767,6 +767,26 @@ TEST(XhciControl, MalformedCompletionCannotBecomeSuccessfulData)
     EXPECT_EQ(f.transfer.completion, 5u);
 }
 
+TEST(XhciControl, InitialDescriptorRetryIgnoresEventsFromFailedTransfer)
+{
+    ControlFixture f;
+    ASSERT_TRUE(f.queue(8));
+    const auto old_status = f.transfer.stages[2];
+    ASSERT_TRUE(f.event(1, 4, 8));
+    ASSERT_TRUE(f.transfer.done);
+    ASSERT_EQ(f.transfer.completion, 4u);
+    ASSERT_EQ(f.transfer.residual, 8u);
+
+    ASSERT_TRUE(f.queue(8));
+    xhci::EventInfo stale{};
+    stale.parameter = old_status;
+    stale.completion_code = 1;
+    EXPECT_FALSE(xhci::control_transfer_event(f.transfer, stale));
+    ASSERT_TRUE(f.event(2, 1));
+    EXPECT_EQ(f.transfer.completion, 1u);
+    EXPECT_EQ(f.transfer.residual, 0u);
+}
+
 TEST(XhciControl, UnrelatedEventCannotCompleteCurrentRequest)
 {
     ControlFixture f;

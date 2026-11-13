@@ -110,6 +110,17 @@ A disconnect fails subsequent disk operations. The shell remains available throu
 The worker can enumerate a replacement as a new attachment.
 Reconnect cannot restore an old filesystem handle or reuse its authority.
 After contexts become visible to hardware, failed initialization retains all device DMA until reboot.
+After controller start and port routing, xHCI waits 100 ms before it scans root ports.
+The `usb` snapshot records the xHCI probe stage and the routing result in `detail` when routing runs.
+Routing values 0, 1, 2, and 3 mean inapplicable, unchanged, changed, and failed.
+An initial descriptor transfer failure records the xHCI completion code in `detail`, or zero if no completion was received.
+
+After successful address assignment, xHCI waits 10 ms before it reads the device descriptor.
+For the initial eight-byte device descriptor read, xHCI can retry one USB Transaction Error.
+The controller validates the halted state when it resets endpoint zero.
+The driver advances the dequeue pointer past the failed transfer.
+The driver retries only after both commands succeed.
+If recovery or the retry fails, initialization fails and the driver retains device DMA.
 Published devices also retain DMA and object addresses after failure.
 Command timeout masks controller interrupt sources and retires all attached devices.
 This bounded retention favors isolation over reclaiming failed resources.
@@ -182,3 +193,20 @@ For example, `0x35031100` reports a medium error with ASC/ASCQ `11/00`.
 `storage-cache-query` and `storage-cache-policy` identify failures after an unsupported flush was confirmed.
 If the output is long, use `usb > /tmp/usb`, then `edit /tmp/usb` and `p 1 15`.
 See the [diagnostic record](../archive/filesystems/2026-11-06-ehci-hardware-diagnostics.md) for field meanings and hardware evidence.
+
+### Desktop cold-boot retest
+
+On 2026-11-13, the desktop reached `os1>` on six of six cold UEFI boots from the original USB port.
+The preceding image with address settling and descriptor retry reached `os1>` on one of six cold boots.
+The retest image adds the unconditional 100 ms controller settling interval and xHCI boot snapshot records.
+
+Three UEFI QEMU boots per image used QEMU 11.1.3, q35, four vCPUs, 128 MiB RAM, and the same ext2 payload.
+Median time to the shell rose from 2.197 s to 2.282 s, an increase of 85 ms (3.9%).
+The normal USB build increased the kernel ELF from 665,328 to 666,032 bytes (+704 bytes, 0.11%).
+The initrd and USB image sizes were 10,240 and 169,869,312 bytes in both builds.
+
+### Boot storage follow-ups
+
+- Wait for late USB storage for a bounded interval before the initial root mount gives up.
+- Allow a bounded enumeration retry with a fresh port reset for a device that stays connected.
+  Preserve DMA quarantine when the controller cannot confirm retirement of the failed attachment.

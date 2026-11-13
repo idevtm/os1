@@ -1093,6 +1093,26 @@ bool wait_for_transfer_completion(XhciControllerState& controller,
     }
 }
 
+bool recover_initial_control_transfer(XhciControllerState& controller, XhciDeviceState& device)
+{
+    // Reset Endpoint validates the halted state. The output context can lag the event.
+    const uint32_t endpoint =
+        (uint32_t(kXhciControlEndpointDci) << 16) | (uint32_t(device.slot_id) << 24);
+    xhci::TrbFields command{};
+    command.control = endpoint | (xhci::kTrbTypeResetEndpointCommand << 10);
+    uint8_t code = 0, slot = 0;
+    if(!submit_command(controller, command, code, slot) || slot != device.slot_id)
+        return false;
+
+    // Skip the failed transfer and resume at the software producer position.
+    const auto& ring = device.control_ring;
+    command.parameter = (device.control_ring_dma.physical_address +
+                         uint64_t(ring.enqueue_index) * xhci::kTrbBytes) |
+                        uint64_t(ring.cycle_state);
+    command.control = endpoint | (xhci::kTrbTypeSetTrDequeueCommand << 10);
+    return submit_command(controller, command, code, slot) && slot == device.slot_id;
+}
+
 bool submit_control_transfer(XhciControllerState& controller,
                              XhciDeviceState& device,
                              const UsbSetupPacket& setup,
@@ -1100,8 +1120,14 @@ bool submit_control_transfer(XhciControllerState& controller,
                              void* in_buffer,
                              size_t buffer_length,
                              size_t& actual_length,
-                             bool* protocol_stall = nullptr)
+                             bool* protocol_stall = nullptr,
+                             bool* transaction_error = nullptr,
+                             uint32_t* failure_detail = nullptr)
 {
+    if(transaction_error)
+        *transaction_error = false;
+    if(failure_detail)
+        *failure_detail = 0;
     actual_length = 0;
     if(protocol_stall)
         *protocol_stall = false;
@@ -1179,8 +1205,12 @@ bool submit_control_transfer(XhciControllerState& controller,
         debug("xhci: control failed port=")(device.port_id)(" request=")(setup.request)(
             " value=0x")(setup.value, 16)(" requested=")(buffer_length)(" completed=")(
             completed)(" cc=")(completion_code)(" residual=")(residual_length)();
+        if(failure_detail)
+            *failure_detail = completed ? completion_code : 0;
         if(protocol_stall && completed && completion_code == 6)
             *protocol_stall = true;
+        else if(transaction_error && completed && completion_code == 4)
+            *transaction_error = true;
         else
             fail_device(device);
         return false;
@@ -1204,7 +1234,8 @@ bool usb_get_descriptor(XhciControllerState& controller,
                         uint8_t descriptor_index,
                         void* buffer,
                         size_t buffer_length,
-                        size_t& actual_length)
+                        size_t& actual_length,
+                        uint32_t* initial_failure_detail = nullptr)
 {
     const UsbSetupPacket setup{
         .request_type = kUsbRequestTypeStandardInDevice,
@@ -1213,8 +1244,31 @@ bool usb_get_descriptor(XhciControllerState& controller,
         .index = 0u,
         .length = static_cast<uint16_t>(buffer_length),
     };
-    return submit_control_transfer(
-        controller, device, setup, nullptr, buffer, buffer_length, actual_length);
+    bool transaction_error = false;
+    if(submit_control_transfer(controller,
+                               device,
+                               setup,
+                               nullptr,
+                               buffer,
+                               buffer_length,
+                               actual_length,
+                               nullptr,
+                               initial_failure_detail ? &transaction_error : nullptr,
+                               initial_failure_detail))
+        return true;
+    if(!transaction_error || !recover_initial_control_transfer(controller, device))
+        return false;
+    debug("xhci: retrying initial device descriptor port=")(device.port_id)();
+    return submit_control_transfer(controller,
+                                   device,
+                                   setup,
+                                   nullptr,
+                                   buffer,
+                                   buffer_length,
+                                   actual_length,
+                                   nullptr,
+                                   nullptr,
+                                   initial_failure_detail);
 }
 
 bool usb_set_configuration(XhciControllerState& controller,
@@ -1770,12 +1824,21 @@ bool initialize_port(PageFrameContainer& frames,
         return false;
     }
 
+    // Allow the device to settle at its new USB address before the first request.
+    tsc_clock_delay_us(10'000);
+
     observation.stage = "device-descriptor-failed";
     UsbDeviceDescriptor descriptor{};
     size_t actual_length = 0u;
     uint16_t packet = 0;
-    if(!usb_get_descriptor(
-           controller, *device, kUsbDescriptorDevice, 0, &descriptor, 8, actual_length) ||
+    if(!usb_get_descriptor(controller,
+                           *device,
+                           kUsbDescriptorDevice,
+                           0,
+                           &descriptor,
+                           8,
+                           actual_length,
+                           &observation.record.detail) ||
        !xhci::device_control_packet(device->speed, &descriptor, actual_length, packet) ||
        !update_control_packet(controller, *device, packet))
     {
@@ -2040,6 +2103,19 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
                            size_t device_index,
                            DeviceId id)
 {
+    struct ProbeObservation
+    {
+        Os1ObserveUsbRecord record{};
+        const char* stage = "xhci-no-controller";
+        ~ProbeObservation()
+        {
+            copy_fixed_string(record.stage, sizeof(record.stage), stage);
+            usb::diagnostics::append(record);
+        }
+    } observation;
+    observation.record.kind = OS1_OBSERVE_USB_CONTROLLER;
+    observation.record.pci_index = static_cast<uint32_t>(device_index);
+
     XhciControllerState* controller = allocate_controller();
     if(nullptr == controller)
     {
@@ -2054,6 +2130,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         device.function, 16, 1)(" id=")(device.vendor_id, 16, 4)(":")(
         device.device_id, 16, 4)(" cmd=0x")(pci_read_command(device), 16, 4)();
 
+    observation.stage = "xhci-bar-failed";
     if(!claim_pci_bar(id, static_cast<uint16_t>(device_index), 0, controller->controller_bar))
     {
         debug("xhci: BAR0 claim failed")();
@@ -2075,6 +2152,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         release_controller(frames, *controller);
         return false;
     }
+    observation.stage = "xhci-mmio-failed";
     if(!map_mmio_range(kernel_vm, controller->controller_bar.base, controller->controller_bar.size))
     {
         debug("xhci: MMIO map failed")();
@@ -2091,6 +2169,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
     const uint32_t capability_word =
         *reinterpret_cast<volatile uint32_t*>(controller->controller.mmio_base);
     debug("xhci: capability word=0x")(capability_word, 16, 8)();
+    observation.stage = "xhci-capability-failed";
     if(0xFFFFFFFFu == capability_word)
     {
         debug("xhci: MMIO reads all ones; skipping controller")();
@@ -2138,12 +2217,14 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         }
     }
 
+    observation.stage = "xhci-clock-failed";
     if(!tsc_clock_calibrate())
     {
         debug("xhci: calibrated reset timing unavailable")();
         release_controller(frames, *controller);
         return false;
     }
+    observation.stage = "xhci-handoff-failed";
     if(!xhci::acquire_legacy_ownership(controller->controller, handoff_delay, nullptr))
     {
         debug("xhci: firmware handoff failed")();
@@ -2152,6 +2233,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
     }
     controller->owned = true;
     debug("xhci: firmware handoff complete")();
+    observation.stage = "xhci-reset-failed";
     if(!xhci::controller_reset(controller->controller,
                                controller_wait_limits(),
                                nullptr,
@@ -2168,6 +2250,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
         controller->controller.capability.scratchpad_buffers)();
     controller->configured_slots = controller->controller.capability.max_slots;
     controller->scratchpad_count = controller->controller.capability.scratchpad_buffers;
+    observation.stage = "xhci-dma-failed";
     if(!allocate_controller_buffers(frames, *controller))
     {
         debug("xhci: DMA allocation failed")();
@@ -2176,6 +2259,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
     }
 
     debug("xhci: buffers ok, binding interrupt")();
+    observation.stage = "xhci-irq-failed";
     if(!pci_enable_best_interrupt(
            kernel_vm, id, device, 0, xhci_irq, controller, controller->interrupt))
     {
@@ -2198,6 +2282,7 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
             static_cast<uint32_t>(controller->event_ring_dma.size_bytes / xhci::kTrbBytes),
     };
     controller->dma_published = true;
+    observation.stage = "xhci-start-failed";
     if(!xhci::controller_program(controller->controller, rings, controller->configured_slots) ||
        !xhci::controller_run(controller->controller, controller_wait_limits()))
     {
@@ -2211,14 +2296,18 @@ bool probe_xhci_controller(VirtualMemory& kernel_vm,
     if(routing != xhci::RoutingResult::NotApplicable)
         debug("xhci: Intel routing result=")(static_cast<uint8_t>(routing))(" USB2=0x")(
             pci_config_read32(device, 0xd0), 16)(" USB3=0x")(pci_config_read32(device, 0xd8), 16)();
+    observation.stage = "xhci-routing-failed";
+    observation.record.detail = static_cast<uint32_t>(routing);
     if(routing == xhci::RoutingResult::Failed)
     {
         release_controller(frames, *controller);
         return false;
     }
-    if(routing == xhci::RoutingResult::Changed)
-        tsc_clock_delay_us(100000u);
+    // Give ports time to settle after start, including when routing was already set.
+    tsc_clock_delay_us(100'000);
     enumerate_ports(frames, *controller);
+    observation.stage =
+        __atomic_load_n(&controller->failed, __ATOMIC_ACQUIRE) ? "xhci-retired" : "xhci-started";
 
     controller->present = true;
     (void)device_binding_publish(id, static_cast<uint16_t>(device_index), "xhci", controller);
