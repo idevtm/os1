@@ -9,11 +9,17 @@
 #include "driver_trust.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "drivers/bus/pci_bus.hpp"
+#include "drivers/bus/resource.hpp"
 #include "drivers/display/service.hpp"
 #include "drivers/module/virtio_host.hpp"
+#include "drivers/timer/tsc_clock.hpp"
 #include "fs/initrd.hpp"
+#include "gm206_driver_trust.hpp"
+#include "handoff/memory_layout.h"
+#include "mm/boot_mapping.hpp"
 #include "mm/kmem.hpp"
 #include "mm/virtual_memory.hpp"
+#include "platform/pci_config.hpp"
 #include "platform/platform.hpp"
 #include "util/string.h"
 #include "vfs/filesystem.hpp"
@@ -200,6 +206,63 @@ void load_display()
     }
     debug("driver: loaded firmware-framebuffer from ")(kDisplayDriverPath)(" bytes=")(size)();
 }
+void load_gm206()
+{
+    for(uint16_t index = 0; index < platform_pci_device_count(); ++index)
+    {
+        const auto& pci = platform_pci_devices()[index];
+        if(pci.vendor_id != 0x10de || pci.device_id != 0x1402 || pci.class_code != 3 ||
+           pci.subclass != 0 || pci_config_read32(pci, 0x2c) != 0x36c51458 ||
+           !(pci_read_command(pci) & 2))
+            continue;
+        const auto& bar = pci.bars[0];
+        if((bar.type != PciBarType::Mmio32 && bar.type != PciBarType::Mmio64) || !bar.base ||
+           bar.size < gm206::register_bytes)
+            continue;
+        VirtualMemory vm(page_frames, g_kernel_root_cr3);
+        driver::Image image;
+        uint64_t size = 0;
+        if(!load_image(vm,
+                       kGm206DriverPath,
+                       sizeof(kGm206DriverPath) - 1,
+                       kGm206DriverDigest,
+                       OS1_GM206_MODULE_BASE,
+                       image,
+                       size))
+            return;
+        const auto* exports = reinterpret_cast<gm206::Entry>(image.entry)();
+        if(!driver::contains(image, reinterpret_cast<uint64_t>(exports), sizeof(*exports), 4) ||
+           exports->version != OS1_GM206_ABI || exports->bytes != sizeof(*exports) ||
+           !driver::contains(image, reinterpret_cast<uint64_t>(exports->probe), 1, 5))
+            return;
+        const DeviceId owner{DeviceBus::Pci, index};
+        PciBarResource registers{};
+        if(!claim_pci_bar(owner, index, 0, registers))
+            return;
+        // Only these register pages are used by the probe.
+        if(map_mmio_range(vm, registers.base, 4096) &&
+           map_mmio_range(vm, registers.base + 0xd000, 4096) &&
+           map_mmio_range(vm, registers.base + 0x612000, 4096) &&
+           map_mmio_range(vm, registers.base + 0x640000, 0x1000))
+        {
+            const gm206::ProbeIo io{kernel_physical_pointer<void>(registers.base),
+                                    [](void* context, unsigned offset) -> uint32_t {
+                                        return static_cast<volatile uint32_t*>(context)[offset / 4];
+                                    },
+                                    [](void* context, unsigned offset, uint32_t value) {
+                                        static_cast<volatile uint32_t*>(context)[offset / 4] =
+                                            value;
+                                    },
+                                    tsc_clock_delay_us};
+            if(native_display::discover_gm206(*exports, io))
+                debug("driver: loaded gm206 discovery from ")(kGm206DriverPath)();
+            else
+                debug("driver: gm206 probe rejected")();
+        }
+        release_pci_bar(owner, index, 0);
+        return;
+    }
+}
 }  // namespace
 void load_boot_drivers()
 {
@@ -207,6 +270,7 @@ void load_boot_drivers()
         return;
     attempted = true;
     load_display();
+    load_gm206();
     bool match = false;
     for(size_t i = 0; i < platform_pci_device_count(); ++i)
         if(pci_driver_matches_device(pci_driver, platform_pci_devices()[i]))

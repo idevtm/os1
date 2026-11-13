@@ -7,8 +7,8 @@
 #include "core/kernel_state.hpp"
 #include "debug/debug.hpp"
 #include "drivers/bus/resource.hpp"
+#include "drivers/display/reflection.hpp"
 #include "drivers/display/text_display.hpp"
-#include "freestanding/string.hpp"
 #include "fs/initrd.hpp"
 #include "handoff/memory_layout.h"
 #include "mm/boot_mapping.hpp"
@@ -26,6 +26,8 @@ os1_display_modes modes;
 volatile uint16_t* bochs;
 os1_bochs_mode boot_mode;
 bool failed;
+gm206::Snapshot gm206_snapshot;
+bool gm206_present;
 struct Session : NativeObject
 {
     os1_framebuffer_surface target;
@@ -236,65 +238,23 @@ const KernelProvider* provider(uint64_t id, unsigned version)
     return id == OS1_DISPLAY_SESSION_INTERFACE_ID ? &session_provider : nullptr;
 }
 
+bool discover_gm206(const gm206::Exports& exports, const gm206::ProbeIo& io)
+{
+    gm206_present = exports.probe(io, gm206_snapshot);
+    return gm206_present;
+}
+
 long query(Os1HardwareQuery& q)
 {
-    if(q.version != OS1_HARDWARE_VERSION || q.reserved || q.next || q.count || q.end ||
-       (q.operation != OS1_HARDWARE_DESCRIBE && q.operation != OS1_HARDWARE_CHILDREN) ||
-       (q.operation == OS1_HARDWARE_DESCRIBE && q.start))
-        return OS1_ERR_INVALID;
-    for(const auto& node : q.nodes)
-    {
-        const auto* bytes = reinterpret_cast<const uint8_t*>(&node);
-        for(unsigned i = 0; i < sizeof(node); ++i)
-            if(bytes[i])
-                return OS1_ERR_INVALID;
-    }
     const bool available = driver && !__atomic_load_n(&failed, __ATOMIC_ACQUIRE);
-    const uint64_t generation = driver && !available ? 2 : 1;
-    if(q.generation && q.generation != generation)
-        return OS1_ERR_CANCELLED;
-    constexpr unsigned base = OS1_HARDWARE_DISPLAY_ROOT;
-    const unsigned count = available ? 6 : 1;
-    if(q.id < base || q.id > base + count)
-        return OS1_ERR_NOT_FOUND;
-    const char* names[] = {
-        "display", "available", "driver", "width", "height", "bits_per_pixel", "mode_count"};
-    const uint64_t values[] = {
-        0, available, 0, surface.width, surface.height, surface.pixel_bytes * 8, modes.count};
-    auto emit = [&](unsigned index) {
-        auto& node = q.nodes[q.count++];
-        node = {};
-        node.id = base + index;
-        node.parent = index ? base : 0;
-        node.type = index == 0   ? OS1_HARDWARE_OBJECT
-                    : index == 2 ? OS1_HARDWARE_STRING
-                                 : OS1_HARDWARE_INTEGER;
-        node.integer = values[index];
-        freestanding::copy_string(node.name, sizeof(node.name), names[index]);
-        if(index == 2)
-            freestanding::copy_string(
-                node.text, sizeof(node.text), bochs ? "bochs-display" : "firmware-framebuffer");
-        if(index == 0)
-            freestanding::copy_string(node.text,
-                                      sizeof(node.text),
-                                      bochs ? "QEMU runtime display" : "Fixed firmware display");
-    };
-    if(q.operation == OS1_HARDWARE_DESCRIBE)
-    {
-        if(q.id > base + count)
-            return OS1_ERR_NOT_FOUND;
-        emit(q.id - base);
-    }
-    else if(q.id == base)
-    {
-        if(q.start > count)
-            return OS1_ERR_INVALID;
-        for(unsigned i = q.start; i < count; ++i)
-            emit(i + 1);
-    }
-    q.generation = generation;
-    q.next = q.start + q.count;
-    q.end = 1;
-    return 0;
+    return query_reflection(q,
+                            {available,
+                             bochs != nullptr,
+                             surface.width,
+                             surface.height,
+                             surface.pixel_bytes * 8,
+                             modes.count,
+                             driver && !available ? 2u : 1u,
+                             gm206_present ? &gm206_snapshot : nullptr});
 }
 }  // namespace native_display

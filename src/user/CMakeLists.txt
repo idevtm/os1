@@ -152,14 +152,16 @@ add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json"
     --base "${OS1_GENERATED_DIR}/storage-programs-base.json"
     --metadata "${OS1_DRIVER_METADATA}" --image "${OS1_DRIVER_ELF}"
     --metadata "${OS1_DISPLAY_DRIVER_METADATA}" --image "${OS1_DISPLAY_DRIVER_ELF}"
+    --metadata "${OS1_GM206_DRIVER_METADATA}" --image "${OS1_GM206_DRIVER_ELF}"
     --output "${OS1_GENERATED_DIR}/storage-programs.json"
   DEPENDS "${OS1_GENERATED_DIR}/storage-programs-base.json" "${OS1_DRIVER_METADATA}"
     "${OS1_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_METADATA}"
+    "${OS1_GM206_DRIVER_ELF}" "${OS1_GM206_DRIVER_METADATA}"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
   VERBATIM)
 add_custom_target(os1_storage_manifest ALL DEPENDS "${OS1_GENERATED_DIR}/storage-programs.json")
-list(APPEND OS1_USER_PROGRAM_FILES "${OS1_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_ELF}" "${OS1_GENERATED_DIR}/storage-programs.json")
+list(APPEND OS1_USER_PROGRAM_FILES "${OS1_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_ELF}" "${OS1_GM206_DRIVER_ELF}" "${OS1_GENERATED_DIR}/storage-programs.json")
 set(OS1_USER_PROGRAM_FILES "${OS1_USER_PROGRAM_FILES}" PARENT_SCOPE)
 
 add_custom_command(

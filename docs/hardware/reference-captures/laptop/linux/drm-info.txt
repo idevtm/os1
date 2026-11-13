@@ -1,0 +1,496 @@
+Node: /dev/dri/card0
+├───Driver: nouveau (nVidia Riva/TNT/GeForce/Quadro/Tesla/Tegra K1+) version 1.4.2 (0)
+│   ├───DRM_CLIENT_CAP_STEREO_3D supported
+│   ├───DRM_CLIENT_CAP_UNIVERSAL_PLANES supported
+│   ├───DRM_CLIENT_CAP_ATOMIC not supported
+│   ├───DRM_CLIENT_CAP_ASPECT_RATIO supported
+│   ├───DRM_CLIENT_CAP_WRITEBACK_CONNECTORS not supported
+│   ├───DRM_CAP_DUMB_BUFFER = 1
+│   ├───DRM_CAP_VBLANK_HIGH_CRTC = 1
+│   ├───DRM_CAP_DUMB_PREFERRED_DEPTH = 24
+│   ├───DRM_CAP_DUMB_PREFER_SHADOW = 1
+│   ├───DRM_CAP_PRIME = 3
+│   ├───DRM_CAP_TIMESTAMP_MONOTONIC = 1
+│   ├───DRM_CAP_ASYNC_PAGE_FLIP = 1
+│   ├───DRM_CAP_CURSOR_WIDTH = 64
+│   ├───DRM_CAP_CURSOR_HEIGHT = 64
+│   ├───DRM_CAP_ADDFB2_MODIFIERS = 1
+│   ├───DRM_CAP_PAGE_FLIP_TARGET = 0
+│   ├───DRM_CAP_CRTC_IN_VBLANK_EVENT = 1
+│   ├───DRM_CAP_SYNCOBJ = 1
+│   └───DRM_CAP_SYNCOBJ_TIMELINE = 1
+├───Device: PCI 10de:1251 NVIDIA Corporation GF116M [GeForce GT 560M]
+│   └───Available nodes: primary, render
+├───Framebuffer size
+│   ├───Width: [0, 16384]
+│   └───Height: [0, 16384]
+├───Connectors
+│   ├───Connector 0
+│   │   ├───Object ID: 44
+│   │   ├───Type: LVDS
+│   │   ├───Status: connected
+│   │   ├───Physical size: 380x210 mm
+│   │   ├───Subpixel: unknown
+│   │   ├───Encoders: {0}
+│   │   ├───Modes
+│   │   │   ├───1920x1080@60.02 preferred driver nhsync nvsync 
+│   │   │   ├───1680x1050@60.00 nhsync pvsync 
+│   │   │   ├───1400x1050@60.00 nhsync pvsync 
+│   │   │   ├───1280x1024@59.95 nhsync pvsync 
+│   │   │   ├───1280x960@59.99 nhsync pvsync 
+│   │   │   ├───1152x864@59.97 nhsync pvsync 
+│   │   │   ├───1024x768@59.95 nhsync pvsync 
+│   │   │   ├───800x600@59.96 nhsync pvsync 
+│   │   │   ├───640x480@59.94 nhsync pvsync 
+│   │   │   ├───720x400@59.97 nhsync pvsync 
+│   │   │   ├───640x400@59.96 nhsync pvsync 
+│   │   │   └───640x350@59.84 nhsync pvsync 
+│   │   └───Properties
+│   │       ├───"EDID" (immutable): blob = 71
+│   │       ├───"DPMS": enum {On, Standby, Suspend, Off} = On
+│   │       ├───"link-status": enum {Good, Bad} = Good
+│   │       ├───"non-desktop" (immutable): range [0, 1] = 0
+│   │       ├───"TILE" (immutable): blob = 0
+│   │       ├───"vibrant hue": range [0, 180] = 90
+│   │       ├───"color vibrance": range [0, 200] = 150
+│   │       ├───"scaling mode": enum {None, Full, Center, Full aspect} = None
+│   │       ├───"dithering mode": enum {auto, off, static 2x2, dynamic 2x2} = auto
+│   │       └───"dithering depth": enum {auto, 6 bpc, 8 bpc} = auto
+│   ├───Connector 1
+│   │   ├───Object ID: 46
+│   │   ├───Type: VGA
+│   │   ├───Status: disconnected
+│   │   ├───Encoders: {1}
+│   │   └───Properties
+│   │       ├───"EDID" (immutable): blob = 0
+│   │       ├───"DPMS": enum {On, Standby, Suspend, Off} = Off
+│   │       ├───"link-status": enum {Good, Bad} = Good
+│   │       ├───"non-desktop" (immutable): range [0, 1] = 0
+│   │       ├───"TILE" (immutable): blob = 0
+│   │       ├───"vibrant hue": range [0, 180] = 90
+│   │       ├───"color vibrance": range [0, 200] = 150
+│   │       └───"scaling mode": enum {None, Full, Center, Full aspect} = None
+│   └───Connector 2
+│       ├───Object ID: 48
+│       ├───Type: HDMI-A
+│       ├───Status: disconnected
+│       ├───Encoders: {2}
+│       └───Properties
+│           ├───"EDID" (immutable): blob = 0
+│           ├───"DPMS": enum {On, Standby, Suspend, Off} = Off
+│           ├───"link-status": enum {Good, Bad} = Good
+│           ├───"non-desktop" (immutable): range [0, 1] = 0
+│           ├───"TILE" (immutable): blob = 0
+│           ├───"underscan": enum {auto, off, on} = off
+│           ├───"underscan hborder": range [0, 128] = 0
+│           ├───"underscan vborder": range [0, 128] = 0
+│           ├───"vibrant hue": range [0, 180] = 90
+│           ├───"color vibrance": range [0, 200] = 150
+│           ├───"scaling mode": enum {None, Full, Center, Full aspect} = None
+│           ├───"dithering mode": enum {auto, off, static 2x2, dynamic 2x2} = auto
+│           └───"dithering depth": enum {auto, 6 bpc, 8 bpc} = auto
+├───Encoders
+│   ├───Encoder 0
+│   │   ├───Object ID: 45
+│   │   ├───Type: LVDS
+│   │   ├───CRTCS: {0, 1}
+│   │   └───Clones: {0}
+│   ├───Encoder 1
+│   │   ├───Object ID: 47
+│   │   ├───Type: DAC
+│   │   ├───CRTCS: {0, 1}
+│   │   └───Clones: {1}
+│   └───Encoder 2
+│       ├───Object ID: 49
+│       ├───Type: TMDS
+│       ├───CRTCS: {0, 1}
+│       └───Clones: {2}
+├───CRTCs
+│   ├───CRTC 0
+│   │   ├───Object ID: 59
+│   │   ├───Legacy info
+│   │   │   ├───Mode: 1920x1080@60.02 preferred driver nhsync nvsync 
+│   │   │   └───Gamma size: 256
+│   │   └───Properties
+│   │       ├───"GAMMA_LUT": blob = 75
+│   │       └───"GAMMA_LUT_SIZE" (immutable): range [0, UINT32_MAX] = 256
+│   └───CRTC 1
+│       ├───Object ID: 69
+│       ├───Legacy info
+│       │   └───Gamma size: 256
+│       └───Properties
+│           ├───"GAMMA_LUT": blob = 0
+│           └───"GAMMA_LUT_SIZE" (immutable): range [0, UINT32_MAX] = 256
+└───Planes
+    ├───Plane 0
+    │   ├───Object ID: 50
+    │   ├───CRTCs: {0}
+    │   ├───Legacy info
+    │   │   ├───FB ID: 73
+    │   │   │   ├───Object ID: 73
+    │   │   │   ├───Size: 1920x1080
+    │   │   │   ├───Format: ABGR2101010 (0x30334241)
+    │   │   │   ├───Modifier: NVIDIA_BLOCK_LINEAR_2D(h=4, k=254, g=0, s=1, c=0) (0x3000000004fe014)
+    │   │   │   └───Planes:
+    │   │   │       └───Plane 0: offset = 0, pitch = 7680 bytes
+    │   │   └───Formats:
+    │   │       ├───C8 (0x20203843)
+    │   │       ├───RGB565 (0x36314752)
+    │   │       ├───XRGB1555 (0x35315258)
+    │   │       ├───ARGB1555 (0x35315241)
+    │   │       ├───XRGB8888 (0x34325258)
+    │   │       ├───ARGB8888 (0x34325241)
+    │   │       ├───XBGR2101010 (0x30334258)
+    │   │       ├───ABGR2101010 (0x30334241)
+    │   │       ├───XBGR8888 (0x34324258)
+    │   │       ├───ABGR8888 (0x34324241)
+    │   │       ├───XBGR16161616F (0x48344258)
+    │   │       └───ABGR16161616F (0x48344241)
+    │   └───Properties
+    │       ├───"type" (immutable): enum {Overlay, Primary, Cursor} = Primary
+    │       ├───"IN_FORMATS" (immutable): blob = 51
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=0, k=254, g=0, s=1, c=0) (0x3000000004fe010)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=1, k=254, g=0, s=1, c=0) (0x3000000004fe011)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=2, k=254, g=0, s=1, c=0) (0x3000000004fe012)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=3, k=254, g=0, s=1, c=0) (0x3000000004fe013)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=4, k=254, g=0, s=1, c=0) (0x3000000004fe014)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=5, k=254, g=0, s=1, c=0) (0x3000000004fe015)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   └───DRM_FORMAT_MOD_LINEAR (0x0)
+    │       │       ├───C8 (0x20203843)
+    │       │       ├───RGB565 (0x36314752)
+    │       │       ├───XRGB1555 (0x35315258)
+    │       │       ├───ARGB1555 (0x35315241)
+    │       │       ├───XRGB8888 (0x34325258)
+    │       │       ├───ARGB8888 (0x34325241)
+    │       │       ├───XBGR2101010 (0x30334258)
+    │       │       ├───ABGR2101010 (0x30334241)
+    │       │       ├───XBGR8888 (0x34324258)
+    │       │       ├───ABGR8888 (0x34324241)
+    │       │       ├───XBGR16161616F (0x48344258)
+    │       │       └───ABGR16161616F (0x48344241)
+    │       └───"zpos" (immutable): range [0, 0] = 0
+    ├───Plane 1
+    │   ├───Object ID: 53
+    │   ├───CRTCs: {0}
+    │   ├───Legacy info
+    │   │   ├───FB ID: 0
+    │   │   └───Formats:
+    │   │       ├───YUYV (0x56595559)
+    │   │       ├───UYVY (0x59565955)
+    │   │       ├───XRGB8888 (0x34325258)
+    │   │       ├───XRGB1555 (0x35315258)
+    │   │       └───XBGR2101010 (0x30334258)
+    │   └───Properties
+    │       ├───"type" (immutable): enum {Overlay, Primary, Cursor} = Overlay
+    │       ├───"IN_FORMATS" (immutable): blob = 54
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=0, k=254, g=0, s=1, c=0) (0x3000000004fe010)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=1, k=254, g=0, s=1, c=0) (0x3000000004fe011)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=2, k=254, g=0, s=1, c=0) (0x3000000004fe012)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=3, k=254, g=0, s=1, c=0) (0x3000000004fe013)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=4, k=254, g=0, s=1, c=0) (0x3000000004fe014)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=5, k=254, g=0, s=1, c=0) (0x3000000004fe015)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   └───DRM_FORMAT_MOD_LINEAR (0x0)
+    │       │       ├───YUYV (0x56595559)
+    │       │       ├───UYVY (0x59565955)
+    │       │       ├───XRGB8888 (0x34325258)
+    │       │       ├───XRGB1555 (0x35315258)
+    │       │       └───XBGR2101010 (0x30334258)
+    │       └───"zpos" (immutable): range [1, 1] = 1
+    ├───Plane 2
+    │   ├───Object ID: 56
+    │   ├───CRTCs: {0}
+    │   ├───Legacy info
+    │   │   ├───FB ID: 0
+    │   │   └───Formats:
+    │   │       └───ARGB8888 (0x34325241)
+    │   └───Properties
+    │       ├───"type" (immutable): enum {Overlay, Primary, Cursor} = Cursor
+    │       ├───"IN_FORMATS" (immutable): blob = 57
+    │       │   └───DRM_FORMAT_MOD_LINEAR (0x0)
+    │       │       └───ARGB8888 (0x34325241)
+    │       └───"zpos" (immutable): range [UINT8_MAX, UINT8_MAX] = 255
+    ├───Plane 3
+    │   ├───Object ID: 60
+    │   ├───CRTCs: {1}
+    │   ├───Legacy info
+    │   │   ├───FB ID: 0
+    │   │   └───Formats:
+    │   │       ├───C8 (0x20203843)
+    │   │       ├───RGB565 (0x36314752)
+    │   │       ├───XRGB1555 (0x35315258)
+    │   │       ├───ARGB1555 (0x35315241)
+    │   │       ├───XRGB8888 (0x34325258)
+    │   │       ├───ARGB8888 (0x34325241)
+    │   │       ├───XBGR2101010 (0x30334258)
+    │   │       ├───ABGR2101010 (0x30334241)
+    │   │       ├───XBGR8888 (0x34324258)
+    │   │       ├───ABGR8888 (0x34324241)
+    │   │       ├───XBGR16161616F (0x48344258)
+    │   │       └───ABGR16161616F (0x48344241)
+    │   └───Properties
+    │       ├───"type" (immutable): enum {Overlay, Primary, Cursor} = Primary
+    │       ├───"IN_FORMATS" (immutable): blob = 61
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=0, k=254, g=0, s=1, c=0) (0x3000000004fe010)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=1, k=254, g=0, s=1, c=0) (0x3000000004fe011)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=2, k=254, g=0, s=1, c=0) (0x3000000004fe012)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=3, k=254, g=0, s=1, c=0) (0x3000000004fe013)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=4, k=254, g=0, s=1, c=0) (0x3000000004fe014)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=5, k=254, g=0, s=1, c=0) (0x3000000004fe015)
+    │       │   │   ├───C8 (0x20203843)
+    │       │   │   ├───RGB565 (0x36314752)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   ├───ARGB1555 (0x35315241)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───ARGB8888 (0x34325241)
+    │       │   │   ├───XBGR2101010 (0x30334258)
+    │       │   │   ├───ABGR2101010 (0x30334241)
+    │       │   │   ├───XBGR8888 (0x34324258)
+    │       │   │   ├───ABGR8888 (0x34324241)
+    │       │   │   ├───XBGR16161616F (0x48344258)
+    │       │   │   └───ABGR16161616F (0x48344241)
+    │       │   └───DRM_FORMAT_MOD_LINEAR (0x0)
+    │       │       ├───C8 (0x20203843)
+    │       │       ├───RGB565 (0x36314752)
+    │       │       ├───XRGB1555 (0x35315258)
+    │       │       ├───ARGB1555 (0x35315241)
+    │       │       ├───XRGB8888 (0x34325258)
+    │       │       ├───ARGB8888 (0x34325241)
+    │       │       ├───XBGR2101010 (0x30334258)
+    │       │       ├───ABGR2101010 (0x30334241)
+    │       │       ├───XBGR8888 (0x34324258)
+    │       │       ├───ABGR8888 (0x34324241)
+    │       │       ├───XBGR16161616F (0x48344258)
+    │       │       └───ABGR16161616F (0x48344241)
+    │       └───"zpos" (immutable): range [0, 0] = 0
+    ├───Plane 4
+    │   ├───Object ID: 63
+    │   ├───CRTCs: {1}
+    │   ├───Legacy info
+    │   │   ├───FB ID: 0
+    │   │   └───Formats:
+    │   │       ├───YUYV (0x56595559)
+    │   │       ├───UYVY (0x59565955)
+    │   │       ├───XRGB8888 (0x34325258)
+    │   │       ├───XRGB1555 (0x35315258)
+    │   │       └───XBGR2101010 (0x30334258)
+    │   └───Properties
+    │       ├───"type" (immutable): enum {Overlay, Primary, Cursor} = Overlay
+    │       ├───"IN_FORMATS" (immutable): blob = 64
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=0, k=254, g=0, s=1, c=0) (0x3000000004fe010)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=1, k=254, g=0, s=1, c=0) (0x3000000004fe011)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=2, k=254, g=0, s=1, c=0) (0x3000000004fe012)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=3, k=254, g=0, s=1, c=0) (0x3000000004fe013)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=4, k=254, g=0, s=1, c=0) (0x3000000004fe014)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   ├───NVIDIA_BLOCK_LINEAR_2D(h=5, k=254, g=0, s=1, c=0) (0x3000000004fe015)
+    │       │   │   ├───YUYV (0x56595559)
+    │       │   │   ├───UYVY (0x59565955)
+    │       │   │   ├───XRGB8888 (0x34325258)
+    │       │   │   ├───XRGB1555 (0x35315258)
+    │       │   │   └───XBGR2101010 (0x30334258)
+    │       │   └───DRM_FORMAT_MOD_LINEAR (0x0)
+    │       │       ├───YUYV (0x56595559)
+    │       │       ├───UYVY (0x59565955)
+    │       │       ├───XRGB8888 (0x34325258)
+    │       │       ├───XRGB1555 (0x35315258)
+    │       │       └───XBGR2101010 (0x30334258)
+    │       └───"zpos" (immutable): range [1, 1] = 1
+    └───Plane 5
+        ├───Object ID: 66
+        ├───CRTCs: {1}
+        ├───Legacy info
+        │   ├───FB ID: 0
+        │   └───Formats:
+        │       └───ARGB8888 (0x34325241)
+        └───Properties
+            ├───"type" (immutable): enum {Overlay, Primary, Cursor} = Cursor
+            ├───"IN_FORMATS" (immutable): blob = 67
+            │   └───DRM_FORMAT_MOD_LINEAR (0x0)
+            │       └───ARGB8888 (0x34325241)
+            └───"zpos" (immutable): range [UINT8_MAX, UINT8_MAX] = 255

@@ -47,7 +47,7 @@ assert not any('/bin/' + name in [e['destination'] for e in programs] for name i
 assert {'/bin/sh', '/bin/ls', '/bin/cat', '/bin/textprocessor', '/bin/counter', '/bin/activation', '/bin/diskutil',
         '/bin/paramdemo', '/bin/buffercheck', '/bin/lshw', '/bin/lspci', '/bin/lsusb', '/bin/lsblk', '/bin/gfxdemo'} <= {e['destination'] for e in programs}
 packages = [e for e in resources if e['destination'].startswith('/system/drivers/')]
-expected = {'virtio-net', 'firmware-framebuffer'}
+expected = {'virtio-net', 'firmware-framebuffer', 'gm206'}
 assert len(packages) == len(expected)
 seen = set()
 program_paths = {entry['destination'] for entry in programs}
@@ -59,11 +59,13 @@ for entry in packages:
     assert entry['destination'].endswith(f'/{name}/manifest.json')
     image = str(Path(entry['destination']).with_name('driver.elf'))
     assert package['image'] == image
-    assert package['abi'] == (1 if name == 'virtio-net' else 2)
+    assert package['abi'] == (2 if name == 'firmware-framebuffer' else 1)
     assert image in program_paths
     assert installed[image][1] == package['sha256']
     if name == 'virtio-net':
         assert package['pci'] == {'vendor': 0x1af4, 'device': 0x1041}
+    elif name == 'gm206':
+        assert package['pci'] == {'vendor': 0x10de, 'device': 0x1402}
     else:
         assert package['match'] == 'validated firmware framebuffer'
         assert 'pci' not in package

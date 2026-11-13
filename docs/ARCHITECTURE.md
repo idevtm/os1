@@ -968,6 +968,20 @@ The QEMU Standard VGA backend switches the scanout resolution during session acq
 The final session release restores the boot mode before it redraws the active terminal.
 The demo uses waitable pointer subscriptions. It reports input and draw timing after it releases the display.
 
+### GM206 discovery at boot
+
+A trusted ext2 module probes the matching GM206 display adapter before user processes start.
+It publishes DisplayPort sink and scanout observations in `os.display.gm206`.
+
+```text
+PCI identity -> trusted GM206 module -> boot probe -> display reflection
+BootInfo framebuffer -> console and exclusive Display sessions
+```
+
+The snapshot does not grant control of GPU registers or offer modes for acquisition.
+The firmware framebuffer retains ownership of physical scanout.
+See the [GM206 module contract](hardware/driver-module-abi.md#gm206-discovery-module).
+
 ### Framebuffer Text Rendering
 
 The framebuffer backend is intentionally minimal:

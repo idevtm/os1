@@ -358,3 +358,23 @@ USB, processor, and arbitrary AML associations are not inferred from names.
 
 Inspection never evaluates AML or executes CPUID.
 Platform capture runs before publication and uses bounded memory. Runtime USB publication remains separate.
+
+## GM206 display discovery
+
+After a matching boot probe succeeds, `inspect os.display.gm206` reports a cached discovery snapshot.
+The existing display backend and the Display v1 mode list stay in effect.
+
+```text
+os.display.gm206
+  outputs.output_N.modes.mode_N
+  scanouts.scanout_N
+```
+
+Names use zero-based indices. The records use the existing paged hardware query.
+An output is a firmware-enabled DisplayPort AUX channel with a successful DPCD reply.
+Fields report the AUX channel, raw DPCD revision and maximum link-rate codes, lane count, and valid EDID block count.
+The mode list reports a bounded subset of sink timings. It does not represent modes selectable through Display v1.
+Timing fields include active geometry, refresh in millihertz, pixel clock in hertz, sync positions, totals, and polarity.
+The preferred flag identifies a preferred EDID base timing.
+Scanout records report head, encoder index, link index, totals, and pixel clock. They do not associate a head with an AUX channel.
+No hardware query triggers a new probe. Connector hotplug does not refresh this snapshot.

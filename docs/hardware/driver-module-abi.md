@@ -1,6 +1,6 @@
 # Initial kernel driver module profile
 
-This profile loads optional virtio-net and firmware framebuffer modules from ext2.
+This profile loads optional virtio-net, firmware framebuffer, and GM206 discovery modules from ext2.
 It defines an internal kernel boundary, not a stable application ABI or Linux module format.
 
 ```text
@@ -118,3 +118,20 @@ The boot mode and pixel layout must agree with the register state.
 The kernel claims the framebuffer and MMIO BARs and maps only the required ranges.
 The module sets the requested geometry and checks the register values.
 A failed probe leaves the fixed framebuffer backend available.
+
+## GM206 discovery module
+
+The kernel matches PCI `10de:1402` and subsystem `1458:36c5` before it loads the package.
+The trusted ELF uses the 128 KiB slot at `0xffffffffa0040000`.
+The internal [GM206 probe table](../../src/common/driver/gm206.h) uses ABI 1.
+
+```text
+PCI match -> trusted ext2 ELF -> bounded BAR 0 access -> boot snapshot
+firmware framebuffer -> console and Display sessions
+```
+
+The kernel requires an enabled MMIO BAR. It releases the BAR claim after the boot probe.
+The driver reads live scanout totals and clocks. It queries firmware-enabled DisplayPort AUX channels for DPCD and EDID.
+The probe writes AUX command registers and the EDID offset to complete reads.
+It does not program scanout, change pad routing, train links, or write sink configuration.
+The discovery snapshot does not change the Display session ABI or framebuffer selection.
