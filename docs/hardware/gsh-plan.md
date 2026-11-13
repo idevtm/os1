@@ -21,8 +21,9 @@ gsh -> input subscription, wall clock, display
 - Retain the display and EHCI stall checks as explicit diagnostic commands in `gsh`.
 - Use 32 bits per pixel for the first backend. Qualify other pixel formats separately.
 
-QEMU Standard VGA provides the first runtime backend. GM206 discovery remains read-only.
-The GTX 950 needs a driver mode-set operation and scanout verification before it can start the desktop.
+QEMU Standard VGA provides the first runtime backend.
+The GTX 950 has a [firmware timing scanout](nvidia-mode-setting-plan.md#firmware-timing-scanout) path. Its physical acceptance is open.
+Complete that acceptance before the GTX 950 starts the desktop from `/etc/gsh.boot`.
 The laptop needs its own supported backend.
 
 ### Configuration

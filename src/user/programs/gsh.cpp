@@ -13,7 +13,29 @@ namespace f = u::files;
 namespace
 {
 constexpr unsigned background = 0x14283e;
-constexpr unsigned cursor_size = 9;
+// Arrow pointer. 'X' is the outline and '.' is the body. The tip is the top-left pixel.
+constexpr const char* cursor_rows[] = {
+    "X           ",
+    "XX          ",
+    "X.X         ",
+    "X..X        ",
+    "X...X       ",
+    "X....X      ",
+    "X.....X     ",
+    "X......X    ",
+    "X.......X   ",
+    "X........X  ",
+    "X.........X ",
+    "X......XXXXX",
+    "X...X..X    ",
+    "X..XX..X    ",
+    "X.X  X..X   ",
+    "XX   X..X   ",
+    "X     XX    ",
+};
+constexpr unsigned cursor_width = 12;
+constexpr unsigned cursor_height = sizeof(cursor_rows) / sizeof(*cursor_rows);
+constexpr unsigned cursor_outline = 0x000000;
 
 void print(int fd, const char* text)
 {
@@ -113,10 +135,29 @@ unsigned move(unsigned position, int64_t delta, unsigned limit)
     return unsigned(int64_t(position) + delta);
 }
 
-long draw_cursor(int client, unsigned x, unsigned y, unsigned color)
+// Draw the pointer with its tip at (x, y). Clip it at the right and bottom limits.
+long draw_cursor(
+    int client, unsigned x, unsigned y, unsigned color, unsigned right, unsigned bottom)
 {
-    long status = fill(client, x + 3, y, 3, cursor_size, color);
-    return status < 0 ? status : fill(client, x, y + 3, cursor_size, 3, color);
+    const unsigned width = right - x < cursor_width ? right - x : cursor_width;
+    // Draw each run of equal pixels in a row with one fill.
+    for(unsigned row = 0; row < cursor_height && y + row < bottom; ++row)
+    {
+        const char* pixels = cursor_rows[row];
+        for(unsigned start = 0, end; start < width; start = end)
+        {
+            for(end = start + 1; end < width && pixels[end] == pixels[start]; ++end)
+            {
+            }
+            if(pixels[start] == ' ')
+                continue;
+            const unsigned rgb = pixels[start] == '.' ? color : cursor_outline;
+            const long status = fill(client, x + start, y + row, end - start, 1, rgb);
+            if(status < 0)
+                return status;
+        }
+    }
+    return 0;
 }
 
 struct PointerStats
@@ -351,8 +392,9 @@ long interactive(int client,
     if(!pointer_state(pointer, previous) && !desktop)
         return OS1_ERR_CLOSED;
     stats.input_id = previous.device;
-    unsigned x = (mode.width - cursor_size) / 2, y = (mode.height - top - cursor_size) / 2;
-    long status = draw_cursor(client, x, top + y, previous.buttons ? 0xffcb54 : 0xffffff);
+    unsigned x = (mode.width - 1) / 2, y = (mode.height - top - 1) / 2;
+    long status = draw_cursor(
+        client, x, top + y, previous.buttons ? 0xffcb54 : 0xffffff, mode.width, mode.height);
     if(status < 0)
         return status;
     if(desktop)
@@ -459,16 +501,16 @@ long interactive(int client,
                     wait_count = 1;
                     break;
                 }
-                nx = move(nx, int64_t(snapshot.x - next.x), mode.width - cursor_size);
-                ny = move(ny, int64_t(snapshot.y - next.y), mode.height - top - cursor_size);
+                nx = move(nx, int64_t(snapshot.x - next.x), mode.width - 1);
+                ny = move(ny, int64_t(snapshot.y - next.y), mode.height - top - 1);
                 next = snapshot;
                 continue;
             }
             if(event.sequence <= next.sequence)
                 continue;
             stats.event(event);
-            nx = move(nx, event.dx, mode.width - cursor_size);
-            ny = move(ny, event.dy, mode.height - top - cursor_size);
+            nx = move(nx, event.dx, mode.width - 1);
+            ny = move(ny, event.dy, mode.height - top - 1);
             next.sequence = event.sequence;
             next.x += uint64_t(int64_t(event.dx));
             next.y += uint64_t(int64_t(event.dy));
@@ -480,12 +522,19 @@ long interactive(int client,
             continue;
         os1_measurement before{}, after{};
         const bool measured = !u::ipc_measure(before) && before.source == OS1_MEASUREMENT_HPET;
-        status = fill(client, x, top + y, cursor_size, cursor_size, background);
+        // Erase the visible part of the pointer.
+        status = fill(client,
+                      x,
+                      top + y,
+                      mode.width - x < cursor_width ? mode.width - x : cursor_width,
+                      mode.height - top - y < cursor_height ? mode.height - top - y : cursor_height,
+                      background);
         if(status < 0)
             return status;
         x = nx;
         y = ny;
-        status = draw_cursor(client, x, top + y, next.buttons ? 0xffcb54 : 0xffffff);
+        status = draw_cursor(
+            client, x, top + y, next.buttons ? 0xffcb54 : 0xffffff, mode.width, mode.height);
         if(status < 0)
             return status;
         if(measured && !u::ipc_measure(after) && after.source == before.source &&
@@ -577,7 +626,7 @@ long run(bool check, int menu)
             return OS1_ERR_LIMIT;
         auto& mode = modes[count++];
         __builtin_memcpy(&mode, r.payload, sizeof(mode));
-        if(!mode.id || mode.width < cursor_size || mode.height < cursor_size ||
+        if(!mode.id || mode.width < cursor_width || mode.height < cursor_height ||
            mode.width > OS1_DISPLAY_FILL_LIMIT ||
            (mode.bits_per_pixel != 24 && mode.bits_per_pixel != 32))
             return OS1_ERR_INVALID;

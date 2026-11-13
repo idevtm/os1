@@ -28,6 +28,11 @@ os1_bochs_mode boot_mode;
 bool failed;
 gm206::Snapshot* gm206_snapshot;
 Gm206Identity gm206_identity;
+const gm206::Exports* gm206_exports;
+gm206::ProbeIo gm206_io;
+gm206::ScanoutState gm206_state;
+uint8_t* gm206_aperture;
+uint32_t gm206_mode;
 struct Session : NativeObject
 {
     os1_framebuffer_surface target;
@@ -83,6 +88,139 @@ void match_bochs(VirtualMemory& vm)
     }
 }
 
+// Write one diagnostic line: the label, then each value as a hexadecimal number.
+// One function keeps the BIOS kernel image in its reserved window.
+[[gnu::noinline]] void gm206_log(const char* label, const uint32_t* values, unsigned count)
+{
+    auto& line = debug("display: gm206 ");
+    line(label);
+    for(unsigned i = 0; i < count; ++i)
+        line(" 0x")(values[i], 16);
+    line();
+}
+
+// Show one reserved surface. A failure after the ownership change leaves the display unusable.
+bool gm206_show(uint32_t offset, uint32_t width, uint32_t height, uint32_t pitch)
+{
+    const gm206::ScanoutLayout layout{
+        gm206_instance_offset,
+        gm206_push_offset,
+        gm206_check_offset,
+        reinterpret_cast<volatile uint32_t*>(gm206_aperture + gm206_check_offset)};
+    const auto read = [](unsigned reg) { return gm206_io.read(gm206_io.context, reg); };
+    const auto& boot = gm206_snapshot->boot;
+    const auto& state = gm206_state;
+    // The clock registers show if the engine changed the clock source. The SOR power and link
+    // registers show if the mode change stopped the output.
+    constexpr unsigned sor_words = sizeof(gm206::sor_state_registers) / sizeof(unsigned);
+    uint32_t before[2 + sor_words];
+    before[0] = read(gm206::head_clock_register(boot.head_index));
+    before[1] = read(gm206::sor_clock_register(boot.sor));
+    for(unsigned i = 0; i < sor_words; ++i)
+        before[2 + i] = read(gm206::sor_state_register(boot.sor, i));
+    const bool shown = gm206_exports->scanout(
+        gm206_io, *gm206_snapshot, layout, {offset, width, height, pitch}, gm206_state);
+    for(unsigned i = 0; i < sor_words; ++i)
+    {
+        const unsigned reg = gm206::sor_state_register(boot.sor, i);
+        const uint32_t values[] = {reg, before[2 + i], read(reg)};
+        gm206_log("sor", values, 3);
+    }
+    {
+        const uint32_t values[] = {before[0],
+                                   read(gm206::head_clock_register(boot.head_index)),
+                                   before[1],
+                                   read(gm206::sor_clock_register(boot.sor))};
+        gm206_log("clock", values, 4);
+    }
+    {
+        const uint32_t values[] = {state.supervisor_stage[0],
+                                   state.supervisor_stage[1],
+                                   state.supervisor_stage[2],
+                                   state.polls,
+                                   state.stage_poll[0],
+                                   state.stage_poll[1],
+                                   state.stage_poll[2],
+                                   state.stages};
+        gm206_log("stages", values, 8);
+    }
+    {
+        const uint32_t values[] = {offset,
+                                   uint32_t(state.stage),
+                                   state.supervisor_requests,
+                                   state.supervisor_head,
+                                   state.error[0],
+                                   state.error[1],
+                                   state.error[2],
+                                   state.channel_control,
+                                   state.armed_context,
+                                   state.armed_offset,
+                                   state.confirmed,
+                                   state.restored,
+                                   state.restored_mask};
+        gm206_log("scanout", values, 13);
+    }
+    // Read the DisplayPort link status again after the first call that reaches the channel
+    // stage. It shows if the monitor lost the link during the mode change.
+    static bool link_recorded = false;
+    if(state.stage >= gm206::ScanoutStage::Channel && !link_recorded)
+    {
+        link_recorded = true;
+        // The snapshot is too large for the kernel image and for the stack.
+        auto* after = static_cast<gm206::Snapshot*>(kcalloc(1, sizeof(gm206::Snapshot)));
+        if(after)
+        {
+            const uint32_t probed = gm206_exports->probe(gm206_io, *after);
+            const auto& now = after->boot;
+            const uint32_t values[] = {probed,
+                                       boot.link_status_read,
+                                       now.link_status_read,
+                                       boot.link_status[0],
+                                       boot.link_status[1],
+                                       boot.link_status[2],
+                                       now.link_status[0],
+                                       now.link_status[1],
+                                       now.link_status[2],
+                                       now.route_matched};
+            gm206_log("link", values, 10);
+            kfree(after);
+        }
+    }
+    // Record the active and the pending core state after each failure and after the first call.
+    // They show which method the engine refused, or the state that the engine accepted.
+    static bool recorded = false;
+    if(state.stage >= gm206::ScanoutStage::Channel && (!shown || !recorded))
+    {
+        recorded = true;
+        // The first methods are the update, the notifier control, and the notifier memory object.
+        // On the desktop card, an offset without a method shows one filler value in the two
+        // states. Offset 0x18c is such an offset.
+        const unsigned head = 0x400 + state.head * 0x300;
+        const uint32_t filler = read(0x64018c);
+        for(unsigned method = 0x80; method < head + 0x300; method += 4)
+        {
+            if(method == 0x8c)
+                method = 0x180;
+            if(method == 0x380)
+                method = head;
+            const uint32_t values[] = {method, read(0x640000 + method), read(0x660000 + method)};
+            if(values[1] != values[2] || (values[1] && values[1] != filler))
+                gm206_log("method", values, 3);
+        }
+    }
+    if(!shown && state.stage >= gm206::ScanoutStage::Ownership)
+        __atomic_store_n(&failed, true, __ATOMIC_RELEASE);
+    return shown;
+}
+
+// Move the console and the fixed mode to the reserved console surface, then show it.
+bool gm206_show_console(NativeObject* owner)
+{
+    surface.pixels = gm206_aperture + gm206_console_offset;
+    console_display_retarget(owner, gm206_aperture + gm206_console_offset);
+    return gm206_show(gm206_console_offset, surface.width, surface.height, surface.pitch);
+}
+
 bool root(const NativeObject* object)
 {
     return object == initrd_namespace_root();
@@ -92,7 +230,9 @@ void destroy(NativeObject* object)
 {
     auto& session = *static_cast<Session*>(object);
     const bool preserve = __atomic_load_n(&session.preserve_scanout, __ATOMIC_ACQUIRE);
-    const bool restored = preserve || !session.switched || driver->bochs_set(bochs, &boot_mode);
+    const bool restored =
+        preserve || !session.switched ||
+        (gm206_mode ? gm206_show_console(object) : driver->bochs_set(bochs, &boot_mode));
     if(!restored)
         __atomic_store_n(&failed, true, __ATOMIC_RELEASE);
     console_display_release(object, restored, preserve);
@@ -120,7 +260,25 @@ long acquire(const os1_display_mode& mode, bool native, DescriptorEntry& output)
     }
     object->preserve_scanout = status > 0;
     object->target = surface;
-    if(mode.id != OS1_DISPLAY_FIXED_MODE)
+    if(gm206_mode && mode.id == gm206_mode)
+    {
+        object->target.pixels = gm206_aperture + gm206_native_offset;
+        object->target.width = mode.width;
+        object->target.height = mode.height;
+        object->target.pitch = mode.width * 4;
+        if(!gm206_show(gm206_native_offset, mode.width, mode.height, mode.width * 4))
+        {
+            instance_release(instance);
+            return OS1_ERR_IO;
+        }
+        // Set this only after success. A failed first switch must not start a second one.
+        object->switched = true;
+        // Clear the surface only after the module checked BAR 1.
+        auto* pixels = reinterpret_cast<volatile uint32_t*>(object->target.pixels);
+        for(uint32_t i = 0; i < mode.width * mode.height; ++i)
+            pixels[i] = 0;
+    }
+    else if(mode.id != OS1_DISPLAY_FIXED_MODE)
     {
         object->switched = true;
         const os1_bochs_mode desired{
@@ -313,6 +471,34 @@ bool discover_gm206(const gm206::Exports& exports, const gm206::ProbeIo& io)
         kfree(snapshot);
     }
     return ready;
+}
+
+bool enable_gm206_scanout(const gm206::Exports& exports,
+                          const gm206::ProbeIo& io,
+                          uint8_t* aperture)
+{
+    // The head keeps the firmware timing. The native mode has the size of its output viewport.
+    const uint32_t output =
+        gm206_snapshot ? gm206_snapshot->boot.head[gm206::head_viewport_out] : 0;
+    const uint32_t width = output & 0x7fff, height = output >> 16 & 0x7fff;
+    if(!driver || bochs || !gm206_snapshot || !gm206_snapshot->boot.route_matched ||
+       modes.count >= OS1_DISPLAY_MODE_LIMIT || surface.pixel_bytes != 4 ||
+       surface.red_shift != 16 || surface.pitch & 0xff || surface.pitch > 0x1fff00 ||
+       surface.pitch < surface.width * 4 || width > 4096 || height > 2160 ||
+       width <= surface.width || height <= surface.height || width * 4 & 0xff ||
+       uint64_t(surface.pitch) * surface.height > gm206_instance_offset - gm206_console_offset ||
+       uint64_t(width) * height * 4 > gm206_console_offset - gm206_native_offset)
+    {
+        gm206_status("probe complete; native mode not offered");
+        return false;
+    }
+    gm206_exports = &exports;
+    gm206_io = io;
+    gm206_aperture = aperture;
+    gm206_mode = modes.count + 1;
+    modes.modes[modes.count++] = {gm206_mode, width, height, 32};
+    gm206_status("probe complete; native mode offered");
+    return true;
 }
 
 long query(Os1HardwareQuery& q)

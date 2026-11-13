@@ -18,6 +18,7 @@ native session close -> restore boot scanout -> redraw console
 - [Implementation sequence](#implementation-sequence)
 - [Impact and validation](#impact-and-validation)
 - [GM206 discovery implementation](#gm206-discovery-implementation)
+- [Firmware timing scanout](#firmware-timing-scanout)
 
 The [graphics shell plan](gsh-plan.md) replaces boot scanout restoration as a requirement for native graphics.
 Older entries retain the original diagnostic and restoration procedures as historical evidence.
@@ -611,4 +612,379 @@ It also found base surface fields that read one state copy only, and weak offset
 The corrections added both state copies, the shared range table, and the pinned offset tests.
 The second and third reviews found no blocking defect.
 The `add_mode` rejection path has no test because no parser input can reach it.
+The prose follows the project rules. Full ASD-STE100 dictionary verification was unavailable.
+
+### Firmware timing scanout
+
+This section describes the first native mode on the desktop GTX 950. The module shows its own surface with the firmware timing.
+The result is a 3840 × 2160 mode with no change to clocks, routing, or the DisplayPort link.
+The engine refused the UPDATE of the [first desktop test](#first-desktop-test).
+It refused one firmware clock value in the [second desktop test](#second-desktop-test).
+It accepted the UPDATE in the [third desktop test](#third-desktop-test), but the monitor showed no image.
+The [fourth desktop test](#fourth-desktop-test) passed with the third correction.
+The QEMU guests have no matching GPU.
+
+```text
+native mode open -> read active firmware state -> check BAR 1 through PRAMIN -> write instance block
+  -> take display from firmware -> start core channel
+  -> firmware state methods -> surface methods -> UPDATE
+  -> acknowledge supervisor requests -> armed state shows the surface
+session close -> console surface methods -> UPDATE -> console redraw
+```
+
+| Topic | Link |
+| --- | --- |
+| Evidence from the desktop | [Ownership report](#ownership-report) |
+| Register sequence | [Takeover sequence](#takeover-sequence) |
+| Reserved video memory | [Video memory layout](#video-memory-layout) |
+| Failure behavior | [Failure stages](#failure-stages) |
+| Desktop procedure | [Physical acceptance procedure](#physical-acceptance-procedure) |
+| Desktop results | [First desktop test](#first-desktop-test), [Second desktop test](#second-desktop-test), [Third desktop test](#third-desktop-test), [Fourth desktop test](#fourth-desktop-test) |
+| Assessment and evidence | [Scanout impact and validation](#scanout-impact-and-validation) |
+
+#### Ownership report
+
+The desktop ran the [ownership capture](#display-ownership-capture) on November 13, 2026.
+The local copy of the report is `build/gm206-native/desktop/gm206.txt`.
+
+| Field | Value | Meaning |
+| --- | --- | --- |
+| `supervisor_status` | `0x100` | Firmware owns the display. |
+| `vbios_display_owner` | `0x803` | Bit 0 shows firmware ownership. |
+| `core_channel_control` | `0x48070088` | The core channel is idle. |
+| `base_channel_control` | `0x40000088` | The base channel of head 0 is idle. |
+| `display_instance` | `0x1` | No display instance block is active. |
+| `pramin_window` | `0x200` | Firmware left the window at 32 MiB. |
+| `bar1_instance` | `0x0` | BAR 1 has no page table. |
+| `bar2_instance` | `0x40000000` | BAR 2 has no page table address. |
+| `vram_fbp_count`, `vram_fbpa_per_fbp` | 2, 1 | Two memory partitions are present. |
+| `vram_fbpa0_mib`, `vram_fbpa1_mib` | 1024, 1024 | Video memory is 2 GiB. |
+| `head_viewport_out_raw` | `0x08700f00` | The output viewport is 3840 × 2160. |
+| `head_surface_context_raw` | `0x0` | The core channel shows no surface. |
+
+The firmware image comes from the VGA path. The head scales the 1024 × 768 firmware framebuffer to the 4K timing.
+The link status shows four locked lanes at link rate code `0x14`.
+
+#### Takeover sequence
+
+Nouveau `gf119` and `gm200` are the reference for each register and value.
+The module keeps Nouveau order for the ownership change and the channel start.
+
+| Step | Registers | Action |
+| --- | --- | --- |
+| 0 | SOR control and 12 head methods at `0x640000` | Read the active firmware state. This step writes no register. |
+| 1 | `0x001700`, `0x700000`, `0x070000` | Write one word through PRAMIN and read it through BAR 1. Repeat in the opposite direction. |
+| 2 | PRAMIN | Clear the 4 KiB hash table. Write the memory object and its hash entry. |
+| 3 | `0x000140` | Disable the interrupt line. The module polls the display engine. |
+| 4 | `0x6101b4`, `0x6101c0`, `0x6301c4` | Copy head, DAC, and SOR capabilities. |
+| 5 | `0x6100ac`, `0x6194e8` | Take the display from firmware. Wait for bit 1 of `0x6194e8` to clear. |
+| 6 | `0x610010`, `0x610090`, `0x6100a0`, `0x6100b0`, `0x616308` | Set the instance block and the supervisor request mask. |
+| 7 | `0x610494` to `0x61049c`, `0x610490`, `0x640000` | Start the core channel with the command page in video memory. |
+| 8 | `0x660000` range, command page, `0x640000` | Send the firmware state methods on the first call. Then send the surface, viewport, and UPDATE methods. |
+| 9 | `0x6100ac`, `0x6101d4`, `0x6101d0` | Acknowledge each supervisor request. Do not change clock or link registers. |
+| 10 | `0x640004`, `0x640460`, `0x640474`, `0x6100ac` | Wait until the engine read all commands. Then wait for the armed surface offset and for supervisor stage 3. |
+
+The memory object has handle `0xf0000001` and covers all video memory. Its hash table entry is index `0x1f`.
+The surface methods are `0x0460`, `0x0468` to `0x0474`, `0x04b0`, `0x04b8`, and `0x04c0` to `0x04c8`.
+The module also disables the output table, the hardware cursor, and the base and overlay bounds.
+Before the ownership change, the module reads the active state of 13 core methods.
+The read address is `0x640000` plus the method.
+The methods are the control of the boot SOR and 12 methods of the boot head.
+The head methods are `0x0404`, `0x0408`, `0x0410` to `0x0424`, `0x042c`, and `0x0450` to `0x0458`.
+They hold the output resource, the control, the raster, and the pixel clock of the firmware mode.
+After the channel start, the module reads the pending state at `0x660000` plus the method.
+The first call sends each of the 13 values that is different from the pending value.
+The module changes two firmware values before it sends them.
+It clears bit 24 of the clock configuration `0x0454`. The Nouveau class header names this bit `NOT_DRIVER`.
+The engine refuses this bit from a channel, as the [second desktop test](#second-desktop-test) showed.
+If the firmware clock limit `0x0458` is zero, the module sends the clock `0x0450` as the limit, as Nouveau does.
+The restored value in the log line is the number of the methods that the first update sent.
+The mask value has one bit for each sent method. Bit 0 is the SOR control.
+Each later log line repeats these values.
+The surface format is `A8R8G8B8` with pitch layout. The head scales a smaller surface to the output viewport.
+The module compares only bits 11:2 of the `0x640004` read pointer, as Nouveau does.
+An update with a supervisor request is complete after the module acknowledges stage 3.
+The armed surface offset shows the new surface before stage 3 starts, as the third desktop test showed.
+Thus the module waits a maximum of five seconds for stage 3. No test shows the time that the engine needs.
+A missing stage 3, a pending request, or a different armed offset at the limit fails the call at stage 7.
+The module starts a new stage sequence at each stage 1 request.
+An update without a supervisor request is complete when the armed offset shows the surface for 20 ms.
+If such an update shows no armed offset in 0.5 seconds, the call succeeds and the confirmed value in the log line is zero.
+The module refuses the request if the captured `bar1_instance` value has bit 31 set.
+Later calls reuse the channel. The module jumps to the start of the command page before byte `0xf00`.
+
+Nouveau does not show these behaviors. The desktop test must confirm them:
+
+- An UPDATE with firmware timing values and new surface values keeps the firmware clock and link.
+- The monitor shows the surface after the module acknowledges all three supervisor stages.
+
+#### Video memory layout
+
+The kernel reserves fixed offsets in the first 101 MiB of video memory. BAR 1 must be at least `0x06412000` bytes.
+
+| Offset | Bytes | Use |
+| --- | ---: | --- |
+| `0x04000000` | 33,177,600 | Native surface, 3840 × 2160, pitch 15,360 |
+| `0x06000000` | 3,145,728 | Console surface, 1024 × 768, pitch 4096 |
+| `0x06400000` | 65,536 | Display instance block |
+| `0x06410000` | 4096 | Command page |
+| `0x06411000` | 4 | BAR 1 check word |
+
+The firmware framebuffer address is not in this range. The capture does not give its video memory offset.
+The capture also does not show if firmware uses the reserved range.
+Thus the console moves to the console surface on the first session close after a switch.
+The fixed 1024 × 768 mode uses the same surface from that time.
+
+#### Failure stages
+
+Each scanout call writes one `display: gm206 scanout` line to the kernel log. The second value is the stage.
+
+| Stage | Name | Display state after failure |
+| ---: | --- | --- |
+| 1 | Precondition | Not changed. The module did not access a register. |
+| 2 | Aperture | Not changed. BAR 1 does not expose the check word. |
+| 3 | Memory | Not changed. The instance block write did not complete. |
+| 4 | Ownership | Unknown. Firmware did not release the display. |
+| 5 | Channel | Unknown. The core channel did not start. |
+| 6 | Command | Unknown. The log line contains the three error words. The first desktop test kept the firmware console. |
+| 7 | Update | Unknown. The engine did not read all commands, or the update did not complete in the time limit. |
+| 8 | Ready | The surface is on the head. |
+
+A failure before stage 4 returns an I/O error and keeps the firmware console.
+After a failure at stage 4 or later, the display service refuses each new session until the next boot.
+The text console can continue to operate, as the first desktop test showed.
+Each log line starts with `display: gm206`, then a label, then hexadecimal values without names.
+The first three desktop tests used an earlier format with a name for each value.
+
+| Label | Lines | Values in order |
+| --- | --- | --- |
+| `sor` | Six for each call | Register offset, value before the call, value after the call. |
+| `clock` | One for each call | Head clock before and after, SOR clock before and after. |
+| `stages` | One for each call | Head request of stages 1 to 3, poll count, poll of stages 1 to 3, stage bits. |
+| `scanout` | One for each call | Surface offset, stage, supervisor requests, head request bits, three error words, channel control, armed context, armed offset, confirmed, restored, mask. |
+| `link` | One, after the first call that reaches stage 5 | Probe result, status read before and after, three status bytes before, three after, route match. |
+| `method` | After that first call and after each failure at stage 5 or later | Method, active value, pending value. |
+
+The `sor` registers are the power, the sequencer, and the link control and lane power of the two links.
+The module clears the `stages` values at the start of each call. One poll takes a minimum of 100 microseconds.
+A stage 3 poll that is not larger than the stage 1 poll belongs to the update before it.
+A stage 3 poll with a stage 1 poll of zero also belongs to that update.
+For the `link` line, the kernel runs the module probe again in a temporary allocation.
+The status bytes are DPCD `0x202` to `0x204`. If the allocation fails, the kernel writes no `link` line.
+The kernel also reads the clock and SOR registers if the module refuses the call at stage 1.
+BAR 0 range `0x610000` to `0x615fff` contains the clock register of each head and of each SOR.
+The `method` lines cover methods `0x0080` to `0x0088`, `0x0180` to `0x037c`, and the methods of the boot head.
+The kernel omits a method if the two values are equal and are zero or the filler value.
+The filler value is the active value at offset `0x018c`, which has no method.
+One log function writes all these lines. The BIOS kernel image has no space for separate statements.
+The kernel clears the native surface after a successful switch. The monitor can show old memory for a short time.
+
+#### Physical acceptance procedure
+
+The menu session shows the background color and the pointer only. It does not show the desktop header.
+Do not create `/etc/gsh.boot` for this test. With that file, `init` opens the native mode during startup.
+
+1. Write the current image to the USB device.
+2. Start the desktop from the USB device.
+3. Run the graphics shell menu:
+
+   ```text
+   gsh "--menu"
+   ```
+
+4. Make sure that the menu shows a 3840 × 2160 entry.
+5. Select the 3840 × 2160 entry.
+6. Press Enter.
+7. Record if the monitor shows the background, a blank screen, a distorted image, or the console.
+8. Move the mouse.
+9. Record if the pointer moves and if it reaches each screen edge.
+10. Press Esc to close the session.
+11. Record if the console text comes back.
+12. Enter this command, also if the screen is blank:
+
+    ```text
+    os.system.log.export target:"disk"
+    ```
+
+13. Wait 10 seconds.
+14. Stop the desktop.
+15. Connect the USB device to the development machine.
+16. Copy the data partition.
+
+The exported kernel log on the data partition contains the `display: gm206 scanout` lines.
+If the console stays after step 6, the switch failed. The stage value in the log shows the position.
+Continue at step 12.
+A menu without the 3840 × 2160 entry shows that the kernel did not offer the mode.
+In that condition, run `os.display.gm206.diagnostics > /gm206.txt`. Then read the `probe_status` field.
+
+| `probe_status` | Meaning |
+| --- | --- |
+| `probe complete; native mode offered` | The mode is in the list. |
+| `probe complete; native mode not offered` | The display service refused the boot state or the firmware framebuffer format. |
+| `probe complete` | The kernel did not claim or map BAR 1, or BAR 1 is too small. |
+
+#### First desktop test
+
+The first test ran on November 13, 2026 with base `42d89e3` plus the first scanout diff.
+The menu showed the 3840 × 2160 mode. The switch failed, and the text console continued to operate.
+The exported kernel log is `build/gm206-restore/desktop-kernel-log.bin`. It contains this line:
+
+```text
+display: gm206 scanout offset=0x4000000 stage=6 supervisor=0x0 head_request=0x0
+  error=0x5080 0x0 0x4 control=0xc909009b context=0x0 armed_offset=0x0 confirmed=0
+```
+
+| Evidence | Result |
+| --- | --- |
+| Stage 6 | The BAR 1 check, the instance block write, the ownership change, and the channel start completed. |
+| Error word `0x5080` | Type 5 is `INVALID_STATE` in the Nouveau error table. The low bits name the UPDATE method `0x0080`. |
+| Error word `0x4` | The engine code. Nouveau does not define this value. |
+| No supervisor request | The engine refused the update before a mode change started. |
+| Console operation | The monitor continued to show the firmware console after the refused update. |
+
+Thus BAR 1 exposes video memory without translation at the check offset on this card.
+The refused update contained the surface, viewport, output table, cursor, and bounds methods.
+It contained no timing, output resource, or SOR method.
+The cause is an inference: the pending state of the new channel had no timing and no output resource.
+The correction is the firmware state step in the [takeover sequence](#takeover-sequence).
+The correction also adds the `restored` value and the `display: gm206 method` lines to the log.
+The [second desktop test](#second-desktop-test) examined this correction.
+
+#### Second desktop test
+
+The second test ran on November 13, 2026 with the first correction. The first correction copied two full method ranges.
+The switch failed again, and the text console continued to operate.
+The exported kernel log is `build/gm206-clock/desktop2-kernel-log.bin`. It contains this line and 206 method lines:
+
+```text
+display: gm206 scanout offset=0x4000000 stage=6 supervisor=0x0 head_request=0x0
+  error=0x4454 0x1200000 0x10 control=0xc909009b context=0x0 armed_offset=0x0 confirmed=0 restored=14
+```
+
+| Evidence | Result |
+| --- | --- |
+| Error word `0x4454` | Type 4 is `INVALID_ARG`. The low bits are method `0x0454` without a shift. |
+| Error word `0x1200000` | The refused value. It is the firmware clock configuration with bit 24, `NOT_DRIVER`. |
+| `0x0454` pending `0x0` | The refused value did not reach the pending state. The engine did not run the later methods. |
+| Nine restored timing methods | The new channel did not hold `0x0220`, `0x0404`, `0x0414` to `0x0424`, `0x0450`, and `0x0454`. |
+| Equal values of `0x0408`, `0x0430`, `0x0470`, `0x04d0` | The new channel kept other firmware values as pending state. |
+| Value `0x552ac409` | An offset without a method shows this filler value in the two states. |
+| Five restored offsets `0x06ec` to `0x06fc` | These offsets have no method and show different values. The first correction sent them. |
+
+Thus the pending state of the new channel had no timing and no output resource.
+No UPDATE has passed. Thus the tests do not confirm the cause of the first `INVALID_STATE` error.
+The `0x640000` and `0x660000` ranges show the active and the pending state.
+The first error word names the method without a shift. Thus the first test error named the UPDATE method `0x0080`.
+The second correction sends only the 13 methods of the [takeover sequence](#takeover-sequence).
+It also clears bit 24 of the clock configuration and sends a clock limit.
+The [third desktop test](#third-desktop-test) examined the second correction.
+
+#### Third desktop test
+
+The third test ran on November 13, 2026 with the second correction.
+The monitor changed its mode and then showed no image. No background and no pointer were visible.
+The exported kernel logs are `build/gm206-stage3/desktop3-kernel-log-1.bin` and `desktop3-kernel-log-4.bin`.
+They contain these lines for the native surface and for the console surface:
+
+```text
+display: gm206 clock head=0x800040 0x800080 sor=0x3d10040 0x3d10080 stages=0x11100 0x11100 0x0
+display: gm206 scanout offset=0x4000000 stage=8 supervisor=0x12 ... error=0x0 0x0 0x0
+display: gm206 clock head=0x800040 0x800040 sor=0x3d10040 0x3d10040 stages=0x100 0x100 0x11100
+display: gm206 scanout offset=0x6000000 stage=8 supervisor=0x12412 ... armed_offset=0x60000
+  confirmed=1 restored=10 mask=0x1df3
+```
+
+| Evidence | Result |
+| --- | --- |
+| Stage 8 and no error words | The engine accepted the 10 sent firmware methods, the surface methods, and the UPDATE. |
+| Method lines | The active state shows the surface, clock configuration `0x200000`, and the clock limit. |
+| `supervisor=0x12` | The first call acknowledged stages 1 and 2. It returned before stage 3. |
+| `supervisor=0x12412` | The second call acknowledged stage 3 of the first update, then stages 1 and 2. |
+| `stages=0x11100` | The first update requested the OR and clock work of a full mode change. |
+| `stages=0x100 0x100` | The surface change of the second update also started supervisor stages. |
+| Clock registers | Bits 7:4 were `0x8` after the first call. They were `0x4` again at the start of the second call. |
+
+Thus `0x6100ac` shows supervisor requests with the interrupt line disabled.
+The engine accepts an UPDATE without a notifier memory object.
+Stage 3 of the first update stayed open when the call returned.
+The second call also returned after stage 2. Thus its stage 3 probably stayed open. This is an inference.
+A second inference is that the open stage 3 kept the output without an image.
+A lost DisplayPort link during the mode change gives the same result on the monitor.
+The third correction waits for stage 3 and acknowledges it in the same call.
+A stage 3 request that is pending before stage 1 or together with stage 1 belongs to the update before it. The module does not use it as the end.
+The log now also shows six SOR power and link registers before and after each call.
+It also shows the poll count of each stage and the DisplayPort link status after the first call.
+A fourth desktop test must confirm the third correction.
+The module does not do the clock, link, and script work that Nouveau does in stages 2 and 3.
+The monitor can thus stay without an image after the correction. The SOR lines then show the output state.
+
+#### Fourth desktop test
+
+The fourth test ran on November 13, 2026 with the third correction.
+The user reported that the test passed on the desktop.
+The repository has no exported kernel log of this test.
+Thus the stage 3 wait time and the link status lines remain unrecorded.
+
+#### Scanout impact and validation
+
+| Area | Assessment |
+| --- | --- |
+| Scope and interfaces | Module ABI 5 adds the `scanout` export. Display v1 does not change. The matched board gets one more mode record. |
+| Boot and platform | The kernel maps PRAMIN and more display pages of BAR 0. It claims BAR 1 and maps 36.07 MiB. UEFI and BIOS guests have no matching device. |
+| Memory and isolation | The kernel allocates one snapshot of approximately 8.3 KB for the second probe and releases it. The module checks each offset against the captured memory size. User requests use the existing mode and fill checks. |
+| Concurrency | The scanout call runs while the session owns the display. The console lock protects the console pixel pointer. Each register wait has a two-second limit. The wait for supervisor stage 3 has a five-second limit. |
+| Runtime resources | The native session clears 8,294,400 pixels through BAR 1 after the switch. The sum of the wait limits is 19 seconds for the first call and 13 seconds for a later call. The kernel request thread waits without a lock. The first call also runs the probe again, with no measured time. Physical latency is unmeasured. |
+| Validation and documents | Host tests use a register model. The fourth desktop test passed, but its log is not recorded. |
+
+
+The candidate is base `42d89e3` plus the source, test, and build script diff.
+The diff SHA-256 is `32e94b8004635de79c8600325d776e057d709ad89f8f96491b9fa1b54cd554b6`.
+The baseline sizes come from the `42d89e3` build with the same toolchain and settings.
+The same diff replaces the cross pointer of the graphics shell with an arrow pointer.
+
+| Resource | Baseline bytes | Candidate bytes | Change |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 667,160 | 670,480 | +3,320 bytes (+0.50%) |
+| BIOS kernel ELF | 495,016 | 497,320 | +2,304 bytes (+0.47%) |
+| GM206 ELF | 11,864 | 16,848 | +4,984 bytes (+42.01%) |
+| `gsh` ELF | 16,776 | 17,328 | +552 bytes (+3.29%) |
+| UEFI ISO | 4,409,344 | 4,413,440 | +4,096 bytes (+0.09%) |
+| Initrd | 10,240 | 10,240 | 0 bytes (0%) |
+| USB image | 35,651,584 | 35,651,584 | 0 bytes (0%) |
+
+One pointer draw uses a maximum of 54 fill calls. The cross pointer used two fill calls.
+Pointer draw latency, switch latency, and surface clear latency on the desktop remain unmeasured.
+
+The final `./scripts/check-local.sh` run passed 832 host, 104 normal-image, and three diagnostic-image checks.
+The profile times were 29.28 s, 419.33 s, and 10.02 s. See `build/gm206-stage3/full-local.log` for the full run.
+An earlier run of this correction failed the BIOS kernel layout check. See `build/gm206-stage3/failed-bios-window-full-local.log`.
+The loaded BIOS kernel was one page larger than its reserved window. The limit did not change.
+The correction replaced the separate log statements with one log function.
+The first call also reads 26 registers for the firmware state.
+Fifteen host tests use a register model of the display engine. The model follows the same reference as the module.
+Thus the host tests do not show the behavior of the physical display engine.
+No host test covers the display service session paths or the pointer clip.
+
+Three independent reviews examined the diff. No review found a blocking defect.
+The first review found a completion test that could fail after a correct switch, and BAR 1 writes before the check.
+It also found a PRAMIN window step that Nouveau does not use. The corrections changed these three behaviors.
+The second review found an acceptance procedure that did not agree with the menu session. The procedure is corrected.
+The third review found a wrong field name in the procedure. The field name is corrected.
+Three more independent reviews examined the correction after the first desktop test. No review found a blocking defect.
+The fourth review found stale evidence, a wrong procedure statement, and a firmware state copy that was too wide.
+The fifth review found a condition that could suppress the failure record, and a test that did not detect a missing guard.
+The sixth review found two missing limits in the statements about the next desktop test. The corrections are in the tree.
+Three more independent reviews examined the second correction. No review found a blocking defect.
+The eighth review found a kernel clock read outside the BAR 0 ranges for head 2, head 3, and SOR 2 to SOR 7.
+The correction is the larger range at `0x610000`. A host test examines each head and each SOR.
+The ninth review found a test for clock writes that examined only `0x612200` to `0x612fff`. The test now examines the full range.
+Three more independent reviews examined the third correction. No review found a blocking defect.
+The tenth review found that an earlier stage 3 request could end a new update. The module now starts the sequence at stage 1.
+It also found no evidence for the stage 3 time limit and no link evidence in the log. The limit and the log changed.
+The eleventh review found wrong wait and allocation statements in this section. The statements are corrected.
+The twelfth review found three wording limits. They are corrected.
+These review findings stay open. The stage 3 values of a call can come from the update before it.
+The host model does not show the stage order `4, 1, 2` of the desktop log.
+No test covers a stage 3 time limit after an earlier stage 3, or a second stage 1 in one call.
+The comment for the SOR state registers in `gm206.h` does not name the sequencer register.
 The prose follows the project rules. Full ASD-STE100 dictionary verification was unavailable.

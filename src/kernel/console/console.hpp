@@ -29,6 +29,7 @@ struct os1_display_fill;
 struct NativeObject;
 long console_display_acquire(NativeObject*, bool native);
 void console_display_release(NativeObject*, bool restored, bool native);
+void console_display_retarget(NativeObject*, uint8_t* framebuffer);
 long console_display_fill(NativeObject*,
                           const os1_display_driver&,
                           const os1_framebuffer_surface&,

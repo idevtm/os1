@@ -251,7 +251,7 @@ void load_gm206()
         PciBarResource registers{};
         if(!claim_pci_bar(owner, index, 0, registers))
             return;
-        // Only the listed register ranges are used by the probe.
+        // The module uses only the listed register ranges.
         bool mapped = true;
         for(const auto& range : gm206::register_ranges)
             mapped = mapped && map_mmio_range(vm, registers.base + range.offset, range.bytes);
@@ -271,6 +271,24 @@ void load_gm206()
             {
                 native_display::gm206_status("probe complete");
                 debug("driver: loaded gm206 discovery from ")(kGm206DriverPath)();
+                // The scanout path needs the reserved video memory through BAR 1.
+                const auto& memory = pci.bars[1];
+                PciBarResource aperture{};
+                if(driver::contains(image, reinterpret_cast<uint64_t>(exports->scanout), 1, 5) &&
+                   (memory.type == PciBarType::Mmio32 || memory.type == PciBarType::Mmio64) &&
+                   memory.size >= native_display::gm206_aperture_bytes &&
+                   claim_pci_bar(owner, index, 1, aperture))
+                {
+                    // The display service keeps both BAR claims when it offers the mode.
+                    if(map_mmio_range(vm,
+                                      aperture.base + native_display::gm206_native_offset,
+                                      native_display::gm206_aperture_bytes -
+                                          native_display::gm206_native_offset) &&
+                       native_display::enable_gm206_scanout(
+                           *exports, io, kernel_physical_pointer<uint8_t>(aperture.base)))
+                        return;
+                    release_pci_bar(owner, index, 1);
+                }
             }
             else
                 debug("driver: gm206 probe rejected")();

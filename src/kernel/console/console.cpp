@@ -168,6 +168,14 @@ void console_display_release(NativeObject* owner, bool restored, bool native)
         active_terminal->link(g_text_display);
 }
 
+void console_display_retarget(NativeObject* owner, uint8_t* framebuffer)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    // Only the display owner can move the console pixels. The geometry does not change.
+    if(graphics_owner == owner)
+        static_cast<FramebufferTextDisplay*>(g_text_display->instance)->framebuffer = framebuffer;
+}
+
 long console_display_fill(NativeObject* owner,
                           const os1_display_driver& driver,
                           const os1_framebuffer_surface& surface,

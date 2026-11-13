@@ -597,7 +597,8 @@ See the [SystemControl contract](docs/native-api/abi/system-control-abi.md) for 
 
 Memory logs can be exported without a diagnostic boot image.
 Run `os.system.log.export target:"tmp"` to refresh bounded snapshots under `/tmp/log`.
-Run `os.system.log.export target:"disk"` to drain and synchronize persistent segments under `/log`.
+Run `lx` in `sh` to drain and synchronize persistent segments under `/log`.
+The shortcut calls `os.system.log.export target:"disk"`.
 `os.system.log.export_info` reports status and failure counters.
 Automatic disk export uses bounded retention and stops after repeated failures.
 See the [log export ABI](docs/native-api/abi/log-export-abi.md) for recovery, privacy, and storage limits.

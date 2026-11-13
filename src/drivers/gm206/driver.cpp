@@ -413,10 +413,413 @@ bool probe(const ProbeIo& io, Snapshot& out)
     }
     return true;
 }
+
+namespace
+{
+// Register access for the display engine. Nouveau gf119 and gm200 are the reference.
+struct Engine
+{
+    const ProbeIo& io;
+    uint32_t rd(unsigned reg) const
+    {
+        return io.read(io.context, reg);
+    }
+    void wr(unsigned reg, uint32_t value) const
+    {
+        io.write(io.context, reg, value);
+    }
+    // Wait at most two seconds.
+    bool wait(unsigned reg, uint32_t mask, uint32_t value) const
+    {
+        for(unsigned i = 0; i < 20000; ++i)
+        {
+            if((rd(reg) & mask) == value)
+                return true;
+            io.delay_us(100);
+        }
+        return false;
+    }
+    // Video memory through the PRAMIN window in BAR 0.
+    unsigned window(uint32_t address) const
+    {
+        // Nouveau sets the window in 1 MiB steps.
+        wr(0x001700, (address & ~0xfffffu) >> 16);
+        return 0x700000 + (address & 0xfffff);
+    }
+    uint32_t memory(uint32_t address) const
+    {
+        return rd(window(address));
+    }
+    void memory(uint32_t address, uint32_t value) const
+    {
+        wr(window(address), value);
+    }
+    bool flush() const
+    {
+        wr(0x070000, 1);
+        return wait(0x070000, 2, 0);
+    }
+    unsigned head_mask() const
+    {
+        return rd(0x612004) & 0xf;
+    }
+};
+
+constexpr uint32_t memory_handle = 0xf0000001;
+constexpr unsigned command_limit = 0xf00, instance_object = 0x1000;
+// Head methods that the first update copies from the active firmware state: output resource,
+// control, raster, and pixel clock. The offset is relative to the first method of the head.
+// A new core channel does not hold all of them as pending state. The module sends no other
+// firmware value. Offsets without a method show values that are not method values.
+inline constexpr unsigned kept_head_methods[] = {
+    0x04, 0x08, 0x10, 0x14, 0x18, 0x1c, 0x20, 0x24, 0x2c, 0x50, 0x54, 0x58};
+constexpr unsigned kept_head_words = sizeof(kept_head_methods) / sizeof(*kept_head_methods);
+// Entry 0 is the control method of the boot SOR.
+constexpr unsigned kept_words = 1 + kept_head_words;
+constexpr unsigned pixel_clock = 0x50, pixel_clock_config = 0x54, pixel_clock_max = 0x58;
+constexpr unsigned kept_method(unsigned index, unsigned head, unsigned sor)
+{
+    return index ? 0x400 + head + kept_head_methods[index - 1] : 0x200 + sor * 0x20;
+}
+
+unsigned boot_index(const char* name)
+{
+    for(unsigned i = 0; i < sizeof(boot_registers) / sizeof(*boot_registers); ++i)
+    {
+        const char *left = boot_registers[i].name, *right = name;
+        while(*left && *left == *right)
+            ++left, ++right;
+        if(*left == *right)
+            return i;
+    }
+    return 0;
+}
+
+// Sum the enabled memory partitions. Return zero if the size is not usable.
+uint64_t memory_bytes(const BootState& boot)
+{
+    const uint64_t parts = uint64_t(boot.core[boot_index("vram_fbp_count")]) *
+                           boot.core[boot_index("vram_fbpa_per_fbp")];
+    if(!parts || parts > 4)
+        return 0;
+    uint64_t mib = 0;
+    for(unsigned i = 0; i < parts; ++i)
+    {
+        const uint32_t part = boot.core[boot_index("vram_fbpa0_mib") + i];
+        if(!part || part > 16384)
+            return 0;
+        mib += part;
+    }
+    return mib << 20;
+}
+
+bool take_display(const Engine& e, const ScanoutLayout& layout, uint64_t bytes, ScanoutState& state)
+{
+    // Check BAR 1 in both directions before any display register changes.
+    state.stage = ScanoutStage::Aperture;
+    constexpr uint32_t pattern = 0x6d32064f;
+    // The first write uses PRAMIN. BAR 1 gets one write only after the read direction is correct.
+    e.memory(layout.check, pattern);
+    if(!e.flush() || *layout.check_word != pattern)
+        return false;
+    *layout.check_word = ~pattern;
+    if(!e.flush() || e.memory(layout.check) != ~pattern)
+        return false;
+
+    // Instance block: an empty hash table, one memory object, and one hash entry for its handle.
+    state.stage = ScanoutStage::Memory;
+    for(unsigned offset = 0; offset < 0x1000; offset += 4)
+        e.memory(layout.instance + offset, 0);
+    const uint32_t object[] = {0x49, 0, uint32_t((bytes - 1) >> 8), 0, 0, 0};
+    for(unsigned i = 0; i < 6; ++i)
+        e.memory(layout.instance + instance_object + i * 4, object[i]);
+    unsigned hash = 0;
+    for(uint32_t handle = memory_handle; handle; handle >>= 9)
+        hash ^= handle & 0x1ff;
+    e.memory(layout.instance + hash * 8, memory_handle);
+    e.memory(layout.instance + hash * 8 + 4, instance_object << 9 | 1);
+    if(!e.flush())
+        return false;
+
+    // Keep the interrupt line quiet. This module polls the display engine.
+    e.wr(0x000140, 0);
+    const unsigned resources = e.rd(0x612004);
+    for(unsigned head = 0; head < heads; ++head)
+        if(resources & (1u << head))
+            for(unsigned word = 0; word < 12; word += 4)
+                e.wr(0x6101b4 + head * 0x800 + word, e.rd(0x616104 + head * 0x800 + word));
+    for(unsigned dac = 0; dac < 4; ++dac)
+        if(resources & (0x10u << dac))
+            e.wr(0x6101c0 + dac * 0x800, e.rd(0x61a000 + dac * 0x800));
+    for(unsigned sor = 0; sor < 8; ++sor)
+        if(resources & (0x100u << sor))
+            e.wr(0x6301c4 + sor * 0x800, e.rd(0x61c000 + sor * 0x800));
+
+    state.stage = ScanoutStage::Ownership;
+    if(e.rd(0x6100ac) & 0x100)
+    {
+        e.wr(0x6100ac, 0x100);
+        e.wr(0x6194e8, e.rd(0x6194e8) & ~1u);
+        if(!e.wait(0x6194e8, 2, 0))
+            return false;
+    }
+    e.wr(0x610010, layout.instance >> 8 | 9);
+    e.wr(0x610090, 0);
+    e.wr(0x6100a0, 0);
+    e.wr(0x6100b0, 0x307);
+    for(unsigned head = 0; head < heads; ++head)
+        if(resources & (1u << head))
+            e.wr(0x616308 + head * 0x800, (e.rd(0x616308 + head * 0x800) & ~0x111u) | 0x010);
+
+    state.stage = ScanoutStage::Channel;
+    e.wr(0x6100a0, e.rd(0x6100a0) | 1);
+    e.wr(0x610494, layout.push >> 8 | 1);
+    e.wr(0x610498, 0x00010000);
+    e.wr(0x61049c, 1);
+    e.wr(0x610490, e.rd(0x610490) | 0x10);
+    e.wr(0x640000, 0);
+    e.wr(0x610490, 0x01000013);
+    state.channel_control = e.rd(0x610490);
+    if(!e.wait(0x610490, 0x80000000, 0))
+    {
+        state.channel_control = e.rd(0x610490);
+        return false;
+    }
+    state.owned = true;
+    state.put = 0;
+    return true;
+}
+
+// Acknowledge one pending supervisor request without a change to clock or link.
+// Return false if the display engine reported a command error.
+bool service(const Engine& e, ScanoutState& state)
+{
+    ++state.polls;
+    if(e.rd(0x61009c) & 1)
+    {
+        for(unsigned word = 0; word < 3; ++word)
+            state.error[word] = e.rd(0x6101f0 + word * 4);
+        e.wr(0x61009c, 1);
+        e.wr(0x6101f0, 0x90000000);
+        state.stage = ScanoutStage::Command;
+        return false;
+    }
+    if(const uint32_t pending = e.rd(0x6100ac) & 7)
+    {
+        state.supervisor_requests = state.supervisor_requests << 4 | pending;
+        // Stage 1 starts the sequence of this update. A stage 3 request that is pending at the
+        // same time or earlier belongs to the update before it.
+        state.stages = pending & 1 ? uint8_t(pending & 3) : uint8_t(state.stages | pending);
+        for(unsigned stage = 0; stage < 3; ++stage)
+            if(pending & (1u << stage))
+                state.stage_poll[stage] = state.polls;
+        const unsigned mask = e.head_mask();
+        e.wr(0x6100ac, pending);
+        for(unsigned index = 0; index < heads; ++index)
+            if(mask & (1u << index))
+            {
+                if(index == state.head)
+                {
+                    const uint32_t request = e.rd(0x6101d4 + index * 0x800);
+                    state.supervisor_head |= request;
+                    for(unsigned stage = 0; stage < 3; ++stage)
+                        if(pending & (1u << stage))
+                            state.supervisor_stage[stage] = request;
+                }
+                e.wr(0x6101d4 + index * 0x800, 0);
+            }
+        e.wr(0x6101d0, 0x80000000);
+    }
+    return true;
+}
+
+// Run the queued commands. The engine must read all of them in two seconds.
+bool run_commands(const Engine& e, ScanoutState& state, uint32_t put)
+{
+    e.wr(0x640000, put);
+    state.put = put;
+    for(unsigned i = 0; i < 20000; ++i)
+    {
+        if(!service(e, state))
+            return false;
+        if(!(e.rd(0x6100ac) & 7) && (e.rd(0x640004) & 0xffc) == put)
+            return true;
+        e.io.delay_us(100);
+    }
+    state.channel_control = e.rd(0x610490);
+    return false;
+}
+
+// Poll limit for the last supervisor stage: five seconds. No test shows the time that the engine
+// needs.
+constexpr unsigned stage_polls = 50000;
+
+// Wait for the end of the update. The third desktop test showed that the engine changes the mode
+// in three supervisor stages. The armed head state shows the surface before the last stage.
+// Thus an update with a supervisor request is complete only after stage 3.
+// An update without a request is complete when the armed state shows the surface for 20 ms.
+// A missing armed state without a request is a diagnostic result and not a failure.
+bool confirm(const Engine& e, ScanoutState& state, uint32_t offset)
+{
+    const unsigned head = state.head * 0x300;
+    state.confirmed = false;
+    unsigned quiet = 0;
+    for(unsigned i = 0; i < stage_polls; ++i)
+    {
+        if(!service(e, state))
+            return false;
+        state.armed_context = e.rd(0x640474 + head);
+        state.armed_offset = e.rd(0x640460 + head);
+        const bool idle = !(e.rd(0x6100ac) & 7);
+        const bool staged = state.stages & 1, last = (state.stages & 5) == 5;
+        if(idle && state.armed_offset == offset && (last || (!staged && ++quiet >= 200)))
+        {
+            state.confirmed = true;
+            return true;
+        }
+        if(!idle || state.armed_offset != offset)
+            quiet = 0;
+        if(idle && !staged && i >= 5000)
+            return true;
+        e.io.delay_us(100);
+    }
+    state.channel_control = e.rd(0x610490);
+    return false;
+}
+}  // namespace
+
+bool scanout(const ProbeIo& io,
+             const Snapshot& snapshot,
+             const ScanoutLayout& layout,
+             const Surface& surface,
+             ScanoutState& state)
+{
+    const auto& boot = snapshot.boot;
+    const Engine e{io};
+    const bool first = !state.owned;
+    // The head keeps the firmware timing. The output size comes from the captured viewport.
+    const uint32_t output = boot.head[head_viewport_out];
+    const uint32_t out_width = output & 0x7fff, out_height = output >> 16 & 0x7fff;
+    const uint64_t bytes = memory_bytes(boot);
+    const uint64_t span = uint64_t(surface.pitch) * surface.height;
+    if(first)
+        state = {};
+    for(auto& request : state.supervisor_stage)
+        request = 0;
+    state.stages = 0;
+    state.polls = 0;
+    for(auto& poll : state.stage_poll)
+        poll = 0;
+    state.stage = ScanoutStage::Precondition;
+    // Bit 31 of the BAR 1 instance register enables address translation.
+    if(!boot.route_matched || boot.core[boot_index("bar1_instance")] >> 31 ||
+       boot.head_index >= heads || !out_width || !out_height || !bytes || !surface.width ||
+       !surface.height || surface.width > out_width || surface.height > out_height ||
+       surface.pitch < surface.width * 4 || surface.pitch & 0xff || surface.pitch > 0x1fff00 ||
+       surface.offset & 0xfff || surface.offset + span > bytes || layout.instance & 0xffff ||
+       layout.push & 0xfff || layout.check & 3 || !layout.check_word ||
+       uint64_t(layout.instance) + 0x10000 > bytes || uint64_t(layout.push) + 0x1000 > bytes ||
+       uint64_t(layout.check) + 4 > bytes)
+        return false;
+    state.head = boot.head_index;
+    const uint32_t saved_window = e.rd(0x001700);
+    const unsigned head = state.head * 0x300;
+    // The engine rejects an update that has no timing or output resource for an active head.
+    // Read the active firmware state now. A new core channel does not keep it as pending state.
+    uint32_t kept[kept_words];
+    if(first)
+        for(unsigned i = 0; i < kept_words; ++i)
+        {
+            kept[i] = e.rd(0x640000 + kept_method(i, head, boot.sor));
+            const unsigned offset = i ? kept_head_methods[i - 1] : 0;
+            // Firmware marks its clock as not set by a driver. The engine refuses this bit from
+            // a channel. Firmware also sets no clock limit. Nouveau sends the clock as the limit.
+            if(offset == pixel_clock_config)
+                kept[i] &= ~(1u << 24);
+            if(offset == pixel_clock_max && !kept[i])
+                kept[i] = kept[i - 2];
+        }
+    bool ok = !first || take_display(e, layout, bytes, state);
+    if(ok)
+    {
+        const uint32_t size = surface.height << 16 | surface.width;
+        const uint32_t commands[] = {
+            // Surface offset, then size, storage, format, and memory object.
+            1u << 18 | (0x0460 + head),
+            surface.offset >> 8,
+            4u << 18 | (0x0468 + head),
+            size,
+            0x01000000 | surface.pitch,
+            0xcf00,
+            memory_handle,
+            // Input viewport. The head scales it to the output size.
+            1u << 18 | (0x04b0 + head),
+            0,
+            1u << 18 | (0x04b8 + head),
+            size,
+            3u << 18 | (0x04c0 + head),
+            output,
+            output,
+            output,
+            // No output table, no hardware cursor, no base or overlay channel.
+            1u << 18 | (0x0448 + head),
+            0,
+            1u << 18 | (0x045c + head),
+            0,
+            1u << 18 | (0x0480 + head),
+            0x05000000,
+            1u << 18 | (0x048c + head),
+            0,
+            2u << 18 | (0x04d0 + head),
+            0,
+            0x100,
+            // Update without a notifier.
+            2u << 18 | 0x0080,
+            0,
+            0,
+        };
+        constexpr unsigned count = sizeof(commands) / sizeof(*commands);
+        static_assert(kept_words * 8 + count * 4 <= command_limit);
+        state.stage = ScanoutStage::Update;
+        if(state.put + count * 4 > command_limit)
+        {
+            // Return to the start of the page. The engine has read all earlier commands.
+            e.memory(layout.push + state.put, 0x20000000);
+            ok = e.flush() && run_commands(e, state, 0);
+        }
+        if(ok)
+        {
+            uint32_t put = state.put;
+            // Send each firmware value that the pending state does not hold. The clock
+            // configuration and the clock limit can differ from the active state. Thus the engine
+            // can request a mode change. The frequency and the raster do not change.
+            for(unsigned i = 0; first && i < kept_words; ++i)
+            {
+                const unsigned method = kept_method(i, head, boot.sor);
+                if(kept[i] == e.rd(0x660000 + method))
+                    continue;
+                e.memory(layout.push + put, 1u << 18 | method);
+                e.memory(layout.push + put + 4, kept[i]);
+                put += 8;
+                ++state.restored;
+                state.restored_mask |= 1u << i;
+            }
+            for(unsigned i = 0; i < count; ++i)
+                e.memory(layout.push + put + i * 4, commands[i]);
+            ok = e.flush() && run_commands(e, state, put + count * 4) &&
+                 confirm(e, state, surface.offset >> 8);
+        }
+        if(ok)
+            state.stage = ScanoutStage::Ready;
+    }
+    e.wr(0x001700, saved_window);
+    return ok;
+}
 }  // namespace gm206
 
 extern "C" const gm206::Exports* os1_driver_init()
 {
-    static constexpr gm206::Exports exports{OS1_GM206_ABI, sizeof(gm206::Exports), gm206::probe};
+    static constexpr gm206::Exports exports{
+        OS1_GM206_ABI, sizeof(gm206::Exports), gm206::probe, gm206::scanout};
     return &exports;
 }

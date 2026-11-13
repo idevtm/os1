@@ -984,8 +984,18 @@ PCI identity -> trusted GM206 module -> boot probe -> display reflection
 BootInfo framebuffer -> console and exclusive Display sessions
 ```
 
-The snapshot does not grant control of GPU registers or offer modes for acquisition.
-The firmware framebuffer retains ownership of physical scanout.
+The snapshot does not grant user programs control of GPU registers.
+The firmware framebuffer owns physical scanout until a session opens the native mode.
+
+```text
+native mode open -> BAR 1 check -> display ownership -> module surface on the boot head
+session close -> console surface in video memory -> console redraw
+```
+
+On the reference board, the display service offers one native mode with the size of the firmware output viewport.
+The module then takes the display from firmware and shows a surface in reserved video memory.
+After the first session close that follows a switch, the console and the fixed mode use a second reserved surface.
+The head keeps the firmware timing and DisplayPort link.
 See the [GM206 module contract](hardware/driver-module-abi.md#gm206-discovery-module).
 
 ### Framebuffer Text Rendering

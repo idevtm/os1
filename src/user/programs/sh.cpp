@@ -1794,6 +1794,29 @@ static int shell_main(int argc_main, char** argv_main)
         {
             continue;
         }
+        if(strings_equal(tokens[0], "lx"))
+        {
+            if(argc != 1 || parsed.input != os1::shell::Input::None ||
+               parsed.output != os1::shell::Output::None)
+            {
+                os1::user::shell_runtime::diagnostic("usage: lx");
+                if(!console_input)
+                    return 1;
+                continue;
+            }
+            command_record.executed = true;
+            os1::user::commands::error = nullptr;
+            command_failed =
+                !os1::user::commands::run("os.system.log.export target:\"disk\"", console_input);
+            if(command_failed)
+            {
+                os1::user::shell_runtime::diagnostic(
+                    os1::user::commands::error ? os1::user::commands::error : "command failed");
+                if(!console_input)
+                    return 1;
+            }
+            continue;
+        }
         static os1::user::shell_runtime::Call call;
         if(!call.prepare(parsed, !console_input))
         {

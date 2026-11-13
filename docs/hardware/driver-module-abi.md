@@ -123,18 +123,25 @@ A failed probe leaves the fixed framebuffer backend available.
 
 The kernel matches PCI `10de:1402` and subsystem `1458:36c5` before it loads the package.
 The trusted ELF uses the 128 KiB slot at `0xffffffffa0040000`.
-The internal [GM206 probe table](../../src/common/driver/gm206.h) uses ABI 4.
+The internal [GM206 probe table](../../src/common/driver/gm206.h) uses ABI 5.
 
 ```text
 PCI match -> trusted ext2 ELF -> bounded BAR 0 access -> boot snapshot
 firmware framebuffer -> console and Display sessions
+native mode open -> scanout export -> module surface on the boot head
 ```
 
-The kernel requires an enabled MMIO BAR. It releases the BAR claim after the boot probe.
+The kernel requires an enabled MMIO BAR. It releases the BAR 0 claim after the boot probe if it does not offer the native mode.
 The driver reads live scanout totals and clocks. It queries firmware-enabled DisplayPort AUX channels for DPCD and EDID.
 The probe writes AUX command registers and the EDID offset to complete reads.
-It does not program scanout, change pad routing, train links, or write sink configuration.
+The probe does not program scanout, change pad routing, train links, or write sink configuration.
 The probe also reads firmware ownership, instance memory, video memory, and base channel registers.
-One table in the probe header defines the mapped BAR 0 ranges. The minimum BAR 0 size is `0x665000` bytes.
+One table in the probe header defines the mapped BAR 0 ranges. The minimum BAR 0 size is `0x800000` bytes.
 See the [ownership capture](nvidia-mode-setting-plan.md#display-ownership-capture) for the register list.
 The discovery snapshot does not change the Display session ABI or framebuffer selection.
+
+ABI 5 adds the `scanout` export. The export shows one linear 32-bit surface on the boot head with the firmware timing.
+The first call takes the display from firmware and starts the core channel.
+The kernel keeps the BAR 0 and BAR 1 claims when it offers the native mode.
+The export does not change timing, clocks, routing, or the DisplayPort link.
+See the [firmware timing scanout](nvidia-mode-setting-plan.md#firmware-timing-scanout) for the sequence and its limits.

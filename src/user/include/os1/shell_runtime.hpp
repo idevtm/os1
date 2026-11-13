@@ -116,6 +116,7 @@ inline constexpr Builtin builtins[] = {{"write", "write [--append|--replace] pat
                                        {"help", "help [command|object.path]"},
                                        {"inspect", "inspect [--details] [object.path|image]"},
                                        {"exec", "exec image [arguments]"},
+                                       {"lx", "lx (export and synchronize logs under /log)"},
                                        {"exit", "exit"}};
 
 inline bool prefix(const char* text, const char* head)

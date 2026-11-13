@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <map>
 #include <string_view>
 #include <vector>
 
@@ -664,4 +665,581 @@ TEST(Gm206, RejectsHeadTimingOutsideEachAxisBound)
     EXPECT_EQ(timing.sync_end, (uint32_t(32767 - 1080 - 1) << 16) | (32767 - 1920 - 1));
     EXPECT_EQ(timing.blank_end, timing.sync_end);
     EXPECT_EQ(timing.blank_start, (uint32_t(32766) << 16) | 32766u);
+}
+
+namespace
+{
+// Model of the display engine parts that the scanout path uses.
+struct EngineFixture
+{
+    static constexpr uint32_t instance = 0x06400000, push = 0x06410000, check = 0x06411000;
+    std::map<unsigned, uint32_t> registers, armed, assembly;
+    std::map<uint32_t, uint32_t> memory;
+    std::vector<std::pair<unsigned, uint32_t>> writes;
+    std::vector<unsigned> accesses;
+    std::vector<std::pair<uint32_t, uint32_t>> memory_writes;
+    uint32_t check_word = 0, get = 0;
+    bool translated = false, supervisor = false, command_error = false, pending_update = false;
+    unsigned supervisor_stage = 0, stage1_polls = 0, stage3_polls = 0;
+    bool stage3_never = false, stale_before_stage1 = false;
+    bool armed_hidden = false, retains_pending = false, installed = false;
+    uint32_t get_flags = 0;
+    // Active firmware state of the desktop card: SOR 1 control, then methods of the boot head.
+    // The second desktop test recorded these values. A new core channel drops the timing values.
+    struct Firmware
+    {
+        unsigned method;
+        uint32_t value;
+        bool timing;
+    };
+    static constexpr Firmware firmware[] = {
+        {0x220, 0x901, true},
+        {0x404, 0x150, true},
+        {0x408, 0x21ec4000, false},
+        {0x414, 0x08ae0fa0, true},
+        {0x418, 0x0004001f, true},
+        {0x41c, 0x003a006f, true},
+        {0x420, 0x08aa0f6f, true},
+        {0x424, 0x04910d01, true},
+        {0x450, 0x1fc8bfd0, true},
+        {0x454, 0x01200000, true},
+        {0x470, 0xe900, false},
+        {0x4d0, 0x00110300, false},
+        // Offsets without a method show a filler value. The last one differs between the states.
+        {0x18c, 0x552ac409, false},
+        {0x43c, 0x552ac409, false},
+        {0x6ec, 0xc3041400, false},
+    };
+    static constexpr unsigned no_method[] = {0x18c, 0x43c, 0x6ec};
+    // Map a method of SOR 1 or of head 0 to the boot SOR or the boot head.
+    unsigned head_method(unsigned method) const
+    {
+        if(method == 0x220)
+            return 0x200 + snapshot.boot.sor * 0x20;
+        return method < 0x400 ? method : method + snapshot.boot.head_index * 0x300;
+    }
+    gm206::Snapshot snapshot{};
+    gm206::ScanoutState state{};
+
+    EngineFixture()
+    {
+        registers[0x6100ac] = 0x100;
+        registers[0x6194e8] = 0x803;
+        registers[0x612004] = 0x700f2f;
+        registers[0x001700] = 0x200;
+        registers[0x610490] = 0x48070088;
+        registers[0x616104] = 0x11;
+        registers[0x61c800] = 0x22;
+        auto& boot = snapshot.boot;
+        boot.route_matched = true;
+        boot.sor = 1;
+        boot.head[15] = 0x08700f00;
+        const auto index = [](std::string_view name) {
+            for(unsigned i = 0; i < std::size(gm206::boot_registers); ++i)
+                if(name == gm206::boot_registers[i].name)
+                    return i;
+            ADD_FAILURE() << name;
+            return 0u;
+        };
+        boot.core[index("vram_fbp_count")] = 2;
+        boot.core[index("vram_fbpa_per_fbp")] = 1;
+        boot.core[index("vram_fbpa0_mib")] = 1024;
+        boot.core[index("vram_fbpa1_mib")] = 1024;
+        boot.core[index("vram_fbpa2_mib")] = 0xbadf2012;
+    }
+    uint32_t& word(uint32_t address)
+    {
+        return address == check && !translated ? check_word : memory[address];
+    }
+    void arm()
+    {
+        for(const auto& [method, value] : assembly)
+            armed[method] = value;
+        pending_update = false;
+    }
+    void fetch(uint32_t put)
+    {
+        while(get != put)
+        {
+            const uint32_t header = memory[push + get];
+            if(header >> 29 == 1)
+            {
+                get = header & 0xffc;
+                continue;
+            }
+            const unsigned count = header >> 18 & 0x3ff, method = header & 0xffc;
+            for(unsigned i = 0; i < count; ++i)
+            {
+                // The engine refuses the firmware clock flag, as the second desktop test showed.
+                // It then stops. The refused value does not reach the pending state.
+                // The refusal of an offset without a method is an assumption of this model.
+                const unsigned target = method + i * 4;
+                const uint32_t value = memory[push + get + 4 + i * 4];
+                const bool reserved =
+                    std::any_of(std::begin(no_method), std::end(no_method), [&](unsigned offset) {
+                        return head_method(offset) == target;
+                    });
+                if(reserved || (target == head_method(0x454) && value >> 24 & 1))
+                {
+                    registers[0x61009c] = 1;
+                    registers[0x6101f0] = (reserved ? 0x3000 : 0x4000) | target;
+                    registers[0x6101f4] = value;
+                    registers[0x6101f8] = 0x10;
+                    return;
+                }
+                assembly[target] = value;
+            }
+            get += 4 + count * 4;
+            if(method != 0x80)
+                continue;
+            // The engine refuses an update that has no timing or no output resource.
+            bool valid = true;
+            for(const auto& entry : firmware)
+                valid &= !entry.timing || entry.method == 0x454 ||
+                         assembly[head_method(entry.method)] == entry.value;
+            valid &= assembly[head_method(0x454)] == 0x00200000;
+            if(command_error || !valid)
+            {
+                registers[0x61009c] = 1;
+                registers[0x6101f0] = 0x5080;
+                registers[0x6101f4] = command_error ? 0x1234 : 0;
+                registers[0x6101f8] = command_error ? 0 : 4;
+            }
+            else if(supervisor)
+            {
+                pending_update = true;
+                supervisor_stage = 0;
+                // The earlier stage 3 is pending together with stage 1, or stage 1 starts one
+                // poll later.
+                if(stale_before_stage1)
+                    stage1_polls = 2;
+                else
+                    registers[0x6100ac] |= 1;
+                registers[0x6101d4] = 0x11100;
+            }
+            else
+                arm();
+        }
+    }
+    uint32_t read(unsigned offset)
+    {
+        accesses.push_back(offset);
+        if(offset >= 0x700000 && offset < 0x800000)
+            return word((registers[0x001700] << 16) + (offset - 0x700000));
+        if(offset == 0x640004)
+            return get | get_flags;
+        if(offset == 0x6100ac && stage1_polls && !--stage1_polls)
+            registers[0x6100ac] |= 1;
+        if(offset == 0x6100ac && stage3_polls && !--stage3_polls)
+        {
+            registers[0x6100ac] |= 4;
+            registers[0x6101d4] = 0x11100;
+        }
+        // A hidden active state reads as zero after the module starts the core channel.
+        if(offset > 0x640004 && offset < 0x641000)
+            return armed_hidden && registers[0x610490] == 0x01000013 ? 0 : armed[offset - 0x640000];
+        if(offset >= 0x660000 && offset < 0x661000)
+        {
+            const auto pending = assembly.find(offset - 0x660000);
+            return pending == assembly.end() ? 0 : pending->second;
+        }
+        return registers[offset];
+    }
+    void write(unsigned offset, uint32_t value)
+    {
+        accesses.push_back(offset);
+        writes.push_back({offset, value});
+        if(offset >= 0x700000 && offset < 0x800000)
+        {
+            const uint32_t address = (registers[0x001700] << 16) + (offset - 0x700000);
+            memory_writes.push_back({address, value});
+            word(address) = value;
+        }
+        else if(offset == 0x070000)
+            registers[offset] = 0;
+        else if(offset == 0x6194e8)
+            registers[offset] = value & 1 ? value : value & ~3u;
+        else if(offset == 0x6100ac || offset == 0x61009c)
+            registers[offset] &= ~value;
+        else if(offset == 0x6101d0 && pending_update)
+        {
+            // Three supervisor stages complete one update, as the third desktop test showed.
+            // The armed state shows the new values after stage 2. Stage 3 starts later.
+            if(supervisor_stage == 0)
+            {
+                registers[0x6100ac] |= 2;
+                registers[0x6101d4] = 0x11100;
+            }
+            else if(supervisor_stage == 1)
+            {
+                for(const auto& [method, value] : assembly)
+                    armed[method] = value;
+                stage3_polls = stage3_never ? 0 : 300;
+            }
+            else
+                pending_update = false;
+            ++supervisor_stage;
+        }
+        else if(offset == 0x640000)
+            fetch(value);
+        else if(offset == 0x610490 && value == 0x01000013)
+        {
+            // A new core channel keeps the pending state but drops the timing values, unless the
+            // test keeps them.
+            assembly = armed;
+            assembly[head_method(0x6ec)] = 0x85104806;
+            for(const auto& entry : firmware)
+                if(entry.timing && !retains_pending)
+                    assembly.erase(head_method(entry.method));
+            registers[offset] = value;
+        }
+        else
+            registers[offset] = value;
+    }
+    gm206::ProbeIo io()
+    {
+        return {this,
+                [](void* self, unsigned offset) {
+                    return static_cast<EngineFixture*>(self)->read(offset);
+                },
+                [](void* self, unsigned offset, uint32_t value) {
+                    static_cast<EngineFixture*>(self)->write(offset, value);
+                },
+                [](uint64_t) {}};
+    }
+    bool show(const gm206::Surface& surface)
+    {
+        if(!installed)
+            for(const auto& entry : firmware)
+                armed[head_method(entry.method)] = entry.value;
+        installed = true;
+        return gm206::scanout(io(), snapshot, {instance, push, check, &check_word}, surface, state);
+    }
+    unsigned count(unsigned offset) const
+    {
+        return unsigned(std::count_if(writes.begin(), writes.end(), [&](const auto& write) {
+            return write.first == offset;
+        }));
+    }
+};
+constexpr gm206::Surface native_surface{0x04000000, 3840, 2160, 15360};
+constexpr gm206::Surface console_surface{0x06000000, 1024, 768, 4096};
+}  // namespace
+
+TEST(Gm206, TakesDisplayAndShowsNativeSurface)
+{
+    EngineFixture engine;
+    ASSERT_TRUE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.stage, gm206::ScanoutStage::Ready);
+    EXPECT_TRUE(engine.state.owned);
+    EXPECT_TRUE(engine.state.confirmed);
+    EXPECT_EQ(engine.state.supervisor_requests, 0u);
+    // Firmware released the display and the engine uses the module instance and command page.
+    EXPECT_EQ(engine.registers[0x6100ac] & 0x100, 0u);
+    EXPECT_EQ(engine.registers[0x6194e8] & 1, 0u);
+    EXPECT_EQ(engine.registers[0x610010], 0x064009u);
+    EXPECT_EQ(engine.registers[0x610494], 0x064101u);
+    EXPECT_EQ(engine.registers[0x610498], 0x00010000u);
+    EXPECT_EQ(engine.registers[0x61049c], 1u);
+    EXPECT_EQ(engine.registers[0x610490], 0x01000013u);
+    EXPECT_EQ(engine.registers[0x6100b0], 0x307u);
+    EXPECT_EQ(engine.registers[0x000140], 0u);
+    EXPECT_EQ(engine.registers[0x6101b4], 0x11u);
+    EXPECT_EQ(engine.registers[0x6309c4], 0x22u);
+    EXPECT_EQ(engine.registers[0x001700], 0x200u);
+    // Hash entry 0x1f names the memory object at instance offset 0x1000.
+    EXPECT_EQ(engine.memory[EngineFixture::instance + 0xf8], 0xf0000001u);
+    EXPECT_EQ(engine.memory[EngineFixture::instance + 0xfc], 0x00200001u);
+    EXPECT_EQ(engine.memory[EngineFixture::instance + 0x1000], 0x49u);
+    EXPECT_EQ(engine.memory[EngineFixture::instance + 0x1004], 0u);
+    EXPECT_EQ(engine.memory[EngineFixture::instance + 0x1008], 0x7fffffu);
+    // Armed head state.
+    EXPECT_EQ(engine.armed[0x460], 0x040000u);
+    EXPECT_EQ(engine.armed[0x468], 0x08700f00u);
+    EXPECT_EQ(engine.armed[0x46c], 0x01003c00u);
+    EXPECT_EQ(engine.armed[0x470], 0xcf00u);
+    EXPECT_EQ(engine.armed[0x474], 0xf0000001u);
+    EXPECT_EQ(engine.armed[0x4b8], 0x08700f00u);
+    EXPECT_EQ(engine.armed[0x4c0], 0x08700f00u);
+    EXPECT_EQ(engine.armed[0x4d0], 0u);
+    EXPECT_EQ(engine.armed[0x4d4], 0x100u);
+    // The new channel dropped the timing values. The module sent the firmware values again.
+    // It also sent the clock limit. Bit 0 is the SOR control. Bit 4 is method 0x414.
+    EXPECT_EQ(engine.state.restored, 10u);
+    EXPECT_EQ(engine.state.restored_mask, 0x1df3u);
+    for(const auto& entry : EngineFixture::firmware)
+        if(entry.timing && entry.method != 0x454)
+            EXPECT_EQ(engine.armed[entry.method], entry.value) << entry.method;
+    // The clock configuration has no firmware flag. The clock limit is equal to the clock.
+    EXPECT_EQ(engine.armed[0x454], 0x00200000u);
+    EXPECT_EQ(engine.armed[0x458], 0x1fc8bfd0u);
+    EXPECT_EQ(engine.armed[0x408], 0x21ec4000u);
+    // The module sends no method for a value that the firmware did not set.
+    for(const unsigned method : {0x200u, 0x240u, 0x18cu + 4, 0x6f0u})
+        EXPECT_FALSE(engine.assembly.contains(method)) << method;
+    EXPECT_EQ(engine.registers[0x6101f0], 0u);
+    // The aperture check completes before the first display register write.
+    const auto display = [](const auto& write) {
+        return write.first >= 0x610000 && write.first < 0x700000;
+    };
+    const auto checked =
+        std::find_if(engine.writes.begin(), engine.writes.end(), [](const auto& w) {
+            return w.first >= 0x700000 && w.second == 0x6d32064fu;
+        });
+    ASSERT_NE(checked, engine.writes.end());
+    EXPECT_EQ(std::find_if(engine.writes.begin(), checked, display), checked);
+    EXPECT_NE(std::find_if(checked, engine.writes.end(), display), engine.writes.end());
+    EXPECT_EQ(engine.check_word, ~0x6d32064fu);
+}
+
+TEST(Gm206, SendsOnlyChangedValuesIfThePendingStateHoldsTheTiming)
+{
+    EngineFixture engine;
+    engine.retains_pending = true;
+    ASSERT_TRUE(engine.show(native_surface));
+    // The clock configuration without the firmware flag, and the clock limit.
+    EXPECT_EQ(engine.state.restored, 2u);
+    EXPECT_EQ(engine.state.restored_mask, 0x1800u);
+    EXPECT_EQ(engine.armed[0x220], 0x901u);
+    EXPECT_EQ(engine.armed[0x454], 0x00200000u);
+    EXPECT_EQ(engine.armed[0x470], 0xcf00u);
+}
+
+TEST(Gm206, KernelClockReadsStayInMappedRegisterRanges)
+{
+    const auto mapped = [](unsigned offset) {
+        for(const auto& range : gm206::register_ranges)
+            if(offset >= range.offset && offset - range.offset <= range.bytes - 4)
+                return true;
+        return false;
+    };
+    for(unsigned head = 0; head < gm206::heads; ++head)
+        EXPECT_TRUE(mapped(gm206::head_clock_register(head))) << head;
+    // The probe accepts SOR 0 to SOR 7.
+    for(unsigned sor = 0; sor < 8; ++sor)
+    {
+        EXPECT_TRUE(mapped(gm206::sor_clock_register(sor))) << sor;
+        for(unsigned i = 0; i < std::size(gm206::sor_state_registers); ++i)
+            EXPECT_TRUE(mapped(gm206::sor_state_register(sor, i))) << sor << ' ' << i;
+    }
+}
+
+TEST(Gm206, KeepsFirmwareClockLimitAndAddressesTheBootSor)
+{
+    EngineFixture engine;
+    engine.snapshot.boot.sor = 3;
+    engine.armed[0x458] = 0x20000000;
+    ASSERT_TRUE(engine.show(native_surface));
+    // The module kept the firmware limit. It sent the control of SOR 3, not of SOR 1.
+    EXPECT_EQ(engine.armed[0x458], 0x20000000u);
+    EXPECT_EQ(engine.armed[0x260], 0x901u);
+    EXPECT_FALSE(engine.assembly.contains(0x220));
+    EXPECT_EQ(engine.state.restored_mask, 0x0df3u);
+}
+
+TEST(Gm206, SendsFirmwareValuesOnlyWithTheFirstUpdate)
+{
+    EngineFixture engine;
+    // Values outside the kept methods. The second desktop test showed such differences.
+    engine.armed[0x438] = 0xf0000002;
+    engine.armed[0x440] = 0x80000000;
+    engine.armed[0x4bc] = 0x00010002;
+    ASSERT_TRUE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.restored, 10u);
+    const auto sent = [&](uint32_t header) {
+        unsigned count = 0;
+        for(const auto& [address, value] : engine.memory_writes)
+            count += address >= EngineFixture::push && address < EngineFixture::push + 0x1000 &&
+                     value == header;
+        return count;
+    };
+    EXPECT_EQ(sent(1u << 18 | 0x220), 1u);
+    for(const unsigned method : {0x438u, 0x440u, 0x4bcu, 0x18cu, 0x43cu, 0x6ecu})
+        EXPECT_EQ(sent(1u << 18 | method), 0u) << method;
+    // The active state now reads as zero. A later update must not send it as firmware state.
+    engine.armed_hidden = true;
+    ASSERT_TRUE(engine.show(console_surface));
+    ASSERT_TRUE(engine.show(native_surface));
+    EXPECT_EQ(sent(1u << 18 | 0x220), 1u);
+    EXPECT_EQ(engine.state.restored, 10u);
+}
+
+TEST(Gm206, RefusesTranslatedApertureBeforeDisplayWrites)
+{
+    EngineFixture engine;
+    engine.translated = true;
+    EXPECT_FALSE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.stage, gm206::ScanoutStage::Aperture);
+    EXPECT_FALSE(engine.state.owned);
+    // The module did not write through BAR 1.
+    EXPECT_EQ(engine.check_word, 0u);
+    for(const auto& [offset, value] : engine.writes)
+        EXPECT_TRUE(offset == 0x001700 || offset == 0x070000 || offset >= 0x700000) << offset;
+    EXPECT_EQ(engine.registers[0x6100ac], 0x100u);
+    EXPECT_EQ(engine.registers[0x001700], 0x200u);
+}
+
+TEST(Gm206, AcknowledgesSupervisorStagesWithoutClockOrLinkWrites)
+{
+    EngineFixture engine;
+    engine.supervisor = true;
+    ASSERT_TRUE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.supervisor_requests, 0x124u);
+    EXPECT_EQ(engine.state.supervisor_head, 0x11100u);
+    EXPECT_EQ(engine.state.supervisor_stage[0], 0x11100u);
+    EXPECT_EQ(engine.state.supervisor_stage[1], 0x11100u);
+    EXPECT_EQ(engine.state.supervisor_stage[2], 0x11100u);
+    EXPECT_LT(engine.state.stage_poll[0], engine.state.stage_poll[1]);
+    EXPECT_GT(engine.state.stage_poll[2], engine.state.stage_poll[1] + 100);
+    EXPECT_GE(engine.state.polls, engine.state.stage_poll[2]);
+    // The module waited for the late third stage. No request stays pending.
+    EXPECT_EQ(engine.state.stages, 7u);
+    EXPECT_TRUE(engine.state.confirmed);
+    EXPECT_EQ(engine.registers[0x6100ac] & 7, 0u);
+    EXPECT_FALSE(engine.pending_update);
+    // A later call without a supervisor request does not repeat the stage values.
+    engine.supervisor = false;
+    ASSERT_TRUE(engine.show(console_surface));
+    EXPECT_EQ(engine.state.supervisor_stage[0], 0u);
+    EXPECT_EQ(engine.count(0x6101d0), 3u);
+    EXPECT_EQ(engine.armed[0x474], 0xf0000001u);
+    for(const auto& [offset, value] : engine.writes)
+    {
+        // No PLL, SOR clock, SOR route, or DisplayPort register.
+        EXPECT_FALSE(offset >= 0x612200 && offset < 0x616000) << offset;
+        EXPECT_FALSE(offset >= 0x61c000 && offset < 0x61e000) << offset;
+        EXPECT_FALSE(offset >= 0x00d000 && offset < 0x00f000) << offset;
+        EXPECT_FALSE(offset >= 0x137000 && offset < 0x138000) << offset;
+    }
+}
+
+TEST(Gm206, DoesNotTakeAnEarlierStageThreeAsTheEndOfTheUpdate)
+{
+    // The third desktop test left stage 3 of one update pending at the start of the next call.
+    for(const bool early : {false, true})
+    {
+        EngineFixture engine;
+        engine.supervisor = true;
+        engine.registers[0x6100ac] |= 4;
+        engine.stale_before_stage1 = early;
+        ASSERT_TRUE(engine.show(native_surface)) << early;
+        EXPECT_FALSE(engine.pending_update) << early;
+        EXPECT_EQ(engine.registers[0x6100ac] & 7, 0u) << early;
+        EXPECT_EQ(engine.state.stages, 7u) << early;
+        // Two consecutive updates with supervisor stages complete.
+        ASSERT_TRUE(engine.show(console_surface)) << early;
+        EXPECT_FALSE(engine.pending_update) << early;
+        EXPECT_EQ(engine.armed[0x460], console_surface.offset >> 8) << early;
+    }
+}
+
+TEST(Gm206, FailsIfTheLastSupervisorStageDoesNotStart)
+{
+    EngineFixture engine;
+    engine.supervisor = true;
+    engine.stage3_never = true;
+    EXPECT_FALSE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.stage, gm206::ScanoutStage::Update);
+    EXPECT_EQ(engine.state.stages, 3u);
+    EXPECT_FALSE(engine.state.confirmed);
+    EXPECT_EQ(engine.registers[0x001700], 0x200u);
+}
+
+TEST(Gm206, ReportsCommandErrorAndStops)
+{
+    EngineFixture engine;
+    engine.command_error = true;
+    EXPECT_FALSE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.stage, gm206::ScanoutStage::Command);
+    EXPECT_EQ(engine.state.error[0], 0x5080u);
+    EXPECT_EQ(engine.state.error[1], 0x1234u);
+    EXPECT_EQ(engine.registers[0x61009c], 0u);
+    EXPECT_EQ(engine.registers[0x6101f0], 0x90000000u);
+    EXPECT_EQ(engine.registers[0x001700], 0x200u);
+}
+
+TEST(Gm206, ReusesChannelAndWrapsCommandPage)
+{
+    EngineFixture engine;
+    for(unsigned i = 0; i < 64; ++i)
+    {
+        const auto& surface = i % 2 ? console_surface : native_surface;
+        ASSERT_TRUE(engine.show(surface)) << i;
+        EXPECT_EQ(engine.armed[0x460], surface.offset >> 8);
+        EXPECT_EQ(engine.armed[0x468], surface.height << 16 | surface.width);
+        EXPECT_EQ(engine.armed[0x46c], 0x01000000 | surface.pitch);
+        EXPECT_EQ(engine.armed[0x4b8], surface.height << 16 | surface.width);
+        EXPECT_EQ(engine.armed[0x4c0], 0x08700f00u);
+        EXPECT_LE(engine.state.put, 0xf00u);
+        EXPECT_EQ(engine.get, engine.state.put);
+    }
+    // One ownership change and one channel start serve all updates.
+    EXPECT_EQ(engine.count(0x6194e8), 1u);
+    EXPECT_EQ(engine.count(0x610494), 1u);
+    EXPECT_EQ(engine.count(0x610010), 1u);
+}
+
+TEST(Gm206, RejectsUnsupportedScanoutRequestsWithoutRegisterAccess)
+{
+    const auto rejected = [](auto change) {
+        EngineFixture engine;
+        gm206::Surface surface = native_surface;
+        change(engine, surface);
+        EXPECT_FALSE(engine.show(surface));
+        EXPECT_EQ(engine.state.stage, gm206::ScanoutStage::Precondition);
+        EXPECT_TRUE(engine.accesses.empty());
+    };
+    rejected([](auto& engine, auto&) { engine.snapshot.boot.route_matched = false; });
+    rejected([](auto& engine, auto&) { engine.snapshot.boot.head[15] = 0; });
+    rejected([](auto& engine, auto&) { engine.snapshot.boot.head_index = gm206::heads; });
+    rejected([](auto& engine, auto&) { engine.snapshot.boot.core[13] = 0; });
+    rejected([](auto& engine, auto&) { engine.snapshot.boot.core[9] = 0x80000000; });
+    rejected([](auto&, auto& surface) { surface.width = 3841; });
+    rejected([](auto&, auto& surface) { surface.height = 2161; });
+    rejected([](auto&, auto& surface) { surface.pitch = 15361; });
+    rejected([](auto&, auto& surface) { surface.pitch = 3840 * 4 - 256; });
+    rejected([](auto&, auto& surface) { surface.offset = 0x04000100; });
+    rejected([](auto&, auto& surface) { surface.offset = 0x7f000000; });
+}
+
+TEST(Gm206, AcceptsUpdateWithoutReadableArmedStateOrCleanGetBits)
+{
+    // Nouveau reads only bits 11:2 of GET and does not read the armed state for completion.
+    EngineFixture engine;
+    engine.armed_hidden = true;
+    engine.get_flags = 0x80000000;
+    ASSERT_TRUE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.stage, gm206::ScanoutStage::Ready);
+    EXPECT_FALSE(engine.state.confirmed);
+    EXPECT_EQ(engine.assembly[0x474], 0xf0000001u);
+}
+
+TEST(Gm206, AddressesMethodsOfTheBootHead)
+{
+    EngineFixture engine;
+    engine.snapshot.boot.head_index = 1;
+    ASSERT_TRUE(engine.show(native_surface));
+    EXPECT_TRUE(engine.state.confirmed);
+    EXPECT_EQ(engine.armed[0x460 + 0x300], 0x040000u);
+    EXPECT_EQ(engine.armed[0x474 + 0x300], 0xf0000001u);
+    EXPECT_EQ(engine.armed[0x4c8 + 0x300], 0x08700f00u);
+    EXPECT_EQ(engine.state.restored, 10u);
+    EXPECT_EQ(engine.armed[0x414 + 0x300], 0x08ae0fa0u);
+    EXPECT_EQ(engine.armed[0x454 + 0x300], 0x00200000u);
+    EXPECT_FALSE(engine.armed.contains(0x460));
+}
+
+TEST(Gm206, ScanoutUsesOnlyMappedRegisterRanges)
+{
+    EngineFixture engine;
+    engine.supervisor = true;
+    ASSERT_TRUE(engine.show(native_surface));
+    ASSERT_TRUE(engine.show(console_surface));
+    for(const auto offset : engine.accesses)
+    {
+        bool mapped = false;
+        for(const auto& range : gm206::register_ranges)
+            mapped |= offset >= range.offset && offset - range.offset <= range.bytes - 4;
+        EXPECT_TRUE(mapped) << "unmapped access " << offset;
+    }
 }
