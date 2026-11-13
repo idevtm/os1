@@ -62,6 +62,66 @@ def exercise_graphics(args, run, expect):
                 time.sleep(.05)
             raise AssertionError('graphics cursor did not appear at expected position')
 
+        def pixel(x, y):
+            width, _, pixels = screenshot()
+            return pixels[(y * width + x) * 3:(y * width + x) * 3 + 3].hex()
+
+        def await_true(check, message):
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                if check():
+                    return
+                time.sleep(.05)
+            raise AssertionError(message)
+
+        def text_pixels():
+            # Count the text pixels in the first window position. The clock is outside this area.
+            width, _, pixels = screenshot()
+            return sum(pixels[(y * width + x) * 3:(y * width + x) * 3 + 3] == b'\xd9\xe4\xf0'
+                       for y in range(208, 400) for x in range(76, 724))
+
+        def settled_text_pixels():
+            deadline = time.monotonic() + 15
+            previous = -1
+            while time.monotonic() < deadline:
+                current = text_pixels()
+                if current == previous:
+                    return current
+                previous = current
+                time.sleep(.2)
+            raise AssertionError('shell window text did not settle')
+
+        def shell_window(pointer):
+            # The window of an 800 x 600 mode has its corner at (76, 196). The title has 12 rows.
+            frame, back, left, top = '4a6d8c', '14283e', 76, 196
+            key('t')
+            await_true(lambda: pixel(left + 1, top + 1) == frame, 'shell window did not open')
+            empty = settled_text_pixels()
+            for code in ('e', 'c', 'h', 'o', 'spc', 'o', 'k', 'ret'):
+                key(code)
+            # The typed line and the new prompt add 153 text pixels. The output "ok" adds 46.
+            await_true(lambda: text_pixels() >= empty + 190, 'shell command output did not appear')
+            # Move the pointer to the title. Then move the window with the left button.
+            qmp.execute('input-send-event', {'events': [
+                {'type': 'rel', 'data': {'axis': 'y', 'value': top + 5 - pointer[1]}}]})
+            await_cursor(lambda p: p[1] == top + 5 or pixel(pointer[0], top + 5) == 'ffffff')
+            qmp.execute('input-send-event', {'events': [
+                {'type': 'btn', 'data': {'down': True, 'button': 'left'}}]})
+            time.sleep(.2)
+            qmp.execute('input-send-event', {'events': [
+                {'type': 'rel', 'data': {'axis': 'x', 'value': 50}},
+                {'type': 'rel', 'data': {'axis': 'y', 'value': 30}}]})
+            await_true(lambda: pixel(left + 51, top + 31) == frame and pixel(left + 1, top + 1) == back,
+                       'shell window did not move')
+            qmp.execute('input-send-event', {'events': [
+                {'type': 'btn', 'data': {'down': False, 'button': 'left'}}]})
+            key('esc')
+            await_true(lambda: pixel(left + 51, top + 31) == back, 'shell window did not close')
+            # The M key opens the next mode in the same session loop.
+            key('m')
+            await_true(lambda: screenshot()[:2] == (1280, 720) and pixel(0, 0) == back,
+                       'the next mode did not open')
+
         boot_width, boot_height, _ = screenshot()
         for arrow, resolution in [('down', (800, 600)), ('up', (1280, 720))]:
             def move_pointer():
@@ -76,7 +136,9 @@ def exercise_graphics(args, run, expect):
                     {'type': 'rel', 'data': {'axis': 'x', 'value': 19}},
                     {'type': 'rel', 'data': {'axis': 'y', 'value': 13}},
                 ]})
-                await_cursor(lambda p: p == (before[0] + 19, before[1] + 13))
+                moved = await_cursor(lambda p: p == (before[0] + 19, before[1] + 13))
+                if arrow == 'down':
+                    shell_window(moved)
                 key('q')
 
             output = run('gsh "--menu"', action=move_pointer)
@@ -250,10 +312,10 @@ def main():
                             raise AssertionError('desktop did not render')
 
                         def clock(pixels):
-                            width = resolution[0]
+                            width, height = resolution
                             return b''.join(pixels[(row * width + width - 200) * 3:
                                                    (row * width + width - 8) * 3]
-                                            for row in range(12, 20))
+                                            for row in range(height - 20, height - 12))
 
                         def stable_clock(timeout):
                             deadline = time.monotonic() + timeout

@@ -199,6 +199,7 @@ void load_display()
        !driver::contains(image, reinterpret_cast<uint64_t>(exports->fill), 1, 5) ||
        !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_read), 1, 5) ||
        !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_set), 1, 5) ||
+       !driver::contains(image, reinterpret_cast<uint64_t>(exports->draw), 1, 5) ||
        !native_display::bind(*exports, vm))
     {
         debug("driver: firmware-framebuffer rejected")();
@@ -275,15 +276,22 @@ void load_gm206()
                 const auto& memory = pci.bars[1];
                 PciBarResource aperture{};
                 if(driver::contains(image, reinterpret_cast<uint64_t>(exports->scanout), 1, 5) &&
+                   driver::contains(image, reinterpret_cast<uint64_t>(exports->cursor), 1, 5) &&
                    (memory.type == PciBarType::Mmio32 || memory.type == PciBarType::Mmio64) &&
                    memory.size >= native_display::gm206_aperture_bytes &&
                    claim_pci_bar(owner, index, 1, aperture))
                 {
                     // The display service keeps both BAR claims when it offers the mode.
-                    if(map_mmio_range(vm,
-                                      aperture.base + native_display::gm206_native_offset,
+                    // The two surfaces use write combining. The instance block, the command
+                    // page, and the check word need writes that the device sees at once.
+                    if(map_framebuffer_range(vm,
+                                             aperture.base + native_display::gm206_native_offset,
+                                             native_display::gm206_instance_offset -
+                                                 native_display::gm206_native_offset) &&
+                       map_mmio_range(vm,
+                                      aperture.base + native_display::gm206_instance_offset,
                                       native_display::gm206_aperture_bytes -
-                                          native_display::gm206_native_offset) &&
+                                          native_display::gm206_instance_offset) &&
                        native_display::enable_gm206_scanout(
                            *exports, io, kernel_physical_pointer<uint8_t>(aperture.base)))
                         return;

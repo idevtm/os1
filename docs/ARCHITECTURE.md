@@ -996,6 +996,11 @@ On the reference board, the display service offers one native mode with the size
 The module then takes the display from firmware and shows a surface in reserved video memory.
 After the first session close that follows a switch, the console and the fixed mode use a second reserved surface.
 The head keeps the firmware timing and DisplayPort link.
+The service also offers smaller monitor modes. The head scales such a surface to the native output.
+The kernel maps the two surfaces with write combining. Each CPU sets page attribute table entry 1 for it.
+The framebuffer module draws the `fill_area`, `copy`, and `bitmap` session requests.
+It writes each pixel to a shadow in normal memory and to video memory. A copy reads the shadow.
+The GM206 module shows a hardware pointer through the position channel of the head.
 See the [GM206 module contract](hardware/driver-module-abi.md#gm206-discovery-module).
 
 ### Framebuffer Text Rendering

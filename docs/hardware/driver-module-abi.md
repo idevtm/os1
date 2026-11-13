@@ -108,7 +108,10 @@ compatible BootInfo framebuffer -> trusted display ELF -> probe -> publish Displ
 The build installs the module under `/system/drivers/<build-id-prefix>/firmware-framebuffer/`.
 The kernel checks the active framebuffer format and geometry before package access.
 This firmware match uses the boot display metadata. The PCI inventory remains separate.
-The [internal table](../../src/common/driver/display.h) uses ABI 2 and exports framebuffer and Bochs operations.
+The [internal table](../../src/common/driver/display.h) uses ABI 3 and exports framebuffer and Bochs operations.
+ABI 3 adds the `draw` export. It runs one `fill_area`, `copy`, or `bitmap` session request.
+The kernel passes the request bytes, the surface, and a shadow of the surface in normal memory.
+The module checks the request against the surface and the limits before it writes pixels.
 Only the kernel passes the framebuffer address, layout, and validated rectangle.
 The [Display ABI](../native-api/abi/display-abi.md) defines application authority and session lifetime.
 
@@ -123,7 +126,7 @@ A failed probe leaves the fixed framebuffer backend available.
 
 The kernel matches PCI `10de:1402` and subsystem `1458:36c5` before it loads the package.
 The trusted ELF uses the 128 KiB slot at `0xffffffffa0040000`.
-The internal [GM206 probe table](../../src/common/driver/gm206.h) uses ABI 5.
+The internal [GM206 probe table](../../src/common/driver/gm206.h) uses ABI 6.
 
 ```text
 PCI match -> trusted ext2 ELF -> bounded BAR 0 access -> boot snapshot
@@ -145,3 +148,7 @@ The first call takes the display from firmware and starts the core channel.
 The kernel keeps the BAR 0 and BAR 1 claims when it offers the native mode.
 The export does not change timing, clocks, routing, or the DisplayPort link.
 See the [firmware timing scanout](nvidia-mode-setting-plan.md#firmware-timing-scanout) for the sequence and its limits.
+
+ABI 6 adds the `cursor` export. The export shows, moves, or hides a hardware pointer on the boot head.
+It needs a surface from the `scanout` export. The mapped BAR 0 ranges include the position channel of each head.
+See the [hardware pointer](nvidia-mode-setting-plan.md#hardware-pointer) for the sequence and its limits.

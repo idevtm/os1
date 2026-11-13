@@ -34,4 +34,12 @@ long console_display_fill(NativeObject*,
                           const os1_display_driver&,
                           const os1_framebuffer_surface&,
                           const os1_display_fill&);
+// Run one module draw request while the session owns the display.
+long console_display_draw(NativeObject*,
+                          const os1_display_driver&,
+                          const os1_framebuffer_surface&,
+                          uint32_t* shadow,
+                          uint32_t member,
+                          const uint8_t* payload,
+                          uint32_t bytes);
 void console_switch_terminal(unsigned index);

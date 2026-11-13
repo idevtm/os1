@@ -681,7 +681,14 @@ struct EngineFixture
     uint32_t check_word = 0, get = 0;
     bool translated = false, supervisor = false, command_error = false, pending_update = false;
     unsigned supervisor_stage = 0, stage1_polls = 0, stage3_polls = 0;
-    bool stage3_never = false, stale_before_stage1 = false;
+    bool stage3_never = false, stale_before_stage1 = false, cursor_channel_dead = false;
+    uint32_t refused_method = ~0u, resume_get = 0, resume_put = ~0u;
+    static constexpr uint32_t cursor = 0x06412000;
+    bool point(uint32_t x, uint32_t y, bool visible)
+    {
+        return gm206::cursor(
+            io(), snapshot, {instance, push, check, &check_word, cursor}, state, x, y, visible);
+    }
     bool armed_hidden = false, retains_pending = false, installed = false;
     uint32_t get_flags = 0;
     // Active firmware state of the desktop card: SOR 1 control, then methods of the boot head.
@@ -779,8 +786,13 @@ struct EngineFixture
                     std::any_of(std::begin(no_method), std::end(no_method), [&](unsigned offset) {
                         return head_method(offset) == target;
                     });
-                if(reserved || (target == head_method(0x454) && value >> 24 & 1))
+                if(reserved || target == refused_method ||
+                   (target == head_method(0x454) && value >> 24 & 1))
                 {
+                    // The engine stops at the refused command. It continues after the error
+                    // acknowledgment. This continuation is an assumption of the model.
+                    resume_get = get + 4 + count * 4;
+                    resume_put = put;
                     registers[0x61009c] = 1;
                     registers[0x6101f0] = (reserved ? 0x3000 : 0x4000) | target;
                     registers[0x6101f4] = value;
@@ -861,6 +873,14 @@ struct EngineFixture
             registers[offset] = value & 1 ? value : value & ~3u;
         else if(offset == 0x6100ac || offset == 0x61009c)
             registers[offset] &= ~value;
+        else if(offset == 0x6101f0 && resume_put != ~0u)
+        {
+            registers[offset] = value;
+            get = resume_get;
+            const uint32_t put = resume_put;
+            resume_put = ~0u;
+            fetch(put);
+        }
         else if(offset == 0x6101d0 && pending_update)
         {
             // Three supervisor stages complete one update, as the third desktop test showed.
@@ -882,6 +902,9 @@ struct EngineFixture
         }
         else if(offset == 0x640000)
             fetch(value);
+        else if(offset >= 0x610560 && offset < 0x6105a0 && !cursor_channel_dead)
+            // The position channel of a head reports the started state.
+            registers[offset] = value | 0x00010000;
         else if(offset == 0x610490 && value == 0x01000013)
         {
             // A new core channel keeps the pending state but drops the timing values, unless the
@@ -1005,23 +1028,69 @@ TEST(Gm206, SendsOnlyChangedValuesIfThePendingStateHoldsTheTiming)
     EXPECT_EQ(engine.armed[0x470], 0xcf00u);
 }
 
-TEST(Gm206, KernelClockReadsStayInMappedRegisterRanges)
+TEST(Gm206, ShowsMovesAndHidesTheHardwarePointer)
 {
-    const auto mapped = [](unsigned offset) {
-        for(const auto& range : gm206::register_ranges)
-            if(offset >= range.offset && offset - range.offset <= range.bytes - 4)
-                return true;
-        return false;
-    };
-    for(unsigned head = 0; head < gm206::heads; ++head)
-        EXPECT_TRUE(mapped(gm206::head_clock_register(head))) << head;
-    // The probe accepts SOR 0 to SOR 7.
-    for(unsigned sor = 0; sor < 8; ++sor)
+    EngineFixture engine;
+    // The pointer needs a surface on the head.
+    EXPECT_FALSE(engine.point(10, 10, true));
+    EXPECT_TRUE(engine.accesses.empty());
+    ASSERT_TRUE(engine.show(console_surface));
+    // A request to hide a hidden pointer accesses no register.
+    const auto accesses = engine.accesses.size();
+    ASSERT_TRUE(engine.point(1, 1, false));
+    EXPECT_EQ(engine.accesses.size(), accesses);
+    ASSERT_TRUE(engine.point(512, 384, true));
+    // The image is 64 x 64 pixels. The tip is opaque black and the next pixel is transparent.
+    EXPECT_EQ(engine.memory[EngineFixture::cursor], 0xff000000u);
+    EXPECT_EQ(engine.memory[EngineFixture::cursor + 4], 0u);
+    EXPECT_EQ(engine.memory[EngineFixture::cursor + 2 * 64 * 4 + 4], 0xffffffffu);
+    EXPECT_EQ(engine.memory[EngineFixture::cursor + 63 * 64 * 4 + 63 * 4], 0u);
+    // The position channel of head 0 runs. The position is in output pixels of 3840 x 2160.
+    EXPECT_EQ(engine.registers[0x610560], 0x00010001u);
+    EXPECT_EQ(engine.registers[0x64d084], 1080u << 16 | 1920u);
+    EXPECT_EQ(engine.count(0x64d080), 1u);
+    EXPECT_EQ(engine.armed[0x480], 0x85000000u);
+    EXPECT_EQ(engine.armed[0x484], EngineFixture::cursor >> 8);
+    EXPECT_EQ(engine.armed[0x48c], 0xf0000001u);
+    EXPECT_TRUE(engine.state.cursor_visible);
+    // A move writes only the position. It sends no command.
+    const uint32_t put = engine.state.put;
+    ASSERT_TRUE(engine.point(1023, 767, true));
+    EXPECT_EQ(engine.registers[0x64d084], (767u * 2160 / 768) << 16 | (1023u * 3840 / 1024));
+    EXPECT_EQ(engine.state.put, put);
+    EXPECT_EQ(engine.count(0x610560), 1u);
+    EXPECT_FALSE(engine.point(1024, 0, true));
+    ASSERT_TRUE(engine.point(0, 0, false));
+    EXPECT_EQ(engine.armed[0x480], 0x05000000u);
+    EXPECT_EQ(engine.armed[0x48c], 0u);
+    // A new surface hides the pointer. The next request shows it again.
+    ASSERT_TRUE(engine.point(1, 1, true));
+    ASSERT_TRUE(engine.show(native_surface));
+    EXPECT_FALSE(engine.state.cursor_visible);
+    EXPECT_EQ(engine.armed[0x480], 0x05000000u);
+    ASSERT_TRUE(engine.point(3839, 2159, true));
+    EXPECT_EQ(engine.registers[0x64d084], 2159u << 16 | 3839u);
+    EXPECT_EQ(engine.armed[0x480], 0x85000000u);
+    EXPECT_EQ(engine.registers[0x001700], 0x200u);
+    for(const auto offset : engine.accesses)
     {
-        EXPECT_TRUE(mapped(gm206::sor_clock_register(sor))) << sor;
-        for(unsigned i = 0; i < std::size(gm206::sor_state_registers); ++i)
-            EXPECT_TRUE(mapped(gm206::sor_state_register(sor, i))) << sor << ' ' << i;
+        bool mapped = false;
+        for(const auto& range : gm206::register_ranges)
+            mapped |= offset >= range.offset && offset - range.offset <= range.bytes - 4;
+        EXPECT_TRUE(mapped) << "unmapped access " << offset;
     }
+}
+
+TEST(Gm206, ReportsAPointerChannelThatDoesNotStart)
+{
+    EngineFixture engine;
+    engine.cursor_channel_dead = true;
+    ASSERT_TRUE(engine.show(native_surface));
+    EXPECT_FALSE(engine.point(1, 1, true));
+    EXPECT_FALSE(engine.state.cursor_visible);
+    EXPECT_FALSE(engine.armed.contains(0x484));
+    // The surface stays in use.
+    ASSERT_TRUE(engine.show(console_surface));
 }
 
 TEST(Gm206, KeepsFirmwareClockLimitAndAddressesTheBootSor)
@@ -1143,6 +1212,51 @@ TEST(Gm206, FailsIfTheLastSupervisorStageDoesNotStart)
     EXPECT_EQ(engine.state.stages, 3u);
     EXPECT_FALSE(engine.state.confirmed);
     EXPECT_EQ(engine.registers[0x001700], 0x200u);
+}
+
+TEST(Gm206, KeepsTheFirstErrorAndDoesNotRecoverFromARefusedMethod)
+{
+    EngineFixture engine;
+    ASSERT_TRUE(engine.show(console_surface));
+    // The engine refuses the surface size and then also the UPDATE of the same request.
+    engine.refused_method = 0x468;
+    engine.command_error = true;
+    EXPECT_FALSE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.stage, gm206::ScanoutStage::Command);
+    // The words of the first error identify the cause.
+    EXPECT_EQ(engine.state.error[0], 0x4468u);
+    EXPECT_EQ(engine.state.errors, 2u);
+    // The display state is not known. The kernel must stop the display service.
+    EXPECT_FALSE(engine.state.recoverable);
+    EXPECT_EQ(engine.registers[0x61009c], 0u);
+    EXPECT_EQ(engine.registers[0x001700], 0x200u);
+    // One refused method without a second error is also not recoverable.
+    EngineFixture single;
+    ASSERT_TRUE(single.show(console_surface));
+    single.refused_method = 0x468;
+    EXPECT_FALSE(single.show(native_surface));
+    EXPECT_EQ(single.state.error[0], 0x4468u);
+    EXPECT_EQ(single.state.errors, 1u);
+    EXPECT_FALSE(single.state.recoverable);
+}
+
+TEST(Gm206, RecoversFromARefusedUpdate)
+{
+    EngineFixture engine;
+    ASSERT_TRUE(engine.show(console_surface));
+    engine.command_error = true;
+    EXPECT_FALSE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.stage, gm206::ScanoutStage::Command);
+    EXPECT_EQ(engine.state.error[0], 0x5080u);
+    EXPECT_TRUE(engine.state.recoverable);
+    // The head keeps the console surface. The next request works and clears the error words.
+    EXPECT_EQ(engine.armed[0x460], console_surface.offset >> 8);
+    EXPECT_EQ(engine.get, engine.state.put);
+    engine.command_error = false;
+    ASSERT_TRUE(engine.show(native_surface));
+    EXPECT_EQ(engine.state.error[0], 0u);
+    EXPECT_FALSE(engine.state.recoverable);
+    EXPECT_EQ(engine.armed[0x460], native_surface.offset >> 8);
 }
 
 TEST(Gm206, ReportsCommandErrorAndStops)

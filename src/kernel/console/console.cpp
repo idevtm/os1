@@ -188,6 +188,20 @@ long console_display_fill(NativeObject* owner,
     return 0;
 }
 
+long console_display_draw(NativeObject* owner,
+                          const os1_display_driver& driver,
+                          const os1_framebuffer_surface& surface,
+                          uint32_t* shadow,
+                          uint32_t member,
+                          const uint8_t* payload,
+                          uint32_t bytes)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    if(graphics_owner != owner)
+        return OS1_ERR_CLOSED;
+    return driver.draw(&surface, shadow, member, payload, bytes) ? 0 : OS1_ERR_INVALID;
+}
+
 void console_switch_terminal(unsigned index)
 {
     IrqSpinGuard guard(g_console_output_lock);

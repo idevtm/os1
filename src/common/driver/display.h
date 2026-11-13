@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #define OS1_DISPLAY_MODULE_BASE UINT64_C(0xffffffffa0020000)
-#define OS1_DISPLAY_MODULE_ABI 2u
+#define OS1_DISPLAY_MODULE_ABI 3u
 
 struct os1_framebuffer_surface
 {
@@ -26,5 +26,12 @@ struct os1_display_driver
                  uint32_t rgb);
     bool (*bochs_read)(volatile uint16_t*, os1_bochs_mode*);
     bool (*bochs_set)(volatile uint16_t*, const os1_bochs_mode*);
+    // Run one FILL_AREA, COPY, or BITMAP session request on a surface with 32-bit pixels.
+    // The shadow is a copy of the surface in normal memory, or null.
+    bool (*draw)(const os1_framebuffer_surface*,
+                 uint32_t* shadow,
+                 uint32_t member,
+                 const uint8_t* payload,
+                 uint32_t bytes);
 };
 using os1_display_entry = const os1_display_driver* (*)();

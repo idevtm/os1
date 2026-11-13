@@ -215,6 +215,7 @@ add_executable(os1_host_tests
   kernel/arp_cache_tests.cpp
   kernel/ehci_tests.cpp
   kernel/gm206_tests.cpp
+  kernel/display_draw_tests.cpp
   ${PROJECT_SOURCE_DIR}/../../src/kernel/drivers/display/reflection.cpp
   ${PROJECT_SOURCE_DIR}/../../src/drivers/gm206/driver.cpp
   kernel/usb_storage_tests.cpp

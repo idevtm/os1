@@ -275,7 +275,7 @@ add_custom_command(OUTPUT "${OS1_DISPLAY_DRIVER_ELF}"
     -mgeneral-regs-only -mcmodel=kernel -fno-pic -fno-pie -no-pie -Os
     -fno-stack-protector -fno-exceptions -fno-rtti -fno-threadsafe-statics
     -fno-asynchronous-unwind-tables -fno-unwind-tables -nostdlib -nostartfiles
-    "-I${PROJECT_SOURCE_DIR}/src/common" "-I${OS1_GENERATED_DIR}"
+    "-I${PROJECT_SOURCE_DIR}/src/common" "-I${PROJECT_SOURCE_DIR}/src/uapi" "-I${OS1_GENERATED_DIR}"
     "-Wl,-T,${PROJECT_SOURCE_DIR}/src/drivers/firmware-framebuffer/linker.ld"
     -Wl,--build-id=none -Wl,-z,max-page-size=4096
     "${PROJECT_SOURCE_DIR}/src/drivers/firmware-framebuffer/driver.cpp" -o "${OS1_DISPLAY_DRIVER_ELF}"
@@ -283,6 +283,8 @@ add_custom_command(OUTPUT "${OS1_DISPLAY_DRIVER_ELF}"
     "${PROJECT_SOURCE_DIR}/src/drivers/firmware-framebuffer/driver.cpp"
     "${PROJECT_SOURCE_DIR}/src/drivers/firmware-framebuffer/linker.ld"
     "${PROJECT_SOURCE_DIR}/src/common/driver/display.h"
+    "${PROJECT_SOURCE_DIR}/src/common/driver/draw.hpp"
+    "${PROJECT_SOURCE_DIR}/src/uapi/os1/display.h"
   VERBATIM)
 add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/display_driver_trust.hpp" "${OS1_DISPLAY_DRIVER_METADATA}"
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"

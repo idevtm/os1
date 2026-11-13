@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #define OS1_GM206_MODULE_BASE UINT64_C(0xffffffffa0040000)
-#define OS1_GM206_ABI 5u
+#define OS1_GM206_ABI 6u
 
 namespace gm206
 {
@@ -19,32 +19,17 @@ inline constexpr RegisterRange register_ranges[] = {
     {0x021000, 0x2000},
     {0x070000, 0x1000},
     {0x110000, 0x4000},
-    {0x610000, 0x6000},
+    {0x610000, 0x3000},
     {0x616000, 0x2000},
     {0x619000, 0x1000},
     {0x61a000, 0x2000},
     {0x61c000, 0x4000},
     {0x630000, 0x4000},
     {0x640000, 0x1000 + heads * 0x1000},
+    {0x64d000, heads * 0x1000},
     {0x660000, 0x1000 + heads * 0x1000},
     {0x700000, 0x100000},
 };
-// Clock registers of one head and of one SOR. The kernel reads them for the scanout log.
-constexpr unsigned head_clock_register(unsigned head)
-{
-    return 0x612200 + head * 0x800;
-}
-constexpr unsigned sor_clock_register(unsigned sor)
-{
-    return 0x612300 + sor * 0x800;
-}
-// SOR registers that the kernel reads for the scanout log: power, then link control and lane
-// power of the two links.
-inline constexpr unsigned sor_state_registers[] = {0x004, 0x030, 0x10c, 0x130, 0x18c, 0x1b0};
-constexpr unsigned sor_state_register(unsigned sor, unsigned index)
-{
-    return 0x61c000 + sor * 0x800 + sor_state_registers[index];
-}
 struct Mode
 {
     uint32_t width, height, millihz, pixel_hz;
@@ -179,6 +164,7 @@ struct ScanoutLayout
     uint32_t instance, push;        // 64 KiB display instance block and 4 KiB command page.
     uint32_t check;                 // Offset of one word that the module uses to check BAR 1.
     volatile uint32_t* check_word;  // The same word through the BAR 1 mapping.
+    uint32_t cursor;                // 16 KiB for the pointer image, 64 x 64 pixels.
 };
 enum class ScanoutStage : uint8_t
 {
@@ -198,7 +184,10 @@ struct ScanoutState
     bool owned;      // The module owns the core channel.
     bool confirmed;  // The armed head state shows the last surface.
     uint8_t head;
-    uint8_t stages;     // Supervisor stages of the last call, one bit for each stage.
+    uint8_t stages;  // Supervisor stages of the last call, one bit for each stage.
+    // Hardware pointer: the image is in video memory, the position channel runs, the head shows it.
+    bool cursor_image, cursor_channel, cursor_visible;
+    Surface surface;    // The surface that the head shows.
     uint32_t put;       // Next free byte in the command page.
     uint32_t restored;  // Firmware method values that the first update sent again.
     // One bit for each of these methods. Bit 0 is the SOR control. The other bits follow the
@@ -209,7 +198,11 @@ struct ScanoutState
     // Engine polls of the last call, and the poll that acknowledged each supervisor stage.
     // One poll takes a minimum of 100 microseconds.
     uint32_t polls, stage_poll[3];
-    uint32_t error[3], channel_control, armed_context, armed_offset;
+    // Words of the first command error of the last call, and the number of errors in that call.
+    uint32_t error[3], errors, channel_control, armed_context, armed_offset;
+    // The engine refused only the UPDATE of the last call. The head keeps its surface, and the
+    // next call can use the channel.
+    bool recoverable;
 };
 struct ProbeIo
 {
@@ -224,11 +217,27 @@ struct Exports
     bool (*probe)(const ProbeIo&, Snapshot&);
     bool (*scanout)(
         const ProbeIo&, const Snapshot&, const ScanoutLayout&, const Surface&, ScanoutState&);
+    bool (*cursor)(const ProbeIo&,
+                   const Snapshot&,
+                   const ScanoutLayout&,
+                   ScanoutState&,
+                   uint32_t x,
+                   uint32_t y,
+                   bool visible);
 };
 using Entry = const Exports* (*)();
 bool probe(const ProbeIo&, Snapshot&);
 // Show one surface on the boot head with the firmware timing. The first call takes the display from
 // firmware.
 bool scanout(const ProbeIo&, const Snapshot&, const ScanoutLayout&, const Surface&, ScanoutState&);
+// Show the hardware pointer with its tip at a surface position, or hide it. The head must show a
+// surface. Each scanout call hides the pointer.
+bool cursor(const ProbeIo&,
+            const Snapshot&,
+            const ScanoutLayout&,
+            ScanoutState&,
+            uint32_t x,
+            uint32_t y,
+            bool visible);
 bool parse_edid(const uint8_t*, unsigned blocks, Output&);
 }  // namespace gm206

@@ -713,14 +713,14 @@ If such an update shows no armed offset in 0.5 seconds, the call succeeds and th
 The module refuses the request if the captured `bar1_instance` value has bit 31 set.
 Later calls reuse the channel. The module jumps to the start of the command page before byte `0xf00`.
 
-Nouveau does not show these behaviors. The desktop test must confirm them:
+Nouveau does not show these behaviors. The [fourth desktop test](#fourth-desktop-test) confirmed them:
 
 - An UPDATE with firmware timing values and new surface values keeps the firmware clock and link.
 - The monitor shows the surface after the module acknowledges all three supervisor stages.
 
 #### Video memory layout
 
-The kernel reserves fixed offsets in the first 101 MiB of video memory. BAR 1 must be at least `0x06412000` bytes.
+The kernel reserves fixed offsets in the first 101 MiB of video memory. BAR 1 must be at least `0x06416000` bytes.
 
 | Offset | Bytes | Use |
 | --- | ---: | --- |
@@ -729,6 +729,7 @@ The kernel reserves fixed offsets in the first 101 MiB of video memory. BAR 1 mu
 | `0x06400000` | 65,536 | Display instance block |
 | `0x06410000` | 4096 | Command page |
 | `0x06411000` | 4 | BAR 1 check word |
+| `0x06412000` | 16,384 | Pointer image, 64 × 64 pixels |
 
 The firmware framebuffer address is not in this range. The capture does not give its video memory offset.
 The capture also does not show if firmware uses the reserved range.
@@ -758,21 +759,15 @@ The first three desktop tests used an earlier format with a name for each value.
 
 | Label | Lines | Values in order |
 | --- | --- | --- |
-| `sor` | Six for each call | Register offset, value before the call, value after the call. |
-| `clock` | One for each call | Head clock before and after, SOR clock before and after. |
 | `stages` | One for each call | Head request of stages 1 to 3, poll count, poll of stages 1 to 3, stage bits. |
 | `scanout` | One for each call | Surface offset, stage, supervisor requests, head request bits, three error words, channel control, armed context, armed offset, confirmed, restored, mask. |
-| `link` | One, after the first call that reaches stage 5 | Probe result, status read before and after, three status bytes before, three after, route match. |
 | `method` | After that first call and after each failure at stage 5 or later | Method, active value, pending value. |
 
-The `sor` registers are the power, the sequencer, and the link control and lane power of the two links.
+The fourth desktop test also had `sor`, `clock`, and `link` lines. The kernel does not write them now.
+The BIOS kernel image needs their space for the drawing requests.
 The module clears the `stages` values at the start of each call. One poll takes a minimum of 100 microseconds.
 A stage 3 poll that is not larger than the stage 1 poll belongs to the update before it.
 A stage 3 poll with a stage 1 poll of zero also belongs to that update.
-For the `link` line, the kernel runs the module probe again in a temporary allocation.
-The status bytes are DPCD `0x202` to `0x204`. If the allocation fails, the kernel writes no `link` line.
-The kernel also reads the clock and SOR registers if the module refuses the call at stage 1.
-BAR 0 range `0x610000` to `0x615fff` contains the clock register of each head and of each SOR.
 The `method` lines cover methods `0x0080` to `0x0088`, `0x0180` to `0x037c`, and the methods of the boot head.
 The kernel omits a method if the two values are equal and are zero or the filler value.
 The filler value is the active value at offset `0x018c`, which has no method.
@@ -921,9 +916,34 @@ The monitor can thus stay without an image after the correction. The SOR lines t
 #### Fourth desktop test
 
 The fourth test ran on November 13, 2026 with the third correction.
-The user reported that the test passed on the desktop.
-The repository has no exported kernel log of this test.
-Thus the stage 3 wait time and the link status lines remain unrecorded.
+The monitor showed the 3840 × 2160 background and the pointer. The pointer moved correctly.
+The background fill took a few seconds. After Esc, the text console returned and operated correctly.
+The exported kernel logs are `build/gm206-accept/desktop4-kernel-log-1.bin` and `desktop4-kernel-log-5.bin`.
+They contain these lines for the native surface and for the console surface:
+
+```text
+display: gm206 stages 0x11100 0x11100 0x11100 0xe7 0x2 0xdb 0xe7 0x7
+display: gm206 scanout 0x4000000 0x8 0x124 0x11100 0x0 0x0 0x0 0xc909009b 0xf0000001 0x40000 0x1 0xa 0x1df3
+display: gm206 link 0x1 0x1 0x1 0x77 0x77 0x81 0x77 0x77 0x1 0x1
+display: gm206 stages 0x100 0x100 0x100 0x5d 0x2 0x5c 0x5d 0x7
+display: gm206 scanout 0x6000000 0x8 0x124124 0x11100 0x0 0x0 0x0 0xc909009b 0xf0000001 0x60000 0x1 0xa 0x1df3
+```
+
+| Evidence | Result |
+| --- | --- |
+| Stage bits `0x7` and stage 8 | Each call acknowledged the three supervisor stages and confirmed the armed surface. |
+| Polls `0x2`, `0xdb`, `0xe7` | The first update reached stage 2 after 219 polls and stage 3 after 231 polls. |
+| Polls `0x2`, `0x5c`, `0x5d` | The console update reached stage 3 after 93 polls. |
+| Link status `0x77 0x77` before and after | The four lanes kept clock recovery, equalization, and symbol lock. |
+| Third status byte `0x81` then `0x01` | The lanes kept the alignment. Bit 7 did not stay set. |
+| Six SOR registers and two clock registers | The values before and after each call are equal. |
+
+Thus the monitor shows the surface after the module acknowledges all three supervisor stages.
+An UPDATE with firmware timing values and new surface values keeps the firmware clock and link.
+The module needs no clock, link, or script work for this mode on this card and monitor.
+One poll takes a minimum of 100 microseconds. Thus the first switch took a minimum of 23 ms after the commands.
+The slow background fill is a limit of the display path and not of the mode switch.
+The kernel maps BAR 1 without write combining. One Display v1 fill request has a limit of 4096 pixels.
 
 #### Scanout impact and validation
 
@@ -931,10 +951,10 @@ Thus the stage 3 wait time and the link status lines remain unrecorded.
 | --- | --- |
 | Scope and interfaces | Module ABI 5 adds the `scanout` export. Display v1 does not change. The matched board gets one more mode record. |
 | Boot and platform | The kernel maps PRAMIN and more display pages of BAR 0. It claims BAR 1 and maps 36.07 MiB. UEFI and BIOS guests have no matching device. |
-| Memory and isolation | The kernel allocates one snapshot of approximately 8.3 KB for the second probe and releases it. The module checks each offset against the captured memory size. User requests use the existing mode and fill checks. |
+| Memory and isolation | The fourth desktop test used a kernel allocation of approximately 8.3 KB for a second probe. The kernel does not run this probe now. The module checks each offset against the captured memory size. User requests use the existing mode and fill checks. |
 | Concurrency | The scanout call runs while the session owns the display. The console lock protects the console pixel pointer. Each register wait has a two-second limit. The wait for supervisor stage 3 has a five-second limit. |
-| Runtime resources | The native session clears 8,294,400 pixels through BAR 1 after the switch. The sum of the wait limits is 19 seconds for the first call and 13 seconds for a later call. The kernel request thread waits without a lock. The first call also runs the probe again, with no measured time. Physical latency is unmeasured. |
-| Validation and documents | Host tests use a register model. The fourth desktop test passed, but its log is not recorded. |
+| Runtime resources | The native session clears 8,294,400 pixels through BAR 1 after the switch. The sum of the wait limits is 19 seconds for the first call and 13 seconds for a later call. The kernel request thread waits without a lock. Physical latency is unmeasured. |
+| Validation and documents | Host tests use a register model. The fourth desktop test passed. Its log is in `build/gm206-accept/`. |
 
 
 The candidate is base `42d89e3` plus the source, test, and build script diff.
@@ -988,3 +1008,262 @@ The host model does not show the stage order `4, 1, 2` of the desktop log.
 No test covers a stage 3 time limit after an earlier stage 3, or a second stage 1 in one call.
 The comment for the SOR state registers in `gm206.h` does not name the sequencer register.
 The prose follows the project rules. Full ASD-STE100 dictionary verification was unavailable.
+
+### Drawing speed, scaled modes, and hardware pointer
+
+This section describes the display work after the physical acceptance of the native mode.
+The result is fast pixel writes, three new drawing requests, more GTX 950 modes, and a hardware pointer.
+The QEMU guests exercise the drawing requests. The [fifth desktop test](#fifth-desktop-test) accepted most of this work.
+The window move did not operate on the desktop.
+
+```text
+gsh -> fill area, copy, bitmap -> kernel session -> framebuffer module -> shadow and video memory
+gsh -> cursor -> kernel session -> GM206 module -> pointer image, position channel, core UPDATE
+BAR 1 surfaces -> write-combining pages (page attribute table entry 1)
+```
+
+| Topic | Link |
+| --- | --- |
+| Cause of the slow fill | [Slow drawing causes](#slow-drawing-causes) |
+| Open implementations | [Acceleration references](#acceleration-references) |
+| Page attributes | [Write-combining mapping](#write-combining-mapping) |
+| Requests and module code | [Drawing requests](#drawing-requests) |
+| More modes | [Scaled modes](#scaled-modes) |
+| Pointer | [Hardware pointer](#hardware-pointer) |
+| Desktop procedure | [Drawing acceptance procedure](#drawing-acceptance-procedure) |
+| Desktop result and next work | [Fifth desktop test](#fifth-desktop-test) |
+| Assessment and evidence | [Drawing impact and validation](#drawing-impact-and-validation) |
+
+#### Slow drawing causes
+
+The fourth desktop test filled the 3840 × 2160 background in a few seconds.
+
+| Cause | Evidence |
+| --- | --- |
+| No write combining | The kernel mapped BAR 1 with the default page attributes. Each pixel write was one bus write. |
+| Byte writes | The framebuffer module wrote each pixel as four byte writes. |
+| Small requests | One Display v1 fill has a limit of 4096 pixels. The background needed 2160 requests. |
+| No copy or bitmap request | The shell drew each text run and each pointer row with a fill request. |
+
+#### Acceleration references
+
+The review used Linux v6.1 Nouveau and related sources. No reference code is in the repository.
+
+| Path | Reference | Result |
+| --- | --- | --- |
+| Write combining and a shadow | Linux `simpledrm.c`, `efifb.c`, `drm_fb_helper.c` | Implemented in this work. |
+| Hardware pointer | Nouveau `head917d.c`, `curs507a.c` | Implemented in this work. |
+| Page flip on the base channel | Nouveau `base907c.c` | Not implemented. It needs a second display channel. |
+| Copy engine, class `B0B5` | Nouveau `nouveau_boa0b5.c`, `fifo/gk104.c`, `mmu/vmmgf100.c` | Not implemented. It needs a command FIFO, a runlist, and a GPU page table. It needs no firmware. |
+| 2D engine, class `902D` | `xf86-video-nouveau` | Not planned. Nouveau loads signed NVIDIA firmware for the graphics engine of this card. |
+
+The NVIDIA open kernel modules support only Turing and later cards.
+Measure the copy request on the desktop before work on the copy engine starts.
+
+#### Write-combining mapping
+
+Each CPU writes the page attribute table during its setup. Entry 1 holds write combining.
+The setup runs on the boot CPU and on each other CPU before a write-combining page is in use.
+The reset value of entry 1 is write through. The kernel has no write-through mapping.
+A page entry with the PWT bit selects entry 1. `PageFlags::WriteCombine` is this bit.
+`map_framebuffer_range` maps a range with this flag in the direct map.
+The boot direct map can hold the range already, with the default attributes.
+The function then adds the flag to each page entry and removes the entry from the TLB of the current CPU.
+No CPU uses the two surfaces before this call. Thus the function sends no request to the other CPUs.
+The function refuses a range that covers only a part of an existing 2 MiB page.
+The memory type range registers of the desktop are not recorded. Write combining in the page table has priority over an uncached range.
+The desktop test must show the effect. A fast background fill is the evidence.
+The loader uses it for the native surface and the console surface of the GTX 950.
+The instance block, the command page, and the check word keep the default attributes.
+The module reads them back through PRAMIN, and a write-combining buffer can delay such a write.
+The framebuffer module sends an `sfence` instruction at the end of each drawing request.
+The Bochs and firmware framebuffers keep the default attributes.
+
+#### Drawing requests
+
+DisplaySession members 3 to 5 are `fill_area`, `copy`, and `bitmap`.
+See the [Display session ABI](../native-api/abi/display-abi.md#fast-drawing-requests) for the records and limits.
+The kernel passes each request to the framebuffer module under the console output lock.
+The module code is in [draw.hpp](../../src/common/driver/draw.hpp). The module ABI is 3.
+The kernel allocates a shadow of the surface for each session with 32-bit pixels.
+The shadow is a copy of the surface in normal memory. A copy request reads the shadow.
+A read from write-combining video memory is not cached and is slow.
+If the allocation fails, the copy request reads video memory.
+The drawing code is in the module because the BIOS kernel image is near its limit.
+The loaded BIOS kernel must end 16 KiB before `0x1c0000`. It ends at `0x1bb000` with this work.
+One more page of kernel code or data is possible before the layout check fails.
+One request has a limit of 65,536 pixels. The kernel holds the console output lock with interrupts off for one request.
+With write combining, one request writes 262,144 bytes to the shadow and to video memory.
+A request for a width of 3840 pixels holds 17 rows. The 3840 × 2160 screen needs 128 requests in place of 2160.
+A copy request cannot read back the pixels of the older `fill` member, because that member does not update the shadow.
+
+#### Scaled modes
+
+The display service offers each smaller EDID mode of the GTX 950 monitor as a scaled mode.
+The head keeps the native timing and scales the surface to the output viewport.
+The console surface of the [firmware timing scanout](#firmware-timing-scanout) uses the same method.
+A scaled mode must have a width that is a multiple of 64, a minimum width of 640, and a minimum height of 480.
+The service omits a size that is already in the list. The list has a capacity of 12 modes.
+The scaler does not keep the aspect ratio. A 4:3 mode covers the full 16:9 output.
+The desktop has not shown a scaled mode other than the 1024 × 768 console surface.
+The engine can refuse the UPDATE of a scaled mode. The head then keeps the surface that it showed before.
+The first desktop test showed this behavior. The module sets its `recoverable` value for this condition only.
+The display service then returns an I/O error for that open request and stays in operation.
+A refused method before the UPDATE is not recoverable. The second desktop test showed that the engine did not run the later methods.
+No test shows the display state and the command page after such a refusal. Thus the display service stops, as for each other failure.
+The log line shows the words of the first error of a call.
+`gsh` opens the next mode when a mode does not open after the M key. The first open of a `gsh` run reports its failure.
+`gsh "--check"` opens each mode other than the boot mode four times. Each open shows the mode surface and then the console surface.
+On the GTX 950 this is a maximum of 80 more surface changes for ten scaled modes.
+
+#### Hardware pointer
+
+GM206 module ABI 6 adds the `cursor` export. DisplaySession member 6 calls it for a GTX 950 session.
+
+| Step | Registers | Action |
+| --- | --- | --- |
+| 1 | PRAMIN, `0x070000` | Write the 64 × 64 `A8R8G8B8` arrow image at video memory offset `0x06412000`. |
+| 2 | `0x610560` plus `0x10` for each head | Write 1 to start the position channel. Wait for `0x00010000` in bits 17:16. |
+| 3 | `0x64d084`, `0x64d080` plus `0x1000` for each head | Write the position in output pixels, then an update. |
+| 4 | Command page | Send methods `0x0480`, `0x0484`, `0x048c`, and UPDATE to show or hide the image. |
+
+The control value `0x85000000` enables a 64 × 64 `A8R8G8B8` image with alpha blending.
+The value `0x05000000` disables the pointer. Each scanout call sends it.
+A move writes only the two registers of step 3. It sends no command.
+The module converts a surface position to an output position for a scaled mode.
+The pointer image has the same size on the monitor in each mode.
+The show and hide commands use the completion rules of the [takeover sequence](#takeover-sequence).
+Nouveau waits for free space in the position channel before a move. The module does not wait.
+The desktop test must confirm these behaviors:
+
+- The position channel starts while the module polls the engine.
+- The engine accepts the pointer methods and the image through the video memory object.
+- The pointer position uses output pixels in a scaled mode.
+- A show or hide UPDATE completes without a mode change.
+
+If the request fails, `gsh` draws the pointer itself. The C key changes between the two pointers.
+A show or hide request waits a minimum of 20 ms in the kernel request thread. A move does not wait.
+A request to hide a hidden pointer accesses no register.
+The desktop session of `/etc/gsh.boot` does not end. Thus no code hides the pointer at its end.
+
+#### Drawing acceptance procedure
+
+1. Write a new USB image. Do not create `/etc/gsh.boot`.
+2. Start the desktop from the USB device.
+3. Run `gsh "--menu"`. Make sure that Up and Down change one row and do not add rows.
+4. Record the number of modes in the list.
+5. Select the 3840 × 2160 mode. Press Enter.
+6. Record the time until the background is complete.
+7. Make sure that the lower right corner shows the date and the time.
+8. Move the mouse. Record if the pointer is visible and smooth.
+9. Press C. Record if the drawn pointer replaces the hardware pointer. Press C again.
+10. Press T. Type `ls "/bin"` and press Enter. Record if the window shows the output.
+11. Put the pointer on the window title.
+12. Hold the left button and move the mouse. Record the window movement.
+13. Press Esc to close the window.
+14. Press M. Record the size of the next mode and the pointer behavior.
+15. Press M again for each other mode.
+16. When the first mode shows again, press Esc.
+17. Run `lx`.
+18. Wait 10 seconds.
+19. Stop the desktop.
+20. Copy the data partition as in the [physical acceptance procedure](#physical-acceptance-procedure).
+
+If the screen has no pointer after step 5, press C one time.
+If a mode shows no image, press M to open the next mode.
+If the console returns with an error after M, the display service stopped. Start the desktop again.
+
+#### Fifth desktop test
+
+The fifth test ran on November 13, 2026 with this work. The user did the [acceptance procedure](#drawing-acceptance-procedure).
+The exported kernel logs are in `build/gsh-accel/desktop5/`. Input records replaced most of the older text lines.
+The logs keep five scanout records. Each record has stage 8, three supervisor stages, and no error word.
+The stage 3 poll of these records is between `0x23` and `0x12d`, which is 3.5 ms to 30 ms as a minimum.
+
+| Item | Desktop result |
+| --- | --- |
+| Background fill at 3840 × 2160 | No visible delay. Write combining and the larger requests have the intended effect. |
+| Hardware pointer | Visible and correct. The user saw no clear speed difference from the drawn pointer. |
+| Shell window | The T key opened the window. Commands ran and showed their output. |
+| Window move | The window did not follow the pointer. The cause is not known. |
+| Mode key | Each mode opened. No scaled mode failed. |
+| Clock | The date and the time showed in the lower right corner. |
+| Text size | The 8 × 8 font is small at 3840 × 2160, and a scaled mode changes its aspect. |
+
+Thus the desktop confirmed these behaviors of the [hardware pointer](#hardware-pointer) and the [scaled modes](#scaled-modes):
+
+- The position channel starts while the module polls the engine.
+- The engine accepts the pointer methods and the image through the video memory object.
+- A show or hide UPDATE completes without a failure.
+- The engine accepts each offered scaled mode of this monitor.
+
+The test did not record the pointer position in a scaled mode as a separate item.
+The test did not measure the fill, copy, or lock times.
+
+The window move has two possible causes. No evidence selects one.
+
+- The title has 12 rows. At 3840 × 2160 this is a small target.
+- `gsh` finds a button press only in an input event. After lost events it reads the pointer state and finds no press.
+
+Next work, in the order of the user decisions:
+
+1. Find the cause of the window move failure on the desktop. Add a log line or a larger title for the test.
+2. Show the current mode in the upper right corner.
+3. Add a kernel wait with a time limit and a byte stream object. Then connect a child `sh` that stays open.
+   See the [later stages](gsh-plan.md#later-stages) of the graphics shell.
+4. Increase the reserved window of the BIOS kernel image. Item 3 needs kernel space.
+5. Add a window size change and a font that fits the mode size.
+6. Measure the copy request on the desktop before work on the copy engine starts.
+
+#### Drawing impact and validation
+
+| Area | Assessment |
+| --- | --- |
+| Project scope | The work adds a drawing path and a shell window for the optional desktop goal. The GPU engines stay out of scope. |
+| Boot and platform | Each CPU writes the page attribute table in its setup, on the BIOS and UEFI paths. No page used entry 1 before. The existing direct map and the unrecorded memory type ranges are the open points. |
+| Memory and isolation | Each session with 32-bit pixels allocates a shadow of pitch times height bytes, 33,177,600 bytes for the native mode. An allocation failure gives a session without a shadow. The module checks each request against the surface and the limits. The pointer request has no owner check of its own. One session owns the display, and one kernel thread runs the requests. |
+| Concurrency | The kernel holds the console output lock with interrupts off for one request of a maximum of 65,536 pixels. A different CPU that needs the lock waits with interrupts off. A pointer show or hide waits in the kernel request thread. The shell window stops the desktop while `waitpid` waits. |
+| Interfaces | DisplaySession v1 adds four members. The framebuffer module ABI is 3 and the GM206 module ABI is 6. The graphics shell adds a window, three keys, and a clock position. The `list_modes` reply keeps its three records. |
+| Runtime resources | See the size table. Fill, copy, and lock times on the desktop are unmeasured. The next step is the acceptance procedure. QEMU has no write-combining effect to measure. |
+| Validation and documents | Host tests cover the drawing code, the pointer export, and the write-combining page flags. A QEMU test covers the shell window, the copy request, and the mode key. Hardware evidence is open. |
+
+The sizes compare base `486e578` with the working tree. The toolchain and build settings are the same.
+The base sizes of the kernel and the GM206 module come from the [scanout validation](#scanout-impact-and-validation).
+The base size of the framebuffer module comes from the load line of the desktop logs.
+
+| Resource | Base bytes | Candidate bytes | Change |
+| --- | ---: | ---: | ---: |
+| Kernel ELF | 670,480 | 671,536 | +1,056 bytes (+0.16%) |
+| BIOS kernel ELF | 497,320 | 498,088 | +768 bytes (+0.15%) |
+| GM206 ELF | 16,848 | 21,568 | +4,720 bytes (+28.02%) |
+| Framebuffer module ELF | 9,112 | 9,576 | +464 bytes (+5.09%) |
+| `gsh` ELF | 17,328 | 46,536 | +29,208 bytes (+168.56%) |
+| UEFI ISO | 4,413,440 | 4,413,440 | 0 bytes (0%) |
+| USB image | 35,651,584 | 35,651,584 | 0 bytes (0%) |
+
+The `gsh` program now links the launch and temporary file code of the user library.
+
+The shell command window runs each command in a new `sh` process and waits for its end.
+The kernel has no pipe object and no wait with a time limit. See the [graphics shell plan](gsh-plan.md#shell-window).
+The candidate is base `486e578` plus the working tree diff.
+The final `./scripts/check-local.sh` run passed 844 host, 104 normal-image, and three diagnostic-image checks.
+The profile times were 29.60 s, 490.82 s, and 11.35 s. See `build/gsh-accel/full-local.log` for the full run.
+The first full run failed one check. The program packaging test still had framebuffer module ABI 2 as its expected value.
+The expected value is now 3. See `build/gsh-accel/first-full-local.log` for the first run.
+The focused checks were the 52 `DisplayDraw`, `Gm206`, and `VirtualMemory` host tests and the two display session QEMU tests.
+No host test covers the scaled mode list, the kernel pointer dispatch, or the `gsh` window code.
+The QEMU test covers the M key only in the menu session. It does not cover the C key.
+One independent review examined this work. It found no blocking defect and three major defects.
+An existing direct map entry made the write-combining mapping without effect. The mapping now changes such an entry.
+One request held the console lock for a maximum of 1,048,576 pixels. The limit is now 65,536 pixels.
+A refused scaled mode stopped the display service. A command error does not stop it now.
+The review also found a test that did not show the command output, and a clock that a window move drew on the window.
+These defects are corrected.
+A second independent review examined the corrections. It found no blocking defect and no major defect.
+It found that a refused method left commands in the command page for the next request.
+It also found two wrong request counts in this section and a first open that did not report its failure. These are corrected.
+A third independent review examined the correction for the refused method. It found no blocking defect.
+It found that the correction lost the first error words and that no evidence supports a recovery after a refused method.
+The module now keeps the first error words. Only a refused UPDATE is recoverable.
+One finding stays open. A partly covered clock shows no new time until the window leaves it.
+

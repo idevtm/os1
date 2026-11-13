@@ -20,3 +20,7 @@ bool map_direct_range(VirtualMemory& vm, uint64_t physical_start, uint64_t lengt
 // higher-half migration backs this with the direct map, but call sites stay
 // explicit so later cacheability/pat work has one owner.
 bool map_mmio_range(VirtualMemory& vm, uint64_t physical_start, uint64_t length);
+
+// Map a linear framebuffer range with write combining. Writes are fast and reads are not cached.
+// Do not use this mapping for device registers or for memory that a device reads back at once.
+bool map_framebuffer_range(VirtualMemory& vm, uint64_t physical_start, uint64_t length);

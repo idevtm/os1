@@ -22,7 +22,13 @@ namespace
 {
 const os1_display_driver* driver;
 os1_framebuffer_surface surface;
-os1_display_modes modes;
+// The mode list. LIST_MODES returns only the first OS1_DISPLAY_MODE_LIMIT records.
+constexpr unsigned mode_capacity = 12;
+struct
+{
+    uint32_t count;
+    os1_display_mode modes[mode_capacity];
+} modes;
 volatile uint16_t* bochs;
 os1_bochs_mode boot_mode;
 bool failed;
@@ -39,6 +45,7 @@ struct Session : NativeObject
     bool switched;
     bool native_requested;
     bool preserve_scanout;
+    uint32_t* shadow;  // Copy of a 32-bit target surface for the module draw requests, or null.
 };
 
 void match_bochs(VirtualMemory& vm)
@@ -106,33 +113,12 @@ bool gm206_show(uint32_t offset, uint32_t width, uint32_t height, uint32_t pitch
         gm206_instance_offset,
         gm206_push_offset,
         gm206_check_offset,
-        reinterpret_cast<volatile uint32_t*>(gm206_aperture + gm206_check_offset)};
+        reinterpret_cast<volatile uint32_t*>(gm206_aperture + gm206_check_offset),
+        gm206_cursor_offset};
     const auto read = [](unsigned reg) { return gm206_io.read(gm206_io.context, reg); };
-    const auto& boot = gm206_snapshot->boot;
     const auto& state = gm206_state;
-    // The clock registers show if the engine changed the clock source. The SOR power and link
-    // registers show if the mode change stopped the output.
-    constexpr unsigned sor_words = sizeof(gm206::sor_state_registers) / sizeof(unsigned);
-    uint32_t before[2 + sor_words];
-    before[0] = read(gm206::head_clock_register(boot.head_index));
-    before[1] = read(gm206::sor_clock_register(boot.sor));
-    for(unsigned i = 0; i < sor_words; ++i)
-        before[2 + i] = read(gm206::sor_state_register(boot.sor, i));
     const bool shown = gm206_exports->scanout(
         gm206_io, *gm206_snapshot, layout, {offset, width, height, pitch}, gm206_state);
-    for(unsigned i = 0; i < sor_words; ++i)
-    {
-        const unsigned reg = gm206::sor_state_register(boot.sor, i);
-        const uint32_t values[] = {reg, before[2 + i], read(reg)};
-        gm206_log("sor", values, 3);
-    }
-    {
-        const uint32_t values[] = {before[0],
-                                   read(gm206::head_clock_register(boot.head_index)),
-                                   before[1],
-                                   read(gm206::sor_clock_register(boot.sor))};
-        gm206_log("clock", values, 4);
-    }
     {
         const uint32_t values[] = {state.supervisor_stage[0],
                                    state.supervisor_stage[1],
@@ -160,32 +146,6 @@ bool gm206_show(uint32_t offset, uint32_t width, uint32_t height, uint32_t pitch
                                    state.restored_mask};
         gm206_log("scanout", values, 13);
     }
-    // Read the DisplayPort link status again after the first call that reaches the channel
-    // stage. It shows if the monitor lost the link during the mode change.
-    static bool link_recorded = false;
-    if(state.stage >= gm206::ScanoutStage::Channel && !link_recorded)
-    {
-        link_recorded = true;
-        // The snapshot is too large for the kernel image and for the stack.
-        auto* after = static_cast<gm206::Snapshot*>(kcalloc(1, sizeof(gm206::Snapshot)));
-        if(after)
-        {
-            const uint32_t probed = gm206_exports->probe(gm206_io, *after);
-            const auto& now = after->boot;
-            const uint32_t values[] = {probed,
-                                       boot.link_status_read,
-                                       now.link_status_read,
-                                       boot.link_status[0],
-                                       boot.link_status[1],
-                                       boot.link_status[2],
-                                       now.link_status[0],
-                                       now.link_status[1],
-                                       now.link_status[2],
-                                       now.route_matched};
-            gm206_log("link", values, 10);
-            kfree(after);
-        }
-    }
     // Record the active and the pending core state after each failure and after the first call.
     // They show which method the engine refused, or the state that the engine accepted.
     static bool recorded = false;
@@ -208,7 +168,10 @@ bool gm206_show(uint32_t offset, uint32_t width, uint32_t height, uint32_t pitch
                 gm206_log("method", values, 3);
         }
     }
-    if(!shown && state.stage >= gm206::ScanoutStage::Ownership)
+    // After a refused UPDATE, the head keeps the surface that it showed before the call, as the
+    // first desktop test showed. Each other failure after the ownership change leaves an unknown
+    // display state.
+    if(!shown && state.stage >= gm206::ScanoutStage::Ownership && !state.recoverable)
         __atomic_store_n(&failed, true, __ATOMIC_RELEASE);
     return shown;
 }
@@ -238,6 +201,7 @@ void destroy(NativeObject* object)
     console_display_release(object, restored, preserve);
     if(!restored)
         debug("display: boot mode restore failed, pixel output disabled")();
+    kfree(session.shadow);
     kfree(object);
 }
 
@@ -260,7 +224,7 @@ long acquire(const os1_display_mode& mode, bool native, DescriptorEntry& output)
     }
     object->preserve_scanout = status > 0;
     object->target = surface;
-    if(gm206_mode && mode.id == gm206_mode)
+    if(gm206_mode && mode.id >= gm206_mode)
     {
         object->target.pixels = gm206_aperture + gm206_native_offset;
         object->target.width = mode.width;
@@ -295,6 +259,10 @@ long acquire(const os1_display_mode& mode, bool native, DescriptorEntry& output)
         object->target.pitch = mode.width * 4;
     }
     object->native_requested = native;
+    // A missing shadow only makes the copy request slow.
+    if(object->target.pixel_bytes == 4)
+        object->shadow =
+            static_cast<uint32_t*>(kcalloc(object->target.height, object->target.pitch));
     output = {instance, OS1_RIGHT_DISPLAY, OS1_DESCRIPTOR_CLOEXEC, 0};
     return 0;
 }
@@ -322,8 +290,12 @@ void invoke(OpenInstance& instance,
         }
         else if(request.member == OS1_DISPLAY_LIST_MODES && !request.payload_bytes)
         {
-            memcpy(result.payload, &modes, sizeof(modes));
-            result.payload_bytes = sizeof(modes);
+            os1_display_modes first{};
+            first.count =
+                modes.count < OS1_DISPLAY_MODE_LIMIT ? modes.count : OS1_DISPLAY_MODE_LIMIT;
+            memcpy(first.modes, modes.modes, first.count * sizeof(os1_display_mode));
+            memcpy(result.payload, &first, sizeof(first));
+            result.payload_bytes = sizeof(first);
         }
         else if(request.member == OS1_DISPLAY_MODE_AT && request.payload_bytes == sizeof(uint32_t))
         {
@@ -367,6 +339,40 @@ void invoke(OpenInstance& instance,
             status = OS1_ERR_INVALID;
         else
             status = console_display_fill(instance.object, *driver, target, fill);
+    }
+    else if(request.member >= OS1_DISPLAY_FILL_AREA && request.member <= OS1_DISPLAY_BITMAP)
+    {
+        const auto& session = *static_cast<const Session*>(instance.object);
+        status = console_display_draw(instance.object,
+                                      *driver,
+                                      session.target,
+                                      session.shadow,
+                                      request.member,
+                                      request.payload,
+                                      request.payload_bytes);
+    }
+    else if(request.member == OS1_DISPLAY_CURSOR &&
+            request.payload_bytes == sizeof(os1_display_cursor))
+    {
+        // Only the GM206 scanout path has a hardware pointer.
+        const auto& session = *static_cast<const Session*>(instance.object);
+        os1_display_cursor cursor;
+        memcpy(&cursor, request.payload, sizeof(cursor));
+        const gm206::ScanoutLayout layout{gm206_instance_offset,
+                                          gm206_push_offset,
+                                          gm206_check_offset,
+                                          nullptr,
+                                          gm206_cursor_offset};
+        if(!gm206_mode || !session.switched || session.target.pixels == surface.pixels)
+            status = OS1_ERR_UNSUPPORTED;
+        else if(!gm206_exports->cursor(gm206_io,
+                                       *gm206_snapshot,
+                                       layout,
+                                       gm206_state,
+                                       cursor.x,
+                                       cursor.y,
+                                       cursor.visible != 0))
+            status = OS1_ERR_IO;
     }
     else if(request.member == OS1_DISPLAY_COMMIT && !request.payload_bytes)
     {
@@ -482,10 +488,10 @@ bool enable_gm206_scanout(const gm206::Exports& exports,
         gm206_snapshot ? gm206_snapshot->boot.head[gm206::head_viewport_out] : 0;
     const uint32_t width = output & 0x7fff, height = output >> 16 & 0x7fff;
     if(!driver || bochs || !gm206_snapshot || !gm206_snapshot->boot.route_matched ||
-       modes.count >= OS1_DISPLAY_MODE_LIMIT || surface.pixel_bytes != 4 ||
-       surface.red_shift != 16 || surface.pitch & 0xff || surface.pitch > 0x1fff00 ||
-       surface.pitch < surface.width * 4 || width > 4096 || height > 2160 ||
-       width <= surface.width || height <= surface.height || width * 4 & 0xff ||
+       modes.count >= mode_capacity || surface.pixel_bytes != 4 || surface.red_shift != 16 ||
+       surface.pitch & 0xff || surface.pitch > 0x1fff00 || surface.pitch < surface.width * 4 ||
+       width > 4096 || height > 2160 || width <= surface.width || height <= surface.height ||
+       width * 4 & 0xff ||
        uint64_t(surface.pitch) * surface.height > gm206_instance_offset - gm206_console_offset ||
        uint64_t(width) * height * 4 > gm206_console_offset - gm206_native_offset)
     {
@@ -497,6 +503,24 @@ bool enable_gm206_scanout(const gm206::Exports& exports,
     gm206_aperture = aperture;
     gm206_mode = modes.count + 1;
     modes.modes[modes.count++] = {gm206_mode, width, height, 32};
+    // Offer each smaller monitor mode as a scaled surface. The head keeps the native timing.
+    // The pitch of a surface must be a multiple of 256 bytes.
+    for(const auto& output_record : gm206_snapshot->outputs)
+        for(unsigned i = 0; i < output_record.mode_count; ++i)
+        {
+            const auto& candidate = output_record.modes[i];
+            bool usable = modes.count < mode_capacity && candidate.width >= 640 &&
+                          candidate.height >= 480 && candidate.width <= width &&
+                          candidate.height <= height && !(candidate.width * 4 & 0xff);
+            for(unsigned known = 0; known < modes.count; ++known)
+                usable = usable && (modes.modes[known].width != candidate.width ||
+                                    modes.modes[known].height != candidate.height);
+            if(usable)
+            {
+                modes.modes[modes.count] = {modes.count + 1, candidate.width, candidate.height, 32};
+                ++modes.count;
+            }
+        }
     gm206_status("probe complete; native mode offered");
     return true;
 }

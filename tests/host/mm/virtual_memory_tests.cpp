@@ -304,3 +304,38 @@ TEST(VirtualMemory, DirectMappingFillsHolesInExistingSmallPageTable)
         EXPECT_EQ(leaf_flags, uint64_t(flags | PageFlags::Present));
     }
 }
+
+TEST(VirtualMemory, FramebufferMappingAddsWriteCombiningToNewAndExistingPages)
+{
+    os1::host_test::PhysicalMemoryArena arena(kArenaBytes);
+    auto frames = make_frames(arena);
+    VirtualMemory vm(frames);
+    constexpr uint64_t combine = uint64_t(PageFlags::WriteCombine);
+    const auto flags_at = [&](uint64_t physical_address) {
+        uint64_t physical = 0, leaf_flags = 0;
+        EXPECT_TRUE(vm.translate(phys_to_virt(physical_address), physical, leaf_flags));
+        EXPECT_EQ(physical, physical_address);
+        return leaf_flags;
+    };
+    // The boot direct map holds the first range as large pages and the second as small pages.
+    constexpr uint64_t large = 0x800000, small = 0xc01000, fresh = 0x1000000;
+    ASSERT_TRUE(map_direct_range(vm, large, 0x400000));
+    ASSERT_TRUE(map_direct_range(vm, small, 0x3000));
+    EXPECT_TRUE(flags_at(large) & VirtualMemory::PAGE_LARGE);
+    EXPECT_FALSE(flags_at(large) & combine);
+    ASSERT_TRUE(map_framebuffer_range(vm, large, 0x200000));
+    ASSERT_TRUE(map_framebuffer_range(vm, small, 0x2000));
+    ASSERT_TRUE(map_framebuffer_range(vm, fresh, 0x201000));
+    EXPECT_TRUE(flags_at(large) & combine);
+    EXPECT_TRUE(flags_at(large + 0x1ff000) & combine);
+    // The next large page, and the small page after the range, keep the default attributes.
+    EXPECT_FALSE(flags_at(large + 0x200000) & combine);
+    EXPECT_TRUE(flags_at(small) & combine);
+    EXPECT_TRUE(flags_at(small + 0x1000) & combine);
+    EXPECT_FALSE(flags_at(small + 0x2000) & combine);
+    EXPECT_TRUE(flags_at(fresh) & combine);
+    EXPECT_TRUE(flags_at(fresh + 0x200000) & combine);
+    // A range that covers only a part of an existing large page is refused.
+    EXPECT_FALSE(map_framebuffer_range(vm, large + 0x200000, 0x1000));
+    EXPECT_FALSE(flags_at(large + 0x200000) & combine);
+}

@@ -2,6 +2,9 @@
 #include "mm/boot_mapping.hpp"
 
 #include "handoff/memory_layout.h"
+#if !defined(OS1_HOST_TEST)
+#include "arch/x86_64/cpu/x86.hpp"
+#endif
 #include "mm/virtual_memory.hpp"
 #include "util/align.hpp"
 
@@ -41,7 +44,24 @@ bool map_bootstrap_identity_range(VirtualMemory& vm, uint64_t physical_start, ui
         start, start, (end - start) / kPageSize, PageFlags::Present | PageFlags::Write);
 }
 
+namespace
+{
+bool map_direct(VirtualMemory& vm, uint64_t physical_start, uint64_t length, PageFlags extra);
+}
+
 bool map_direct_range(VirtualMemory& vm, uint64_t physical_start, uint64_t length)
+{
+    return map_direct(vm, physical_start, length, PageFlags::None);
+}
+
+bool map_framebuffer_range(VirtualMemory& vm, uint64_t physical_start, uint64_t length)
+{
+    return map_direct(vm, physical_start, length, PageFlags::WriteCombine);
+}
+
+namespace
+{
+bool map_direct(VirtualMemory& vm, uint64_t physical_start, uint64_t length, PageFlags extra)
 {
     if(0 == length)
     {
@@ -62,12 +82,28 @@ bool map_direct_range(VirtualMemory& vm, uint64_t physical_start, uint64_t lengt
         const bool use_large_page = (0 == (current % kLargePageSize2MiB)) &&
                                     (0 == (virtual_address % kLargePageSize2MiB)) &&
                                     ((end - current) >= kLargePageSize2MiB);
-        if(use_large_page &&
-           (large_page_is_already_mapped(vm, virtual_address, current) ||
-            vm.map_physical_2m(virtual_address,
-                               current,
-                               1,
-                               PageFlags::Present | PageFlags::Write | PageFlags::NoExecute)))
+        // The boot direct map can hold this range with the default attributes. Add the flags and
+        // remove the old entry from the TLB of this CPU. No CPU used the range before this call.
+        if(extra != PageFlags::None && page_is_already_mapped(vm, virtual_address, current))
+        {
+            // A large page that is only partly in the range would change memory outside the range.
+            const bool large = large_page_is_already_mapped(vm, virtual_address, current);
+            if((large && !use_large_page) || !vm.add_leaf_flags(virtual_address, extra))
+            {
+                return false;
+            }
+#if !defined(OS1_HOST_TEST)
+            invlpg(reinterpret_cast<void*>(virtual_address));
+#endif
+            current += large ? kLargePageSize2MiB : kPageSize;
+            continue;
+        }
+        if(use_large_page && (large_page_is_already_mapped(vm, virtual_address, current) ||
+                              vm.map_physical_2m(virtual_address,
+                                                 current,
+                                                 1,
+                                                 PageFlags::Present | PageFlags::Write |
+                                                     PageFlags::NoExecute | extra)))
         {
             current += kLargePageSize2MiB;
             continue;
@@ -77,7 +113,7 @@ bool map_direct_range(VirtualMemory& vm, uint64_t physical_start, uint64_t lengt
            !vm.map_physical(virtual_address,
                             current,
                             1,
-                            PageFlags::Present | PageFlags::Write | PageFlags::NoExecute))
+                            PageFlags::Present | PageFlags::Write | PageFlags::NoExecute | extra))
         {
             return false;
         }
@@ -86,6 +122,7 @@ bool map_direct_range(VirtualMemory& vm, uint64_t physical_start, uint64_t lengt
 
     return true;
 }
+}  // namespace
 
 bool map_mmio_range(VirtualMemory& vm, uint64_t physical_start, uint64_t length)
 {

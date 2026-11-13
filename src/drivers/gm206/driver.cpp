@@ -597,8 +597,10 @@ bool service(const Engine& e, ScanoutState& state)
     ++state.polls;
     if(e.rd(0x61009c) & 1)
     {
-        for(unsigned word = 0; word < 3; ++word)
+        // Keep the words of the first error of a call. They identify the cause.
+        for(unsigned word = 0; word < 3 && !state.errors; ++word)
             state.error[word] = e.rd(0x6101f0 + word * 4);
+        ++state.errors;
         e.wr(0x61009c, 1);
         e.wr(0x6101f0, 0x90000000);
         state.stage = ScanoutStage::Command;
@@ -641,7 +643,20 @@ bool run_commands(const Engine& e, ScanoutState& state, uint32_t put)
     for(unsigned i = 0; i < 20000; ++i)
     {
         if(!service(e, state))
+        {
+            // A refused UPDATE is the last command, and the head keeps its surface, as the first
+            // desktop test showed. Then the next call can use the channel. A refused method
+            // before the UPDATE leaves a display state and a command page that no test shows.
+            for(unsigned polls = 0; polls < 100; ++polls)
+            {
+                service(e, state);
+                e.io.delay_us(100);
+            }
+            state.recoverable = (state.error[0] & 0xffc) == 0x80 && state.errors == 1 &&
+                                !(e.rd(0x6100ac) & 7) && (e.rd(0x640004) & 0xffc) == put;
+            state.stage = ScanoutStage::Command;
             return false;
+        }
         if(!(e.rd(0x6100ac) & 7) && (e.rd(0x640004) & 0xffc) == put)
             return true;
         e.io.delay_us(100);
@@ -707,6 +722,10 @@ bool scanout(const ProbeIo& io,
     for(auto& request : state.supervisor_stage)
         request = 0;
     state.stages = 0;
+    state.errors = 0;
+    state.recoverable = false;
+    for(auto& word : state.error)
+        word = 0;
     state.polls = 0;
     for(auto& poll : state.stage_poll)
         poll = 0;
@@ -810,7 +829,130 @@ bool scanout(const ProbeIo& io,
                  confirm(e, state, surface.offset >> 8);
         }
         if(ok)
+        {
             state.stage = ScanoutStage::Ready;
+            state.surface = surface;
+            // The commands disabled the hardware pointer.
+            state.cursor_visible = false;
+        }
+    }
+    e.wr(0x001700, saved_window);
+    return ok;
+}
+
+namespace
+{
+// Arrow pointer. 'X' is the outline and '.' is the body. The tip is the top-left pixel.
+constexpr const char* pointer_rows[] = {
+    "X",
+    "XX",
+    "X.X",
+    "X..X",
+    "X...X",
+    "X....X",
+    "X.....X",
+    "X......X",
+    "X.......X",
+    "X........X",
+    "X.........X",
+    "X......XXXXX",
+    "X...X..X",
+    "X..XX..X",
+    "X.X  X..X",
+    "XX   X..X",
+    "X     XX",
+};
+constexpr unsigned pointer_size = 64;
+}  // namespace
+
+bool cursor(const ProbeIo& io,
+            const Snapshot& snapshot,
+            const ScanoutLayout& layout,
+            ScanoutState& state,
+            uint32_t x,
+            uint32_t y,
+            bool visible)
+{
+    const Engine e{io};
+    const uint64_t bytes = memory_bytes(snapshot.boot);
+    if(!state.owned || state.stage != ScanoutStage::Ready || layout.cursor & 0xfff ||
+       uint64_t(layout.cursor) + pointer_size * pointer_size * 4 > bytes ||
+       x >= state.surface.width || y >= state.surface.height)
+        return false;
+    // A hidden pointer needs no register access.
+    if(!visible && !state.cursor_visible)
+        return true;
+    const unsigned head = state.head * 0x300, user = 0x64d000 + state.head * 0x1000;
+    const uint32_t saved_window = e.rd(0x001700);
+    bool ok = true;
+    if(visible && !state.cursor_image)
+    {
+        // Write the image one time. A pixel with alpha 0 is transparent.
+        for(unsigned row = 0; row < pointer_size; ++row)
+        {
+            const char* pixels =
+                row < sizeof(pointer_rows) / sizeof(*pointer_rows) ? pointer_rows[row] : "";
+            bool end = false;
+            for(unsigned col = 0; col < pointer_size; ++col)
+            {
+                end = end || !pixels[col];
+                const char pixel = end ? ' ' : pixels[col];
+                e.memory(layout.cursor + (row * pointer_size + col) * 4,
+                         pixel == 'X'   ? 0xff000000
+                         : pixel == '.' ? 0xffffffff
+                                        : 0);
+            }
+        }
+        ok = e.flush();
+        state.cursor_image = ok;
+    }
+    if(ok && !state.cursor_channel)
+    {
+        // Start the position channel of the head. It needs no command page.
+        const unsigned control = 0x610490 + (13 + state.head) * 0x10;
+        e.wr(control, 1);
+        ok = e.wait(control, 0x00030000, 0x00010000);
+        state.cursor_channel = ok;
+    }
+    if(ok && visible)
+    {
+        // The position is in output pixels. The head scales a smaller surface to the output.
+        const uint32_t output = snapshot.boot.head[head_viewport_out];
+        const uint32_t out_x = uint64_t(x) * (output & 0x7fff) / state.surface.width;
+        const uint32_t out_y = uint64_t(y) * (output >> 16 & 0x7fff) / state.surface.height;
+        e.wr(user + 0x84, out_y << 16 | out_x);
+        e.wr(user + 0x80, 0);
+    }
+    if(ok && visible != state.cursor_visible)
+    {
+        const uint32_t commands[] = {
+            // Control with a 64 x 64 A8R8G8B8 image, then the image offset and its memory object.
+            2u << 18 | (0x0480 + head),
+            visible ? 0x85000000 : 0x05000000,
+            layout.cursor >> 8,
+            1u << 18 | (0x048c + head),
+            visible ? memory_handle : 0,
+            2u << 18 | 0x0080,
+            0,
+            0,
+        };
+        constexpr unsigned count = sizeof(commands) / sizeof(*commands);
+        state.stages = 0;
+        state.errors = 0;
+        if(state.put + count * 4 > command_limit)
+        {
+            e.memory(layout.push + state.put, 0x20000000);
+            ok = e.flush() && run_commands(e, state, 0);
+        }
+        if(ok)
+        {
+            for(unsigned i = 0; i < count; ++i)
+                e.memory(layout.push + state.put + i * 4, commands[i]);
+            ok = e.flush() && run_commands(e, state, state.put + count * 4) &&
+                 confirm(e, state, state.surface.offset >> 8);
+        }
+        if(ok)
+            state.cursor_visible = visible;
     }
     e.wr(0x001700, saved_window);
     return ok;
@@ -820,6 +962,6 @@ bool scanout(const ProbeIo& io,
 extern "C" const gm206::Exports* os1_driver_init()
 {
     static constexpr gm206::Exports exports{
-        OS1_GM206_ABI, sizeof(gm206::Exports), gm206::probe, gm206::scanout};
+        OS1_GM206_ABI, sizeof(gm206::Exports), gm206::probe, gm206::scanout, gm206::cursor};
     return &exports;
 }

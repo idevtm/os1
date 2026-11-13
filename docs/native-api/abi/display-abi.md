@@ -5,6 +5,7 @@ A DisplaySession grants exclusive control of pixel output until its last referen
 
 ```text
 root grant -> Display -> open(mode_id) -> DisplaySession -> fill(rectangle, rgb)
+DisplaySession -> fill_area, copy, bitmap -> framebuffer module -> shadow and video memory
 diagnostic session closes -> restore boot mode -> redraw text
 native session closes -> release exclusive ownership -> retain native scanout
 ```
@@ -18,6 +19,10 @@ native session closes -> release exclusive ownership -> retain native scanout
 | Display v1 | `open_native` | 32-bit runtime mode ID | One owned DisplaySession descriptor |
 | DisplaySession v1 | `fill` | `os1_display_fill` | Empty |
 | DisplaySession v1 | `commit` | Empty | Empty |
+| DisplaySession v1 | `fill_area` | `os1_display_fill` | Empty |
+| DisplaySession v1 | `copy` | `os1_display_copy` | Empty |
+| DisplaySession v1 | `bitmap` | `os1_display_bitmap` header and bitmap bytes | Empty |
+| DisplaySession v1 | `cursor` | `os1_display_cursor` | Empty |
 
 The [UAPI header](../../../src/uapi/os1/display.h) defines the copied records.
 The kernel grants `OS1_RIGHT_DISPLAY` on the initial root descriptor.
@@ -31,6 +36,8 @@ Mode ID 1 identifies the boot framebuffer.
 The firmware backend offers only this mode.
 A matching QEMU Standard VGA backend also offers 800 by 600 and 1280 by 720 RGB32 modes.
 The list skips any alternate that duplicates the boot mode.
+The reference GTX 950 backend offers the native mode and smaller scaled modes of its monitor.
+The `mode_at` method reports each mode. The list has a capacity of 12 modes.
 Mode IDs in this list are local to the boot. An acquire rejects an unknown ID.
 The kernel checks a mode switch before it publishes the session.
 If the check fails, it restores the boot mode and returns an I/O error.
@@ -57,9 +64,12 @@ BIOS VGA text exposes no graphics mode.
 
 Run `gsh "--menu"` from the disk shell for the display diagnostic.
 Use Up and Down to highlight a mode. Press Enter to apply the highlighted mode.
-The boot mode is highlighted first.
+The boot mode is highlighted first. The menu draws the highlighted mode on one console row.
+A serial console receives one line for each change.
 Move the mouse to move the pointer.
-Press Escape or `q` to restore the console.
+Press M to open the next mode. Press C to change between the hardware pointer and the drawn pointer.
+Press T to open the shell window. Press Escape to close the window.
+With no open window, press Escape or `q` to restore the console.
 The demo selects the first USB pointer or falls back to the first non-USB pointer.
 A detached pointer ends the demo and releases both sessions.
 
@@ -71,6 +81,32 @@ On exit, it reports event publication gaps, event age, and cursor draw duration.
 The report counts samples at or above 50 ms and includes maximum values and sample counts.
 A zero sample count means no timing result for that measure.
 Publication gaps can include time when the pointer was stationary.
+
+### Fast drawing requests
+
+DisplaySession members 3 to 6 are `fill_area`, `copy`, `bitmap`, and `cursor`.
+Members 3 to 5 need a surface with 32-bit pixels. A different surface returns an invalid-argument error.
+A caller sends a `fill_area` request of one pixel to find if the session has these members.
+
+| Member | Rule |
+| --- | --- |
+| `fill_area` | The rectangle has a maximum of 65,536 pixels. The color uses the form `0xRRGGBB`. |
+| `copy` | The source and the target have the same size and a maximum of 65,536 pixels. They can overlap. |
+| `bitmap` | Each row starts at a new byte. Bit 0 of a byte is the left pixel. The bitmap has a maximum of 232 bytes. |
+| `cursor` | The position is the pointer tip in surface pixels. A zero `visible` value hides the pointer. |
+
+A `bitmap` request contains the 24-byte header and only the necessary bitmap bytes.
+A set bit draws the foreground color. A clear bit draws the background color.
+The background value `0x01000000` keeps the pixel of a clear bit.
+Each rectangle must fit fully inside the mode. The framebuffer module refuses a request before it writes pixels.
+A caller divides a larger area into requests. For an overlapping move down, send the lowest band first.
+The kernel keeps a shadow of the surface in normal memory for these members.
+A `copy` request reads the shadow. If the kernel has no memory for the shadow, the request reads video memory.
+The shadow starts with zero pixels. Draw an area before you copy it.
+The `fill` member does not update the shadow. Do not use `fill` and `copy` for the same area.
+Only the GTX 950 backend has a hardware pointer. A different session returns `OS1_ERR_UNSUPPORTED`.
+A failed pointer request returns an I/O error. The caller then draws the pointer.
+See the [drawing work](../../hardware/nvidia-mode-setting-plan.md#drawing-speed-scaled-modes-and-hardware-pointer) for the design.
 
 ### Indexed mode enumeration
 

@@ -1,4 +1,5 @@
 #include "driver/display.h"
+#include "driver/draw.hpp"
 
 namespace
 {
@@ -74,7 +75,7 @@ bool set_mode(volatile uint16_t* regs, const os1_bochs_mode* mode)
            active.y == mode->y;
 }
 const os1_display_driver driver{
-    OS1_DISPLAY_MODULE_ABI, sizeof(driver), probe, fill, read_mode, set_mode};
+    OS1_DISPLAY_MODULE_ABI, sizeof(driver), probe, fill, read_mode, set_mode, display_draw::draw};
 }  // namespace
 
 extern "C" const os1_display_driver* os1_driver_init()

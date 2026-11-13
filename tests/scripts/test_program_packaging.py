@@ -63,7 +63,7 @@ for entry in packages:
     assert entry['destination'].endswith(f'/{name}/manifest.json')
     image = str(Path(entry['destination']).with_name('driver.elf'))
     assert package['image'] == image
-    assert package['abi'] == {'virtio-net': 1, 'firmware-framebuffer': 2, 'gm206': gm206_abi}[name]
+    assert package['abi'] == {'virtio-net': 1, 'firmware-framebuffer': 3, 'gm206': gm206_abi}[name]
     assert image in program_paths
     assert installed[image][1] == package['sha256']
     if name == 'virtio-net':
