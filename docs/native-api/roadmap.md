@@ -357,7 +357,7 @@ The eighth desktop test on the GTX 950 accepted the shell window with these limi
 | A window has a fixed size. | Add a size change with the pointer. |
 | The GPU copy of the GTX 950 has no time measurement, and the card has no GPU fill. | The [GPU copy engine path](../hardware/gm206-copy-engine.md) passed its first desktop test. Measure it against the processor copy. Add a fill only if a measurement shows a need. |
 | The [Spleen fonts](../shell/fonts.md) and the console cell change have no desktop test. | Examine the six font sizes in `gsh` and the console fonts of `sh` on the GTX 950. |
-| The laptop has no native display driver. | Add its display adapter to the display driver modules. |
+| The laptop has no native display driver. | Add its display adapter to the GM206 module. See the [laptop display plan](../hardware/laptop-display-plan.md). |
 
 These checks are also open:
 

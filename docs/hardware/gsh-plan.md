@@ -114,7 +114,7 @@ The shell window does not stay open across a mode change.
 1. Give the shell window line editing, history, and completion. Add a request that stops a child process.
 2. Add a window size change.
 3. Measure the [GPU copy engine path](gm206-copy-engine.md) against the processor copy. The first desktop test passed.
-4. Add the laptop display adapter to the display driver modules.
+4. Add the laptop display adapter to the display driver modules. See the [laptop display plan](laptop-display-plan.md).
 5. Increase the reserved window of the BIOS kernel image when a kernel feature needs the space.
 6. Qualify the Spleen fonts on the desktop in each mode size.
 
