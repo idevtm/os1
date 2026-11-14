@@ -118,7 +118,7 @@ kernel -> session ownership, request checks, console, PCI inventory, mapping, me
 
 ### Driver table
 
-The [interface header](../../src/common/driver/display.h) defines ABI 4. Each display module returns one `os1_display_driver` table.
+The [interface header](../../src/common/driver/display.h) defines ABI 5. ABI 5 adds the body color to the `cursor` export. Each display module returns one `os1_display_driver` table.
 
 | Export | Use |
 | --- | --- |
@@ -128,7 +128,7 @@ The [interface header](../../src/common/driver/display.h) defines ABI 4. Each di
 | `set_mode` | Show one mode and report its surface. |
 | `restore` | Show the text console again and report the console surface. |
 | `fill`, `draw` | Draw into a surface. These exports are optional. |
-| `cursor` | Show, move, or hide a hardware pointer. This export is optional. |
+| `cursor` | Show, move, or hide a hardware pointer with a body color. This export is optional. |
 | `reflect` | Answer a reflection query for the display subtree. This export is optional. |
 
 The `set_mode` and `restore` exports return one of three results.

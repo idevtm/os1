@@ -1106,9 +1106,10 @@ The GM206 module offers each smaller EDID mode of the GTX 950 monitor as a scale
 The head keeps the native timing and scales the surface to the output viewport.
 The console surface of the [firmware timing scanout](#firmware-timing-scanout) uses the same method.
 A scaled mode must have a width that is a multiple of 64, a minimum width of 640, and a minimum height of 480.
+A scaled mode must also have the width to height relation of the native mode. The scaler then keeps the pixel shape.
 The service omits a size that is already in the list. The list has a capacity of 12 modes.
-The scaler does not keep the aspect ratio. A 4:3 mode covers the full 16:9 output.
-The desktop has not shown a scaled mode other than the 1024 × 768 console surface.
+The fifth desktop test also offered modes with a different relation. A 4:3 mode covered the full 16:9 output.
+The fifth and sixth desktop tests showed the scaled modes of this monitor.
 The engine can refuse the UPDATE of a scaled mode. The head then keeps the surface that it showed before.
 The first desktop test showed this behavior. The module sets its `recoverable` value for this condition only.
 The display service then returns an I/O error for that open request and stays in operation.
@@ -1127,21 +1128,23 @@ GM206 module ABI 6 adds the `cursor` export. DisplaySession member 6 calls it fo
 | --- | --- | --- |
 | 1 | PRAMIN, `0x070000` | Write the 64 × 64 `A8R8G8B8` arrow image at video memory offset `0x06412000`. |
 | 2 | `0x610560` plus `0x10` for each head | Write 1 to start the position channel. Wait for `0x00010000` in bits 17:16. |
-| 3 | `0x64d084`, `0x64d080` plus `0x1000` for each head | Write the position in output pixels, then an update. |
+| 3 | `0x64d084`, `0x64d080` plus `0x1000` for each head | Write the position in surface pixels, then an update. |
 | 4 | Command page | Send methods `0x0480`, `0x0484`, `0x048c`, and UPDATE to show or hide the image. |
 
 The control value `0x85000000` enables a 64 × 64 `A8R8G8B8` image with alpha blending.
 The value `0x05000000` disables the pointer. Each scanout call sends it.
 A move writes only the two registers of step 3. It sends no command.
-The module converts a surface position to an output position for a scaled mode.
-The pointer image has the same size on the monitor in each mode.
+The position is in surface pixels. See the [sixth desktop test](#sixth-desktop-test) for the correction.
+The module waits a maximum of 1 ms for free space in the position channel before a move. Then it writes the position.
+The module writes one `gm206 cursor` log line for each show, hide, and failure.
+The first values are the position, the visible request, the result, the stage, and the first error word.
+The last values are the active control value, the channel control register, and the free space of the channel.
 The show and hide commands use the completion rules of the [takeover sequence](#takeover-sequence).
-Nouveau waits for free space in the position channel before a move. The module does not wait.
 The desktop test must confirm these behaviors:
 
 - The position channel starts while the module polls the engine.
 - The engine accepts the pointer methods and the image through the video memory object.
-- The pointer position uses output pixels in a scaled mode.
+- The pointer position uses surface pixels in a scaled mode.
 - A show or hide UPDATE completes without a mode change.
 
 If the request fails, `gsh` draws the pointer itself. The C key changes between the two pointers.
@@ -1328,4 +1331,101 @@ The first review found no automated check of the GM206 driver table. Two host te
 It also found a wrong result of the framebuffer module after a failed mode change, and module claims without listed modes.
 The second review found one status for four causes of a missing mode. Each cause now has its own status.
 The corrections after the second review had no further review.
+
+### Sixth desktop test
+
+The sixth test ran on November 13, 2026 with commit `15dfde7`. The repository has no exported log of this test.
+The user reported the results. The moved display code of the [display driver boundary](#display-driver-boundary) operated on the card.
+
+| Item | Desktop result |
+| --- | --- |
+| Menu, mode list, mode change, console return | Operated as before the move. |
+| Hardware pointer | In some sessions the pointer did not show. |
+| Window move | Operated in some modes, with the 3840 × 2160 mode as one of them. |
+
+The two faults have one probable cause. The module sent the pointer position in output pixels.
+In the native mode, an output pixel is a surface pixel. In a scaled mode, the pointer on the monitor then moved faster than the position that `gsh` used.
+A press on the title that the user saw was then not on the title for `gsh`. The pointer also left the output area.
+The correction sends the position in surface pixels, as Nouveau does for the position of its user mode.
+No log confirms the cause. The method name of the position is `SET_CURSOR_HOT_SPOT_POINT_OUT`, which can also mean output pixels.
+If so, the pointer stays in the upper left part of a scaled mode after this correction.
+A seventh desktop test must show the pointer and the window move in a scaled mode.
+The new `gm206 cursor` log line gives the evidence if the pointer does not show.
+
+The same change set adds these items of the graphics shell. The [graphics shell plan](gsh-plan.md#mode-list) has the details.
+
+- A font scale for large modes, and the mode size in the upper right corner.
+- A mode list window with a confirmation and a time limit.
+- A clock that draws again each window over it. The seventh desktop test replaced this item.
+
+Seventh test procedure:
+
+1. Write a new USB image and start the desktop PC from it.
+2. Run `gsh "--menu"` and select the 3840 × 2160 mode.
+3. Record the size of the text and the mode size in the upper right corner.
+4. Press M. Select a smaller mode with the pointer and press the left button.
+5. Press Enter to keep the mode. Record if the pointer is on the position of the mouse.
+6. Press T. Move the window by its title. Record the result.
+7. Move the window over the clock. Record if the clock stays correct after the window leaves.
+8. Press Esc. Press M, select a different mode, press Enter, and then press no key for 10 seconds.
+9. Record if the mode before the change returns.
+10. Press Esc to end the session.
+11. Run `touch "/etc/gsh.boot"` in the text shell. Then start the desktop PC again.
+12. Record if the graphics shell shows the header, the clock, and the pointer.
+13. Press M, select a different mode, and press Enter. Press Enter again to keep the mode.
+14. Press T. Run `cat "/etc/gsh.conf"` in the shell window. Record if the file has the size of the kept mode.
+15. Run `lx` in the shell window.
+16. Run `rm "/etc/gsh.boot"` in the shell window to remove the direct start.
+17. Press Esc, then S to stop the desktop PC.
+
+The desktop session has no exit to the text shell. The shell window is the way to remove the file.
+If the shell window does not operate, delete `/etc/gsh.boot` from the data partition on the development machine.
+
+Open items of this change set:
+
+- The mode list of the desktop session and the saved preference have no automated check. Steps 13 and 14 examine them.
+- No QEMU mode has a font scale of 2 or 3. Steps 2 and 3 examine the scale of 3.
+- A serial arrow key in the mode list closes the list, because the list does not read escape sequences.
+- An error after the desktop takes the display leaves the last image on the monitor. The text shell is then on the serial console only.
+- The graphics shell needs a pointer device at its start. A mouse that is not ready gives the text shell.
+
+### Seventh desktop test
+
+The seventh test ran on November 14, 2026 with commit `15dfde7` plus the change set of the [sixth desktop test](#sixth-desktop-test).
+The repository has no exported log of this test. The user reported the results.
+
+| Item | Desktop result |
+| --- | --- |
+| Mode list, confirmation, and return to the mode before | Operated correctly. |
+| Hardware pointer and drawn pointer | Operated correctly in each mode. This result confirms the position correction. |
+| Pointer color during a button press | The hardware pointer did not show the press color. |
+| Window scroll speed | Acceptable. The user still wants a path through the GPU. |
+| Window move | The user reported no fault. The test has no separate record for it. |
+| Start from `/etc/gsh.boot` | The graphics shell started with its header. |
+| Shell window after that start | The child shell had no aliases. The shell init script did not run. |
+| Clock and mode size over a window | The user wants them under the windows, with no window draw each second. |
+
+The corrections of this test are in the same change set:
+
+- The `cursor` request and the `cursor` export have a body color. The GM206 module writes the body pixels of the pointer image again for a new color. The head shows the image memory, so the change needs no command.
+- `gsh` gives a child shell the init script constructor if no shell started `gsh`.
+- `gsh` draws the clock and the mode size only where no window covers them. It paints the visible part of a partly covered character with the background color.
+
+The display driver interface is ABI 5 for the new `cursor` export.
+No test has examined the saved mode in `/etc/gsh.conf`. The user could not read the file without the `cat` alias.
+
+Open work after this test:
+
+1. Add a kernel byte stream object and a wait with a time limit. Then connect a child `sh` that stays open.
+2. Add a copy path through the GPU copy engine of the GTX 950.
+3. Add the laptop display adapter to the display driver modules.
+4. Add a window size change.
+
+Validation of this change set, with base `15dfde7`:
+The final `./scripts/check-local.sh` run passed 848 host, 106 normal-image, and three diagnostic-image checks.
+The profile times were 29.78 s, 492.40 s, and 11.04 s. See `build/gsh-batch-a/full-local.log` for the full run.
+The GM206 module has 37,472 bytes, 4,096 bytes more than before. The `gsh` program has 52,768 bytes, 6,232 bytes more.
+The kernel images have the same sizes as before.
+Two independent reviews examined the change set. No review found a blocking defect.
+The corrections after each review had no further review.
 

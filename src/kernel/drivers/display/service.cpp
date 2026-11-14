@@ -294,9 +294,12 @@ void invoke(OpenInstance& instance,
         const auto& session = *static_cast<const Session*>(instance.object);
         os1_display_cursor cursor;
         memcpy(&cursor, request.payload, sizeof(cursor));
-        if(!session.switched || !backends[session.backend]->cursor)
+        if(cursor.rgb > 0xffffff)
+            status = OS1_ERR_INVALID;
+        else if(!session.switched || !backends[session.backend]->cursor)
             status = OS1_ERR_UNSUPPORTED;
-        else if(!backends[session.backend]->cursor(cursor.x, cursor.y, cursor.visible != 0))
+        else if(!backends[session.backend]->cursor(
+                    cursor.x, cursor.y, cursor.visible != 0, cursor.rgb))
             status = OS1_ERR_IO;
     }
     else if(request.member == OS1_DISPLAY_COMMIT && !request.payload_bytes)

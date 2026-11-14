@@ -698,10 +698,16 @@ struct EngineFixture
     bool stage3_never = false, stale_before_stage1 = false, cursor_channel_dead = false;
     uint32_t refused_method = ~0u, resume_get = 0, resume_put = ~0u;
     static constexpr uint32_t cursor = 0x06412000;
-    bool point(uint32_t x, uint32_t y, bool visible)
+    bool point(uint32_t x, uint32_t y, bool visible, uint32_t rgb = 0xffffff)
     {
-        return gm206::cursor(
-            io(), snapshot, {instance, push, check, &check_word, cursor}, state, x, y, visible);
+        return gm206::cursor(io(),
+                             snapshot,
+                             {instance, push, check, &check_word, cursor},
+                             state,
+                             x,
+                             y,
+                             visible,
+                             rgb);
     }
     bool armed_hidden = false, retains_pending = false, installed = false;
     uint32_t get_flags = 0;
@@ -1059,18 +1065,27 @@ TEST(Gm206, ShowsMovesAndHidesTheHardwarePointer)
     EXPECT_EQ(engine.memory[EngineFixture::cursor + 4], 0u);
     EXPECT_EQ(engine.memory[EngineFixture::cursor + 2 * 64 * 4 + 4], 0xffffffffu);
     EXPECT_EQ(engine.memory[EngineFixture::cursor + 63 * 64 * 4 + 63 * 4], 0u);
-    // The position channel of head 0 runs. The position is in output pixels of 3840 x 2160.
+    // The position channel of head 0 runs. The position is in surface pixels.
     EXPECT_EQ(engine.registers[0x610560], 0x00010001u);
-    EXPECT_EQ(engine.registers[0x64d084], 1080u << 16 | 1920u);
+    EXPECT_EQ(engine.registers[0x64d084], 384u << 16 | 512u);
     EXPECT_EQ(engine.count(0x64d080), 1u);
     EXPECT_EQ(engine.armed[0x480], 0x85000000u);
     EXPECT_EQ(engine.armed[0x484], EngineFixture::cursor >> 8);
     EXPECT_EQ(engine.armed[0x48c], 0xf0000001u);
     EXPECT_TRUE(engine.state.cursor_visible);
+    // A new body color changes only the body pixels of the image. It sends no command.
+    const uint32_t color_put = engine.state.put;
+    ASSERT_TRUE(engine.point(512, 384, true, 0xffcb54));
+    EXPECT_EQ(engine.memory[EngineFixture::cursor], 0xff000000u);
+    EXPECT_EQ(engine.memory[EngineFixture::cursor + 2 * 64 * 4 + 4], 0xffffcb54u);
+    EXPECT_EQ(engine.memory[EngineFixture::cursor + 4], 0u);
+    EXPECT_EQ(engine.state.put, color_put);
+    ASSERT_TRUE(engine.point(512, 384, true));
+    EXPECT_EQ(engine.memory[EngineFixture::cursor + 2 * 64 * 4 + 4], 0xffffffffu);
     // A move writes only the position. It sends no command.
     const uint32_t put = engine.state.put;
     ASSERT_TRUE(engine.point(1023, 767, true));
-    EXPECT_EQ(engine.registers[0x64d084], (767u * 2160 / 768) << 16 | (1023u * 3840 / 1024));
+    EXPECT_EQ(engine.registers[0x64d084], 767u << 16 | 1023u);
     EXPECT_EQ(engine.state.put, put);
     EXPECT_EQ(engine.count(0x610560), 1u);
     EXPECT_FALSE(engine.point(1024, 0, true));
@@ -1387,13 +1402,16 @@ TEST(Gm206, OffersTheNativeModeAndSmallerMonitorModesAsScaledModes)
                                  {1280, 720},
                                  {4096, 2160},
                                  {640, 400},
-                                 {1600, 900}};
+                                 {1600, 900},
+                                 {1280, 960},
+                                 {1920, 1200}};
     for(const auto& size : sizes)
         sink.modes[sink.mode_count++] = size;
     const os1_framebuffer_surface boot{nullptr, 1024, 768, 4096, 4, 16, 8, 0};
     os1_display_mode modes[12]{};
     // The native mode is first. The list has no size two times and no size of the boot mode.
     // A width of 800 gives a pitch that is not a multiple of 256 bytes.
+    // A size with a different shape than the native mode is not in the list.
     ASSERT_EQ(gm206::offer_modes(snapshot, boot, modes, 12), 5u);
     const uint32_t expected[][2] = {
         {3840, 2160}, {2560, 1440}, {1920, 1080}, {1280, 720}, {1600, 900}};
@@ -1605,7 +1623,7 @@ TEST(Gm206Module, OffersModesOnTheSupportedBoardAndKeepsItsClaims)
     // A request outside the mode list changes nothing. No surface is on the head.
     os1_framebuffer_surface surface{};
     EXPECT_EQ(machine.driver->set_mode(99, &surface), OS1_DISPLAY_REFUSED);
-    EXPECT_FALSE(machine.driver->cursor(1, 1, true));
+    EXPECT_FALSE(machine.driver->cursor(1, 1, true, 0xffffff));
     // Before the first module surface, the console keeps the boot framebuffer.
     EXPECT_EQ(machine.driver->restore(&surface), OS1_DISPLAY_DONE);
     EXPECT_EQ(surface.pixels, machine.memory);

@@ -67,7 +67,9 @@ Use Up and Down to highlight a mode. Press Enter to apply the highlighted mode.
 The boot mode is highlighted first. The menu draws the highlighted mode on one console row.
 A serial console receives one line for each change.
 Move the mouse to move the pointer.
-Press M to open the next mode. Press C to change between the hardware pointer and the drawn pointer.
+Press M to show the mode list. Select a mode with Up and Down or with the pointer. Press Enter or the left button to apply it.
+A new mode asks for a confirmation. Press Enter in 10 seconds to keep it. If not, the mode before it returns.
+Press C to change between the hardware pointer and the drawn pointer.
 Press T to open the shell window. Press Escape to close the window.
 With no open window, press Escape or `q` to restore the console.
 The demo selects the first USB pointer or falls back to the first non-USB pointer.
@@ -93,7 +95,7 @@ A caller sends a `fill_area` request of one pixel to find if the session has the
 | `fill_area` | The rectangle has a maximum of 65,536 pixels. The color uses the form `0xRRGGBB`. |
 | `copy` | The source and the target have the same size and a maximum of 65,536 pixels. They can overlap. |
 | `bitmap` | Each row starts at a new byte. Bit 0 of a byte is the left pixel. The bitmap has a maximum of 232 bytes. |
-| `cursor` | The position is the pointer tip in surface pixels. A zero `visible` value hides the pointer. |
+| `cursor` | The position is the pointer tip in surface pixels. A zero `visible` value hides the pointer. The `rgb` value is the body color in the form `0xRRGGBB`. A larger value returns an invalid-argument error. |
 
 A `bitmap` request contains the 24-byte header and only the necessary bitmap bytes.
 A set bit draws the foreground color. A clear bit draws the background color.
@@ -104,6 +106,7 @@ The kernel keeps a shadow of the surface in normal memory for these members.
 A `copy` request reads the shadow. If the kernel has no memory for the shadow, the request reads video memory.
 The shadow starts with zero pixels. Draw an area before you copy it.
 The `fill` member does not update the shadow. Do not use `fill` and `copy` for the same area.
+The `cursor` record has 16 bytes. The kernel refuses the earlier record of 12 bytes.
 Only the GTX 950 backend has a hardware pointer. A different session returns `OS1_ERR_UNSUPPORTED`.
 A failed pointer request returns an I/O error. The caller then draws the pointer.
 See the [drawing work](../../hardware/nvidia-mode-setting-plan.md#drawing-speed-scaled-modes-and-hardware-pointer) for the design.

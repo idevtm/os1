@@ -5,7 +5,7 @@
 
 // Interface between the kernel display service and a trusted display driver module.
 // The kernel knows this interface only. It has no code for one display device.
-#define OS1_DISPLAY_MODULE_ABI 4u
+#define OS1_DISPLAY_MODULE_ABI 5u
 
 struct os1_framebuffer_surface
 {
@@ -102,8 +102,9 @@ struct os1_display_driver
                  uint32_t member,
                  const uint8_t* payload,
                  uint32_t bytes);
-    // Show the hardware pointer with its tip at a surface position, or hide it.
-    bool (*cursor)(uint32_t x, uint32_t y, bool visible);
+    // Show the hardware pointer with its tip at a surface position, or hide it. The body of the
+    // pointer has the color `rgb`.
+    bool (*cursor)(uint32_t x, uint32_t y, bool visible, uint32_t rgb);
     // Answer a hardware reflection query for the display subtree.
     long (*reflect)(Os1HardwareQuery*, const os1_display_summary*);
 };

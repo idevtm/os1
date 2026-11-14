@@ -280,9 +280,26 @@ os1_display_result restore(os1_framebuffer_surface* out)
     return OS1_DISPLAY_DONE;
 }
 
-bool cursor(uint32_t x, uint32_t y, bool visible)
+bool cursor(uint32_t x, uint32_t y, bool visible, uint32_t rgb)
 {
-    return shown && gm206::cursor(io, snapshot, layout(), state, x, y, visible);
+    const bool change = visible != state.cursor_visible;
+    const bool done = shown && gm206::cursor(io, snapshot, layout(), state, x, y, visible, rgb);
+    // Record each show, hide, and failure. A move writes no line.
+    if(shown && (change || !done))
+    {
+        const uint32_t values[] = {x,
+                                   y,
+                                   visible,
+                                   done,
+                                   uint32_t(state.stage),
+                                   state.error[0],
+                                   io.read(io.context, 0x640480 + state.head * 0x300),
+                                   io.read(io.context, 0x610560 + state.head * 0x10),
+                                   // Free space of the position channel.
+                                   io.read(io.context, 0x64d008 + state.head * 0x1000)};
+        host->log("gm206 cursor", values, 9);
+    }
+    return done;
 }
 
 long reflect(Os1HardwareQuery* query, const os1_display_summary* summary)

@@ -66,8 +66,8 @@ def exercise_graphics(args, run, expect):
             width, _, pixels = screenshot()
             return pixels[(y * width + x) * 3:(y * width + x) * 3 + 3].hex()
 
-        def await_true(check, message):
-            deadline = time.monotonic() + 15
+        def await_true(check, message, seconds=15):
+            deadline = time.monotonic() + seconds
             while time.monotonic() < deadline:
                 if check():
                     return
@@ -117,10 +117,29 @@ def exercise_graphics(args, run, expect):
                 {'type': 'btn', 'data': {'down': False, 'button': 'left'}}]})
             key('esc')
             await_true(lambda: pixel(left + 51, top + 31) == back, 'shell window did not close')
-            # The M key opens the next mode in the same session loop.
+            # The M key shows the mode list. The list is a window of 232 x 68 pixels in the
+            # center. Down selects 1280 x 720, the mode after the current one.
             key('m')
+            await_true(lambda: pixel(286, 268) == frame, 'mode list did not open')
+            key('down')
+            key('ret')
             await_true(lambda: screenshot()[:2] == (1280, 720) and pixel(0, 0) == back,
-                       'the next mode did not open')
+                       'the selected mode did not open')
+            # The new mode asks for a confirmation in a window of 232 x 44 pixels. Enter keeps it.
+            await_true(lambda: pixel(526, 340) == frame, 'mode confirmation did not open')
+            key('ret')
+            await_true(lambda: pixel(526, 340) == back, 'mode confirmation did not close')
+            # A mode without a confirmation returns to the mode before it after 10 seconds.
+            key('m')
+            await_true(lambda: pixel(526, 328) == frame, 'mode list did not open again')
+            key('up')
+            key('ret')
+            await_true(lambda: screenshot()[:2] == (800, 600) and pixel(286, 280) == frame,
+                       'the second mode did not ask for a confirmation')
+            await_true(lambda: screenshot()[:2] == (1280, 720) and pixel(0, 0) == back,
+                       'the session did not return to the confirmed mode', seconds=25)
+            time.sleep(1)
+            assert pixel(526, 340) == back, 'a returned mode asked for a confirmation'
 
         boot_width, boot_height, _ = screenshot()
         for arrow, resolution in [('down', (800, 600)), ('up', (1280, 720))]:

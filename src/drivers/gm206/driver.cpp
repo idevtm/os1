@@ -864,10 +864,13 @@ unsigned offer_modes(const Snapshot& snapshot,
         for(unsigned i = 0; i < sink.mode_count; ++i)
         {
             const auto& candidate = sink.modes[i];
-            bool usable = count < capacity && candidate.width >= 640 && candidate.height >= 480 &&
-                          candidate.width <= width && candidate.height <= height &&
-                          !(candidate.width * 4 & 0xff) &&
-                          (candidate.width != boot.width || candidate.height != boot.height);
+            bool usable =
+                count < capacity && candidate.width >= 640 && candidate.height >= 480 &&
+                candidate.width <= width && candidate.height <= height &&
+                !(candidate.width * 4 & 0xff) &&
+                // The head scales a surface to the full output. Keep the pixel shape.
+                uint64_t(candidate.width) * height == uint64_t(candidate.height) * width &&
+                (candidate.width != boot.width || candidate.height != boot.height);
             for(unsigned known = 0; known < count; ++known)
                 usable = usable && (modes[known].width != candidate.width ||
                                     modes[known].height != candidate.height);
@@ -908,7 +911,8 @@ bool cursor(const ProbeIo& io,
             ScanoutState& state,
             uint32_t x,
             uint32_t y,
-            bool visible)
+            bool visible,
+            uint32_t rgb)
 {
     const Engine e{io};
     const uint64_t bytes = memory_bytes(snapshot.boot);
@@ -922,26 +926,30 @@ bool cursor(const ProbeIo& io,
     const unsigned head = state.head * 0x300, user = 0x64d000 + state.head * 0x1000;
     const uint32_t saved_window = e.rd(0x001700);
     bool ok = true;
-    if(visible && !state.cursor_image)
+    if(visible && (!state.cursor_image || state.cursor_color != rgb))
     {
-        // Write the image one time. A pixel with alpha 0 is transparent.
-        for(unsigned row = 0; row < pointer_size; ++row)
+        // Write the image one time. A pixel with alpha 0 is transparent. For a new color, write
+        // only the body pixels. The head shows the image memory, so the change needs no command.
+        constexpr unsigned drawn_rows = sizeof(pointer_rows) / sizeof(*pointer_rows);
+        for(unsigned row = 0; row < (state.cursor_image ? drawn_rows : pointer_size); ++row)
         {
-            const char* pixels =
-                row < sizeof(pointer_rows) / sizeof(*pointer_rows) ? pointer_rows[row] : "";
+            const char* pixels = row < drawn_rows ? pointer_rows[row] : "";
             bool end = false;
             for(unsigned col = 0; col < pointer_size; ++col)
             {
                 end = end || !pixels[col];
                 const char pixel = end ? ' ' : pixels[col];
+                if(state.cursor_image && pixel != '.')
+                    continue;
                 e.memory(layout.cursor + (row * pointer_size + col) * 4,
                          pixel == 'X'   ? 0xff000000
-                         : pixel == '.' ? 0xffffffff
+                         : pixel == '.' ? 0xff000000 | rgb
                                         : 0);
             }
         }
         ok = e.flush();
         state.cursor_image = ok;
+        state.cursor_color = rgb;
     }
     if(ok && !state.cursor_channel)
     {
@@ -953,11 +961,12 @@ bool cursor(const ProbeIo& io,
     }
     if(ok && visible)
     {
-        // The position is in output pixels. The head scales a smaller surface to the output.
-        const uint32_t output = snapshot.boot.head[head_viewport_out];
-        const uint32_t out_x = uint64_t(x) * (output & 0x7fff) / state.surface.width;
-        const uint32_t out_y = uint64_t(y) * (output >> 16 & 0x7fff) / state.surface.height;
-        e.wr(user + 0x84, out_y << 16 | out_x);
+        // The position is in surface pixels, as Nouveau passes the position of the user mode.
+        // The sixth desktop test showed a pointer fault in scaled modes with output pixels.
+        // Wait a maximum of 1 ms for free space in the channel. Nouveau also waits for it.
+        for(unsigned i = 0; i < 10 && (e.rd(user + 0x08) & 0x3f) < 4; ++i)
+            e.io.delay_us(100);
+        e.wr(user + 0x84, y << 16 | x);
         e.wr(user + 0x80, 0);
     }
     if(ok && visible != state.cursor_visible)

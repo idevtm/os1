@@ -189,9 +189,10 @@ struct ScanoutState
     uint8_t stages;  // Supervisor stages of the last call, one bit for each stage.
     // Hardware pointer: the image is in video memory, the position channel runs, the head shows it.
     bool cursor_image, cursor_channel, cursor_visible;
-    Surface surface;    // The surface that the head shows.
-    uint32_t put;       // Next free byte in the command page.
-    uint32_t restored;  // Firmware method values that the first update sent again.
+    uint32_t cursor_color;  // Body color of the pointer image in video memory.
+    Surface surface;        // The surface that the head shows.
+    uint32_t put;           // Next free byte in the command page.
+    uint32_t restored;      // Firmware method values that the first update sent again.
     // One bit for each of these methods. Bit 0 is the SOR control. The other bits follow the
     // order of the kept head methods.
     uint32_t restored_mask;
@@ -218,14 +219,15 @@ bool probe(const ProbeIo&, Snapshot&);
 // firmware.
 bool scanout(const ProbeIo&, const Snapshot&, const ScanoutLayout&, const Surface&, ScanoutState&);
 // Show the hardware pointer with its tip at a surface position, or hide it. The head must show a
-// surface. Each scanout call hides the pointer.
+// surface. Each scanout call hides the pointer. The body of the pointer has the color `rgb`.
 bool cursor(const ProbeIo&,
             const Snapshot&,
             const ScanoutLayout&,
             ScanoutState&,
             uint32_t x,
             uint32_t y,
-            bool visible);
+            bool visible,
+            uint32_t rgb = 0xffffff);
 bool parse_edid(const uint8_t*, unsigned blocks, Output&);
 
 // Video memory that the module reserves in BAR 1. BAR 1 must have `aperture_bytes` bytes.

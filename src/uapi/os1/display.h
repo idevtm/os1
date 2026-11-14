@@ -55,8 +55,9 @@ struct os1_display_bitmap
     uint8_t bits[OS1_DISPLAY_BITMAP_BYTES];
 };
 
-// Show the hardware pointer with its tip at (x, y), or hide it.
+// Show the hardware pointer with its tip at (x, y), or hide it. The body of the pointer has the
+// color `rgb` in the form 0xRRGGBB.
 struct os1_display_cursor
 {
-    uint32_t x, y, visible;
+    uint32_t x, y, visible, rgb;
 };

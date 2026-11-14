@@ -7,6 +7,8 @@
 #include <os1/input.hpp>
 #include <os1/system.hpp>
 
+#include "interface/shell_startup.hpp"
+
 namespace u = os1::user;
 namespace f = u::files;
 
@@ -242,6 +244,7 @@ struct PointerStats
 constexpr unsigned desktop_header = 32;
 constexpr unsigned header_color = 0x223d57;
 constexpr unsigned text_color = 0xd9e4f0;
+constexpr unsigned frame_color = 0x4a6d8c, panel_color = 0x0b1420;
 constexpr uint64_t second_ns = 1'000'000'000;
 
 long session_call(int client, unsigned member, const void* bytes, unsigned size)
@@ -257,7 +260,19 @@ struct Canvas
     os1_display_mode mode;
     bool fast;      // The session accepts the fast requests.
     bool hardware;  // The hardware pointer is in use.
+    // Each font pixel is a square of this number of screen pixels. A large mode has a large font.
+    unsigned scale;
+    // Width and height of one character.
+    unsigned cell() const
+    {
+        return 8 * scale;
+    }
 };
+
+unsigned font_scale(const os1_display_mode& mode)
+{
+    return mode.height >= 2000 ? 3 : mode.height >= 1300 ? 2 : 1;
+}
 
 long paint(Canvas& c, unsigned x, unsigned y, unsigned width, unsigned height, unsigned rgb)
 {
@@ -303,7 +318,7 @@ long copy(Canvas& c,
     return 0;
 }
 
-// Draw characters of 8 x 8 pixels on a solid background.
+// Draw characters on a solid background. One character has a size of one canvas cell.
 long text(Canvas& c,
           unsigned x,
           unsigned y,
@@ -312,10 +327,10 @@ long text(Canvas& c,
           unsigned rgb,
           unsigned back)
 {
-    constexpr unsigned group = OS1_DISPLAY_BITMAP_BYTES / 8;
+    const unsigned scale = c.scale, size = c.cell();
     if(!c.fast)
     {
-        long status = paint(c, x, y, count * 8, 8, back);
+        long status = paint(c, x, y, count * size, size, back);
         for(unsigned i = 0; status >= 0 && i < count; ++i)
         {
             const auto& glyph = font8x8_basic[characters[i] & 127];
@@ -330,21 +345,42 @@ long text(Canvas& c,
                     unsigned end = first + 1;
                     while(end < 8 && (glyph[row] & (1u << end)))
                         ++end;
-                    status = paint(c, x + i * 8 + first, y + row, end - first, 1, rgb);
+                    status = paint(c,
+                                   x + i * size + first * scale,
+                                   y + row * scale,
+                                   (end - first) * scale,
+                                   scale,
+                                   rgb);
                     first = end;
                 }
         }
         return status;
     }
+    // One character uses `scale` bytes in each of its `size` bitmap rows.
+    const unsigned group = OS1_DISPLAY_BITMAP_BYTES / (size * scale);
     for(unsigned first = 0; first < count; first += group)
     {
         const unsigned part = count - first < group ? count - first : group;
-        os1_display_bitmap bitmap{x + first * 8, y, part * 8, 8, rgb, back, {}};
+        const unsigned row_bytes = part * scale;
+        os1_display_bitmap bitmap{x + first * size, y, part * size, size, rgb, back, {}};
         for(unsigned row = 0; row < 8; ++row)
+        {
+            uint8_t* line = bitmap.bits + row * scale * row_bytes;
             for(unsigned i = 0; i < part; ++i)
-                bitmap.bits[row * part + i] = font8x8_basic[characters[first + i] & 127][row];
-        const long status = session_call(
-            c.client, OS1_DISPLAY_BITMAP, &bitmap, sizeof(bitmap) - sizeof(bitmap.bits) + part * 8);
+            {
+                const uint8_t glyph = font8x8_basic[characters[first + i] & 127][row];
+                for(unsigned column = 0; column < size; ++column)
+                    if(glyph & (1u << column / scale))
+                        line[i * scale + column / 8] |= uint8_t(1u << column % 8);
+            }
+            // Each font row gives `scale` equal bitmap rows.
+            for(unsigned copy_row = 1; copy_row < scale; ++copy_row)
+                __builtin_memcpy(line + copy_row * row_bytes, line, row_bytes);
+        }
+        const long status = session_call(c.client,
+                                         OS1_DISPLAY_BITMAP,
+                                         &bitmap,
+                                         sizeof(bitmap) - sizeof(bitmap.bits) + row_bytes * size);
         if(status < 0)
             return status;
     }
@@ -354,6 +390,46 @@ long text(Canvas& c,
 long text(Canvas& c, unsigned x, unsigned y, const char* characters, unsigned back)
 {
     return text(c, x, y, characters, unsigned(f::length(characters)), text_color, back);
+}
+
+// Write a number. Return the number of characters.
+unsigned put_number(char* out, unsigned value)
+{
+    char digits[10];
+    unsigned n = 0, at = 0;
+    do
+        digits[n++] = char('0' + value % 10);
+    while(value /= 10);
+    while(n)
+        out[at++] = digits[--n];
+    return at;
+}
+
+// Write "width x height". Return the number of characters.
+unsigned put_size(char* out, const os1_display_mode& mode)
+{
+    unsigned at = put_number(out, mode.width);
+    out[at++] = ' ';
+    out[at++] = 'x';
+    out[at++] = ' ';
+    at += put_number(out + at, mode.height);
+    out[at] = 0;
+    return at;
+}
+
+// Save the mode as the preference of the next start. If the file does not open, the old
+// preference stays. After a failed write, the next start uses the first mode of the driver.
+void save_preference(const os1_display_mode& mode)
+{
+    f::Handle file(f::open_file("/etc/gsh.conf", f::Mode::Replace));
+    if(file.fd < 0)
+        return;
+    char value[12];
+    f::put(file.fd, "version=1\nwidth=", 16);
+    f::put(file.fd, value, put_number(value, mode.width));
+    f::put(file.fd, "\nheight=", 8);
+    f::put(file.fd, value, put_number(value, mode.height));
+    f::put(file.fd, "\n", 1);
 }
 
 bool read_literal(const char*& cursor, const char* literal)
@@ -432,21 +508,23 @@ struct PointerInput
 // The window waits for the end of the command. A command cannot read from the keyboard.
 struct Terminal
 {
-    static constexpr unsigned max_columns = 80, max_rows = 24, title = 12, border = 4;
-    static constexpr unsigned frame_color = 0x4a6d8c, back = 0x0b1420;
+    static constexpr unsigned max_columns = 80, max_rows = 24;
+    static constexpr unsigned back = panel_color;
     bool open{};
     unsigned x{}, y{}, columns{}, rows{}, row{}, column{};
+    // Pixel sizes for the font scale of the session.
+    unsigned size{}, title{}, border{};
     char cells[max_rows][max_columns]{};
     char line[max_columns * 2]{};
     unsigned length{};
 
     unsigned width() const
     {
-        return columns * 8 + border * 2;
+        return columns * size + border * 2;
     }
     unsigned height() const
     {
-        return rows * 8 + title + border;
+        return rows * size + title + border;
     }
     bool title_hit(unsigned px, unsigned py) const
     {
@@ -460,14 +538,14 @@ struct Terminal
     {
         long status = 0;
         for(unsigned r = first; status >= 0 && r <= last && r < rows; ++r)
-            status = text(c, x + border, y + title + r * 8, cells[r], columns, text_color, back);
+            status = text(c, x + border, y + title + r * size, cells[r], columns, text_color, back);
         return status;
     }
     long draw(Canvas& c)
     {
         long status = paint(c, x, y, width(), title, frame_color);
         if(status >= 0)
-            status = text(c, x + border, y + 2, "Shell  |  Esc closes", frame_color);
+            status = text(c, x + border, y + 2 * c.scale, "Shell  |  Esc closes", frame_color);
         if(status >= 0)
             status = paint(c, x, y + title, border, height() - title, frame_color);
         if(status >= 0)
@@ -479,10 +557,14 @@ struct Terminal
     }
     long show(Canvas& c, unsigned top)
     {
-        if(c.mode.width < 32 + 20 * 8 || c.mode.height < top + 64 + 4 * 8)
+        size = c.cell();
+        title = 12 * c.scale;
+        border = 4 * c.scale;
+        if(c.mode.width < (32 + 20 * 8) * c.scale || c.mode.height < top + (64 + 4 * 8) * c.scale)
             return OS1_ERR_UNSUPPORTED;
-        columns = (c.mode.width - 32) / 8 < max_columns ? (c.mode.width - 32) / 8 : max_columns;
-        const unsigned space = (c.mode.height - top - 64) / 8;
+        const unsigned across = (c.mode.width - 32 * c.scale) / size;
+        columns = across < max_columns ? across : max_columns;
+        const unsigned space = (c.mode.height - top - 64 * c.scale) / size;
         rows = space < max_rows ? space : max_rows;
         x = (c.mode.width - width()) / 2;
         y = top + (c.mode.height - top - height()) / 2;
@@ -505,8 +587,13 @@ struct Terminal
         for(char& cell : cells[rows - 1])
             cell = ' ';
         // Move the text up by one row. Without the copy request, draw each row again.
-        const long status =
-            copy(c, x + border, y + title + 8, x + border, y + title, columns * 8, (rows - 1) * 8);
+        const long status = copy(c,
+                                 x + border,
+                                 y + title + size,
+                                 x + border,
+                                 y + title,
+                                 columns * size,
+                                 (rows - 1) * size);
         if(status == OS1_ERR_UNSUPPORTED)
             return draw_rows(c, 0, rows - 1);
         return status < 0 ? status : draw_rows(c, rows - 1, rows - 1);
@@ -562,6 +649,11 @@ struct Terminal
             const bool swapped = u::duplicate(script.fd, u::fs::file_rights, 0, 0) == 0 &&
                                  u::duplicate(capture.fd, u::fs::file_rights, 0, 2) == 2;
             const char* arguments[] = {"sh"};
+            // A shell that init starts gets the init script through its constructor. A desktop
+            // that init starts has no shell before it, so give the child the same constructor.
+            constexpr auto boot = os1::shell_startup::boot_arguments();
+            const bool inherited =
+                os1::context::child(u::environment_data, 0, "shell_init_script") >= 0;
             if(swapped)
                 pid = u::run_program("/bin/sh",
                                      1,
@@ -572,7 +664,7 @@ struct Terminal
                                      nullptr,
                                      nullptr,
                                      -1,
-                                     nullptr,
+                                     inherited ? nullptr : &boot,
                                      capture.fd);
             u::duplicate(saved_input.fd, input.rights, input.descriptor_flags, 0);
             u::duplicate(saved_errors.fd, errors.rights, errors.descriptor_flags, 2);
@@ -612,20 +704,215 @@ struct Terminal
     }
 };
 
+// A window with the mode list, or with the question that follows a mode change.
+struct Panel
+{
+    enum Kind
+    {
+        Closed,
+        Modes,
+        Confirm
+    };
+    static constexpr unsigned columns = 28, confirm_seconds = 10;
+    Kind kind = Closed;
+    unsigned x{}, y{}, width{}, height{}, line{}, border{};
+    const os1_display_mode* modes{};
+    unsigned first{}, count{}, current{}, selected{}, seconds{};
+
+    bool overlaps(unsigned ax, unsigned ay, unsigned aw, unsigned ah) const
+    {
+        return kind != Closed && ax < x + width && ax + aw > x && ay < y + height && ay + ah > y;
+    }
+    // The y position of one text row of the window.
+    unsigned row_y(unsigned row) const
+    {
+        return y + border + row * line;
+    }
+    long draw_row(Canvas& c, unsigned row, const char* characters, bool marked)
+    {
+        char padded[columns];
+        unsigned used = 0;
+        for(; used < columns && characters[used]; ++used)
+            padded[used] = characters[used];
+        for(; used < columns; ++used)
+            padded[used] = ' ';
+        // The marked row has the frame color as its background.
+        long status = paint(c,
+                            x + border,
+                            row_y(row),
+                            columns * c.cell(),
+                            line,
+                            marked ? frame_color : panel_color);
+        return status < 0 ? status
+                          : text(c,
+                                 x + border,
+                                 row_y(row) + (line - c.cell()) / 2,
+                                 padded,
+                                 columns,
+                                 text_color,
+                                 marked ? frame_color : panel_color);
+    }
+    long draw_mode(Canvas& c, unsigned index)
+    {
+        char label[40] = "  ";
+        unsigned at = 2 + put_size(label + 2, modes[index]);
+        if(index == current)
+            for(const char* mark = "  (now)"; *mark; ++mark)
+                label[at++] = *mark;
+        label[at] = 0;
+        return draw_row(c, 1 + index - first, label, index == selected);
+    }
+    long draw_seconds(Canvas& c)
+    {
+        char label[40] = "Esc returns. Time left: ";
+        unsigned at = unsigned(f::length(label));
+        at += put_number(label + at, seconds);
+        label[at++] = ' ';
+        label[at++] = 's';
+        label[at] = 0;
+        return draw_row(c, 2, label, false);
+    }
+    long draw(Canvas& c)
+    {
+        long status = paint(c, x, y, width, height, frame_color);
+        if(status >= 0)
+            status = draw_row(c, 0, kind == Modes ? "Video modes" : "Keep this mode?", false);
+        if(kind == Modes)
+        {
+            for(unsigned index = first; status >= 0 && index < count; ++index)
+                status = draw_mode(c, index);
+            if(status >= 0)
+                status = draw_row(c, 1 + count - first, "Enter applies. Esc closes.", false);
+        }
+        else if(status >= 0)
+        {
+            status = draw_row(c, 1, "Enter keeps this mode.", false);
+            if(status >= 0)
+                status = draw_seconds(c);
+        }
+        return status;
+    }
+    long show(Canvas& c, Kind next, unsigned top)
+    {
+        kind = next;
+        line = c.cell() + 4 * c.scale;
+        border = 4 * c.scale;
+        const unsigned rows = next == Modes ? count - first + 2 : 3;
+        width = columns * c.cell() + border * 2;
+        height = rows * line + border * 2;
+        if(width > c.mode.width || height > c.mode.height - top)
+        {
+            kind = Closed;
+            return OS1_ERR_UNSUPPORTED;
+        }
+        x = (c.mode.width - width) / 2;
+        y = top + (c.mode.height - top - height) / 2;
+        selected = current;
+        seconds = confirm_seconds;
+        return draw(c);
+    }
+    // The mode under a screen position, or `count` for none.
+    unsigned mode_at(unsigned px, unsigned py) const
+    {
+        if(kind != Modes || px < x + border || px >= x + width - border || py < row_y(1))
+            return count;
+        const unsigned index = first + (py - row_y(1)) / line;
+        return index < count ? index : count;
+    }
+    long select(Canvas& c, unsigned index)
+    {
+        if(index == selected)
+            return 0;
+        const unsigned previous = selected;
+        selected = index;
+        const long status = draw_mode(c, previous);
+        return status < 0 ? status : draw_mode(c, selected);
+    }
+};
+
 struct Desktop
 {
     Canvas& c;
     bool desktop;
     unsigned top;
     Terminal terminal{};
+    Panel panel{};
+    char label[24]{};
+    unsigned label_length{};
 
     unsigned clock_x() const
     {
-        return c.mode.width - 200;
+        return c.mode.width - (23 * 8 + 16) * c.scale;
     }
     unsigned clock_y() const
     {
-        return c.mode.height - 20;
+        return c.mode.height - 20 * c.scale;
+    }
+    unsigned label_x() const
+    {
+        return c.mode.width - label_length * c.cell() - 16 * c.scale;
+    }
+    // Draw text that stays under the windows. A character that a window covers is not drawn.
+    // The visible part of a partly covered character gets the background color, so that no old
+    // character part stays on the screen. Only one window is open at a time.
+    long text_under(unsigned x, unsigned y, const char* characters, unsigned count, unsigned back)
+    {
+        const unsigned size = c.cell();
+        // The rectangle of the open window, or an empty rectangle.
+        unsigned wx = 0, wy = 0, ww = 0, wh = 0;
+        if(terminal.open)
+        {
+            wx = terminal.x;
+            wy = terminal.y;
+            ww = terminal.width();
+            wh = terminal.height();
+        }
+        else if(panel.kind != Panel::Closed)
+        {
+            wx = panel.x;
+            wy = panel.y;
+            ww = panel.width;
+            wh = panel.height;
+        }
+        const auto covered = [&](unsigned index) {
+            const unsigned cx = x + index * size;
+            return ww && cx < wx + ww && cx + size > wx && y < wy + wh && y + size > wy;
+        };
+        long status = 0;
+        for(unsigned first = 0; status >= 0 && first < count;)
+        {
+            if(covered(first))
+            {
+                // Paint the parts of the cell above, below, left, and right of the window.
+                const unsigned cx = x + first * size, right = cx + size, bottom = y + size;
+                const unsigned from = wy > y ? wy : y;
+                const unsigned to = wy + wh < bottom ? wy + wh : bottom;
+                if(wy > y)
+                    status = paint(c, cx, y, size, wy - y, back);
+                if(status >= 0 && wy + wh < bottom)
+                    status = paint(c, cx, wy + wh, size, bottom - (wy + wh), back);
+                if(status >= 0 && wx > cx)
+                    status = paint(c, cx, from, wx - cx, to - from, back);
+                if(status >= 0 && wx + ww < right)
+                    status = paint(c, wx + ww, from, right - (wx + ww), to - from, back);
+                ++first;
+                continue;
+            }
+            unsigned end = first + 1;
+            while(end < count && !covered(end))
+                ++end;
+            status =
+                text(c, x + first * size, y, characters + first, end - first, text_color, back);
+            first = end;
+        }
+        return status;
+    }
+    // Show the size of the current mode in the upper right corner.
+    long draw_label()
+    {
+        label_length = put_size(label, c.mode);
+        return text_under(
+            label_x(), 12 * c.scale, label, label_length, top ? header_color : background);
     }
     long draw_clock()
     {
@@ -635,20 +922,18 @@ struct Desktop
             u::clock::format(time, now, false);
         else
             __builtin_memcpy(time, "Clock unavailable      ", 24);
-        // The window can cover the clock.
-        if(terminal.overlaps(clock_x(), clock_y(), 184, 8))
-            return 0;
-        return text(c, clock_x(), clock_y(), time, 23, text_color, background);
+        return text_under(clock_x(), clock_y(), time, 23, background);
     }
     long draw_header()
     {
         long status = paint(c, 0, 0, c.mode.width, top, header_color);
-        const char* label = "os1  |  R Reboot  S Shut down  T Shell  M Mode  C Pointer";
-        if(status >= 0 && c.mode.width >= 24 + f::length(label) * 8)
-            status = text(c, 12, 12, label, header_color);
+        const char* keys = "os1  |  R Reboot  S Shut down  T Shell  M Mode  C Pointer";
+        if(status >= 0 && c.mode.width >= (f::length(keys) + 16) * c.cell() + 28 * c.scale)
+            status = text(c, 12 * c.scale, 12 * c.scale, keys, header_color);
         else if(status >= 0)
-            status = text(c, 12, 12, "os1  |  R Reboot  S Shut down", header_color);
-        return status;
+            status =
+                text(c, 12 * c.scale, 12 * c.scale, "os1  |  R Reboot  S Shut down", header_color);
+        return status < 0 ? status : draw_label();
     }
     // Draw one area of the desktop again. The software pointer uses this to remove itself.
     // A window move draws the window itself and passes false.
@@ -662,20 +947,31 @@ struct Desktop
             const unsigned first = y < top ? top : y;
             status = paint(c, x, first, width, y + height - first, background);
         }
-        if(status >= 0 && x + width > clock_x() && y + height > clock_y() && y < clock_y() + 8)
-            status = draw_clock();
+        // Without a header, the mode label is on the background.
+        if(status >= 0 && !top && x + width > label_x() && y < 20 * c.scale + c.cell())
+            status = draw_label();
         if(status >= 0 && window && terminal.overlaps(x, y, width, height))
             status = terminal.draw(c);
+        if(status >= 0 && panel.overlaps(x, y, width, height))
+            status = panel.draw(c);
+        if(status >= 0 && x + width > clock_x() && y + height > clock_y() &&
+           y < clock_y() + c.cell())
+            status = draw_clock();
         return status;
     }
     long draw_all()
     {
         long status = paint(c, 0, top, c.mode.width, c.mode.height - top, background);
-        if(status >= 0 && top)
-            status = draw_header();
+        if(status >= 0)
+            status = top ? draw_header() : draw_label();
         if(status >= 0)
             status = draw_clock();
         return status;
+    }
+    long close_panel()
+    {
+        panel.kind = Panel::Closed;
+        return repaint(panel.x, panel.y, panel.width, panel.height);
     }
     // Move the window. Copy its pixels, then draw the area that the window left.
     long move_window(unsigned x, unsigned y)
@@ -705,8 +1001,7 @@ struct Desktop
         }
         if(status >= 0 && !copied)
             status = terminal.draw(c);
-        // Show the clock again after the window leaves it.
-        return status < 0 ? status : draw_clock();
+        return status;
     }
 };
 
@@ -716,7 +1011,7 @@ long show_pointer(Desktop& d, unsigned x, unsigned y, unsigned color)
     Canvas& c = d.c;
     if(c.hardware)
     {
-        os1_display_cursor cursor{x, y, 1};
+        os1_display_cursor cursor{x, y, 1, color};
         if(session_call(c.client, OS1_DISPLAY_CURSOR, &cursor, sizeof(cursor)) >= 0)
             return 0;
         c.hardware = false;
@@ -735,7 +1030,18 @@ long hide_pointer(Desktop& d, unsigned x, unsigned y)
                      c.mode.height - y < cursor_height ? c.mode.height - y : cursor_height);
 }
 
-// Return 0 to end the session, 1 to open the next mode, or an error.
+// The modes that the user can select, and the mode change that the session asks for.
+struct ModeChoice
+{
+    const os1_display_mode* modes;
+    unsigned first, count;  // The list is modes[first] to modes[count - 1].
+    unsigned current;       // Index of the mode of this session.
+    bool confirm;           // The session started with a mode change that the user must confirm.
+    unsigned next;          // Result: index of the mode to open.
+};
+
+// Return 0 to end the session, 1 to open `choice.next`, 2 to return to the mode before the last
+// change, or an error.
 long interactive(Canvas& c,
                  int keys,
                  int key_client,
@@ -743,15 +1049,21 @@ long interactive(Canvas& c,
                  const PointerInput& input,
                  PointerStats& stats,
                  bool trace,
-                 bool desktop)
+                 bool desktop,
+                 ModeChoice& choice)
 {
     const auto& mode = c.mode;
     const int client = c.client;
     os1_ipc_result r{};
+    c.scale = font_scale(mode);
     // A session without the fast requests refuses this fill. The old fill request then draws.
     os1_display_fill probe{0, 0, 1, 1, background};
     c.fast = session_call(client, OS1_DISPLAY_FILL_AREA, &probe, sizeof(probe)) >= 0;
-    Desktop d{c, desktop, desktop ? desktop_header : 0};
+    Desktop d{c, desktop, desktop ? desktop_header * c.scale : 0};
+    d.panel.modes = choice.modes;
+    d.panel.first = choice.first;
+    d.panel.count = choice.count;
+    d.panel.current = choice.current;
     const unsigned top = d.top;
     long status = d.draw_all();
     if(status < 0)
@@ -761,9 +1073,25 @@ long interactive(Canvas& c,
         return OS1_ERR_CLOSED;
     stats.input_id = previous.device;
     unsigned x = (mode.width - 1) / 2, y = (mode.height - top - 1) / 2;
+    const auto pointer_color = [&] { return previous.buttons ? 0xffcb54u : 0xffffffu; };
+    // After a mode change, the user must keep the mode in a limited time.
+    if(choice.confirm)
+    {
+        status = d.panel.show(c, Panel::Confirm, top);
+        if(status == OS1_ERR_UNSUPPORTED)
+            status = 0;
+        if(status < 0)
+            return status;
+        // Discard each key from before the question. Such a key must not keep the mode.
+        const long now = u::ipc_clock();
+        unsigned old_key = 0;
+        while(now >= 0 && u::console_read_key(keys, key_client, old_key, uint64_t(now)) == 0)
+        {
+        }
+    }
     // Use the hardware pointer if the session has one.
     c.hardware = true;
-    status = show_pointer(d, x, top + y, previous.buttons ? 0xffcb54 : 0xffffff);
+    status = show_pointer(d, x, top + y, pointer_color());
     if(status < 0)
         return status;
     if(desktop)
@@ -795,9 +1123,16 @@ long interactive(Canvas& c,
         if(!next_clock || (now >= 0 && uint64_t(now) >= next_clock))
         {
             status = d.draw_clock();
-            // The clock text can cover the drawn pointer.
+            // The question closes itself and the session returns to the mode before the change.
+            if(status >= 0 && next_clock && d.panel.kind == Panel::Confirm)
+            {
+                if(!--d.panel.seconds)
+                    return 2;
+                status = d.panel.draw_seconds(c);
+            }
+            // The clock text or a window can cover the drawn pointer.
             if(status >= 0 && !c.hardware && next_clock)
-                status = show_pointer(d, x, top + y, previous.buttons ? 0xffcb54 : 0xffffff);
+                status = show_pointer(d, x, top + y, pointer_color());
             if(status < 0)
                 return status;
             next_clock = now < 0 || uint64_t(now) > INT64_MAX - second_ns
@@ -816,6 +1151,47 @@ long interactive(Canvas& c,
             if(status < 0)
                 return status;
             const unsigned letter = key >= 'A' && key <= 'Z' ? key + 32 : key;
+            const bool enter = key == '\n' || key == '\r';
+            if(d.panel.kind == Panel::Confirm)
+            {
+                // Enter keeps the mode. Esc returns to the mode before the change.
+                if(key == 27 || letter == 'n')
+                    return 2;
+                if(enter || letter == 'y')
+                {
+                    if(desktop)
+                        save_preference(mode);
+                    status = d.close_panel();
+                    if(status >= 0 && !c.hardware)
+                        status = show_pointer(d, x, top + y, pointer_color());
+                    if(status < 0)
+                        return status;
+                }
+                continue;
+            }
+            if(d.panel.kind == Panel::Modes)
+            {
+                auto& panel = d.panel;
+                const unsigned listed = panel.count - panel.first;
+                if(enter && panel.selected != panel.current)
+                {
+                    choice.next = panel.selected;
+                    return 1;
+                }
+                if(enter || key == 27 || letter == 'm' || letter == 'q')
+                    status = d.close_panel();
+                else if(key == OS1_CONSOLE_KEY_UP)
+                    status = panel.select(
+                        c, panel.first + (panel.selected - panel.first + listed - 1) % listed);
+                else if(key == OS1_CONSOLE_KEY_DOWN)
+                    status =
+                        panel.select(c, panel.first + (panel.selected - panel.first + 1) % listed);
+                if(status >= 0 && !c.hardware)
+                    status = show_pointer(d, x, top + y, pointer_color());
+                if(status < 0)
+                    return status;
+                continue;
+            }
             if(d.terminal.open)
             {
                 // The window has the keyboard. Esc closes it.
@@ -829,7 +1205,7 @@ long interactive(Canvas& c,
                 else
                     status = d.terminal.key(c, key);
                 if(status >= 0 && !c.hardware)
-                    status = show_pointer(d, x, top + y, previous.buttons ? 0xffcb54 : 0xffffff);
+                    status = show_pointer(d, x, top + y, pointer_color());
                 if(status < 0)
                     return status;
                 continue;
@@ -842,18 +1218,29 @@ long interactive(Canvas& c,
                 if(status == OS1_ERR_UNSUPPORTED)
                     status = 0;
                 if(status >= 0)
-                    status = show_pointer(d, x, top + y, previous.buttons ? 0xffcb54 : 0xffffff);
+                    status = show_pointer(d, x, top + y, pointer_color());
                 if(status < 0)
                     return status;
             }
             else if(letter == 'm' && !trace)
-                return 1;
+            {
+                // Show the mode list. The user selects a mode with the keys or the pointer.
+                status = hide_pointer(d, x, top + y);
+                if(status >= 0)
+                    status = d.panel.show(c, Panel::Modes, top);
+                if(status == OS1_ERR_UNSUPPORTED)
+                    status = 0;
+                if(status >= 0)
+                    status = show_pointer(d, x, top + y, pointer_color());
+                if(status < 0)
+                    return status;
+            }
             else if(letter == 'c')
             {
                 // Change between the hardware pointer and the drawn pointer.
                 if(c.hardware)
                 {
-                    os1_display_cursor hidden{x, top + y, 0};
+                    os1_display_cursor hidden{x, top + y, 0, 0};
                     session_call(client, OS1_DISPLAY_CURSOR, &hidden, sizeof(hidden));
                     c.hardware = false;
                 }
@@ -863,7 +1250,7 @@ long interactive(Canvas& c,
                     c.hardware = true;
                 }
                 if(status >= 0)
-                    status = show_pointer(d, x, top + y, previous.buttons ? 0xffcb54 : 0xffffff);
+                    status = show_pointer(d, x, top + y, pointer_color());
                 if(status < 0)
                     return status;
             }
@@ -875,7 +1262,8 @@ long interactive(Canvas& c,
                         u::system_control(letter == 'r' ? OS1_SYSTEM_REBOOT : OS1_SYSTEM_SHUTDOWN);
                     if(status < 0)
                     {
-                        status = text(c, 12, 24, "System command failed", header_color);
+                        status = text(
+                            c, 12 * c.scale, 22 * c.scale, "System command failed", header_color);
                         if(status < 0)
                             return status;
                     }
@@ -929,6 +1317,13 @@ long interactive(Canvas& c,
                 }
                 nx = move(nx, int64_t(snapshot.x - next.x), mode.width - 1);
                 ny = move(ny, int64_t(snapshot.y - next.y), mode.height - top - 1);
+                // The state after lost events can show a press that no event reported.
+                if(snapshot.buttons && !next.buttons && !pressed)
+                {
+                    pressed = true;
+                    press_x = nx;
+                    press_y = ny;
+                }
                 next = snapshot;
                 continue;
             }
@@ -957,8 +1352,27 @@ long interactive(Canvas& c,
         status = hide_pointer(d, x, top + y);
         if(status < 0)
             return status;
+        if(d.panel.kind == Panel::Modes)
+        {
+            // The pointer selects the mode under it. A press applies it or closes the list.
+            const unsigned under = d.panel.mode_at(nx, top + ny);
+            if(under < d.panel.count)
+                status = d.panel.select(c, under);
+            if(status >= 0 && pressed)
+            {
+                const unsigned chosen = d.panel.mode_at(press_x, top + press_y);
+                if(chosen < d.panel.count && chosen != d.panel.current)
+                {
+                    choice.next = chosen;
+                    return 1;
+                }
+                status = d.close_panel();
+            }
+            if(status < 0)
+                return status;
+        }
         // A press on the title starts a window move. The window follows the pointer.
-        if(pressed && d.terminal.title_hit(press_x, top + press_y))
+        else if(pressed && d.terminal.title_hit(press_x, top + press_y))
         {
             dragging = true;
             grab_x = press_x - d.terminal.x;
@@ -975,12 +1389,14 @@ long interactive(Canvas& c,
             wx = wx > limit_x ? limit_x : wx;
             wy = wy < top ? top : wy > limit_y ? limit_y : wy;
             status = d.move_window(wx, wy);
+            if(status >= 0)
+                status = d.draw_clock();
             if(status < 0)
                 return status;
         }
         x = nx;
         y = ny;
-        status = show_pointer(d, x, top + y, next.buttons ? 0xffcb54 : 0xffffff);
+        status = show_pointer(d, x, top + y, pointer_color());
         if(status < 0)
             return status;
         if(measured && !u::ipc_measure(after) && after.source == before.source &&
@@ -1133,35 +1549,47 @@ long run(bool check, int menu)
         status = input.prepare(pointer_client.fd);
         if(status < 0)
             return status;
-        auto mode = preferred_mode(modes + 1, count - 1);
-        // The M key opens the next mode. The boot mode is not a native mode.
-        bool changed = false;
-        for(unsigned refused = 0;;)
+        const auto preferred = preferred_mode(modes + 1, count - 1);
+        // The boot mode is not a native mode. The mode list of the desktop starts after it.
+        ModeChoice choice{modes, 1, count, 1, false, 1};
+        while(choice.current + 1 < count && modes[choice.current].id != preferred.id)
+            ++choice.current;
+        unsigned before = choice.current;
+        for(;;)
         {
+            const auto& mode = modes[choice.current];
             f::Handle session(display_call(
                 display.fd, OS1_DISPLAY_OPEN_NATIVE, &mode.id, sizeof(mode.id), r, true));
-            // After a mode change, a mode that does not open is not the end. Open the next one.
-            if(session.fd < 0 && (!changed || session.fd != OS1_ERR_IO || ++refused >= count))
-                return session.fd;
-            status = 1;
-            if(session.fd >= 0)
+            if(session.fd < 0)
             {
-                changed = true;
-                f::Handle client(bind_display(session.fd, OS1_DISPLAY_SESSION_INTERFACE_ID));
-                if(client.fd < 0)
-                    return client.fd;
-                refused = 0;
-                PointerStats stats{};
-                Canvas canvas{client.fd, mode, false, false};
-                status = interactive(
-                    canvas, keys.fd, key_client.fd, pointer_client.fd, input, stats, false, true);
+                // A new mode that does not open is not the end. Return to the mode before it.
+                if(session.fd != OS1_ERR_IO || !choice.confirm)
+                    return session.fd;
+                choice.current = before;
+                choice.confirm = false;
+                continue;
             }
-            if(status != 1)
+            f::Handle client(bind_display(session.fd, OS1_DISPLAY_SESSION_INTERFACE_ID));
+            if(client.fd < 0)
+                return client.fd;
+            PointerStats stats{};
+            Canvas canvas{client.fd, mode, false, false, 1};
+            status = interactive(canvas,
+                                 keys.fd,
+                                 key_client.fd,
+                                 pointer_client.fd,
+                                 input,
+                                 stats,
+                                 false,
+                                 true,
+                                 choice);
+            if(status != 1 && status != 2)
                 return status;
-            unsigned index = 1;
-            while(index < count && modes[index].id != mode.id)
-                ++index;
-            mode = modes[index + 1 < count ? index + 1 : 1];
+            // 1 opens the selected mode, which the user must confirm. 2 returns to the mode before.
+            const unsigned next = status == 1 ? choice.next : before;
+            before = choice.current;
+            choice.confirm = status == 1;
+            choice.current = next;
         }
     }
     // Write one mode record. The text has no line end.
@@ -1260,27 +1688,42 @@ long run(bool check, int menu)
     if(status < 0)
         return status;
     PointerStats stats{};
-    // The M key opens the next mode in the list.
-    unsigned refused = 0;
-    bool changed = false;
-    for(status = 1; status == 1; selected = selected + 1 == count ? 0 : selected + 1)
+    // The M key shows the mode list. A new mode needs a confirmation.
+    ModeChoice choice{modes, 0, count, selected, false, selected};
+    unsigned before = selected;
+    for(;;)
     {
-        const auto& mode = modes[selected];
+        const auto& mode = modes[choice.current];
         f::Handle session(
             display_call(display.fd, OS1_DISPLAY_OPEN, &mode.id, sizeof(mode.id), r, true));
-        // After a mode change, a mode that does not open is not the end. Open the next one.
-        if(session.fd == OS1_ERR_IO && changed && ++refused < count)
-            continue;
         if(session.fd < 0)
-            return session.fd;
-        refused = 0;
-        changed = true;
+        {
+            // A new mode that does not open is not the end. Return to the mode before it.
+            if(session.fd != OS1_ERR_IO || !choice.confirm)
+                return session.fd;
+            choice.current = before;
+            choice.confirm = false;
+            continue;
+        }
         f::Handle client(bind_display(session.fd, OS1_DISPLAY_SESSION_INTERFACE_ID));
         if(client.fd < 0)
             return client.fd;
-        Canvas canvas{client.fd, mode, false, false};
-        status = interactive(
-            canvas, keys.fd, key_client.fd, pointer_client.fd, input, stats, menu == 2, false);
+        Canvas canvas{client.fd, mode, false, false, 1};
+        status = interactive(canvas,
+                             keys.fd,
+                             key_client.fd,
+                             pointer_client.fd,
+                             input,
+                             stats,
+                             menu == 2,
+                             false,
+                             choice);
+        if(status != 1 && status != 2)
+            break;
+        const unsigned next = status == 1 ? choice.next : before;
+        before = choice.current;
+        choice.confirm = status == 1;
+        choice.current = next;
     }
     os1_measurement end{};
     if(!u::ipc_measure(end) && end.source == OS1_MEASUREMENT_HPET)
