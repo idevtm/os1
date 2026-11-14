@@ -6,6 +6,7 @@
 #include "debug/debug.hpp"
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
+#include "ipc/channel.hpp"
 #include "mm/user_copy.hpp"
 #include "proc/startup.hpp"
 #include "proc/thread.hpp"
@@ -33,6 +34,8 @@ long sys_write(
         return status;
     if(file)
         return vfs_write_or_block(*context.frames, thread, instance, user_buffer, length);
+    if(instance->object->kind == OS1_OBJECT_STREAM)
+        return stream_write(*context.frames, thread, instance, user_buffer, length);
     if(!(instance->object->interfaces & OS1_INTERFACE_BYTE_OUTPUT) ||
        !instance->object->write_bytes)
         return OS1_ERR_UNSUPPORTED;

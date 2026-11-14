@@ -5,6 +5,7 @@
 
 #include "console/console.hpp"
 #include "console/terminal.hpp"
+#include "terminal/cells.hpp"
 #include "terminal/line.hpp"
 Terminal* active_terminal = nullptr;
 void Terminal::write(char) {}
@@ -25,6 +26,11 @@ const std::string& host_console_output()
 os1_console_geometry console_geometry()
 {
     return {80, 25};
+}
+// The host console has the built-in 8 x 16 cell. The check is the check of the kernel.
+long console_set_glyphs(const uint8_t* payload, size_t bytes)
+{
+    return os1::terminal::valid_glyphs(payload, bytes, 8, 16) ? 0 : OS1_ERR_INVALID;
 }
 void clear_console()
 {

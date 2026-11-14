@@ -74,6 +74,36 @@ inline long console_geometry(int client, os1_console_geometry& geometry)
         reinterpret_cast<uint8_t*>(&geometry)[i] = result.payload[i];
     return 0;
 }
+// Give the framebuffer text console a font with cells of `width` x `height` pixels. `glyphs` has
+// 128 glyphs of `height` rows of (width + 7) / 8 bytes. Bit 0 of the first byte of a row is the
+// left pixel. The first request has character 0 and sets the cell size.
+inline long console_set_font(int client, unsigned width, unsigned height, const uint8_t* glyphs)
+{
+    const unsigned glyph = height * ((width + 7) / 8);
+    if(!glyph || glyph > OS1_IPC_PAYLOAD_MAX - OS1_CONSOLE_GLYPH_HEADER)
+        return OS1_ERR_INVALID;
+    const unsigned limit = (OS1_IPC_PAYLOAD_MAX - OS1_CONSOLE_GLYPH_HEADER) / glyph;
+    for(unsigned first = 0; first < OS1_CONSOLE_GLYPH_COUNT; first += limit)
+    {
+        const unsigned left = OS1_CONSOLE_GLYPH_COUNT - first;
+        const unsigned count = left < limit ? left : limit;
+        auto request = console_request(OS1_CONSOLE_SET_GLYPHS);
+        request.payload_bytes = OS1_CONSOLE_GLYPH_HEADER + count * glyph;
+        request.payload[0] = uint8_t(first);
+        request.payload[1] = uint8_t(count);
+        request.payload[2] = uint8_t(width);
+        request.payload[3] = uint8_t(height);
+        for(unsigned i = 0; i < count * glyph; ++i)
+            request.payload[OS1_CONSOLE_GLYPH_HEADER + i] = glyphs[first * glyph + i];
+        os1_ipc_result result{};
+        const long status = ipc_call(client, request, result);
+        if(status < 0 || result.transport_status || result.application_status)
+            return status < 0                ? status
+                   : result.transport_status ? result.transport_status
+                                             : result.application_status;
+    }
+    return 0;
+}
 inline long console_clear(int client)
 {
     os1_ipc_result result{};

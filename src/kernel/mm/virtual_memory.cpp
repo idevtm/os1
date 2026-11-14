@@ -350,6 +350,30 @@ bool VirtualMemory::detach(uint64_t address, uint64_t pages)
     return true;
 }
 
+bool VirtualMemory::add_leaf_flags(uint64_t virtual_address, PageFlags flags)
+{
+    uint64_t* table = kernel_physical_pointer<uint64_t>(root_);
+    for(unsigned shift = 39; initialized_; shift -= 9)
+    {
+        uint64_t& entry = table[page_index(virtual_address, shift)];
+        if(0 == (entry & PAGE_PRESENT))
+        {
+            break;
+        }
+        if(12 == shift || (21 == shift && (entry & PAGE_LARGE)))
+        {
+            entry |= static_cast<uint64_t>(flags);
+            return true;
+        }
+        if(entry & PAGE_LARGE)
+        {
+            break;
+        }
+        table = kernel_physical_pointer<uint64_t>(entry & kEntryAddressMask);
+    }
+    return false;
+}
+
 bool VirtualMemory::translate(uint64_t virtual_address,
                               uint64_t& physical_address,
                               uint64_t& flags) const

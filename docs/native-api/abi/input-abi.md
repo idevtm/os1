@@ -320,7 +320,7 @@ Use this diagnostic to compare worker scheduling, EHCI reports, and pointer publ
 The trace covers one selected input identity for one capture.
 
 ```text
-gfxdemo ready -> start(input identity) -> bounded RAM capture -> stop(ticket)
+gsh stall diagnostic ready -> start(input identity) -> bounded RAM capture -> stop(ticket)
 run-tests -> observe kind 15 -> save paired artifacts
 ```
 

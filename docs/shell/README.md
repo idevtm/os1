@@ -12,6 +12,7 @@ The richer language below remains a proposal.
 | [Typed context and basic commands](typed-context.md) | Implemented first stage, startup v3, rooted navigation, and same-filesystem moves |
 | [Metadata and recursive tools](filesystem-tools.md) | Implemented metadata, traversal, copy/removal, search, and usage |
 | [Completion redraw](completion-redraw-plan.md) | Local row replacement, serial output, validation, and measurements |
+| [Fonts](fonts.md) | Font files on the disk, `/etc/sh.conf`, the font steps of `gsh`, and the console glyph request |
 | [Interactive pager](pager.md) | Implemented bounded paging, input ownership, and cleanup |
 | [Text utilities](text-utilities.md) | Implemented line selection, literal search, counts, classification, and stream limits |
 | [Pager implementation record](../archive/shell/2026-11-07-interactive-pager.md) | Scope, impact, validation, measurements, and review |

@@ -5,3 +5,6 @@
 /local-evidence/
 /.agent-state/
 /**/__pycache__/
+/.codex-attachments/
+# Vendor firmware stays local.
+/docs/hardware/reference-captures/**/*.rom

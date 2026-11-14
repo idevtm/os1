@@ -12,6 +12,13 @@ import time
 from pathlib import Path
 from boot_menu import BootMenu
 
+# The cell height of the console font. A UEFI boot has a framebuffer console with the 6 x 12
+# Spleen font of /etc/sh.conf on the test disk. A BIOS boot keeps VGA text mode, and QEMU captures
+# its 80 x 25 screen as 720 x 400 pixels with cells of 16 rows.
+FRAMEBUFFER_CELL_HEIGHT = 12
+VGA_TEXT_CAPTURE = (720, 400)
+VGA_TEXT_CELL_HEIGHT = 16
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -436,6 +443,12 @@ def main():
                 time.sleep(.15)
             else:
                 send(serial)
+        def grid_top(width, height, rows):
+            # The first pixel row of the last `rows` rows of the console grid.
+            cell = (VGA_TEXT_CELL_HEIGHT if (width, height) == VGA_TEXT_CAPTURE
+                    else FRAMEBUFFER_CELL_HEIGHT)
+            return (height // cell - rows) * cell
+
         def screen(name):
             if not connection:
                 return None
@@ -463,7 +476,9 @@ def main():
             closed_screen = screen('closed')
             if closed_screen:
                 cw, ch, cp = closed_screen
-                assert not any(cp[cw * (ch - 9 * 16) * 3:]), 'cancel left stale menu rows'
+                # The rows of the menu are the last 9 rows of the console grid, and the pixels
+                # under the grid are blank.
+                assert not any(cp[cw * grid_top(cw, ch, 9) * 3:]), 'cancel left stale menu rows'
             assert b'after-cancel\n' in run('echo "after-cancel"')
         key('tab', b'\t')
         expect(b'context choices')
@@ -483,15 +498,16 @@ def main():
         expect(b'  > ')
         restored_screen = screen('restored')
         if original_screen:
-            # Both test displays use 16-pixel cells. Ignore the blinking prompt cursor row.
-            body = width * (height - 16) * 3
+            # Ignore the blinking prompt cursor row, the last row of the console grid.
+            body = width * grid_top(width, height, 1) * 3
             assert pixels[:body] == restored_screen[2][:body], 'selection did not redraw in place'
         key('tab', b'\t')
         expect(b'  > os.')
         shorter_screen = screen('shorter')
         if original_screen:
             assert pixels[:history_bytes] == shorter_screen[2][:history_bytes], 'descent scrolled console history'
-            blank = shorter_screen[2][width * (height - (9 - os_child_count) * 16) * 3:width * (height - 16) * 3]
+            blank = shorter_screen[2][width * grid_top(width, height, 9 - os_child_count) * 3:
+                                      width * grid_top(width, height, 1) * 3]
             assert not any(blank), 'shorter menu left stale rows'
         key('esc', b'\x1b')
         expect(b'  > os.')

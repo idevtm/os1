@@ -60,6 +60,7 @@ All fields use the current x86-64 little-endian ABI.
 | Method `acquire_input` | 6 | READ | Empty or `os1_console_input_options` | One owned ConsoleInputSession through RESULT_CAPS |
 | Method `redraw_line` | 7 | WRITE | `os1_console_redraw` and printable text | Empty |
 | Method `set_cursor` | 8 | WRITE | One `u32 column` | Empty |
+| Method `set_glyphs` | 9 | WRITE | `os1_console_glyphs` header and glyph rows, at most 256 bytes | Empty |
 
 `info` contains four `u32` fields: `rights`, `max_write_bytes`, `max_read_bytes`, and `flags`.
 `rights` reports captured service rights.
@@ -202,6 +203,43 @@ It requires no serial cursor-control capability.
 Shift-Tab produces `OS1_CONSOLE_KEY_BACKTAB` (`0x87`).
 Ctrl-Space produces `OS1_CONSOLE_KEY_COMPLETE` (`0x88`).
 The prompt also accepts serial `ESC [ Z` and NUL for these actions.
+
+## Console font
+
+`set_glyphs` sets the cell size and glyphs of the font of the framebuffer text console.
+A new cell size changes the grid of each terminal. The main result is a console font of 5 × 8 to 16 × 32 pixels.
+
+```text
+set_glyphs(first=0, new width x height) -> loaded glyphs removed -> grid = screen / cell
+-> terminal rows keep their left cells, cursor row stays -> next requests: more glyphs, same cell
+```
+
+| Offset | Bytes | Field |
+| --- | --- | --- |
+| 0 | 1 | `first`: character code of the first glyph |
+| 1 | 1 | `count`: number of glyphs, 1 or more |
+| 2 | 1 | `width`: cell width in pixels, 5 to 16 |
+| 3 | 1 | `height`: cell height in pixels, 8 to 32 |
+| 4 | `count` × `height` × row bytes | Glyphs. One row has (`width` + 7) / 8 bytes. Bit 0 of the first byte is the left pixel. |
+
+`first + count` must not be more than 128. The payload size must be 4 + `count` × `height` × row bytes.
+The payload limit of 256 bytes gives the largest `count` for a cell size.
+A request with a cell size that is not the current cell size must have `first` 0.
+A request with a different size, range, or cell returns INVALID and changes nothing.
+A console object without output, or a console without a framebuffer, returns UNSUPPORTED.
+
+A new cell size removes each loaded glyph. Then the columns are the screen width divided by the cell width, and the rows are the screen height divided by the cell height.
+Each terminal keeps the left cells of its rows. If the cursor row is not in the new grid, the top rows go out.
+New cells are blank. The `geometry` property gives the new grid size.
+A glyph without a loaded copy is empty. With the 8 × 16 cell, such a glyph uses the built-in font of the kernel.
+The change uses the console output lock. After the request with character 127, the console draws each changed cell, or each cell after a new cell size.
+After an earlier request, the next console output draws them.
+While a display session owns the screen, the console does not draw. It draws again when the session releases the screen.
+The VGA text console and the serial console do not use the glyphs.
+The glyphs are global for the console and stay after the client exits. Kernel messages on the console use them also.
+Each client with the WRITE right can change them. A sequence of requests that stops early after a new cell size leaves empty glyphs. With the same cell size, it leaves glyphs of two fonts.
+The member is not in the discovery view of the shell, because its input is binary.
+See [Fonts](../../shell/fonts.md#text-console) for the font files and the loader.
 
 ## Dispatch, bounds, and lifetime
 

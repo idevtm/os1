@@ -3,6 +3,8 @@
 #include <stdint.h>
 
 #include <os1/command_engine.hpp>
+#include <os1/console.hpp>
+#include <os1/font.hpp>
 #include <os1/image_inspection.hpp>
 #include <os1/line_editor.hpp>
 #include <os1/log.hpp>
@@ -16,6 +18,8 @@
 #include "interface/parameter_fixture.hpp"
 #include "interface/shell_startup.hpp"
 #include "shell/program_path.hpp"
+#include "terminal/cells.hpp"
+#include "text/settings.hpp"
 
 namespace
 {
@@ -971,6 +975,10 @@ long run_diagnostic(int report)
 {
     switch(report)
     {
+        case os1::user::shell_runtime::gm206_diagnostic:
+            if(!os1::user::discovery::refresh(os1::user::prompt::view, true))
+                return OS1_ERR_LIMIT;
+            return os1::user::prompt::report_display_node(OS1_HARDWARE_DISPLAY_ROOT, output_fd);
         case OS1_OBSERVE_SYSTEM:
             run_sys();
             break;
@@ -1581,6 +1589,53 @@ bool load_shell_profile()
 }
 }  // namespace
 
+namespace
+{
+// Give the text console the font of /etc/sh.conf. Without the file, the font is the 6 x 12 font
+// file. If the font file is absent or not valid, or on a console without a framebuffer, the
+// console keeps its font.
+void set_console_font()
+{
+    os1::settings::ShellSettings settings;
+    os1::user::files::Handle config(os1::user::open("/etc/sh.conf", OS1_RIGHT_READ));
+    if(config.fd >= 0)
+    {
+        static char text[os1::settings::file_limit];
+        size_t used = 0;
+        long n = 1;
+        while(n > 0 && used < sizeof(text))
+        {
+            n = os1::user::read(config.fd, text + used, sizeof(text) - used);
+            if(n > 0)
+                used += size_t(n);
+        }
+        char extra;
+        if(n < 0 || (n > 0 && os1::user::read(config.fd, &extra, 1) != 0) ||
+           !os1::settings::parse_shell(text, used, settings))
+        {
+            os1::user::files::message(
+                "shell: /etc/sh.conf is not valid; the default font is in use\n");
+            settings = {};
+        }
+    }
+    if(!settings.font[0])
+        return;
+    static uint8_t
+        font_file[os1::user::font_header_bytes +
+                  128 * OS1_CONSOLE_CELL_MAX_HEIGHT * ((OS1_CONSOLE_CELL_MAX_WIDTH + 7) / 8)];
+    os1::user::Font font{};
+    if(!os1::user::load_font(settings.font, font_file, sizeof(font_file), font) ||
+       !os1::terminal::valid_cell(font.width, font.height))
+    {
+        os1::user::files::message("shell: the console font file is absent or not valid\n");
+        return;
+    }
+    os1::user::files::Handle console(os1::user::console_bind(2, OS1_RIGHT_WRITE));
+    if(console.fd >= 0)
+        (void)os1::user::console_set_font(console.fd, font.width, font.height, font.glyphs);
+}
+}  // namespace
+
 static int shell_main(int argc_main, char** argv_main)
 {
     ShellLifetime lifetime;
@@ -1675,10 +1730,17 @@ static int shell_main(int argc_main, char** argv_main)
     os1::user::files::Line input;
 
     os1_resource_info input_info{};
-    const bool console_input = argc_main != 2 && os1::user::query(0, &input_info) >= 0 &&
-                               input_info.kind == OS1_OBJECT_CONSOLE;
-    if(console_input)
+    // A byte stream as standard input is a terminal of a different program. The shell then
+    // writes its prompt, reads one line for each command, and continues after a failed command.
+    const bool have_input = argc_main != 2 && os1::user::query(0, &input_info) >= 0;
+    const bool stream_input = have_input && input_info.kind == OS1_OBJECT_STREAM;
+    const bool console_input =
+        stream_input || (have_input && input_info.kind == OS1_OBJECT_CONSOLE);
+    if(console_input && !stream_input)
+    {
+        set_console_font();
         os1::user::files::message("shell prompt ready\n");
+    }
     for(;;)
     {
         output_failed = false;
@@ -1695,7 +1757,8 @@ static int shell_main(int argc_main, char** argv_main)
 
         if(!input.size)
         {
-            if(input.eof && !console_input)
+            // The other program closed the stream.
+            if(input.eof && (!console_input || stream_input))
                 return 0;
             os1::user::files::message("\n");
             continue;
@@ -1788,6 +1851,29 @@ static int shell_main(int argc_main, char** argv_main)
         const char* raw = parsed.raw;
         if(0 == argc)
         {
+            continue;
+        }
+        if(strings_equal(tokens[0], "lx"))
+        {
+            if(argc != 1 || parsed.input != os1::shell::Input::None ||
+               parsed.output != os1::shell::Output::None)
+            {
+                os1::user::shell_runtime::diagnostic("usage: lx");
+                if(!console_input)
+                    return 1;
+                continue;
+            }
+            command_record.executed = true;
+            os1::user::commands::error = nullptr;
+            command_failed =
+                !os1::user::commands::run("os.system.log.export target:\"disk\"", console_input);
+            if(command_failed)
+            {
+                os1::user::shell_runtime::diagnostic(
+                    os1::user::commands::error ? os1::user::commands::error : "command failed");
+                if(!console_input)
+                    return 1;
+            }
             continue;
         }
         static os1::user::shell_runtime::Call call;
@@ -2016,7 +2102,11 @@ static int shell_main(int argc_main, char** argv_main)
         }
         else if(call.method == os1::user::shell_runtime::Method::Diagnostic)
         {
-            run_diagnostic(os1::user::shell_runtime::diagnostic_kind(call.target));
+            if(run_diagnostic(os1::user::shell_runtime::diagnostic_kind(call.target)) < 0)
+            {
+                os1::user::shell_runtime::diagnostic("diagnostics failed");
+                command_failed = true;
+            }
         }
         else if(call.method != os1::user::shell_runtime::Method::Unknown)
         {

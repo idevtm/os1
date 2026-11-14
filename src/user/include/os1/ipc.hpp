@@ -8,6 +8,11 @@ inline long ipc(unsigned operation, int fd, void* argument = nullptr)
 {
     return os1_syscall3(os1_sys_ipc, operation, fd, reinterpret_cast<uint64_t>(argument));
 }
+/// Create one byte stream. A read from the reader end waits for bytes from the writer end.
+inline long stream_create(os1_stream_pair& pair)
+{
+    return ipc(OS1_IPC_STREAM_CREATE, 0, &pair);
+}
 inline long ipc_wait(int fd)
 {
     return ipc(OS1_IPC_WAIT, fd);

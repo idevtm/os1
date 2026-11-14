@@ -1,5 +1,6 @@
 #include <os1/file_tools.hpp>
 #include <os1/ipc.hpp>
+#include <os1/log.hpp>
 
 #include "interface/shell_startup.hpp"
 
@@ -72,10 +73,32 @@ void report_status(const char* prefix, long status)
     files::number(2, status < 0 ? uint64_t(0) - uint64_t(status) : uint64_t(status));
     files::message("\n");
 }
+bool graphical_profile()
+{
+    files::Handle profile(u::open("/etc/gsh.boot", OS1_RIGHT_READ | OS1_RIGHT_INSPECT));
+    os1_file_info file{};
+    if(profile.fd < 0 || u::file_info(profile.fd, &file) < 0 || file.kind != OS1_OBJECT_FILE)
+        return false;
+    files::Handle log(u::logs::bind());
+    os1_log_info info{};
+    return log.fd >= 0 &&
+           u::logs::call(log.fd, OS1_LOG_INFO, nullptr, 0, &info, sizeof(info)) == sizeof(info) &&
+           !info.diagnostic;
+}
 }  // namespace
 
 int main(int, char**)
 {
+    if(graphical_profile())
+    {
+        const char* arguments[] = {"gsh"};
+        constexpr os1_constructor_args constructor{};
+        const long child = u::run_program(
+            "/bin/gsh", 1, arguments, false, 0, nullptr, nullptr, nullptr, -1, &constructor);
+        int status = 0;
+        const long result = child < 0 ? child : u::waitpid(child, &status);
+        report_status("init: gsh ended; starting sh, status=", result < 0 ? result : status);
+    }
     bool first = true;
     unsigned rapid_exits = 0;
     RetryTimer timer;

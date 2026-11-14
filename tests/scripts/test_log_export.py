@@ -43,9 +43,11 @@ def main():
             samples.append(time.monotonic() - start)
         print('tmp_export_seconds=' + ','.join(f'{v:.6f}' for v in samples))
         run('ls "/tmp/log"', b'kernel.bin')
+        run('help lx', b'export and synchronize logs under /log')
         info = run('os.system.log.export_info')
         assert b'last_status:0' in info or b'last_status=0' in info, info
-        run('os.system.log.export target:"disk"')
+        output = run('lx')
+        assert b'shell:' not in output, output
         run('ls "/log"', b'kernel-')
         run('exit', b'shell ended')
         run('echo "new-session-marker"')
@@ -81,6 +83,7 @@ def main():
         commands = [r['command'] for r in rows if 'command' in r]
         assert any('export-visible-marker' in r for r in commands), commands
         assert any('new-session-marker' in r for r in commands), commands
+        assert 'lx' in commands, commands
         assert any(r == 'shutdown' for r in commands), commands
         assert not any('export-private-marker' in r for r in commands), commands
         assert any(r['flags'] & 4 for r in rows if 'command' in r)
@@ -105,6 +108,29 @@ def main():
     assert max(f['boot'] for f in frames) > first_boot
     for name, data in baseline.items():
         assert files[name] == data, name
+
+    blocked = disk.with_suffix('.blocked.raw')
+    shutil.copyfile(args.program_disk, blocked)
+    partition = blocked.with_suffix('.ext2')
+    partition_offset = 2048 * 512
+    with blocked.open('rb') as image, partition.open('wb') as fs:
+        image.seek(partition_offset)
+        shutil.copyfileobj(image, fs)
+    marker = blocked.with_suffix('.txt')
+    marker.write_text('Blocked log directory\n')
+    subprocess.run([args.debugfs, '-w', '-R', f'write "{marker}" /log', str(partition)],
+                   check=True, capture_output=True)
+    with blocked.open('r+b') as image, partition.open('rb') as fs:
+        image.seek(partition_offset)
+        shutil.copyfileobj(fs, image)
+
+    def without_log_directory(run, expect):
+        run('cat /log', b'Blocked log directory')
+        run('lx', b'shell: log export failed')
+        run('os.system.log.export target:"tmp"')
+        run('ls "/tmp/log"', b'kernel.bin')
+
+    boot(args, blocked, 'blocked', exercise=without_log_directory)
     missing = disk.with_suffix('.missing.raw')
     with missing.open('wb') as target:
         target.truncate(disk.stat().st_size)

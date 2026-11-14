@@ -6,6 +6,7 @@
 #include "console/console_input.hpp"
 #include "debug/log.hpp"
 #include "debug/log_export.hpp"
+#include "ipc/channel.hpp"
 #include "mm/user_address.hpp"
 #include "mm/user_copy.hpp"
 #include "sync/wait_queue.hpp"
@@ -84,6 +85,13 @@ bool read_or_block(PageFrameContainer& frames,
     {
         result = vfs_read_or_block(frames, thread, instance, user_buffer, length);
         return result != kVfsBlocked;
+    }
+    if(instance->object->kind == OS1_OBJECT_STREAM)
+    {
+        // A waiting thread runs this system call again. The dispatcher then moves the
+        // instruction pointer back.
+        result = stream_read(frames, thread, instance, user_buffer, length);
+        return result != kIpcBlocked;
     }
     if(instance->object->kind != OS1_OBJECT_CONSOLE ||
        !(instance->object->interfaces & OS1_INTERFACE_BYTE_INPUT) ||

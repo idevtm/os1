@@ -10,6 +10,7 @@
 #include "driver/display.h"
 #include "drivers/display/text_display.hpp"
 #include "sync/smp.hpp"
+#include "terminal/cells.hpp"
 #include "terminal/line.hpp"
 
 namespace
@@ -32,6 +33,30 @@ void clear_console()
             debug.write_unmirrored(c);
     if(active_terminal)
         active_terminal->clear();
+}
+
+long console_set_glyphs(const uint8_t* payload, size_t bytes)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    if(!g_text_display || g_text_display->kind != TextDisplayBackendKind::FramebufferText ||
+       !text_display_glyph_storage())
+        return OS1_ERR_UNSUPPORTED;
+    uint32_t width, height;
+    text_display_cell(width, height);
+    if(!os1::terminal::valid_glyphs(payload, bytes, width, height))
+        return OS1_ERR_INVALID;
+    if(set_text_display_glyphs(payload[0], payload[1], payload[2], payload[3], payload + 4))
+    {
+        // The grid has a new size. Each terminal buffer has space for the grid of each font.
+        const auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
+        for(auto& each : terminal)
+            each.resize(display.columns, display.rows);
+    }
+    // Draw once, after the request with the last glyph. An earlier request only marks the cells
+    // for the next drawing, so a font of many requests does not draw the screen many times.
+    if(payload[0] + payload[1] == OS1_CONSOLE_GLYPH_COUNT && active_terminal)
+        active_terminal->link(g_text_display);
+    return 0;
 }
 
 long set_console_column(unsigned column)
@@ -131,28 +156,32 @@ void console_mirror_debug_byte(char c)
 namespace
 {
 NativeObject* graphics_owner;
-}
+bool native_display_active;
+}  // namespace
 
-long console_display_acquire(NativeObject* owner)
+long console_display_acquire(NativeObject* owner, bool native)
 {
     IrqSpinGuard guard(g_console_output_lock);
     if(graphics_owner)
         return OS1_ERR_WOULD_BLOCK;
     auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
-    if(!display.available)
+    if(!display.available || (native_display_active && !native))
         return OS1_ERR_UNSUPPORTED;
     graphics_owner = owner;
     display.graphics_owned = true;
-    return 0;
+    return native_display_active ? 1 : 0;
 }
 
-void console_display_release(NativeObject* owner, bool restored)
+void console_display_release(NativeObject* owner, bool restored, bool native)
 {
     IrqSpinGuard guard(g_console_output_lock);
     if(graphics_owner != owner)
         return;
     graphics_owner = nullptr;
     auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
+    native_display_active |= native;
+    if(native_display_active)
+        return;
     display.graphics_owned = false;
     if(!restored)
     {
@@ -162,6 +191,14 @@ void console_display_release(NativeObject* owner, bool restored)
     reset_framebuffer_text_display(display);
     if(active_terminal)
         active_terminal->link(g_text_display);
+}
+
+void console_display_retarget(NativeObject* owner, uint8_t* framebuffer)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    // Only the display owner can move the console pixels. The geometry does not change.
+    if(graphics_owner == owner)
+        static_cast<FramebufferTextDisplay*>(g_text_display->instance)->framebuffer = framebuffer;
 }
 
 long console_display_fill(NativeObject* owner,
@@ -174,6 +211,28 @@ long console_display_fill(NativeObject* owner,
         return OS1_ERR_CLOSED;
     driver.fill(&surface, fill.x, fill.y, fill.width, fill.height, fill.rgb);
     return 0;
+}
+
+long console_display_draw(NativeObject* owner,
+                          const os1_display_driver& driver,
+                          const os1_display_driver* device,
+                          const os1_framebuffer_surface& surface,
+                          uint32_t* shadow,
+                          uint32_t member,
+                          const uint8_t* payload,
+                          uint32_t bytes)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    if(graphics_owner != owner)
+        return OS1_ERR_CLOSED;
+    if(device && shadow && device->accelerate(&surface, member, payload, bytes))
+    {
+        // The device changed video memory. The drawing driver now changes only the shadow.
+        os1_framebuffer_surface memory = surface;
+        memory.pixels = reinterpret_cast<volatile uint8_t*>(shadow);
+        return driver.draw(&memory, nullptr, member, payload, bytes) ? 0 : OS1_ERR_INVALID;
+    }
+    return driver.draw(&surface, shadow, member, payload, bytes) ? 0 : OS1_ERR_INVALID;
 }
 
 void console_switch_terminal(unsigned index)

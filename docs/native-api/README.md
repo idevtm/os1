@@ -60,6 +60,7 @@ The host suite checks both languages and the IPC envelope layouts.
 | Persistent ext2 over virtio/USB, disk executables, File/Directory `sync` | [Ext2 storage profile](../filesystems/ext2.md) |
 | Kernel-hosted writable `/tmp`, mutation rights, resource results, quotas | [Temporary filesystem ABI](abi/tmpfs-abi.md) |
 | Descriptors, rights, lifetime, console | [Console descriptor ABI](abi/console-descriptor-abi.md) |
+| Byte streams between processes, and a wait request without a wait | [Byte stream ABI](abi/byte-stream-abi.md) |
 | Immutable files/directories, launch grants, argv/environment | [Initrd VFS and startup ABI](abi/initrd-vfs-abi.md) |
 | Sync/async copied calls, retained Operations, TextProcessor, offline `inspect` | [Copied IPC ABI](abi/copied-ipc-abi.md) |
 | Properties, volatile broadcast events, unsubscribe, typed Counter construction, deadlines | [Counter and events ABI](abi/counter-events-abi.md) |

@@ -1,0 +1,4 @@
+0000:01:00.0 VGA compatible controller [0300]: NVIDIA Corporation GM206 [GeForce GTX 950] [10de:1402] (rev a1)
+	Subsystem: Gigabyte Technology Co., Ltd Device [1458:36c5]
+	Kernel driver in use: nvidia
+	Kernel modules: nvidiafb, nouveau, nvidia_drm, nvidia

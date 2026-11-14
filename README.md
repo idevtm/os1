@@ -450,7 +450,7 @@ The raw image remains 2880 sectors (1.44 MB), including the unchanged boot-log a
 
 The smoke targets cover both boot paths, including the baseline shell, observability, SMP balance, `exec`, and `spawn` flows, so higher-half regressions are exercised on both UEFI and BIOS.
 
-`/bin/ascii` prints the `0x00..0x7F` ASCII table in 8 columns and exists mainly as a visual check that the framebuffer text backend is rendering the bundled 8x16 font correctly.
+`/bin/ascii` prints the `0x00..0x7F` ASCII table in 8 columns and exists mainly as a visual check that the framebuffer text backend draws the console font correctly. The console font is the font of `/etc/sh.conf`, or the bundled 8x16 font without a font file.
 
 The helper wrapper scripts remain available as thin CMake frontends:
 
@@ -597,7 +597,8 @@ See the [SystemControl contract](docs/native-api/abi/system-control-abi.md) for 
 
 Memory logs can be exported without a diagnostic boot image.
 Run `os.system.log.export target:"tmp"` to refresh bounded snapshots under `/tmp/log`.
-Run `os.system.log.export target:"disk"` to drain and synchronize persistent segments under `/log`.
+Run `lx` in `sh` to drain and synchronize persistent segments under `/log`.
+The shortcut calls `os.system.log.export target:"disk"`.
 `os.system.log.export_info` reports status and failure counters.
 Automatic disk export uses bounded retention and stops after repeated failures.
 See the [log export ABI](docs/native-api/abi/log-export-abi.md) for recovery, privacy, and storage limits.

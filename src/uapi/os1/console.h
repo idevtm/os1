@@ -11,6 +11,14 @@
 #define OS1_CONSOLE_ACQUIRE_INPUT 6u
 #define OS1_CONSOLE_REDRAW_LINE 7u
 #define OS1_CONSOLE_SET_CURSOR 8u
+// Set the cell size and glyphs of the font of the framebuffer text console.
+#define OS1_CONSOLE_SET_GLYPHS 9u
+#define OS1_CONSOLE_GLYPH_COUNT 128u
+#define OS1_CONSOLE_CELL_MIN_WIDTH 5u
+#define OS1_CONSOLE_CELL_MAX_WIDTH 16u
+#define OS1_CONSOLE_CELL_MIN_HEIGHT 8u
+#define OS1_CONSOLE_CELL_MAX_HEIGHT 32u
+#define OS1_CONSOLE_GLYPH_HEADER 4u
 #define OS1_CONSOLE_REDRAW_MAX 252u
 #define OS1_CONSOLE_ROW_DELTA_MAX 200
 #define OS1_OBJECT_CONSOLE_INPUT_SESSION 10u
@@ -34,6 +42,13 @@
 struct os1_console_redraw
 {
     int32_t row_delta;
+};
+// SET_GLYPHS input: this header, then `count` glyphs. One glyph has `height` rows of
+// (width + 7) / 8 bytes. Bit 0 of the first byte of a row is the left pixel. The character codes
+// are `first` to `first + count - 1`. A request with a different cell size must start at 0.
+struct os1_console_glyphs
+{
+    uint8_t first, count, width, height;
 };
 struct os1_console_input_options
 {

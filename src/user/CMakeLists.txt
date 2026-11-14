@@ -82,7 +82,7 @@ function(os1_add_user_cxx_program program_name source_file output_var)
 endfunction()
 
 os1_add_user_cxx_program(sh "${CMAKE_CURRENT_SOURCE_DIR}/programs/sh.cpp" OS1_USER_SH_ELF)
-os1_add_user_cxx_program(gfxdemo "${CMAKE_CURRENT_SOURCE_DIR}/programs/gfxdemo.cpp" OS1_USER_GFXDEMO_ELF)
+os1_add_user_cxx_program(gsh "${CMAKE_CURRENT_SOURCE_DIR}/programs/gsh.cpp" OS1_USER_GSH_ELF "-I${PROJECT_SOURCE_DIR}/third_party/font8x8")
 os1_add_user_cxx_program(run-tests "${CMAKE_CURRENT_SOURCE_DIR}/programs/run_tests.cpp" OS1_USER_RUN_TESTS_ELF)
 os1_add_user_cxx_program(init "${CMAKE_CURRENT_SOURCE_DIR}/programs/init.cpp" OS1_USER_INIT_ELF)
 os1_add_user_cxx_program(rescue "${CMAKE_CURRENT_SOURCE_DIR}/programs/rescue.cpp" OS1_USER_RESCUE_ELF)
@@ -145,21 +145,39 @@ foreach(program IN LISTS OS1_USER_PROGRAM_FILES)
     set(separator ",")
   endif()
 endforeach()
-string(APPEND program_manifest "],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/etc/motd\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/readme\",\"destination\":\"/etc/readme\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/shell-init.script\",\"destination\":\"/etc/shell/init.script\"}]}\n")
+# Font files for the text console and the graphics shell, from the Spleen BDF files.
+set(OS1_FONT_FILES "")
+set(font_resources "")
+foreach(size 5x8 6x12 8x16 12x24 16x32 32x64)
+  set(font "${OS1_GENERATED_DIR}/fonts/spleen-${size}.font")
+  add_custom_command(OUTPUT "${font}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_GENERATED_DIR}/fonts"
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -I "${PROJECT_SOURCE_DIR}/cmake/scripts/make_font.py"
+      "${PROJECT_SOURCE_DIR}/third_party/spleen/spleen-${size}.bdf" "${font}"
+    DEPENDS "${PROJECT_SOURCE_DIR}/third_party/spleen/spleen-${size}.bdf"
+      "${PROJECT_SOURCE_DIR}/cmake/scripts/make_font.py"
+    VERBATIM)
+  list(APPEND OS1_FONT_FILES "${font}")
+  string(APPEND font_resources ",{\"source\":\"${font}\",\"destination\":\"/share/fonts/spleen-${size}.font\"}")
+endforeach()
+add_custom_target(os1_fonts ALL DEPENDS ${OS1_FONT_FILES})
+string(APPEND program_manifest "],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/etc/motd\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/readme\",\"destination\":\"/etc/readme\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/shell-init.script\",\"destination\":\"/etc/shell/init.script\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/sh.conf\",\"destination\":\"/etc/sh.conf\"}${font_resources}]}\n")
 file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs-base.json" CONTENT "${program_manifest}")
 add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json"
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"
     --base "${OS1_GENERATED_DIR}/storage-programs-base.json"
     --metadata "${OS1_DRIVER_METADATA}" --image "${OS1_DRIVER_ELF}"
     --metadata "${OS1_DISPLAY_DRIVER_METADATA}" --image "${OS1_DISPLAY_DRIVER_ELF}"
+    --metadata "${OS1_GM206_DRIVER_METADATA}" --image "${OS1_GM206_DRIVER_ELF}"
     --output "${OS1_GENERATED_DIR}/storage-programs.json"
   DEPENDS "${OS1_GENERATED_DIR}/storage-programs-base.json" "${OS1_DRIVER_METADATA}"
     "${OS1_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_METADATA}"
+    "${OS1_GM206_DRIVER_ELF}" "${OS1_GM206_DRIVER_METADATA}"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"
     "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_package.py"
   VERBATIM)
 add_custom_target(os1_storage_manifest ALL DEPENDS "${OS1_GENERATED_DIR}/storage-programs.json")
-list(APPEND OS1_USER_PROGRAM_FILES "${OS1_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_ELF}" "${OS1_GENERATED_DIR}/storage-programs.json")
+list(APPEND OS1_USER_PROGRAM_FILES ${OS1_FONT_FILES} "${OS1_DRIVER_ELF}" "${OS1_DISPLAY_DRIVER_ELF}" "${OS1_GM206_DRIVER_ELF}" "${OS1_GENERATED_DIR}/storage-programs.json")
 set(OS1_USER_PROGRAM_FILES "${OS1_USER_PROGRAM_FILES}" PARENT_SCOPE)
 
 add_custom_command(

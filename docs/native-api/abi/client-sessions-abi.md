@@ -35,6 +35,7 @@ Account capability transfers use existing SUBMIT_CAPS/REPLY_CAPS rights attenuat
 ## Bounded wait-many
 
 WAIT_MANY selects the lowest ready input index from at most eight retained resources.
+It also accepts the reader end of a [byte stream](byte-stream-abi.md).
 A readiness result does not reserve data for the caller.
 
 ```text

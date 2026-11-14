@@ -198,6 +198,10 @@ static inline uint64_t rdtsc(void)
     return (static_cast<uint64_t>(high) << 32) | low;
 }
 
+// Page attribute table. Entry 1 holds write combining instead of the reset value, write through.
+// A page entry selects entry 1 with the PWT bit. The kernel uses no write-through mapping.
+inline constexpr uint32_t kIa32Pat = 0x277;
+inline constexpr uint64_t kPatWithWriteCombining = 0x0007010600070106ull;
 inline constexpr uint32_t kIa32FsBase = 0xC0000100;
 inline constexpr uint32_t kIa32GsBase = 0xC0000101;
 inline constexpr uint32_t kIa32KernelGsBase = 0xC0000102;

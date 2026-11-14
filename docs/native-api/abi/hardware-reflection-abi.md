@@ -358,3 +358,50 @@ USB, processor, and arbitrary AML associations are not inferred from names.
 
 Inspection never evaluates AML or executes CPUID.
 Platform capture runs before publication and uses bounded memory. Runtime USB publication remains separate.
+
+## GM206 display discovery
+
+The GM206 display module supplies the `os.display.gm206` subtree. It reports the cached boot probe status also if the probe fails.
+A machine without the PCI device does not load the module and has no such subtree.
+The existing display backend and the Display v1 mode list stay in effect.
+
+```text
+os.display.gm206
+  diagnostics
+  gpu
+  outputs.output_N
+    edid.hex_N
+    modes.mode_N
+  scanouts.scanout_N
+```
+
+Names use zero-based indices. The records use the existing paged hardware query.
+An output is a firmware-enabled DisplayPort AUX channel with a successful DPCD reply.
+Fields report the AUX channel, raw DPCD revision and maximum link-rate codes, lane count, and valid EDID block count.
+The mode list reports a bounded subset of sink timings. It does not represent modes selectable through Display v1.
+Timing fields include active geometry, refresh in millihertz, pixel clock in hertz, sync positions, totals, and polarity.
+The preferred flag identifies a preferred EDID base timing.
+Scanout records report head, encoder index, link index, totals, and pixel clock. They do not associate a head with an AUX channel.
+No hardware query triggers a new probe. Connector hotplug does not refresh this snapshot.
+
+The GPU record includes PCI identity, BAR 0 size, and raw chip and display resource registers.
+The `boot0_read` flag distinguishes a captured chip register from an unavailable value.
+The AUX masks record sink presence, firmware-enabled pads, and failed DPCD reads.
+Valid EDID supplies monitor manufacturer, model text, product code, and optional serial text.
+The EDID object retains up to two read blocks, including bytes from blocks that fail validation.
+Each `hex_N` field contains 32 consecutive bytes in hexadecimal. Join the fields in index order.
+The shell method `os.display.gm206.diagnostics` prints the display tree to standard output.
+Redirect it to a file to retain the boot report.
+
+A successful GM206 probe also exposes `os.display.gm206.boot_state`.
+The route value comes from BAR 0 offset `0x612488` on the reference board.
+The route flag indicates a match with an observed active DisplayPort SOR and link.
+Head timing and surface register fields appear only after a route match.
+Base channel fields for the matched head also appear only after a route match.
+Fields with the `_next_raw` suffix read the second state copy of the same base channel method.
+The `vbios_display_owner`, `pramin_window`, `bar1_instance`, `bar2_instance`, and `vram_*` fields are raw register values.
+They describe firmware ownership and GPU memory layout. They do not grant ownership to OS1.
+The link read flags are set only when the complete read succeeds.
+The sink link configuration comes from DPCD `0x100` and `0x101`.
+The six status bytes start at `0x202`. The first byte occupies the low eight bits of `link_status_raw`.
+Framebuffer fields describe the boot handoff. GPU surface and viewport fields are raw observations.

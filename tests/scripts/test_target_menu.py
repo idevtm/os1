@@ -37,6 +37,7 @@ class Menu(unittest.TestCase):
         self.assertEqual(target_menu.category('run_persistent'), ('Run QEMU', 'Modern UEFI'))
         self.assertEqual(target_menu.category('run_persistent_bios'), ('Run QEMU', 'Legacy BIOS'))
         self.assertEqual(target_menu.category('storage_deploy'), ('Storage',))
+        self.assertEqual(target_menu.category('usb_capture'), ('USB',))
         self.assertEqual(target_menu.category('future_target'), ('Other',))
         self.assertEqual(target_menu.category('smoke_storage'), ('Checks', 'Storage'))
 

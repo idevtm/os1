@@ -8,6 +8,9 @@
 os1_console_geometry console_geometry();
 void clear_console();
 long set_console_column(unsigned column);
+// Handle a SET_GLYPHS payload for the framebuffer text console. A new cell size changes the grid
+// of each terminal. Return 0, OS1_ERR_INVALID, or OS1_ERR_UNSUPPORTED without a framebuffer.
+long console_set_glyphs(const uint8_t* payload, size_t bytes);
 long redraw_console_line(int delta, const char* text, size_t bytes);
 
 // write exactly `length` bytes to the kernel console stream.
@@ -27,10 +30,21 @@ struct os1_framebuffer_surface;
 struct os1_display_driver;
 struct os1_display_fill;
 struct NativeObject;
-long console_display_acquire(NativeObject*);
-void console_display_release(NativeObject*, bool restored);
+long console_display_acquire(NativeObject*, bool native);
+void console_display_release(NativeObject*, bool restored, bool native);
+void console_display_retarget(NativeObject*, uint8_t* framebuffer);
 long console_display_fill(NativeObject*,
                           const os1_display_driver&,
                           const os1_framebuffer_surface&,
                           const os1_display_fill&);
+// Run one module draw request while the session owns the display. If `device` is not null and the
+// session has a shadow, the device driver gets the request first.
+long console_display_draw(NativeObject*,
+                          const os1_display_driver&,
+                          const os1_display_driver* device,
+                          const os1_framebuffer_surface&,
+                          uint32_t* shadow,
+                          uint32_t member,
+                          const uint8_t* payload,
+                          uint32_t bytes);
 void console_switch_terminal(unsigned index);

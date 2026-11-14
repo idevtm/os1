@@ -151,6 +151,27 @@ Run `/bin/diskutil sync` before shutdown or removal after writes.
 Then reconnect the stick to the development computer for updates.
 A dirty or unsupported filesystem prevents update staging; the tool does not repair or format it automatically.
 
+## Copy the data partition to a file
+
+Use this action to examine the files of a stick, for example an exported log, on the development computer.
+
+```text
+./os1.sh usb_capture -> select the stick if more than one is connected -> sudo reads the stick
+read -> temporary file with the ext2 data partition -> the tool prints the file path
+```
+
+Run `./os1.sh usb_capture` without sudo, or select **USB > Copy USB stick data to a temporary file**.
+The tool accepts only a stick with the os1 boot and data layout. It unmounts the stick and does not write to it.
+The last output line is `USB data partition copy:` and the path of the file.
+The lines before it are from the build configuration. Use `./os1.sh usb_capture | tail -n 1` to get only that line.
+The file is in the temporary directory of your user. Delete it after use.
+If only one eligible USB disk is connected, the tool reads it without a question.
+The tool checks the os1 layout after it unmounts the disk. A different disk gets no write, and the tool then stops.
+The stick stays unmounted and is not ejected. A stick with write protection is not eligible.
+The `os1_usb_capture_contract` check runs this action with a disk image in place of the stick and of sudo.
+One run against a physical stick on November 14, 2026 gave a correct file.
+Use `debugfs` of e2fsprogs to list or copy files from the ext2 file, for example `debugfs -R "ls -l /log" <file>`.
+
 ## Update an existing installation
 
 Run `./os1.sh usb` and choose one of these actions:

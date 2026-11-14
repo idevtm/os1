@@ -51,6 +51,8 @@ struct IpcWaitState
     uint8_t kernel_lane = 0;
     uint64_t deadline_ns = UINT64_MAX;
     long result = 0;
+    // The thread runs its system call again after the wait. The wait writes no result register.
+    bool restart = false;
 };
 
 struct VfsIoWaitState

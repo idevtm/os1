@@ -1,6 +1,7 @@
 #pragma once
 #include <os1/observe.h>
 #include <os1/resource.h>
+#include <os1/tmpfs.h>
 
 #include <os1/syscall.hpp>
 

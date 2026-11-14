@@ -6,12 +6,16 @@
 #include "debug/debug.hpp"
 #include "font8x16.h"
 #include "handoff/memory_layout.h"
+#include "terminal/cells.hpp"
 #include "util/memory.h"
 
 namespace
 {
-constexpr uint32_t kFramebufferCellWidth = 8;
-constexpr uint32_t kFramebufferCellHeight = 16;
+// The built-in font has this cell size.
+constexpr uint32_t kBuiltInCellWidth = 8;
+constexpr uint32_t kBuiltInCellHeight = 16;
+constexpr uint32_t kGlyphBytesLimit = OS1_CONSOLE_CELL_MAX_HEIGHT * 2;
+static_assert(128 * kGlyphBytesLimit == kTextDisplayGlyphStorageBytes);
 constexpr uint32_t kFramebufferBackground = 0x00000000u;
 constexpr uint16_t kVgaBlankCell = 0x0720;
 constexpr uint32_t kVgaPalette[16] = {
@@ -35,6 +39,14 @@ constexpr uint32_t kVgaPalette[16] = {
 
 VgaTextDisplay g_vga_text_display;
 FramebufferTextDisplay g_framebuffer_text_display;
+// The cell size of the font. A program can change it.
+uint32_t g_cell_width = kBuiltInCellWidth;
+uint32_t g_cell_height = kBuiltInCellHeight;
+// Glyphs that a program loaded, in pages of the boot allocation. One glyph row has
+// (g_cell_width + 7) / 8 bytes. A glyph without a loaded copy uses the built-in font if the cell
+// has its size, and is empty if not.
+uint8_t (*g_loaded_glyphs)[kGlyphBytesLimit] = nullptr;
+bool g_glyph_loaded[128];
 TextDisplayBackend g_vga_backend{TextDisplayBackendKind::VgaText, &g_vga_text_display};
 TextDisplayBackend g_framebuffer_backend{TextDisplayBackendKind::FramebufferText,
                                          &g_framebuffer_text_display};
@@ -175,11 +187,19 @@ void framebuffer_draw_cell(
     const uint32_t bg =
         inverse ? vga_color(attribute & 0x0Fu) : vga_color((attribute >> 4) & 0x0Fu);
 
-    for(uint32_t glyph_row = 0; glyph_row < 16; ++glyph_row)
+    const bool built_in = g_cell_width == kBuiltInCellWidth && g_cell_height == kBuiltInCellHeight;
+    const uint32_t row_bytes = (g_cell_width + 7) / 8;
+    for(uint32_t glyph_row = 0; glyph_row < g_cell_height; ++glyph_row)
     {
-        const uint8_t bits = font8x16[glyph_index][glyph_row];
+        uint32_t bits = 0;
+        if(g_glyph_loaded[glyph_index & 127])
+            for(uint32_t i = 0; i < row_bytes; ++i)
+                bits |= uint32_t(g_loaded_glyphs[glyph_index & 127][glyph_row * row_bytes + i])
+                        << (8 * i);
+        else if(built_in)
+            bits = font8x16[glyph_index & 127][glyph_row];
         const uint32_t y = cell_y + glyph_row;
-        for(uint32_t glyph_col = 0; glyph_col < 8; ++glyph_col)
+        for(uint32_t glyph_col = 0; glyph_col < g_cell_width; ++glyph_col)
         {
             const bool set = ((bits >> glyph_col) & 1u) != 0;
             framebuffer_set_pixel(display, cell_x + glyph_col, y, set ? fg : bg);
@@ -237,11 +257,8 @@ void present_framebuffer_text(FramebufferTextDisplay& display,
                 continue;
             }
 
-            framebuffer_draw_cell(display,
-                                  col * kFramebufferCellWidth,
-                                  row * kFramebufferCellHeight,
-                                  cell,
-                                  is_cursor);
+            framebuffer_draw_cell(
+                display, col * g_cell_width, row * g_cell_height, cell, is_cursor);
             if(nullptr != display.shadow_buffer)
             {
                 display.shadow_buffer[shadow_index] = cell;
@@ -320,8 +337,8 @@ bool initialize_framebuffer_text_display(FramebufferTextDisplay& display,
         return false;
     }
 
-    display.columns = (uint16_t)(display.width / kFramebufferCellWidth);
-    display.rows = (uint16_t)(display.height / kFramebufferCellHeight);
+    display.columns = (uint16_t)(display.width / g_cell_width);
+    display.rows = (uint16_t)(display.height / g_cell_height);
     if((0 == display.columns) || (0 == display.rows))
     {
         return false;
@@ -388,9 +405,95 @@ void reset_framebuffer_text_display(FramebufferTextDisplay& display)
     display.shadow_valid = false;
     display.cursor_valid = false;
     // Text presentation redraws every cell. Clear only pixels outside the grid.
-    const uint32_t right = display.columns * kFramebufferCellWidth;
-    const uint32_t bottom = display.rows * kFramebufferCellHeight;
+    const uint32_t right = display.columns * g_cell_width;
+    const uint32_t bottom = display.rows * g_cell_height;
     for(uint32_t y = 0; y < display.height; ++y)
         for(uint32_t x = y < bottom ? right : 0; x < display.width; ++x)
             framebuffer_set_pixel(display, x, y, kFramebufferBackground);
+}
+
+namespace
+{
+bool same_bytes(const uint8_t* left, const uint8_t* right, unsigned bytes)
+{
+    for(unsigned i = 0; i < bytes; ++i)
+        if(left[i] != right[i])
+            return false;
+    return true;
+}
+}  // namespace
+
+void set_text_display_glyph_storage(uint8_t* storage)
+{
+    g_loaded_glyphs = reinterpret_cast<uint8_t (*)[kGlyphBytesLimit]>(storage);
+}
+
+bool text_display_glyph_storage()
+{
+    return g_loaded_glyphs != nullptr;
+}
+
+void framebuffer_text_capacity(const FramebufferTextDisplay& display,
+                               uint16_t& columns,
+                               uint16_t& rows)
+{
+    columns = (uint16_t)(display.width / OS1_CONSOLE_CELL_MIN_WIDTH);
+    rows = (uint16_t)(display.height / OS1_CONSOLE_CELL_MIN_HEIGHT);
+}
+
+void text_display_cell(uint32_t& width, uint32_t& height)
+{
+    width = g_cell_width;
+    height = g_cell_height;
+}
+
+bool set_text_display_glyphs(
+    uint8_t first, uint8_t count, uint8_t width, uint8_t height, const uint8_t* rows)
+{
+    auto& display = g_framebuffer_text_display;
+    bool grid_changed = false, cell_changed = false;
+    if(width != g_cell_width || height != g_cell_height)
+    {
+        // A new cell size removes each loaded glyph. The caller sends the glyphs from 0.
+        g_cell_width = width;
+        g_cell_height = height;
+        cell_changed = true;
+        for(bool& loaded : g_glyph_loaded)
+            loaded = false;
+        display.shadow_valid = false;
+        if(display.width && display.height)
+        {
+            const uint16_t columns = (uint16_t)(display.width / width);
+            const uint16_t rows_count = (uint16_t)(display.height / height);
+            grid_changed = columns != display.columns || rows_count != display.rows;
+            display.columns = columns;
+            display.rows = rows_count;
+            display.cursor_valid = false;
+        }
+    }
+    const unsigned bytes = os1::terminal::glyph_bytes(width, height);
+    const bool built_in = width == kBuiltInCellWidth && height == kBuiltInCellHeight;
+    for(unsigned i = 0; i < count && first + i < 128; ++i)
+    {
+        const uint8_t* source = rows + i * bytes;
+        // A glyph that does not change causes no new presentation.
+        bool same = true;
+        if(g_glyph_loaded[first + i])
+            same = same_bytes(g_loaded_glyphs[first + i], source, bytes);
+        else if(built_in)
+            same = same_bytes(font8x16[first + i], source, bytes);
+        else
+            for(unsigned b = 0; b < bytes; ++b)
+                same = same && !source[b];
+        if(same && (g_glyph_loaded[first + i] || built_in))
+            continue;
+        memcpy(g_loaded_glyphs[first + i], source, bytes);
+        g_glyph_loaded[first + i] = true;
+        if(!same)
+            display.shadow_valid = false;
+    }
+    // Clear the pixels outside a smaller grid. The display owner keeps its pixels.
+    if(cell_changed && display.available && !display.graphics_owned)
+        reset_framebuffer_text_display(display);
+    return grid_changed;
 }

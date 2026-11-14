@@ -7,11 +7,21 @@
 namespace kernel_event
 {
 constexpr uint32_t kEventRingCapacity = OS1_OBSERVE_EVENT_RING_CAPACITY;
+// The kernel gives the ring this much storage in boot pages. The storage is not in the kernel
+// image, so the BIOS image window does not grow with the capacity.
+constexpr size_t kEventRingStorageBytes = sizeof(Os1ObserveEventRecord) * kEventRingCapacity;
 
 class KernelEventRing
 {
 public:
+    KernelEventRing() = default;
+    // A copy would share the storage of the original.
+    KernelEventRing(const KernelEventRing&) = delete;
+    KernelEventRing& operator=(const KernelEventRing&) = delete;
     void reset();
+    // Give the ring its storage of kEventRingCapacity records. A ring without storage counts the
+    // sequence numbers of its records but keeps none.
+    void attach(Os1ObserveEventRecord* storage);
 
     Os1ObserveEventRecord append(uint64_t tick_count,
                                  uint32_t type,
@@ -30,7 +40,12 @@ public:
     [[nodiscard]] uint64_t next_sequence() const;
 
 private:
-    Os1ObserveEventRecord records_[kEventRingCapacity]{};
+#if defined(OS1_HOST_TEST)
+    Os1ObserveEventRecord host_storage_[kEventRingCapacity]{};
+    Os1ObserveEventRecord* records_ = host_storage_;
+#else
+    Os1ObserveEventRecord* records_ = nullptr;
+#endif
     uint64_t next_sequence_ = 1;
     uint32_t head_ = 0;
     uint32_t count_ = 0;
@@ -53,5 +68,8 @@ void record_subject(uint32_t type,
                     uint64_t arg3 = 0);
 
 bool snapshot_all(Os1ObserveEventRecord* records, uint32_t capacity, uint32_t& count);
+
+// Give the kernel event ring its storage. Events before this call are not kept.
+void attach_storage(Os1ObserveEventRecord* storage);
 
 }  // namespace kernel_event

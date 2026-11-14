@@ -46,6 +46,12 @@ inline long waitpid(uint64_t pid, int* status)
     return os1_waitpid(pid, status);
 }
 
+/// @brief Collects a child process that has ended. Returns OS1_ERR_WOULD_BLOCK if none has.
+inline long waitpid_now(uint64_t pid, int* status)
+{
+    return os1_waitpid(pid | OS1_WAIT_NO_WAIT, status);
+}
+
 /// @brief Replaces the current process image with an initrd program.
 inline long exec(const char* path)
 {

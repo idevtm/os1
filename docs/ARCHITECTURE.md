@@ -59,6 +59,12 @@ Capture-image builds additionally pass `os1.bootdiag` for their reset-and-harves
 The custom BIOS loader retains build-selected diagnostics without an interactive menu.
 See the [boot-menu record](archive/boot/2026-11-09-boot-menu.md) for limits and validation.
 
+On a normal boot, init starts `gsh` directly if `/etc/gsh.boot` exists.
+A diagnostic boot starts `sh`.
+A pre-takeover failure leaves the text console available and init starts `sh`.
+The graphics shell requires a runtime mode from a driver.
+See the [graphics shell plan](hardware/gsh-plan.md) for startup, preferences, and session behavior.
+
 ## Native objects and OS services
 
 The Native API has implemented descriptor authority and bounded IPC between user programs.
@@ -968,12 +974,78 @@ The QEMU Standard VGA backend switches the scanout resolution during session acq
 The final session release restores the boot mode before it redraws the active terminal.
 The demo uses waitable pointer subscriptions. It reports input and draw timing after it releases the display.
 
+### Byte streams between processes
+
+A byte stream connects the standard streams of a child process to its parent.
+The IPC code owns the stream, because the stream uses the IPC wait queue and its lock.
+
+```text
+writer end -> write syscall -> ring of 16,384 bytes -> read syscall -> reader end
+empty or full ring -> thread in the IPC wait queue -> wake -> the thread runs its system call again
+reader end -> WAIT_MANY with console keys, input devices, and IPC objects
+```
+
+The graphics shell uses two streams for the child shell of its window.
+See the [byte stream ABI](native-api/abi/byte-stream-abi.md).
+
+### Display driver boundary
+
+The kernel has no code for one display device. It has the display service, the text console, and a loader.
+Each display device has its code in a trusted ext2 module that uses one display driver interface.
+
+```text
+kernel: Display sessions, request checks, console handover, PCI inventory, BAR claims, mapping
+module: device match, registers, mode list, mode change, console restore, pointer, reflection
+no display device -> no display module -> serial console and all other services
+```
+
+A generated table names the display packages. The loader loads a package with a PCI identity only for a device in the PCI inventory.
+The loader loads the package for the boot framebuffer only for a supported framebuffer layout.
+A module gets kernel services through one host table: PCI records, BAR claims, mapping, memory, delay, and log.
+A machine without a display device starts without a display module. The Display service then reports no display.
+See the [display driver interface](hardware/driver-module-abi.md#display-driver-interface).
+
+### GM206 discovery at boot
+
+A trusted ext2 module probes the matching GM206 display adapter before user processes start.
+It publishes DisplayPort sink and scanout observations in `os.display.gm206`.
+
+```text
+PCI identity -> trusted GM206 module -> boot probe -> display reflection
+BootInfo framebuffer -> console and exclusive Display sessions
+```
+
+The snapshot does not grant user programs control of GPU registers.
+The firmware framebuffer owns physical scanout until a session opens the native mode.
+
+```text
+native mode open -> BAR 1 check -> display ownership -> module surface on the boot head
+session close -> console surface in video memory -> console redraw
+```
+
+On the reference board, the module offers one native mode with the size of the firmware output viewport.
+The module then takes the display from firmware and shows a surface in reserved video memory.
+After the first session close that follows a switch, the console and the fixed mode use a second reserved surface.
+The head keeps the firmware timing and DisplayPort link.
+The service also offers smaller monitor modes. The head scales such a surface to the native output.
+The module maps the two surfaces with write combining through the host services. Each CPU sets page attribute table entry 1 for it.
+The framebuffer module draws the `fill_area`, `copy`, and `bitmap` session requests.
+It writes each pixel to a shadow in normal memory and to video memory. A copy reads the shadow.
+The GM206 module shows a hardware pointer through the position channel of the head.
+See the [GM206 module contract](hardware/driver-module-abi.md#gm206-display-module).
+The module can also move an area of its surface with the copy engine of the card. The kernel asks the module first and updates only the shadow after a success.
+The text console and `gsh` read their fonts from files in `/share/fonts` on the disk. `sh` gives the font of `/etc/sh.conf`, by default 6 × 12, to the kernel console through Console member 9.
+`gsh` selects a font with the font steps of `/etc/gsh.conf` for the mode height.
+The kernel and `gsh` keep built-in fonts for a machine without the files. See [Fonts](shell/fonts.md).
+See the [GM206 copy engine](hardware/gm206-copy-engine.md). The first desktop test of this path passed.
+
 ### Framebuffer Text Rendering
 
 The framebuffer backend is intentionally minimal:
 
-- text grid derived from framebuffer geometry using 8x16 cells
-- bundled `font8x16` bitmap glyphs
+- text grid derived from framebuffer geometry and the cell size of the console font, 8x16 at boot
+- bundled `font8x16` bitmap glyphs as the fallback; `sh` replaces them and can change the cell size with the [font file](shell/fonts.md) of the disk
+- terminal and shadow buffers sized at boot for the grid of the smallest cell, 5x8, so a cell change does not allocate
 - white text on black background
 - software cursor by inverse cell rendering
 - cell-by-cell redraw only where content or cursor state changed
@@ -1291,7 +1363,7 @@ Both QEMU smokes still require a resolved route on their known firmware configur
 The [implementation record](archive/kernel/2026-11-05-passive-acpi-observation.md) closes the snapshot side effect from review R2.
 A separate authorized power diagnostic interface remains deferred pending driver coordination and failure recovery.
 
-The event ring currently stores 256 overwrite-on-full records with monotonic sequence numbers and direct `pid` / `tid` fields. Current event types cover traps, scheduler transitions, IRQs, block I/O, PCI binds, user-copy failures, smoke markers used by the observe smokes, the chosen scheduler timer source (PIT vs LAPIC), `kmem` corruption, NIC RX completions, AP-online / AP-tick events, reschedule / TLB-shootdown IPIs, kernel-thread ping markers, thread migration, and run-queue depth changes.
+The event ring currently stores 512 overwrite-on-full records with monotonic sequence numbers and direct `pid` / `tid` fields. The kernel allocates its 40,960 bytes of storage in boot pages before platform discovery, so the records are not in the kernel image; an event before that point is counted but not kept. Current event types cover traps, scheduler transitions, IRQs, block I/O, PCI binds, user-copy failures, smoke markers used by the observe smokes, the chosen scheduler timer source (PIT vs LAPIC), `kmem` corruption, NIC RX completions, AP-online / AP-tick events, reschedule / TLB-shootdown IPIs, kernel-thread ping markers, thread migration, and run-queue depth changes.
 
 Trap events for an NMI or a machine check use process and thread IDs of zero.
 These events clear `OS1_KERNEL_EVENT_FLAG_USER`.
@@ -1435,7 +1507,7 @@ Current user programs:
 - `/bin/fdcheck` and `/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
 - `/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
 - `/bin/acpiprobe` — ACPICA observe probe built from [`src/user/programs/acpiprobe.cpp`](../src/user/programs/acpiprobe.cpp)
-- `/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify 8x16 font rendering on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
+- `/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify the console font on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
 
 The kernel retains its fixed `/sbin/init` boot contract.
 Init starts `/bin/sh` through the existing filesystem-backed loader.
@@ -1826,7 +1898,7 @@ Drivers marked `probe_early` finish before ordinary PCI probes, independent of P
 xHCI uses this phase to request firmware ownership before reset and DMA setup.
 An ownership timeout leaves BIOS ownership intact and rejects that controller.
 After xHCI starts, Intel `8086:8c31` routing enables supported SuperSpeed ports before switching supported USB 2.0 ports.
-A 100 ms settling delay follows changed routing; device enumeration then precedes EHCI probing.
+After controller start and the routing check, xHCI waits 100 ms before it enumerates devices. EHCI probing follows.
 Other PCI IDs receive no Intel routing-register writes.
 See the [hardware evidence and validation plan](hardware/2026-11-06-usb-keyboard-handoff.md).
 

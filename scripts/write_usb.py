@@ -465,6 +465,52 @@ def update_interactive(args, mode):
     print(f"Pre-update backup retained: {backup}")
 
 
+def capture_interactive():
+    """Copy the ext2 data partition of an os1 stick to a temporary file and print its path."""
+    if os.geteuid() == 0:
+        raise ValueError("run this command without sudo; only the reader will request it")
+    disks = list_disks(usb_data_image.DATA_START + 4 * 1024 * 1024)
+    if not disks:
+        raise ValueError("no eligible USB disk is available")
+    choice = 0
+    if len(disks) > 1:
+        if not sys.stdin.isatty():
+            raise ValueError("USB disk selection requires an interactive terminal")
+        options = [(i, f"{info['DeviceIdentifier']}: Copy data — {info.get('MediaName', '')} "
+                       f"({info['TotalSize'] / 1_000_000_000:.1f} GB)") for i, info in enumerate(disks)]
+        choice = choose_menu("Select USB to copy", options,
+                             "The stick does not change. Only the os1 boot/data layout is accepted.",
+                             require_selection=True)
+        if choice is None:
+            return
+    selected = disks[choice]
+    disk = selected['DeviceIdentifier']
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    # The first file holds the boot and data regions. The second file keeps the data partition.
+    fd, whole_name = tempfile.mkstemp(prefix=f"os1-usb-{stamp}-", suffix=".img")
+    whole = Path(whole_name)
+    try:
+        print(f"Reading /dev/{disk} ({selected.get('MediaName', '')}); the stick does not change.",
+              file=sys.stderr, flush=True)
+        with os.fdopen(fd, 'w+b', buffering=0) as output:
+            sudo_step(["--read", "--disk", disk, "--identity", json.dumps(identity(selected))],
+                      "read the selected USB disk", stdout=output)
+            output.flush()
+            end = usb_data_image.inspect(output)
+            data_fd, data_name = tempfile.mkstemp(prefix=f"os1-usb-data-{stamp}-", suffix=".ext2")
+            try:
+                with os.fdopen(data_fd, 'w+b') as data:
+                    usb_data_image.copy_range(output, data, usb_data_image.DATA_START,
+                                              end - usb_data_image.DATA_START, 0)
+            except BaseException:
+                # Do not leave a part of the partition as a result.
+                Path(data_name).unlink(missing_ok=True)
+                raise
+    finally:
+        whole.unlink(missing_ok=True)
+    print(f"USB data partition copy: {data_name}")
+
+
 @contextmanager
 def raw_device(disk, expected_identity):
     if os.geteuid() != 0:
@@ -589,6 +635,7 @@ def main():
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--write", type=Path)
     actions.add_argument("--read", action="store_true")
+    actions.add_argument("--capture", action="store_true")
     actions.add_argument("--update", type=Path)
     parser.add_argument("--mode", choices=["boot", "programs", "all"])
     parser.add_argument("--before-sha256")
@@ -599,7 +646,9 @@ def main():
     try:
         if sys.platform != "darwin":
             raise ValueError("USB writing currently supports macOS only")
-        if args.read:
+        if args.capture:
+            capture_interactive()
+        elif args.read:
             if not args.disk or not args.identity or sys.stdout.isatty():
                 raise ValueError("snapshot requires disk identity and redirected output")
             read_device(args.disk, json.loads(args.identity), sys.stdout.buffer)

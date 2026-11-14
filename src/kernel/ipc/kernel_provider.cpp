@@ -103,6 +103,7 @@ void invoke_console(OpenInstance& source,
     uint32_t required;
     switch(request.member)
     {
+        case OS1_CONSOLE_SET_GLYPHS:
         case OS1_CONSOLE_SET_CURSOR:
         case OS1_CONSOLE_REDRAW_LINE:
         case OS1_CONSOLE_CLEAR:
@@ -157,6 +158,15 @@ void invoke_console(OpenInstance& source,
             memcpy(result.payload, &geometry, sizeof(geometry));
             result.payload_bytes = sizeof(geometry);
         }
+        return;
+    }
+    if(request.member == OS1_CONSOLE_SET_GLYPHS)
+    {
+        // The console checks the header and the size. See `os1::terminal::valid_glyphs`.
+        if(!object->write_bytes)
+            result.application_status = OS1_ERR_UNSUPPORTED;
+        else
+            result.application_status = console_set_glyphs(request.payload, request.payload_bytes);
         return;
     }
     if(request.member == OS1_CONSOLE_SET_CURSOR)

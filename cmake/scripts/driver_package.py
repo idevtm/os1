@@ -20,7 +20,9 @@ def main():
     parser.add_argument('--identity', required=True)
     parser.add_argument('--header', required=True)
     parser.add_argument('--metadata', required=True)
-    parser.add_argument('--display', action='store_true')
+    profile = parser.add_mutually_exclusive_group()
+    profile.add_argument('--display', action='store_true')
+    profile.add_argument('--gm206', action='store_true')
     args = parser.parse_args()
     build = re.search(r'#define OS1_LOG_IMAGE "([a-f0-9]{64})"', Path(args.identity).read_text())
     if not build:
@@ -32,10 +34,16 @@ def main():
                 'dependencies': ['kernel.virtio_queue.v1'], 'firmware': [],
                 'image': directory + '/driver.elf'}
     if args.display:
-        metadata.update(driver='firmware-framebuffer', abi=2, dependencies=['kernel.firmware_framebuffer.v1'],
+        metadata.update(driver='firmware-framebuffer', abi=6, dependencies=['kernel.display_driver.v6'],
+                        base='0xffffffffa0020000',
                         image=directory.replace('/virtio-net', '/firmware-framebuffer') + '/driver.elf',
                         match='validated firmware framebuffer')
         del metadata['pci']
+    if args.gm206:
+        metadata.update(driver='gm206', abi=6, dependencies=['kernel.display_driver.v6'],
+                        base='0xffffffffa0040000',
+                        image=directory.replace('/virtio-net', '/gm206') + '/driver.elf',
+                        pci={'vendor': 0x10de, 'device': 0x1402})
     write_if_changed(args.metadata, json.dumps(metadata, indent=2) + '\n')
     header = '#pragma once\n'
     header += 'constexpr char kDriverPath[] = ' + json.dumps(metadata['image']) + ';\n'
@@ -43,6 +51,9 @@ def main():
     header += 'constexpr unsigned kDriverVendor = 0x1af4, kDriverDevice = 0x1041;\n'
     if args.display:
         header = '\n'.join(line.replace('kDriver', 'kDisplayDriver') for line in header.split('\n')
+                           if 'kDriverVendor' not in line)
+    if args.gm206:
+        header = '\n'.join(line.replace('kDriver', 'kGm206Driver') for line in header.split('\n')
                            if 'kDriverVendor' not in line)
     write_if_changed(args.header, header)
 

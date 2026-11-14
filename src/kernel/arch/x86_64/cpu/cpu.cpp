@@ -192,6 +192,8 @@ void cpu_init()
         asm volatile("mov %0, %%cr4" : : "r"(cr4) : "memory");
     }
 
+    // Each CPU needs the same page attribute table before a write-combining page is in use.
+    wrmsr(kIa32Pat, kPatWithWriteCombining);
     wrmsr(kIa32FsBase, 0);
     wrmsr(kIa32GsBase, reinterpret_cast<uint64_t>(c));
     wrmsr(kIa32KernelGsBase, 0);

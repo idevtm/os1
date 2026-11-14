@@ -13,6 +13,8 @@ enum class PageFlags : uint64_t
     Present = 1ull << 0,
     Write = 1ull << 1,
     User = 1ull << 2,
+    // Page attribute table entry 1. The CPU setup stores write combining there.
+    WriteCombine = 1ull << 3,
     SharedBacking = 1ull << 9,
     NoExecute = 1ull << 63,
 };
@@ -70,6 +72,8 @@ public:
     bool detach(uint64_t address, uint64_t pages);
     // translate one virtual address and report its physical address plus leaf flags.
     bool translate(uint64_t virtual_address, uint64_t& physical_address, uint64_t& flags) const;
+    // Add flags to the 4 KiB or 2 MiB page entry that maps one address. The caller flushes the TLB.
+    bool add_leaf_flags(uint64_t virtual_address, PageFlags flags);
     // Clone the steady-state supervisor mappings required in user CR3s.
     bool clone_kernel_mappings(uint64_t source_root);
     // Destroy an entire PML4 slot and optionally all user leaf pages beneath it.

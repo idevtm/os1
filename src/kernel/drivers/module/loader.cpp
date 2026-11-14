@@ -4,16 +4,21 @@
 #include "core/kernel_state.hpp"
 #include "crypto/sha256.hpp"
 #include "debug/debug.hpp"
-#include "display_driver_trust.hpp"
+#include "display_modules.hpp"
 #include "driver/image.hpp"
 #include "driver_trust.hpp"
 #include "drivers/bus/driver_registry.hpp"
 #include "drivers/bus/pci_bus.hpp"
+#include "drivers/bus/resource.hpp"
 #include "drivers/display/service.hpp"
 #include "drivers/module/virtio_host.hpp"
+#include "drivers/timer/tsc_clock.hpp"
 #include "fs/initrd.hpp"
+#include "handoff/memory_layout.h"
+#include "mm/boot_mapping.hpp"
 #include "mm/kmem.hpp"
 #include "mm/virtual_memory.hpp"
+#include "platform/pci_config.hpp"
 #include "platform/platform.hpp"
 #include "util/string.h"
 #include "vfs/filesystem.hpp"
@@ -171,34 +176,54 @@ bool load_image(VirtualMemory& vm,
     kfree(bytes);
     return true;
 }
-void load_display()
+// Load each display driver package that this machine needs. The generated table names the
+// packages. A package with a PCI identity needs that display device. A package without one
+// drives the boot framebuffer.
+void load_display_modules()
 {
-    if(!native_display::compatible())
-        return;
-    VirtualMemory vm(page_frames, g_kernel_root_cr3);
-    driver::Image image;
-    uint64_t size = 0;
-    if(!load_image(vm,
-                   kDisplayDriverPath,
-                   sizeof(kDisplayDriverPath) - 1,
-                   kDisplayDriverDigest,
-                   OS1_DISPLAY_MODULE_BASE,
-                   image,
-                   size))
-        return;
-    auto* exports = reinterpret_cast<os1_display_entry>(image.entry)();
-    if(!driver::contains(image, reinterpret_cast<uint64_t>(exports), sizeof(*exports), 4) ||
-       exports->version != OS1_DISPLAY_MODULE_ABI || exports->bytes != sizeof(*exports) ||
-       !driver::contains(image, reinterpret_cast<uint64_t>(exports->probe), 1, 5) ||
-       !driver::contains(image, reinterpret_cast<uint64_t>(exports->fill), 1, 5) ||
-       !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_read), 1, 5) ||
-       !driver::contains(image, reinterpret_cast<uint64_t>(exports->bochs_set), 1, 5) ||
-       !native_display::bind(*exports, vm))
+    for(const auto& package : kDisplayModules)
     {
-        debug("driver: firmware-framebuffer rejected")();
-        return;
+        bool needed = !package.vendor && native_display::compatible();
+        for(uint16_t i = 0; package.vendor && i < platform_pci_device_count(); ++i)
+        {
+            const auto& pci = platform_pci_devices()[i];
+            needed = needed || (pci.vendor_id == package.vendor &&
+                                pci.device_id == package.device && pci.class_code == 3);
+        }
+        if(!needed)
+            continue;
+        VirtualMemory vm(page_frames, g_kernel_root_cr3);
+        driver::Image image;
+        uint64_t size = 0;
+        size_t path_bytes = 0;
+        while(package.path[path_bytes])
+            ++path_bytes;
+        if(!load_image(vm, package.path, path_bytes, package.digest, package.base, image, size))
+            continue;
+        const auto inside = [&](const void* function, bool optional) {
+            return (optional && !function) ||
+                   driver::contains(image, reinterpret_cast<uint64_t>(function), 1, 5);
+        };
+        auto* exports = reinterpret_cast<os1_display_entry>(image.entry)();
+        if(!driver::contains(image, reinterpret_cast<uint64_t>(exports), sizeof(*exports), 4) ||
+           exports->version != OS1_DISPLAY_MODULE_ABI || exports->bytes != sizeof(*exports) ||
+           !inside(reinterpret_cast<const void*>(exports->probe), false) ||
+           !inside(reinterpret_cast<const void*>(exports->text), false) ||
+           !inside(reinterpret_cast<const void*>(exports->mode), false) ||
+           !inside(reinterpret_cast<const void*>(exports->set_mode), false) ||
+           !inside(reinterpret_cast<const void*>(exports->restore), false) ||
+           !inside(reinterpret_cast<const void*>(exports->fill), true) ||
+           !inside(reinterpret_cast<const void*>(exports->draw), true) ||
+           !inside(reinterpret_cast<const void*>(exports->cursor), true) ||
+           !inside(reinterpret_cast<const void*>(exports->reflect), true) ||
+           !inside(reinterpret_cast<const void*>(exports->accelerate), true) ||
+           !native_display::add(*exports))
+        {
+            debug("driver: ")(package.name)(" rejected")();
+            continue;
+        }
+        debug("driver: loaded ")(package.name)(" from ")(package.path)(" bytes=")(size)();
     }
-    debug("driver: loaded firmware-framebuffer from ")(kDisplayDriverPath)(" bytes=")(size)();
 }
 }  // namespace
 void load_boot_drivers()
@@ -206,7 +231,7 @@ void load_boot_drivers()
     if(attempted)
         return;
     attempted = true;
-    load_display();
+    load_display_modules();
     bool match = false;
     for(size_t i = 0; i < platform_pci_device_count(); ++i)
         if(pci_driver_matches_device(pci_driver, platform_pci_devices()[i]))

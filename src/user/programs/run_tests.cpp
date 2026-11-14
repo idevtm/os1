@@ -293,9 +293,9 @@ long ehci_stall_capture()
     if(demo.fd < 0)
         return demo.fd;
     text(1, "Move the USB mouse continuously for 20 to 30 seconds. Press q when done.\n");
-    const char* args[] = {"gfxdemo", "--stall-report"};
+    const char* args[] = {"gsh", "--stall-report"};
     const long pid = u::run_program(
-        "/bin/gfxdemo", 2, args, false, 0, nullptr, nullptr, nullptr, -1, nullptr, demo.fd);
+        "/bin/gsh", 2, args, false, 0, nullptr, nullptr, nullptr, -1, nullptr, demo.fd);
     if(pid < 0)
         return pid;
     int child_status = 0;

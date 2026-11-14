@@ -504,7 +504,7 @@ The [Native API service roadmap](docs/native-api/roadmap.md#remaining-priorities
 3. Establish shared driver lifetime and disk loading; then expose native keyboard and mouse services with volatile events, unsubscribe, state recovery, and removal handling.
 4. Add scoped service discovery and lifecycle rules. Add kernel Buffer borrowing and BlockDevice methods when required by a concrete client.
 5. Expand storage capacity and filesystem operations beyond the bounded ext2 profile; qualify device failure and update recovery separately.
-6. Add pipe endpoints, readiness, and shell pipelines.
+6. Add shell pipelines and write readiness on the [byte stream](docs/native-api/abi/byte-stream-abi.md) endpoints.
 7. Add credentials, ownership, and permissions before multiuser or remote service exposure.
 8. Build IPv4, UDP/TCP, sockets, addressing, and DNS; then add PTYs, authenticated sessions, and SSH.
 
@@ -558,7 +558,7 @@ The in-repo milestone designs (M1–M5) refine the coarser A–G map below into 
 - normal shell and bundled programs on ext2 under `/bin`
 - `/bin/ascii` remains a human-only font probe; automated smokes do not validate glyph appearance
 - serial-drivable shell and smoke coverage on both boot paths
-- structured observability through versioned fixed-record snapshots (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, `irqs`, `kmem`, `acpi`) and a 256-record kernel event ring covering traps, scheduler transitions, IRQs, block I/O, PCI bind, user-copy failures, smoke markers, timer-source choice, `kmem` corruption, NIC RX, AP-online/tick events, reschedule/TLB-shootdown IPIs, thread migration, and run-queue depth
+- structured observability through versioned fixed-record snapshots (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, `irqs`, `kmem`, `acpi`) and a 512-record kernel event ring covering traps, scheduler transitions, IRQs, block I/O, PCI bind, user-copy failures, smoke markers, timer-source choice, `kmem` corruption, NIC RX, AP-online/tick events, reschedule/TLB-shootdown IPIs, thread migration, and run-queue depth
 
 The [VFS/startup extension](docs/native-api/abi/initrd-vfs-abi.md) now provides file-backed loading, directory/file descriptors, argument/environment passing, and explicit child grants. Bounded hosted services are also implemented; process credentials and general service integration remain follow-ups.
 
