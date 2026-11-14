@@ -36,9 +36,20 @@ Spinlock g_event_ring_lock("event_ring");
 }
 }  // namespace
 
+void KernelEventRing::attach(Os1ObserveEventRecord* storage)
+{
+    records_ = storage;
+    for(uint32_t i = 0; records_ && i < kEventRingCapacity; ++i)
+    {
+        records_[i] = {};
+    }
+    head_ = 0;
+    count_ = 0;
+}
+
 void KernelEventRing::reset()
 {
-    for(uint32_t i = 0; i < kEventRingCapacity; ++i)
+    for(uint32_t i = 0; records_ && i < kEventRingCapacity; ++i)
     {
         records_[i] = {};
     }
@@ -71,6 +82,10 @@ Os1ObserveEventRecord KernelEventRing::append(uint64_t tick_count,
     record.flags = flags;
     record.cpu = cpu;
 
+    if(nullptr == records_)
+    {
+        return record;
+    }
     records_[head_] = record;
     head_ = (head_ + 1) % kEventRingCapacity;
     if(count_ < kEventRingCapacity)
@@ -82,7 +97,7 @@ Os1ObserveEventRecord KernelEventRing::append(uint64_t tick_count,
 
 uint32_t KernelEventRing::snapshot(Os1ObserveEventRecord* records, uint32_t max_records) const
 {
-    if((nullptr == records) || (0 == max_records))
+    if((nullptr == records) || (0 == max_records) || (nullptr == records_))
     {
         return 0;
     }
@@ -158,6 +173,12 @@ bool snapshot_all(Os1ObserveEventRecord* records, uint32_t capacity, uint32_t& c
     if(count > capacity)
         return false;
     return g_event_ring.snapshot(records, capacity) == count;
+}
+
+void attach_storage(Os1ObserveEventRecord* storage)
+{
+    IrqSpinGuard guard(g_event_ring_lock);
+    g_event_ring.attach(storage);
 }
 
 }  // namespace kernel_event

@@ -35,9 +35,14 @@ The [typed context](../shell/typed-context.md) supplies inherited plain data and
 The [fixed runtime profile](context-discovery.md) now implements live inspection and shell completion.
 General provider reflection remains planned.
 
-The kernel has a 256-record [event ring](../../src/kernel/debug/event_ring.cpp), protected by an IRQ spin guard.
-Its records contain sequence numbers, scheduling ticks, CPU identity, process identity, and event arguments.
-It does not record every API call or provide the proposed persistent log service.
+The kernel has a 512-record [event ring](../../src/kernel/debug/event_ring.cpp), protected by an IRQ spin guard.
+The event ring records contain sequence numbers, scheduling ticks, CPU identity, process identity, and event arguments.
+The event ring does not record every API call or provide the proposed persistent log service.
+
+The kernel allocates the event ring storage in 10 boot pages before platform discovery. The records are not in the kernel image.
+The event ring keeps no event from before that allocation. It counts the sequence number of such an event.
+An `events` query allocates a snapshot of up to 40,960 record bytes, in 10 pages. The caller buffer must hold the header and each retained record.
+A caller buffer for 256 records gets a failure when the event ring holds more than 256 records. The in-tree `sh` uses a buffer of 64 KiB.
 
 The separate [boot-log mechanism](../hardware/boot-log.md) captures diagnostic output and can harvest retained RAM after a reset.
 It has documented hardware and SMP limits. Keep this early-boot path available when ext2 or normal runtime export cannot operate.

@@ -108,3 +108,37 @@ TEST(EventRing, ResetClearsRecordsAndSequence)
     EXPECT_EQ(1u, ring.next_sequence());
     EXPECT_EQ(0u, ring.snapshot(records.data(), static_cast<uint32_t>(records.size())));
 }
+
+TEST(EventRing, RingWithoutStorageCountsSequencesButKeepsNoRecords)
+{
+    kernel_event::KernelEventRing ring;
+    ring.attach(nullptr);
+    std::array<Os1ObserveEventRecord, 2> records{};
+
+    const auto record = ring.append(5, OS1_KERNEL_EVENT_IRQ, 0, 0, 0, 0, 1, 2, 3, 4);
+    EXPECT_EQ(1u, record.sequence);
+    EXPECT_EQ(2u, ring.next_sequence());
+    EXPECT_EQ(0u, ring.count());
+    EXPECT_EQ(0u, ring.snapshot(records.data(), static_cast<uint32_t>(records.size())));
+    ring.reset();
+    EXPECT_EQ(0u, ring.count());
+}
+
+TEST(EventRing, AttachedStorageStartsEmptyAndKeepsTheSequence)
+{
+    kernel_event::KernelEventRing ring;
+    ring.attach(nullptr);
+    ring.append(1, OS1_KERNEL_EVENT_IRQ, 0, 0, 0, 0, 0, 0, 0, 0);
+    std::array<Os1ObserveEventRecord, kernel_event::kEventRingCapacity> storage{};
+    storage[0].sequence = 99;
+    ring.attach(storage.data());
+    EXPECT_EQ(0u, ring.count());
+    EXPECT_EQ(0u, storage[0].sequence);
+
+    ring.append(2, OS1_KERNEL_EVENT_IRQ, 0, 0, 0, 0, 7, 0, 0, 0);
+    std::array<Os1ObserveEventRecord, 1> records{};
+    ASSERT_EQ(1u, ring.snapshot(records.data(), 1));
+    EXPECT_EQ(2u, records[0].sequence);
+    EXPECT_EQ(7u, records[0].arg0);
+    EXPECT_EQ(2u, storage[0].sequence);
+}

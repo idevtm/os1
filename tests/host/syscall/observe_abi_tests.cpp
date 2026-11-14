@@ -19,7 +19,7 @@ TEST(ObserveAbi, ConstantsAreStable)
     EXPECT_EQ(12, OS1_OBSERVE_USB);
     EXPECT_EQ(14, OS1_OBSERVE_USB_INPUT_FAILURES);
     EXPECT_EQ(16, OS1_OBSERVE_WALL_CLOCK);
-    EXPECT_EQ(256, OS1_OBSERVE_EVENT_RING_CAPACITY);
+    EXPECT_EQ(512, OS1_OBSERVE_EVENT_RING_CAPACITY);
     EXPECT_EQ(32, OS1_OBSERVE_DRIVER_NAME_BYTES);
     EXPECT_EQ(32, OS1_OBSERVE_KMEM_NAME_BYTES);
     EXPECT_EQ(1, OS1_OBSERVE_RESOURCE_PCI_BAR);
@@ -501,9 +501,11 @@ TEST_F(UsbInputObserve, EventSnapshotDisclosesOnlyOwnUserFaultAddresses)
 
     constexpr auto capacity = OS1_OBSERVE_EVENT_RING_CAPACITY;
     constexpr auto bytes = sizeof(Os1ObserveHeader) + capacity * sizeof(Os1ObserveEventRecord);
+    // The fixture maps the first page. Map the other pages of a snapshot at full capacity.
+    constexpr unsigned pages = unsigned((bytes + kPageSize - 1) / kPageSize);
     VirtualMemory vm(frames, thread->address_space_cr3);
-    ASSERT_TRUE(
-        vm.allocate_and_map(kUserImageBase + kPageSize, 5, PageFlags::User | PageFlags::Write));
+    ASSERT_TRUE(vm.allocate_and_map(
+        kUserImageBase + kPageSize, pages - 1, PageFlags::User | PageFlags::Write));
     std::array<Os1ObserveEventRecord, capacity> raw{};
     uint32_t count = 0;
     ASSERT_TRUE(kernel_event::snapshot_all(raw.data(), capacity, count));
@@ -535,10 +537,12 @@ TEST_F(UsbInputObserve, EventSyscallKeepsCapturedRecordsDuringOverlappingRead)
 {
     constexpr auto bytes =
         sizeof(Os1ObserveHeader) + sizeof(Os1ObserveEventRecord) * OS1_OBSERVE_EVENT_RING_CAPACITY;
-    constexpr auto second = kUserImageBase + 6 * kPageSize;
+    // Two buffers of a full snapshot each, without overlap. The fixture maps the first page.
+    constexpr unsigned pages = unsigned((bytes + kPageSize - 1) / kPageSize);
+    constexpr auto second = kUserImageBase + pages * kPageSize;
     VirtualMemory vm(frames, thread->address_space_cr3);
-    ASSERT_TRUE(
-        vm.allocate_and_map(kUserImageBase + kPageSize, 11, PageFlags::User | PageFlags::Write));
+    ASSERT_TRUE(vm.allocate_and_map(
+        kUserImageBase + kPageSize, 2 * pages - 1, PageFlags::User | PageFlags::Write));
     for(unsigned i = 0; i < OS1_OBSERVE_EVENT_RING_CAPACITY; ++i)
         kernel_event::record_subject(OS1_KERNEL_EVENT_SMOKE_MARKER, 0, 0, 0);
 

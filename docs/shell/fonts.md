@@ -173,8 +173,9 @@ These sizes are from the Debug build with GCC 11.2.0. The values before are from
 | `sh` program | 242,336 bytes | 243,776 bytes | +1,440 bytes (+0.59%) |
 | Font files on the disk | 16,432 bytes | 51,808 bytes | +35,376 bytes (+215%) |
 
-The BIOS kernel image and its data end at physical address 0x1BB000. With the reserve of 0x4000 bytes, it uses 0xBF000 of 0xC0000 bytes of its window.
 The first form of this change put the glyph storage in the kernel data. That form went past the BIOS window by 0x1000 bytes, and the build check refused it.
+With the glyph storage in boot pages, the BIOS kernel image and its data ended at physical address 0x1BB000. With the reserve of 0x4000 bytes, it used 0xBF000 of 0xC0000 bytes of its window.
+A later correction moved the event ring to boot pages. See [Event ring capacity](#event-ring-capacity).
 
 The terminal and shadow buffers are calculated values for 12 terminals and one shadow buffer, in pages of 4,096 bytes. No machine measured them.
 
@@ -203,3 +204,25 @@ No check sends a `set_glyphs` request to the kernel that the kernel must refuse.
 No check covers the fonts other than 6 × 12 in a session. No QEMU check uses a font step from `/etc/gsh.conf`.
 No check covers the 32 × 64 bands of `gsh` on a display.
 The desktop has not run these fonts.
+
+### Event ring capacity
+
+The font load of `sh` adds about 60 scheduler and reschedule records to the kernel event ring before the first shell command.
+The measurements below are one run each of `os1_smoke_observe`, on the UEFI path with Limine and 4 CPUs in QEMU, at commit `279b290`. Each run used a copy of the program test disk with a different `/etc/sh.conf`.
+
+| `/etc/sh.conf` font | Records at the `events` command | Result |
+| --- | --- | --- |
+| `none` | 249 and 251, in two runs | Passed |
+| `spleen-6x12.font` (the default) | 307 and 313, in two runs | Failed, 51 and 57 early records lost |
+| `spleen-8x16.font` | 330 | Failed |
+
+The failed runs missed `ap-online`, `ap-tick`, `kernel-thread-ping`, `timer-source-lapic`, and `smoke-marker`.
+The first failure log is `build/artifacts/test-runs/os1_smoke_observe-hh3u5tet/guest.log`. The runs with a changed disk are in `build/artifacts/test-runs/os1_smoke_observe_<font>-*/`.
+The correction doubles the ring to 512 records and puts its 40,960 bytes in 10 boot pages. The check of the record contents did not change.
+
+| Item | Before the correction | After the correction | Difference |
+| --- | --- | --- | --- |
+| Kernel ELF | 666,296 bytes | 646,248 bytes | -20,048 bytes (-3.0%) |
+| BIOS kernel ELF | 493,000 bytes | 472,776 bytes | -20,224 bytes (-4.1%) |
+| BIOS image and data end | 0x1BB000 | 0x1B6000 | -0x5000 bytes |
+| Event ring storage | 20,480 bytes in the kernel image | 40,960 bytes in boot pages | +20,480 bytes (+100%) |

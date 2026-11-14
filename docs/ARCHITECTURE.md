@@ -1363,7 +1363,7 @@ Both QEMU smokes still require a resolved route on their known firmware configur
 The [implementation record](archive/kernel/2026-11-05-passive-acpi-observation.md) closes the snapshot side effect from review R2.
 A separate authorized power diagnostic interface remains deferred pending driver coordination and failure recovery.
 
-The event ring currently stores 256 overwrite-on-full records with monotonic sequence numbers and direct `pid` / `tid` fields. Current event types cover traps, scheduler transitions, IRQs, block I/O, PCI binds, user-copy failures, smoke markers used by the observe smokes, the chosen scheduler timer source (PIT vs LAPIC), `kmem` corruption, NIC RX completions, AP-online / AP-tick events, reschedule / TLB-shootdown IPIs, kernel-thread ping markers, thread migration, and run-queue depth changes.
+The event ring currently stores 512 overwrite-on-full records with monotonic sequence numbers and direct `pid` / `tid` fields. The kernel allocates its 40,960 bytes of storage in boot pages before platform discovery, so the records are not in the kernel image; an event before that point is counted but not kept. Current event types cover traps, scheduler transitions, IRQs, block I/O, PCI binds, user-copy failures, smoke markers used by the observe smokes, the chosen scheduler timer source (PIT vs LAPIC), `kmem` corruption, NIC RX completions, AP-online / AP-tick events, reschedule / TLB-shootdown IPIs, kernel-thread ping markers, thread migration, and run-queue depth changes.
 
 Trap events for an NMI or a machine check use process and thread IDs of zero.
 These events clear `OS1_KERNEL_EVENT_FLAG_USER`.

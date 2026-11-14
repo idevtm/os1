@@ -617,6 +617,17 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         bootlog_mark(kBootLogFlagWatchdogArmed);
     }
 
+    // The event ring keeps its records in boot pages. Without them, the ring keeps no records.
+    {
+        uint64_t event_storage = 0;
+        constexpr unsigned event_pages =
+            (unsigned)((kernel_event::kEventRingStorageBytes + kPageSize - 1) / kPageSize);
+        if(page_frames.allocate(event_storage, event_pages))
+            kernel_event::attach_storage(
+                kernel_physical_pointer<Os1ObserveEventRecord>(event_storage));
+        else
+            debug("event ring storage allocation failed")();
+    }
     if(!platform_discover(*g_boot_info, kvm))
     {
         return;

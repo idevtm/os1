@@ -558,7 +558,7 @@ The in-repo milestone designs (M1–M5) refine the coarser A–G map below into 
 - normal shell and bundled programs on ext2 under `/bin`
 - `/bin/ascii` remains a human-only font probe; automated smokes do not validate glyph appearance
 - serial-drivable shell and smoke coverage on both boot paths
-- structured observability through versioned fixed-record snapshots (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, `irqs`, `kmem`, `acpi`) and a 256-record kernel event ring covering traps, scheduler transitions, IRQs, block I/O, PCI bind, user-copy failures, smoke markers, timer-source choice, `kmem` corruption, NIC RX, AP-online/tick events, reschedule/TLB-shootdown IPIs, thread migration, and run-queue depth
+- structured observability through versioned fixed-record snapshots (`sys`, `ps`, `cpu`, `pci`, `initrd`, `events`, `devices`, `resources`, `irqs`, `kmem`, `acpi`) and a 512-record kernel event ring covering traps, scheduler transitions, IRQs, block I/O, PCI bind, user-copy failures, smoke markers, timer-source choice, `kmem` corruption, NIC RX, AP-online/tick events, reschedule/TLB-shootdown IPIs, thread migration, and run-queue depth
 
 The [VFS/startup extension](docs/native-api/abi/initrd-vfs-abi.md) now provides file-backed loading, directory/file descriptors, argument/environment passing, and explicit child grants. Bounded hosted services are also implemented; process credentials and general service integration remain follow-ups.
 
