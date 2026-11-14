@@ -1618,7 +1618,14 @@ TEST(Gm206Module, OffersModesOnTheSupportedBoardAndKeepsItsClaims)
     EXPECT_EQ(machine.maps[ranges].flags, uint32_t(OS1_DISPLAY_MAP_WRITE_COMBINE));
     EXPECT_EQ(machine.maps[ranges + 1].bar, 1u);
     EXPECT_EQ(machine.maps[ranges + 1].offset, 0x06400000u);
-    EXPECT_EQ(machine.maps[ranges + 1].bytes, 0x16000u);
+    // The instance block, the command page, the pointer image, and the copy engine channel.
+    EXPECT_EQ(machine.maps[ranges + 1].bytes, 0x120000u);
+    // The copy engine is not in use before a mode change. The processor then draws each request.
+    ASSERT_NE(machine.driver->accelerate, nullptr);
+    const os1_framebuffer_surface drawn{machine.memory, 640, 480, 2560, 4, 16, 8, 0};
+    const os1_display_copy copy{0, 0, 100, 100, 64, 64};
+    EXPECT_FALSE(machine.driver->accelerate(
+        &drawn, OS1_DISPLAY_COPY, reinterpret_cast<const uint8_t*>(&copy), sizeof(copy)));
     EXPECT_EQ(machine.maps[ranges + 1].flags, 0u);
     // A request outside the mode list changes nothing. No surface is on the head.
     os1_framebuffer_surface surface{};

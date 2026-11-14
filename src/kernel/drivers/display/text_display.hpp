@@ -63,3 +63,7 @@ void present_text_display(const TextDisplayBackend* backend,
 void detach_text_display(const TextDisplayBackend* backend);
 
 void reset_framebuffer_text_display(FramebufferTextDisplay& display);
+// Replace glyphs of the framebuffer text font. One glyph has 16 rows of one byte, and bit 0 is the
+// left pixel. The built-in font stays in use for each glyph without a replacement. The next
+// presentation draws each cell again.
+void set_text_display_glyphs(uint8_t first, uint8_t count, const uint8_t* rows);

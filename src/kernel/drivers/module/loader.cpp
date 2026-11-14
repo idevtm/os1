@@ -216,6 +216,7 @@ void load_display_modules()
            !inside(reinterpret_cast<const void*>(exports->draw), true) ||
            !inside(reinterpret_cast<const void*>(exports->cursor), true) ||
            !inside(reinterpret_cast<const void*>(exports->reflect), true) ||
+           !inside(reinterpret_cast<const void*>(exports->accelerate), true) ||
            !native_display::add(*exports))
         {
             debug("driver: ")(package.name)(" rejected")();

@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <os1/command_engine.hpp>
+#include <os1/font.hpp>
 #include <os1/image_inspection.hpp>
 #include <os1/line_editor.hpp>
 #include <os1/log.hpp>
@@ -1686,7 +1687,21 @@ static int shell_main(int argc_main, char** argv_main)
     const bool console_input =
         stream_input || (have_input && input_info.kind == OS1_OBJECT_CONSOLE);
     if(console_input && !stream_input)
+    {
+        // Give the text console the font file of the disk. Without the file, or on a console
+        // without a framebuffer, the console keeps the font in the kernel.
+        static uint8_t font_file[os1::user::font_header_bytes + 128 * 16];
+        os1::user::Font font{};
+        if(os1::user::load_font(
+               "/share/fonts/spleen-8x16.font", font_file, sizeof(font_file), font) &&
+           font.width == 8 && font.height == 16)
+        {
+            os1::user::files::Handle console(os1::user::console_bind(2, OS1_RIGHT_WRITE));
+            if(console.fd >= 0)
+                (void)os1::user::console_set_font(console.fd, font.glyphs);
+        }
         os1::user::files::message("shell prompt ready\n");
+    }
     for(;;)
     {
         output_failed = false;

@@ -5,7 +5,7 @@
 
 // Interface between the kernel display service and a trusted display driver module.
 // The kernel knows this interface only. It has no code for one display device.
-#define OS1_DISPLAY_MODULE_ABI 5u
+#define OS1_DISPLAY_MODULE_ABI 6u
 
 struct os1_framebuffer_surface
 {
@@ -88,7 +88,7 @@ struct os1_display_driver
     os1_display_result (*set_mode)(uint32_t index, os1_framebuffer_surface*);
     // Show the text console again and report its surface. The surface can be a new one.
     os1_display_result (*restore)(os1_framebuffer_surface* console);
-    // The next four exports can be null.
+    // The next five exports can be null.
     void (*fill)(const os1_framebuffer_surface*,
                  uint32_t x,
                  uint32_t y,
@@ -107,5 +107,14 @@ struct os1_display_driver
     bool (*cursor)(uint32_t x, uint32_t y, bool visible, uint32_t rgb);
     // Answer a hardware reflection query for the display subtree.
     long (*reflect)(Os1HardwareQuery*, const os1_display_summary*);
+    // Run one FILL_AREA or COPY session request in video memory with the device. The surface is
+    // the one that `set_mode` reported. A false result means that the device did not complete the
+    // request. The kernel then runs the request with the drawing driver, which gives the correct
+    // image also after a device request that stopped. The kernel calls this export only for a
+    // session with a shadow, and it updates the shadow.
+    bool (*accelerate)(const os1_framebuffer_surface*,
+                       uint32_t member,
+                       const uint8_t* payload,
+                       uint32_t bytes);
 };
 using os1_display_entry = const os1_display_driver* (*)();

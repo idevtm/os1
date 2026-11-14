@@ -9,7 +9,7 @@ from write_usb import choose_menu
 
 
 def category(target):
-    if target == 'usb':
+    if target in ('usb', 'usb_capture'):
         return ('USB',)
     if target.startswith('storage_'):
         return ('Storage',)

@@ -4,6 +4,7 @@
 #include <os1/clock.hpp>
 #include <os1/console.hpp>
 #include <os1/file_tools.hpp>
+#include <os1/font.hpp>
 #include <os1/input.hpp>
 #include <os1/system.hpp>
 
@@ -258,18 +259,26 @@ struct Canvas
     os1_display_mode mode;
     bool fast;      // The session accepts the fast requests.
     bool hardware;  // The hardware pointer is in use.
-    // Each font pixel is a square of this number of screen pixels. A large mode has a large font.
-    unsigned scale;
-    // Width and height of one character.
-    unsigned cell() const
-    {
-        return 8 * scale;
-    }
+    u::Font font;
+    // Unit of the spaces between the elements of the desktop, in pixels.
+    unsigned unit;
 };
 
-unsigned font_scale(const os1_display_mode& mode)
+// The font in the program. It is in use only if the disk has no font file.
+const u::Font built_in_font{8, 8, 1, reinterpret_cast<const uint8_t*>(font8x8_basic)};
+uint8_t font_file[u::font_file_limit];
+
+// Select the font file for the size of the mode. No font has a scale.
+void select_font(Canvas& c)
 {
-    return mode.height >= 1300 ? 2 : 1;
+    const char* path = c.mode.height >= 1800   ? "/share/fonts/spleen-16x32.font"
+                       : c.mode.height >= 1000 ? "/share/fonts/spleen-12x24.font"
+                                               : "/share/fonts/spleen-8x16.font";
+    // One character must go into one bitmap request.
+    if(!u::load_font(path, font_file, sizeof(font_file), c.font) ||
+       c.font.row_bytes * c.font.height > OS1_DISPLAY_BITMAP_BYTES)
+        c.font = built_in_font;
+    c.unit = c.font.width >= 16 ? 2 : 1;
 }
 
 long paint(Canvas& c, unsigned x, unsigned y, unsigned width, unsigned height, unsigned rgb)
@@ -316,7 +325,7 @@ long copy(Canvas& c,
     return 0;
 }
 
-// Draw characters on a solid background. One character has a size of one canvas cell.
+// Draw characters on a solid background. One character has the size of one font cell.
 long text(Canvas& c,
           unsigned x,
           unsigned y,
@@ -325,60 +334,56 @@ long text(Canvas& c,
           unsigned rgb,
           unsigned back)
 {
-    const unsigned scale = c.scale, size = c.cell();
+    const unsigned width = c.font.width, height = c.font.height;
     if(!c.fast)
     {
-        long status = paint(c, x, y, count * size, size, back);
+        // Draw each row of set pixels as one area.
+        long status = paint(c, x, y, count * width, height, back);
         for(unsigned i = 0; status >= 0 && i < count; ++i)
-        {
-            const auto& glyph = font8x8_basic[characters[i] & 127];
-            for(unsigned row = 0; status >= 0 && row < 8; ++row)
-                for(unsigned first = 0; status >= 0 && first < 8;)
+            for(unsigned row = 0; status >= 0 && row < height; ++row)
+            {
+                const unsigned glyph = c.font.row(characters[i], row);
+                for(unsigned first = 0; status >= 0 && first < width;)
                 {
-                    if(!(glyph[row] & (1u << first)))
+                    if(!(glyph & (1u << first)))
                     {
                         ++first;
                         continue;
                     }
                     unsigned end = first + 1;
-                    while(end < 8 && (glyph[row] & (1u << end)))
+                    while(end < width && (glyph & (1u << end)))
                         ++end;
-                    status = paint(c,
-                                   x + i * size + first * scale,
-                                   y + row * scale,
-                                   (end - first) * scale,
-                                   scale,
-                                   rgb);
+                    status = paint(c, x + i * width + first, y + row, end - first, 1, rgb);
                     first = end;
                 }
-        }
+            }
         return status;
     }
-    // One character uses `scale` bytes in each of its `size` bitmap rows.
-    const unsigned group = OS1_DISPLAY_BITMAP_BYTES / (size * scale);
+    // The characters of one bitmap request. Each bitmap row starts at a new byte.
+    const unsigned group = OS1_DISPLAY_BITMAP_BYTES / height * 8 / width;
     for(unsigned first = 0; first < count; first += group)
     {
         const unsigned part = count - first < group ? count - first : group;
-        const unsigned row_bytes = part * scale;
-        os1_display_bitmap bitmap{x + first * size, y, part * size, size, rgb, back, {}};
-        for(unsigned row = 0; row < 8; ++row)
+        const unsigned row_bytes = (part * width + 7) / 8;
+        os1_display_bitmap bitmap{x + first * width, y, part * width, height, rgb, back, {}};
+        for(unsigned row = 0; row < height; ++row)
         {
-            uint8_t* line = bitmap.bits + row * scale * row_bytes;
+            uint8_t* line = bitmap.bits + row * row_bytes;
             for(unsigned i = 0; i < part; ++i)
             {
-                const uint8_t glyph = font8x8_basic[characters[first + i] & 127][row];
-                for(unsigned column = 0; column < size; ++column)
-                    if(glyph & (1u << column / scale))
-                        line[i * scale + column / 8] |= uint8_t(1u << column % 8);
+                const unsigned glyph = c.font.row(characters[first + i], row);
+                for(unsigned column = 0; column < width; ++column)
+                    if(glyph & (1u << column))
+                    {
+                        const unsigned bit = i * width + column;
+                        line[bit / 8] |= uint8_t(1u << bit % 8);
+                    }
             }
-            // Each font row gives `scale` equal bitmap rows.
-            for(unsigned copy_row = 1; copy_row < scale; ++copy_row)
-                __builtin_memcpy(line + copy_row * row_bytes, line, row_bytes);
         }
         const long status = session_call(c.client,
                                          OS1_DISPLAY_BITMAP,
                                          &bitmap,
-                                         sizeof(bitmap) - sizeof(bitmap.bits) + row_bytes * size);
+                                         sizeof(bitmap) - sizeof(bitmap.bits) + row_bytes * height);
         if(status < 0)
             return status;
     }
@@ -403,10 +408,9 @@ long glyph_part(Canvas& c,
         return paint(c, x, y, width, height, back);
     const unsigned row_bytes = (width + 7) / 8;
     os1_display_bitmap bitmap{x, y, width, height, text_color, back, {}};
-    const auto& glyph = font8x8_basic[character & 127];
     for(unsigned row = 0; row < height; ++row)
         for(unsigned column = 0; column < width; ++column)
-            if(glyph[(y - cell_y + row) / c.scale] & (1u << (x - cell_x + column) / c.scale))
+            if(c.font.row(character, y - cell_y + row) & (1u << (x - cell_x + column)))
                 bitmap.bits[row * row_bytes + column / 8] |= uint8_t(1u << column % 8);
     return session_call(c.client,
                         OS1_DISPLAY_BITMAP,
@@ -539,8 +543,8 @@ struct Terminal
     static constexpr unsigned back = panel_color;
     bool open{};
     unsigned x{}, y{}, columns{}, rows{}, row{}, column{};
-    // Pixel sizes for the font scale of the session.
-    unsigned size{}, title{}, border{};
+    // Pixel sizes for the font of the session.
+    unsigned cell_width{}, cell_height{}, title{}, border{};
     char cells[max_rows][max_columns]{};
     char line[max_columns * 2]{};
     unsigned length{};
@@ -550,11 +554,11 @@ struct Terminal
 
     unsigned width() const
     {
-        return columns * size + border * 2;
+        return columns * cell_width + border * 2;
     }
     unsigned height() const
     {
-        return rows * size + title + border;
+        return rows * cell_height + title + border;
     }
     bool title_hit(unsigned px, unsigned py) const
     {
@@ -569,14 +573,15 @@ struct Terminal
         // A closed window keeps the text of the child in its cells and draws nothing.
         long status = 0;
         for(unsigned r = first; open && status >= 0 && r <= last && r < rows; ++r)
-            status = text(c, x + border, y + title + r * size, cells[r], columns, text_color, back);
+            status = text(
+                c, x + border, y + title + r * cell_height, cells[r], columns, text_color, back);
         return status;
     }
     long draw(Canvas& c)
     {
         long status = paint(c, x, y, width(), title, frame_color);
         if(status >= 0)
-            status = text(c, x + border, y + 2 * c.scale, "Shell  |  Esc closes", frame_color);
+            status = text(c, x + border, y + 2 * c.unit, "Shell  |  Esc closes", frame_color);
         if(status >= 0)
             status = paint(c, x, y + title, border, height() - title, frame_color);
         if(status >= 0)
@@ -588,14 +593,16 @@ struct Terminal
     }
     long show(Canvas& c, unsigned top)
     {
-        size = c.cell();
-        title = 12 * c.scale;
-        border = 4 * c.scale;
-        if(c.mode.width < (32 + 20 * 8) * c.scale || c.mode.height < top + (64 + 4 * 8) * c.scale)
+        cell_width = c.font.width;
+        cell_height = c.font.height;
+        title = cell_height + 4 * c.unit;
+        border = 4 * c.unit;
+        if(c.mode.width < 32 * c.unit + 20 * cell_width ||
+           c.mode.height < top + 64 * c.unit + 4 * cell_height)
             return OS1_ERR_UNSUPPORTED;
-        const unsigned across = (c.mode.width - 32 * c.scale) / size;
+        const unsigned across = (c.mode.width - 32 * c.unit) / cell_width;
         const unsigned new_columns = across < max_columns ? across : max_columns;
-        const unsigned space = (c.mode.height - top - 64 * c.scale) / size;
+        const unsigned space = (c.mode.height - top - 64 * c.unit) / cell_height;
         const unsigned new_rows = space < max_rows ? space : max_rows;
         // A window with a new text size starts with empty text. The child continues.
         if(new_columns != columns || new_rows != rows)
@@ -634,11 +641,11 @@ struct Terminal
         // Move the text up by one row. Without the copy request, draw each row again.
         const long status = copy(c,
                                  x + border,
-                                 y + title + size,
+                                 y + title + cell_height,
                                  x + border,
                                  y + title,
-                                 columns * size,
-                                 (rows - 1) * size);
+                                 columns * cell_width,
+                                 (rows - 1) * cell_height);
         if(status == OS1_ERR_UNSUPPORTED)
             return draw_rows(c, 0, rows - 1);
         return status < 0 ? status : draw_rows(c, rows - 1, rows - 1);
@@ -827,13 +834,13 @@ struct Panel
         long status = paint(c,
                             x + border,
                             row_y(row),
-                            columns * c.cell(),
+                            columns * c.font.width,
                             line,
                             marked ? frame_color : panel_color);
         return status < 0 ? status
                           : text(c,
                                  x + border,
-                                 row_y(row) + (line - c.cell()) / 2,
+                                 row_y(row) + (line - c.font.height) / 2,
                                  padded,
                                  columns,
                                  text_color,
@@ -882,10 +889,10 @@ struct Panel
     long show(Canvas& c, Kind next, unsigned top)
     {
         kind = next;
-        line = c.cell() + 4 * c.scale;
-        border = 4 * c.scale;
+        line = c.font.height + 4 * c.unit;
+        border = 4 * c.unit;
         const unsigned rows = next == Modes ? count - first + 2 : 3;
-        width = columns * c.cell() + border * 2;
+        width = columns * c.font.width + border * 2;
         height = rows * line + border * 2;
         if(width > c.mode.width || height > c.mode.height - top)
         {
@@ -930,21 +937,21 @@ struct Desktop
 
     unsigned clock_x() const
     {
-        return c.mode.width - (23 * 8 + 16) * c.scale;
+        return c.mode.width - 23 * c.font.width - 16 * c.unit;
     }
     unsigned clock_y() const
     {
-        return c.mode.height - 20 * c.scale;
+        return c.mode.height - c.font.height - 12 * c.unit;
     }
     unsigned label_x() const
     {
-        return c.mode.width - label_length * c.cell() - 16 * c.scale;
+        return c.mode.width - label_length * c.font.width - 16 * c.unit;
     }
     // Draw text that stays under the windows. A character that a window covers fully is not
     // drawn. A partly covered character shows its visible part. Only one window is open at a time.
     long text_under(unsigned x, unsigned y, const char* characters, unsigned count, unsigned back)
     {
-        const unsigned size = c.cell();
+        const unsigned size = c.font.width, tall = c.font.height;
         // The rectangle of the open window, or an empty rectangle.
         unsigned wx = 0, wy = 0, ww = 0, wh = 0;
         if(terminal.open)
@@ -963,7 +970,7 @@ struct Desktop
         }
         const auto covered = [&](unsigned index) {
             const unsigned cx = x + index * size;
-            return ww && cx < wx + ww && cx + size > wx && y < wy + wh && y + size > wy;
+            return ww && cx < wx + ww && cx + size > wx && y < wy + wh && y + tall > wy;
         };
         long status = 0;
         for(unsigned first = 0; status >= 0 && first < count;)
@@ -971,7 +978,7 @@ struct Desktop
             if(covered(first))
             {
                 // Draw the parts of the character above, below, left, and right of the window.
-                const unsigned cx = x + first * size, right = cx + size, bottom = y + size;
+                const unsigned cx = x + first * size, right = cx + size, bottom = y + tall;
                 const unsigned from = wy > y ? wy : y;
                 const unsigned to = wy + wh < bottom ? wy + wh : bottom;
                 const char character = characters[first];
@@ -1001,7 +1008,7 @@ struct Desktop
     long draw_label()
     {
         label_length = put_size(label, c.mode);
-        return text_under(label_x(), 12 * c.scale, label, label_length, background);
+        return text_under(label_x(), 12 * c.unit, label, label_length, background);
     }
     long draw_clock()
     {
@@ -1019,10 +1026,9 @@ struct Desktop
     {
         const char* keys = "os1  |  R Reboot  S Shut down  T Shell  M Mode  C Pointer";
         const char* few = "os1  |  R Reboot  S Shut down";
-        const bool fits = c.mode.width >= (f::length(keys) + 16) * c.cell() + 28 * c.scale;
+        const bool fits = c.mode.width >= (f::length(keys) + 16) * c.font.width + 28 * c.unit;
         const char* shown = fits ? keys : few;
-        return text_under(
-            12 * c.scale, 12 * c.scale, shown, unsigned(f::length(shown)), background);
+        return text_under(12 * c.unit, 12 * c.unit, shown, unsigned(f::length(shown)), background);
     }
     // Draw one area of the desktop again. The software pointer uses this to remove itself.
     // A window move draws the window itself and passes false.
@@ -1030,7 +1036,7 @@ struct Desktop
     {
         long status = paint(c, x, y, width, height, background);
         // The key text and the mode size are in the first text row.
-        if(status >= 0 && y < 12 * c.scale + c.cell())
+        if(status >= 0 && y < 12 * c.unit + c.font.height)
         {
             if(desktop)
                 status = draw_help();
@@ -1042,7 +1048,7 @@ struct Desktop
         if(status >= 0 && panel.overlaps(x, y, width, height))
             status = panel.draw(c);
         if(status >= 0 && x + width > clock_x() && y + height > clock_y() &&
-           y < clock_y() + c.cell())
+           y < clock_y() + c.font.height)
             status = draw_clock();
         return status;
     }
@@ -1145,7 +1151,7 @@ long interactive(Canvas& c,
     const auto& mode = c.mode;
     const int client = c.client;
     os1_ipc_result r{};
-    c.scale = font_scale(mode);
+    select_font(c);
     // A session without the fast requests refuses this fill. The old fill request then draws.
     os1_display_fill probe{0, 0, 1, 1, background};
     c.fast = session_call(client, OS1_DISPLAY_FILL_AREA, &probe, sizeof(probe)) >= 0;
@@ -1374,8 +1380,11 @@ long interactive(Canvas& c,
                         u::system_control(letter == 'r' ? OS1_SYSTEM_REBOOT : OS1_SYSTEM_SHUTDOWN);
                     if(status < 0)
                     {
-                        status = text(
-                            c, 12 * c.scale, 22 * c.scale, "System command failed", background);
+                        status = text(c,
+                                      12 * c.unit,
+                                      16 * c.unit + c.font.height,
+                                      "System command failed",
+                                      background);
                         if(status < 0)
                             return status;
                     }
@@ -1687,7 +1696,7 @@ long run(bool check, int menu)
             if(client.fd < 0)
                 return client.fd;
             PointerStats stats{};
-            Canvas canvas{client.fd, mode, false, false, 1};
+            Canvas canvas{client.fd, mode, false, false, {}, 1};
             status = interactive(canvas,
                                  keys.fd,
                                  key_client.fd,
@@ -1823,7 +1832,7 @@ long run(bool check, int menu)
         f::Handle client(bind_display(session.fd, OS1_DISPLAY_SESSION_INTERFACE_ID));
         if(client.fd < 0)
             return client.fd;
-        Canvas canvas{client.fd, mode, false, false, 1};
+        Canvas canvas{client.fd, mode, false, false, {}, 1};
         status = interactive(canvas,
                              keys.fd,
                              key_client.fd,

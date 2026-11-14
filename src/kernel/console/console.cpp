@@ -34,6 +34,12 @@ void clear_console()
         active_terminal->clear();
 }
 
+void console_set_glyphs(uint8_t first, uint8_t count, const uint8_t* rows)
+{
+    IrqSpinGuard guard(g_console_output_lock);
+    set_text_display_glyphs(first, count, rows);
+}
+
 long set_console_column(unsigned column)
 {
     IrqSpinGuard guard(g_console_output_lock);
@@ -190,6 +196,7 @@ long console_display_fill(NativeObject* owner,
 
 long console_display_draw(NativeObject* owner,
                           const os1_display_driver& driver,
+                          const os1_display_driver* device,
                           const os1_framebuffer_surface& surface,
                           uint32_t* shadow,
                           uint32_t member,
@@ -199,6 +206,13 @@ long console_display_draw(NativeObject* owner,
     IrqSpinGuard guard(g_console_output_lock);
     if(graphics_owner != owner)
         return OS1_ERR_CLOSED;
+    if(device && shadow && device->accelerate(&surface, member, payload, bytes))
+    {
+        // The device changed video memory. The drawing driver now changes only the shadow.
+        os1_framebuffer_surface memory = surface;
+        memory.pixels = reinterpret_cast<volatile uint8_t*>(shadow);
+        return driver.draw(&memory, nullptr, member, payload, bytes) ? 0 : OS1_ERR_INVALID;
+    }
     return driver.draw(&surface, shadow, member, payload, bytes) ? 0 : OS1_ERR_INVALID;
 }
 

@@ -32,5 +32,9 @@ if [ "$TARGET" = usb ]; then
 		--build-dir "${USB_BUILD_DIR:-$SCRIPT_DIR/build/usb-write}" --toolchain "$TOOLCHAIN_FILE"
 fi
 
+if [ "$TARGET" = usb_capture ]; then
+	exec python3 -I "$SCRIPT_DIR/scripts/write_usb.py" --capture
+fi
+
 cmake --build "$BUILD_DIR"
 cmake --build "$BUILD_DIR" --target "$TARGET"

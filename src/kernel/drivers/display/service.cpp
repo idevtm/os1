@@ -278,14 +278,18 @@ void invoke(OpenInstance& instance,
     else if(request.member >= OS1_DISPLAY_FILL_AREA && request.member <= OS1_DISPLAY_BITMAP)
     {
         const auto& session = *static_cast<const Session*>(instance.object);
-        status = !driver->draw ? OS1_ERR_UNSUPPORTED
-                               : console_display_draw(instance.object,
-                                                      *driver,
-                                                      session.target,
-                                                      session.shadow,
-                                                      request.member,
-                                                      request.payload,
-                                                      request.payload_bytes);
+        // Only the backend that changed the mode can run a request with its device.
+        const auto* device = session.switched ? backends[session.backend] : nullptr;
+        status = !driver->draw
+                     ? OS1_ERR_UNSUPPORTED
+                     : console_display_draw(instance.object,
+                                            *driver,
+                                            device && device->accelerate ? device : nullptr,
+                                            session.target,
+                                            session.shadow,
+                                            request.member,
+                                            request.payload,
+                                            request.payload_bytes);
     }
     else if(request.member == OS1_DISPLAY_CURSOR &&
             request.payload_bytes == sizeof(os1_display_cursor))

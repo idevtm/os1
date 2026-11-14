@@ -35,6 +35,9 @@ constexpr uint32_t kVgaPalette[16] = {
 
 VgaTextDisplay g_vga_text_display;
 FramebufferTextDisplay g_framebuffer_text_display;
+// Glyphs that a program loaded. A glyph without a loaded copy uses the built-in font.
+uint8_t g_loaded_glyphs[128][16];
+bool g_glyph_loaded[128];
 TextDisplayBackend g_vga_backend{TextDisplayBackendKind::VgaText, &g_vga_text_display};
 TextDisplayBackend g_framebuffer_backend{TextDisplayBackendKind::FramebufferText,
                                          &g_framebuffer_text_display};
@@ -177,7 +180,9 @@ void framebuffer_draw_cell(
 
     for(uint32_t glyph_row = 0; glyph_row < 16; ++glyph_row)
     {
-        const uint8_t bits = font8x16[glyph_index][glyph_row];
+        const uint8_t bits = g_glyph_loaded[glyph_index & 127]
+                                 ? g_loaded_glyphs[glyph_index & 127][glyph_row]
+                                 : font8x16[glyph_index & 127][glyph_row];
         const uint32_t y = cell_y + glyph_row;
         for(uint32_t glyph_col = 0; glyph_col < 8; ++glyph_col)
         {
@@ -393,4 +398,22 @@ void reset_framebuffer_text_display(FramebufferTextDisplay& display)
     for(uint32_t y = 0; y < display.height; ++y)
         for(uint32_t x = y < bottom ? right : 0; x < display.width; ++x)
             framebuffer_set_pixel(display, x, y, kFramebufferBackground);
+}
+
+void set_text_display_glyphs(uint8_t first, uint8_t count, const uint8_t* rows)
+{
+    for(unsigned i = 0; i < count && first + i < 128; ++i)
+    {
+        // A glyph that does not change causes no new presentation.
+        const uint8_t* current =
+            g_glyph_loaded[first + i] ? g_loaded_glyphs[first + i] : font8x16[first + i];
+        bool same = true;
+        for(unsigned row = 0; row < 16; ++row)
+            same = same && current[row] == rows[i * 16 + row];
+        if(same)
+            continue;
+        memcpy(g_loaded_glyphs[first + i], rows + i * 16, 16);
+        g_glyph_loaded[first + i] = true;
+        g_framebuffer_text_display.shadow_valid = false;
+    }
 }

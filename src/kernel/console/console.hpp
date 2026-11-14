@@ -8,6 +8,8 @@
 os1_console_geometry console_geometry();
 void clear_console();
 long set_console_column(unsigned column);
+// Replace glyphs of the framebuffer text font. See `set_text_display_glyphs`.
+void console_set_glyphs(uint8_t first, uint8_t count, const uint8_t* rows);
 long redraw_console_line(int delta, const char* text, size_t bytes);
 
 // write exactly `length` bytes to the kernel console stream.
@@ -34,9 +36,11 @@ long console_display_fill(NativeObject*,
                           const os1_display_driver&,
                           const os1_framebuffer_surface&,
                           const os1_display_fill&);
-// Run one module draw request while the session owns the display.
+// Run one module draw request while the session owns the display. If `device` is not null and the
+// session has a shadow, the device driver gets the request first.
 long console_display_draw(NativeObject*,
                           const os1_display_driver&,
+                          const os1_display_driver* device,
                           const os1_framebuffer_surface&,
                           uint32_t* shadow,
                           uint32_t member,

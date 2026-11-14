@@ -7,6 +7,7 @@ Keep physical observations separate from emulator validation.
 | --- | --- |
 | [Graphics shell plan](gsh-plan.md) | Native graphical startup, desktop, and terminal stages |
 | [Fixed framebuffer plan](fixed-framebuffer-plan.md) | Firmware match, graphics session, pointer demo, and validation |
+| [GM206 copy engine](gm206-copy-engine.md) | Copy engine channel of the GTX 950 module, its start checks, and the desktop test |
 | [Physical NVIDIA mode-setting plan](nvidia-mode-setting-plan.md) | Connected-output captures, runtime mode qualification, and firmware fallback |
 | [Driver module profile](driver-module-abi.md) | Implemented internal ELF boundary and lifetime limits |
 | [Driver lifecycle plan](driver-lifecycle-plan.md) | Scope, impact assessment, validation, and resource comparison |

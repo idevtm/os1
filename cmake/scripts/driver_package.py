@@ -34,13 +34,13 @@ def main():
                 'dependencies': ['kernel.virtio_queue.v1'], 'firmware': [],
                 'image': directory + '/driver.elf'}
     if args.display:
-        metadata.update(driver='firmware-framebuffer', abi=5, dependencies=['kernel.display_driver.v5'],
+        metadata.update(driver='firmware-framebuffer', abi=6, dependencies=['kernel.display_driver.v6'],
                         base='0xffffffffa0020000',
                         image=directory.replace('/virtio-net', '/firmware-framebuffer') + '/driver.elf',
                         match='validated firmware framebuffer')
         del metadata['pci']
     if args.gm206:
-        metadata.update(driver='gm206', abi=5, dependencies=['kernel.display_driver.v5'],
+        metadata.update(driver='gm206', abi=6, dependencies=['kernel.display_driver.v6'],
                         base='0xffffffffa0040000',
                         image=directory.replace('/virtio-net', '/gm206') + '/driver.elf',
                         pci={'vendor': 0x10de, 'device': 0x1402})

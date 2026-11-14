@@ -103,6 +103,7 @@ void invoke_console(OpenInstance& source,
     uint32_t required;
     switch(request.member)
     {
+        case OS1_CONSOLE_SET_GLYPHS:
         case OS1_CONSOLE_SET_CURSOR:
         case OS1_CONSOLE_REDRAW_LINE:
         case OS1_CONSOLE_CLEAR:
@@ -157,6 +158,20 @@ void invoke_console(OpenInstance& source,
             memcpy(result.payload, &geometry, sizeof(geometry));
             result.payload_bytes = sizeof(geometry);
         }
+        return;
+    }
+    if(request.member == OS1_CONSOLE_SET_GLYPHS)
+    {
+        // The payload has a header of four bytes and 16 bytes for each glyph.
+        const uint8_t first = request.payload[0], count = request.payload[1];
+        if(!object->write_bytes)
+            result.application_status = OS1_ERR_UNSUPPORTED;
+        else if(request.payload_bytes < 4 || !count || count > OS1_CONSOLE_GLYPH_LIMIT ||
+                first + count > OS1_CONSOLE_GLYPH_COUNT || request.payload[2] ||
+                request.payload[3] || request.payload_bytes != 4 + count * OS1_CONSOLE_GLYPH_ROWS)
+            result.application_status = OS1_ERR_INVALID;
+        else
+            console_set_glyphs(first, count, request.payload + 4);
         return;
     }
     if(request.member == OS1_CONSOLE_SET_CURSOR)

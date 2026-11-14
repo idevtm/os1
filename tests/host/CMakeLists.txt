@@ -217,9 +217,11 @@ add_executable(os1_host_tests
   kernel/gm206_tests.cpp
   kernel/display_draw_tests.cpp
   kernel/stream_ring_tests.cpp
+  kernel/gm206_copy_tests.cpp
   ${PROJECT_SOURCE_DIR}/../../src/kernel/drivers/display/reflection.cpp
   ${PROJECT_SOURCE_DIR}/../../src/drivers/gm206/reflection.cpp
   ${PROJECT_SOURCE_DIR}/../../src/drivers/gm206/display.cpp
+  ${PROJECT_SOURCE_DIR}/../../src/drivers/gm206/copy.cpp
   ${PROJECT_SOURCE_DIR}/../../src/drivers/gm206/driver.cpp
   kernel/usb_storage_tests.cpp
   kernel/hid_keyboard_tests.cpp

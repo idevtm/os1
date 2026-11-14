@@ -645,6 +645,13 @@ os1_register_menu_target(usb
   "Build and write USB stick"
   "Choose preserved UEFI or fresh hybrid layout, select a USB disk, verify and eject. macOS only.")
 
+add_custom_target(usb_capture
+  COMMAND "${CMAKE_COMMAND}" -E echo "Use ./os1.sh usb_capture to copy the data partition of a USB stick."
+  VERBATIM)
+os1_register_menu_target(usb_capture
+  "Copy USB stick data to a temporary file"
+  "Read the ext2 data partition of an os1 stick into a temporary file and print its path. The stick does not change. macOS only.")
+
 function(os1_add_unavailable_target target_name reason)
   add_custom_target(
     "${target_name}"
@@ -1853,6 +1860,11 @@ if(BUILD_TESTING AND OS1_PYTHON_EXECUTABLE)
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_program_packaging.py"
       --initrd "${OS1_INITRD_CPIO}" --manifest "${OS1_GENERATED_DIR}/storage-programs.json"
       --disk "${OS1_PROGRAM_TEST_DISK}")
+  add_test(NAME os1_usb_capture_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_usb_capture.py"
+      --image "${OS1_ARTIFACT_DIR}/os1-usb-data.img")
+  add_test(NAME os1_font_contract
+    COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_font_files.py")
   add_test(NAME os1_storage_image_contract
     COMMAND "${OS1_PYTHON_EXECUTABLE}" -E -B "${PROJECT_SOURCE_DIR}/tests/scripts/test_storage_image.py")
 endif()

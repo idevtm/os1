@@ -74,6 +74,29 @@ inline long console_geometry(int client, os1_console_geometry& geometry)
         reinterpret_cast<uint8_t*>(&geometry)[i] = result.payload[i];
     return 0;
 }
+// Give the framebuffer text console the glyphs of an 8 x 16 font. `glyphs` has 128 glyphs of 16
+// bytes. Bit 0 of a byte is the left pixel.
+inline long console_set_font(int client, const uint8_t* glyphs)
+{
+    for(unsigned first = 0; first < OS1_CONSOLE_GLYPH_COUNT; first += OS1_CONSOLE_GLYPH_LIMIT)
+    {
+        const unsigned left = OS1_CONSOLE_GLYPH_COUNT - first;
+        const unsigned count = left < OS1_CONSOLE_GLYPH_LIMIT ? left : OS1_CONSOLE_GLYPH_LIMIT;
+        auto request = console_request(OS1_CONSOLE_SET_GLYPHS);
+        request.payload_bytes = 4 + count * OS1_CONSOLE_GLYPH_ROWS;
+        request.payload[0] = uint8_t(first);
+        request.payload[1] = uint8_t(count);
+        for(unsigned i = 0; i < count * OS1_CONSOLE_GLYPH_ROWS; ++i)
+            request.payload[4 + i] = glyphs[first * OS1_CONSOLE_GLYPH_ROWS + i];
+        os1_ipc_result result{};
+        const long status = ipc_call(client, request, result);
+        if(status < 0 || result.transport_status || result.application_status)
+            return status < 0                ? status
+                   : result.transport_status ? result.transport_status
+                                             : result.application_status;
+    }
+    return 0;
+}
 inline long console_clear(int client)
 {
     os1_ipc_result result{};

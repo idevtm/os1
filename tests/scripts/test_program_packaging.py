@@ -83,6 +83,8 @@ for entry in packages:
         assert 'pci' not in package
 assert seen == expected
 assert {e['destination'] for e in resources} == {
-    '/etc/motd', '/etc/readme', '/etc/shell/init.script', *(e['destination'] for e in packages)
+    '/etc/motd', '/etc/readme', '/etc/shell/init.script',
+    *(f'/share/fonts/spleen-{size}.font' for size in ('8x16', '12x24', '16x32')),
+    *(e['destination'] for e in packages)
 }
 print(f'Two recovery executables; {len(programs)} complete disk ELFs; {len(resources)} resource defaults')

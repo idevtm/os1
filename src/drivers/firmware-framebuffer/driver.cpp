@@ -200,6 +200,7 @@ const os1_display_driver driver{OS1_DISPLAY_MODULE_ABI,
                                 fill,
                                 display_draw::draw,
                                 nullptr,
+                                nullptr,
                                 nullptr};
 }  // namespace
 

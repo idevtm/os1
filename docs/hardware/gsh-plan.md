@@ -48,7 +48,8 @@ The upper right corner shows the size of the current mode.
 The clock and the mode size stay under each window. `gsh` does not draw a character that a window covers.
 A partly covered character shows its visible part.
 The pointer body has the color `0xffcb54` while a button is down. The hardware pointer shows the same color.
-The font has a scale of 2 for a mode height of 1300 or more. Other modes use a scale of 1.
+`gsh` reads a [font file](../shell/fonts.md#font-selection) for the height of the mode. No font has a scale.
+The fonts are 8 × 16, 12 × 24, and 16 × 32 pixels.
 The desktop has no top bar. The key help is text on the background, in the upper left corner.
 A window can move across the full screen. The key help stays under each window, as the clock does.
 If a pointer disconnects, the clock and keyboard controls remain active.
@@ -107,10 +108,10 @@ The shell window does not stay open across a mode change.
 
 1. Give the shell window line editing, history, and completion. Add a request that stops a child process.
 2. Add a window size change.
-3. Add a copy path through the GPU copy engine of the GTX 950.
+3. Measure the [GPU copy engine path](gm206-copy-engine.md) against the processor copy. The first desktop test passed.
 4. Add the laptop display adapter to the display driver modules.
 5. Increase the reserved window of the BIOS kernel image when a kernel feature needs the space.
-6. Use a thinner font in graphics mode. The text console keeps its font.
+6. Qualify the Spleen fonts on the desktop in each mode size.
 
 The [roadmap](../native-api/roadmap.md#graphics-shell-and-byte-stream-limits) records each open limit with its next step.
 

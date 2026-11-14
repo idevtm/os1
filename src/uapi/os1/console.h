@@ -11,6 +11,11 @@
 #define OS1_CONSOLE_ACQUIRE_INPUT 6u
 #define OS1_CONSOLE_REDRAW_LINE 7u
 #define OS1_CONSOLE_SET_CURSOR 8u
+// Replace glyphs of the 8 x 16 font of the framebuffer text console.
+#define OS1_CONSOLE_SET_GLYPHS 9u
+#define OS1_CONSOLE_GLYPH_ROWS 16u
+#define OS1_CONSOLE_GLYPH_LIMIT 14u
+#define OS1_CONSOLE_GLYPH_COUNT 128u
 #define OS1_CONSOLE_REDRAW_MAX 252u
 #define OS1_CONSOLE_ROW_DELTA_MAX 200
 #define OS1_OBJECT_CONSOLE_INPUT_SESSION 10u
@@ -34,6 +39,13 @@
 struct os1_console_redraw
 {
     int32_t row_delta;
+};
+// SET_GLYPHS input: the header and `count` glyphs. One glyph has 16 rows of one byte. Bit 0 of a
+// row is the left pixel. The character codes are `first` to `first + count - 1`.
+struct os1_console_glyphs
+{
+    uint8_t first, count, reserved[2];
+    uint8_t rows[OS1_CONSOLE_GLYPH_LIMIT * OS1_CONSOLE_GLYPH_ROWS];
 };
 struct os1_console_input_options
 {

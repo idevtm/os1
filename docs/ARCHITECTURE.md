@@ -1033,13 +1033,17 @@ The framebuffer module draws the `fill_area`, `copy`, and `bitmap` session reque
 It writes each pixel to a shadow in normal memory and to video memory. A copy reads the shadow.
 The GM206 module shows a hardware pointer through the position channel of the head.
 See the [GM206 module contract](hardware/driver-module-abi.md#gm206-display-module).
+The module can also move an area of its surface with the copy engine of the card. The kernel asks the module first and updates only the shadow after a success.
+The text console and `gsh` read their fonts from files in `/share/fonts` on the disk. `sh` gives the 8 × 16 font to the kernel console through Console member 9.
+The kernel and `gsh` keep built-in fonts for a machine without the files. See [Fonts](shell/fonts.md).
+See the [GM206 copy engine](hardware/gm206-copy-engine.md). The first desktop test of this path passed.
 
 ### Framebuffer Text Rendering
 
 The framebuffer backend is intentionally minimal:
 
 - text grid derived from framebuffer geometry using 8x16 cells
-- bundled `font8x16` bitmap glyphs
+- bundled `font8x16` bitmap glyphs as the fallback; `sh` replaces them with the [font file](shell/fonts.md) of the disk
 - white text on black background
 - software cursor by inverse cell rendering
 - cell-by-cell redraw only where content or cursor state changed

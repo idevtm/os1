@@ -60,6 +60,7 @@ All fields use the current x86-64 little-endian ABI.
 | Method `acquire_input` | 6 | READ | Empty or `os1_console_input_options` | One owned ConsoleInputSession through RESULT_CAPS |
 | Method `redraw_line` | 7 | WRITE | `os1_console_redraw` and printable text | Empty |
 | Method `set_cursor` | 8 | WRITE | One `u32 column` | Empty |
+| Method `set_glyphs` | 9 | WRITE | `os1_console_glyphs`: header and 1 to 14 glyphs | Empty |
 
 `info` contains four `u32` fields: `rights`, `max_write_bytes`, `max_read_bytes`, and `flags`.
 `rights` reports captured service rights.
@@ -202,6 +203,28 @@ It requires no serial cursor-control capability.
 Shift-Tab produces `OS1_CONSOLE_KEY_BACKTAB` (`0x87`).
 Ctrl-Space produces `OS1_CONSOLE_KEY_COMPLETE` (`0x88`).
 The prompt also accepts serial `ESC [ Z` and NUL for these actions.
+
+## Console font
+
+`set_glyphs` replaces glyphs of the 8 × 16 font of the framebuffer text console.
+The kernel keeps its built-in font for each glyph without a replacement.
+
+| Offset | Bytes | Field |
+| --- | --- | --- |
+| 0 | 1 | `first`: character code of the first glyph |
+| 1 | 1 | `count`: number of glyphs, 1 to 14 |
+| 2 | 2 | Reserved, zero |
+| 4 | 16 × `count` | Glyphs. One glyph has 16 rows of one byte. Bit 0 of a row is the left pixel. |
+
+`first + count` must not be more than 128. The payload size must be 4 + 16 × `count`.
+A request with a different size, range, or reserved value returns INVALID and changes no glyph.
+A console object without output returns UNSUPPORTED.
+The change uses the console output lock. The next console output draws each cell again if a glyph changed.
+The VGA text console and the serial console do not use the glyphs.
+The glyphs are global for the console and stay after the client exits. Kernel messages on the console use them also.
+Each client with the WRITE right can change them. A sequence of requests that stops early leaves glyphs of two fonts.
+The member is not in the discovery view of the shell, because its input is binary.
+See [Fonts](../../shell/fonts.md) for the font files and the loader.
 
 ## Dispatch, bounds, and lifetime
 

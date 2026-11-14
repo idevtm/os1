@@ -19,6 +19,7 @@ native session close -> restore boot scanout -> redraw console
 - [Impact and validation](#impact-and-validation)
 - [GM206 discovery implementation](#gm206-discovery-implementation)
 - [Firmware timing scanout](#firmware-timing-scanout)
+- [Copy engine](gm206-copy-engine.md)
 
 The [graphics shell plan](gsh-plan.md) replaces boot scanout restoration as a requirement for native graphics.
 Older entries retain the original diagnostic and restoration procedures as historical evidence.
@@ -720,7 +721,8 @@ Nouveau does not show these behaviors. The [fourth desktop test](#fourth-desktop
 
 #### Video memory layout
 
-The kernel reserves fixed offsets in the first 101 MiB of video memory. BAR 1 must be at least `0x06416000` bytes.
+The kernel reserves fixed offsets in the first 102 MiB of video memory. BAR 1 must be at least `0x06520000` bytes.
+The [copy engine channel](gm206-copy-engine.md#channel-memory) has 1 MiB at offset `0x06420000`.
 
 | Offset | Bytes | Use |
 | --- | ---: | --- |

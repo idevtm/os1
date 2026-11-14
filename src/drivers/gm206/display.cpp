@@ -17,6 +17,8 @@ unsigned mode_count;
 bool probed;    // The snapshot holds the result of a complete probe.
 bool shown;     // The head showed a module surface one time or more.
 bool recorded;  // The log has the method lines of the first call.
+gm206::CopyState copier;
+bool copy_tried;  // The module starts the copy engine one time.
 
 uint32_t read_register(void* base, unsigned offset)
 {
@@ -184,7 +186,8 @@ bool probe(const os1_display_host* services)
     state = {};
     aperture = nullptr;
     mode_count = 0;
-    probed = shown = recorded = false;
+    probed = shown = recorded = copy_tried = false;
+    copier = {};
 #endif
     host = services;
     boot = console = host->boot;
@@ -244,6 +247,10 @@ os1_display_result set_mode(uint32_t index, os1_framebuffer_surface* surface)
 {
     if(index >= mode_count)
         return OS1_DISPLAY_REFUSED;
+    // A session that keeps its mode at the end does not call `restore`. Thus a mode change also
+    // records the use of the copy engine and removes a channel that a request disabled.
+    if(copy_tried && copier.stage >= gm206::CopyStage::Ready)
+        gm206::copy_stop(io, aperture, copier, host->log);
     const auto& wanted = modes[index];
     if(!show(gm206::native_offset, wanted.width, wanted.height, wanted.width * 4))
         return failure();
@@ -260,11 +267,20 @@ os1_display_result set_mode(uint32_t index, os1_framebuffer_surface* surface)
     auto* pixels = reinterpret_cast<volatile uint32_t*>(surface->pixels);
     for(uint32_t i = 0; i < wanted.width * wanted.height; ++i)
         pixels[i] = 0;
+    // Start the copy engine after the first mode change. A failure leaves the processor copy.
+    if(!copy_tried)
+    {
+        copy_tried = true;
+        (void)gm206::copy_start(io, aperture, copier, host->log);
+    }
     return OS1_DISPLAY_DONE;
 }
 
 os1_display_result restore(os1_framebuffer_surface* out)
 {
+    // Each session end records the use of the copy engine.
+    if(copy_tried && copier.stage >= gm206::CopyStage::Ready)
+        gm206::copy_stop(io, aperture, copier, host->log);
     // Before the first module surface, the firmware framebuffer is the console surface.
     if(shown)
     {
@@ -302,6 +318,42 @@ bool cursor(uint32_t x, uint32_t y, bool visible, uint32_t rgb)
     return done;
 }
 
+// Run one copy request with the copy engine. A small area is faster with the processor.
+bool accelerate(const os1_framebuffer_surface* surface,
+                uint32_t member,
+                const uint8_t* payload,
+                uint32_t bytes)
+{
+    if(!copier.ready || member != OS1_DISPLAY_COPY || bytes != sizeof(os1_display_copy) ||
+       surface->pixels != aperture + gm206::native_offset || surface->pixel_bytes != 4)
+        return false;
+    os1_display_copy copy;
+    __builtin_memcpy(&copy, payload, sizeof(copy));
+    if(!copy.width || !copy.height || copy.height > OS1_DISPLAY_AREA_LIMIT / copy.width ||
+       copy.width * copy.height < 1024)
+        return false;
+#if defined(__x86_64__)
+    // Send the processor writes to the device before the engine reads video memory.
+    __asm__ volatile("sfence");
+#endif
+    const bool done =
+        gm206::copy_area(io,
+                         aperture,
+                         copier,
+                         host->log,
+                         {gm206::native_offset, surface->width, surface->height, surface->pitch},
+                         copy.source_x,
+                         copy.source_y,
+                         copy.x,
+                         copy.y,
+                         copy.width,
+                         copy.height);
+    // Record the use at each power of two. A session can end without a `restore` call.
+    if(done ? !(copier.copies & (copier.copies - 1)) : copier.halted)
+        gm206::copy_use(copier, host->log);
+    return done;
+}
+
 long reflect(Os1HardwareQuery* query, const os1_display_summary* summary)
 {
     return gm206::reflect(*query, *summary, probed ? &snapshot : nullptr, &identity);
@@ -317,7 +369,8 @@ const os1_display_driver driver{OS1_DISPLAY_MODULE_ABI,
                                 nullptr,
                                 nullptr,
                                 cursor,
-                                reflect};
+                                reflect,
+                                accelerate};
 }  // namespace
 
 extern "C" const os1_display_driver* os1_driver_init()

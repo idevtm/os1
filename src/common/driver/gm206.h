@@ -9,28 +9,24 @@
 namespace gm206
 {
 constexpr unsigned channels = 8, heads = 4, mode_limit = 16;
-constexpr unsigned register_bytes = 0x800000;
+constexpr unsigned register_bytes = 0x801000;
 // BAR 0 ranges that the kernel maps for the module. Each register access must stay inside them.
 struct RegisterRange
 {
     unsigned offset, bytes;
 };
 inline constexpr RegisterRange register_ranges[] = {
-    {0x000000, 0x2000},
-    {0x00d000, 0x1000},
-    {0x021000, 0x2000},
-    {0x070000, 0x1000},
-    {0x110000, 0x4000},
-    {0x610000, 0x3000},
-    {0x616000, 0x2000},
-    {0x619000, 0x1000},
-    {0x61a000, 0x2000},
-    {0x61c000, 0x4000},
-    {0x630000, 0x4000},
-    {0x640000, 0x1000 + heads * 0x1000},
-    {0x64d000, heads * 0x1000},
-    {0x660000, 0x1000 + heads * 0x1000},
-    {0x700000, 0x100000},
+    {0x000000, 0x4000},  // Includes the channel scheduler registers at 0x2000 and 0x3000.
+    {0x00d000, 0x1000},         {0x021000, 0x2000},
+    {0x040000, 0x10000},                             // Command readers of the channel scheduler.
+    {0x070000, 0x1000},         {0x100000, 0x1000},  // Address translation control.
+    {0x104000, 0x3000},                              // Copy engines.
+    {0x110000, 0x4000},         {0x610000, 0x3000},
+    {0x616000, 0x2000},         {0x619000, 0x1000},
+    {0x61a000, 0x2000},         {0x61c000, 0x4000},
+    {0x630000, 0x4000},         {0x640000, 0x1000 + heads * 0x1000},
+    {0x64d000, heads * 0x1000}, {0x660000, 0x1000 + heads * 0x1000},
+    {0x700000, 0x100000},       {0x800000, 0x1000},  // Channel table.
 };
 struct Mode
 {
@@ -234,7 +230,68 @@ bool parse_edid(const uint8_t*, unsigned blocks, Output&);
 inline constexpr uint32_t native_offset = 0x04000000, console_offset = 0x06000000;
 inline constexpr uint32_t instance_offset = 0x06400000, push_offset = 0x06410000;
 inline constexpr uint32_t check_offset = 0x06411000, cursor_offset = 0x06412000;
-inline constexpr uint32_t aperture_bytes = 0x06416000;
+// Memory of the copy engine channel: 1 MiB after the pointer image.
+inline constexpr uint32_t copy_offset = 0x06420000;
+inline constexpr uint32_t aperture_bytes = 0x06520000;
+
+// Copy engine of the card, class B0B5, through one command channel. Nouveau and the NVIDIA open
+// kernel modules are the reference. The module polls. It uses no interrupt and no firmware file.
+enum class CopyStage : uint8_t
+{
+    Idle,
+    Topology,   // The device table has no copy engine with its own run list.
+    Scheduler,  // The channel scheduler has no usable command reader, or channel 0 is in use.
+    Memory,     // Video memory did not hold the channel data.
+    Translation,
+    Channel,  // The scheduler did not accept the channel.
+    Submit,   // The channel did not run the first commands.
+    Kick,     // The channel did not see later commands.
+    Launch,   // The engine did not copy the test pattern.
+    Ready,
+    Stopped,  // A request failed after the start. The module stopped the channel.
+};
+using CopyLog = void (*)(const char* label, const uint32_t* values, uint32_t count);
+struct CopyState
+{
+    CopyStage stage;
+    bool ready;
+    bool physical;  // The engine takes video memory addresses without translation.
+    bool bound;     // The channel has the engine class on its subchannel.
+    // How the scheduler learns of new commands: 1 a write to the user area through BAR 1,
+    // 2 a new channel enable, 3 a write to the command reader. 0 is not known.
+    uint8_t kick;
+    uint8_t runlist, engine, reset, fault, instance, readers, reader;
+    uint32_t put;      // Next entry of the command ring.
+    uint32_t payload;  // Value of the last completion word.
+    uint32_t copies;
+    // Completion polls of all commands and of the slowest commands. One poll takes 10 us or more.
+    uint32_t polls, longest;
+    bool halted;  // A request failed. The channel is disabled and waits for `copy_stop`.
+};
+// Start the channel and run the checks of the engine. `video` is the address of video memory byte
+// 0 through BAR 1. A false result leaves the engine out of use. The display does not change.
+bool copy_start(const ProbeIo&, volatile uint8_t* video, CopyState&, CopyLog);
+// Copy one area of a surface in the reserved native surface memory. The areas can overlap.
+// A false result for a valid area disables the channel. The caller then draws the area with the
+// processor.
+bool copy_area(const ProbeIo&,
+               volatile uint8_t* video,
+               CopyState&,
+               CopyLog,
+               const Surface&,
+               uint32_t source_x,
+               uint32_t source_y,
+               uint32_t x,
+               uint32_t y,
+               uint32_t width,
+               uint32_t height);
+// Write the use counts to the log.
+void copy_use(const CopyState&, CopyLog);
+// Write the use counts to the log. Remove a channel that a failed request disabled. The caller
+// must not hold a lock that stops interrupts, because the removal can wait.
+void copy_stop(const ProbeIo&, volatile uint8_t* video, CopyState&, CopyLog);
+// The largest area of one copy, in pixels. The scratch memory of the channel holds one area.
+inline constexpr uint32_t copy_pixel_limit = 65536;
 
 // Write the modes that the module can show: the native mode, then each smaller monitor mode as a
 // scaled surface. Return the number of modes. Zero means that the boot state has no support.

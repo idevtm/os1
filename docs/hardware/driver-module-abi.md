@@ -118,7 +118,7 @@ kernel -> session ownership, request checks, console, PCI inventory, mapping, me
 
 ### Driver table
 
-The [interface header](../../src/common/driver/display.h) defines ABI 5. ABI 5 adds the body color to the `cursor` export. Each display module returns one `os1_display_driver` table.
+The [interface header](../../src/common/driver/display.h) defines ABI 6. ABI 6 adds the `accelerate` export. Each display module returns one `os1_display_driver` table.
 
 | Export | Use |
 | --- | --- |
@@ -130,6 +130,7 @@ The [interface header](../../src/common/driver/display.h) defines ABI 5. ABI 5 a
 | `fill`, `draw` | Draw into a surface. These exports are optional. |
 | `cursor` | Show, move, or hide a hardware pointer with a body color. This export is optional. |
 | `reflect` | Answer a reflection query for the display subtree. This export is optional. |
+| `accelerate` | Run one `fill_area` or `copy` request in video memory with the device. This export is optional. |
 
 The `set_mode` and `restore` exports return one of three results.
 `OS1_DISPLAY_DONE` is a success. `OS1_DISPLAY_REFUSED` means that the display shows what it showed before.
@@ -138,7 +139,11 @@ The first module with a `fill` export draws for each session. It also owns the b
 The kernel adds the modes of each module to the mode list in load order. The list has a capacity of 12 modes.
 The kernel lists no mode of a module without a drawing module in use. The host table tells the module this in `drawing`.
 Thus the package of the boot framebuffer must be first in the package table. The build writes the table in that order.
-A session records the module that changed its mode. The kernel calls `restore` and `cursor` of that module.
+A session records the module that changed its mode. The kernel calls `restore`, `cursor`, and `accelerate` of that module.
+The kernel calls `accelerate` before the drawing module, and only for a session with a shadow.
+After a true result, the drawing module changes only the shadow.
+After a false result, the drawing module runs the full request. It reads a copy source from the shadow.
+Thus the image is correct also after a device request that stopped.
 The `restore` export can report a new console surface. The kernel then moves the text console to that surface.
 
 ### Host services
@@ -214,7 +219,8 @@ The driver reads live scanout totals and clocks. It queries firmware-enabled Dis
 The probe writes AUX command registers and the EDID offset to complete reads.
 The probe does not program scanout, change pad routing, train links, or write sink configuration.
 The probe also reads firmware ownership, instance memory, video memory, and base channel registers.
-One table in the module header defines the mapped BAR 0 ranges. The minimum BAR 0 size is `0x800000` bytes.
+One table in the module header defines the mapped BAR 0 ranges. The minimum BAR 0 size is `0x801000` bytes.
+The ranges include the registers of the [copy engine path](gm206-copy-engine.md).
 See the [ownership capture](nvidia-mode-setting-plan.md#display-ownership-capture) for the register list.
 
 The module keeps the boot snapshot, the scanout state, the mode list, and the reserved video memory layout.
