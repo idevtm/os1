@@ -27,6 +27,10 @@ struct os1_ipc_pair
 {
     int32_t client, provider;
 };
+struct os1_stream_pair
+{
+    int32_t reader, writer;
+};
 struct os1_ipc_info
 {
     uint32_t version, size;
@@ -179,6 +183,13 @@ struct os1_measurement
 // Bind an implemented kernel interface using authority from fd, not a global name.
 // Returns one ready CLOEXEC client; argument is an input-only record.
 #define OS1_IPC_BIND_KERNEL 28u
+// Create one byte stream. The call writes one os1_stream_pair with two descriptors.
+// A read from the reader end waits for bytes. It returns 0 after the writer end closes.
+// A write to the writer end waits for space. It returns OS1_ERR_CLOSED after the reader end closes.
+// WAIT_MANY accepts the reader end. The end is ready with bytes or with a closed writer end.
+#define OS1_IPC_STREAM_CREATE 29u
+#define OS1_OBJECT_STREAM 15u
+#define OS1_STREAM_BYTES 16384u
 #define OS1_IPC_KERNEL_BINDING_LIMIT 16u
 #define OS1_IPC_KERNEL_BINDING_PROCESS_LIMIT 8u
 #define OS1_IPC_KERNEL_OPERATION_LIMIT 4u

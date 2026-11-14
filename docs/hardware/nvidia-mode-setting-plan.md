@@ -1429,3 +1429,19 @@ The kernel images have the same sizes as before.
 Two independent reviews examined the change set. No review found a blocking defect.
 The corrections after each review had no further review.
 
+### Eighth desktop test
+
+The eighth test ran on November 14, 2026 with commit `1004725`. The repository has no exported log of this test.
+The user reported the results.
+
+| Item | Desktop result |
+| --- | --- |
+| Hardware pointer color during a button press | Correct. |
+| Shell window after a start from `/etc/gsh.boot` | The aliases operated. |
+| Clock under a window | Correct, with one fault. A partly covered character did not show its visible part. |
+| Mode size in the header | The windows cannot cover the header. No change is necessary. |
+
+The correction draws the visible part of a partly covered character with a bitmap request for each visible rectangle.
+The next change set adds the child shell that stays open. See the [shell window](gsh-plan.md#shell-window) and the [byte stream ABI](../native-api/abi/byte-stream-abi.md).
+The desktop has not run this change set.
+

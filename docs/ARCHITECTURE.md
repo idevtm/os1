@@ -974,6 +974,20 @@ The QEMU Standard VGA backend switches the scanout resolution during session acq
 The final session release restores the boot mode before it redraws the active terminal.
 The demo uses waitable pointer subscriptions. It reports input and draw timing after it releases the display.
 
+### Byte streams between processes
+
+A byte stream connects the standard streams of a child process to its parent.
+The IPC code owns the stream, because the stream uses the IPC wait queue and its lock.
+
+```text
+writer end -> write syscall -> ring of 16,384 bytes -> read syscall -> reader end
+empty or full ring -> thread in the IPC wait queue -> wake -> the thread runs its system call again
+reader end -> WAIT_MANY with console keys, input devices, and IPC objects
+```
+
+The graphics shell uses two streams for the child shell of its window.
+See the [byte stream ABI](native-api/abi/byte-stream-abi.md).
+
 ### Display driver boundary
 
 The kernel has no code for one display device. It has the display service, the text console, and a loader.

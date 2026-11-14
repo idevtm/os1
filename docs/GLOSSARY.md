@@ -619,6 +619,7 @@ These terms describe software interfaces and process behavior. The API drafts ex
 | Partial I/O | A successful transfer of fewer bytes than requested; callers must use the returned length rather than assume the whole request completed. |
 | IPC | **Interprocess Communication**: mechanisms for exchanging data or notifications between processes, such as messages, pipes, shared memory, or mediated object calls. |
 | Pipe | A kernel-managed byte channel commonly connecting one process's output to another's input. |
+| Byte stream | The OS1 pipe object. It has one reader end and one writer end over a ring of 16,384 bytes. See the [byte stream ABI](native-api/abi/byte-stream-abi.md). |
 | Signal | An asynchronous process notification, often used for termination, interruption, or job control; it is distinct from a CPU exception or an arbitrary object event. |
 | `ioctl` | **I/O control**: a device- or resource-specific control operation used when ordinary byte reads and writes do not express the request. |
 | Compatibility layer / shim | Software that translates one interface contract into another so existing programs can use a different underlying implementation. |

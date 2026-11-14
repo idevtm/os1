@@ -46,33 +46,41 @@ Use M to show the mode list. Use C to change between the hardware pointer and th
 Use T to open the shell window.
 The upper right corner shows the size of the current mode.
 The clock and the mode size stay under each window. `gsh` does not draw a character that a window covers.
-It paints the visible part of a partly covered character with the background color.
+A partly covered character shows its visible part.
 The pointer body has the color `0xffcb54` while a button is down. The hardware pointer shows the same color.
-The font has a scale of 2 for a mode height of 1300 or more, and a scale of 3 for 2000 or more.
+The font has a scale of 2 for a mode height of 1300 or more. Other modes use a scale of 1.
+The desktop has no top bar. The key help is text on the background, in the upper left corner.
+A window can move across the full screen. The key help stays under each window, as the clock does.
 If a pointer disconnects, the clock and keyboard controls remain active.
 If `gsh` exits after takeover, the text shell is available over serial.
 
 ## Shell window
 
-The T key opens one window with a command line. The window has the keyboard until Esc closes it.
-Enter runs the typed line. `gsh` writes the line to a temporary file.
-It starts `/bin/sh` with that file as standard input and a second temporary file as both outputs.
-It waits for the end of the process, then shows the output file in the window.
-A shell that init starts gets the shell init script through its constructor. The script adds the command aliases.
-A desktop that init starts has no such shell before it. `gsh` then gives each child shell the same constructor.
+The T key opens one window with one child shell. The window has the keyboard until Esc closes it.
+`gsh` starts `/bin/sh` one time with two [byte streams](../native-api/abi/byte-stream-abi.md).
+The child reads the typed lines from the first stream. It writes its prompt and its output to the second stream.
 
 ```text
-typed line -> temporary file -> sh (standard input) -> temporary file -> window text
+keys -> line edit in gsh -> Enter -> byte stream -> sh (standard input)
+sh (both outputs) -> byte stream -> WAIT_MANY in gsh with keys and pointer -> window text
 window move -> copy request -> draw the area that the window left
 ```
 
+`gsh` waits for keys, pointer events, and child output in one wait request. Thus the desktop continues while a command runs.
+The child stays in operation while the window is closed and across a mode change. Its directory and its state stay.
+A window with a different text size after a mode change starts with empty text.
+Ctrl-D closes the input stream. The child then ends, and the next key starts a new child.
+A shell that init starts gets the shell init script through its constructor. The script adds the command aliases.
+A desktop that init starts has no such shell before it. `gsh` then gives the child shell the same constructor.
+
 | Limit | Cause |
 | --- | --- |
-| The desktop does not update while a command runs. | `waitpid` has no time limit, and a user program has one thread. |
-| A command that does not end stops the desktop until a reset. | The kernel has no request that stops an ordinary child process. |
-| A command cannot read from the keyboard. | The kernel has no pipe or terminal object for a second input stream. |
-| Each command starts in a new shell. A `cd` command has no later effect. | The window starts one `sh` process for each line. |
-| One command shows a maximum of 65,536 output bytes. | This is the size limit of a temporary file. |
+| A command that does not end keeps the child busy. | The kernel has no request that stops an ordinary child process. |
+| The window has no history, completion, or cursor keys. | `gsh` sends complete lines. The shell uses its line editor only on the console. |
+| A full-screen program does not operate in the window. | The window shows printable characters, line feeds, and backspaces only. |
+| The child gets the lines only after Enter. | `gsh` does the line edit. |
+| Ctrl-D ends the shell also while a command reads its input. | The command and the shell use the same input stream. |
+| `gsh` can wait in a write if the child does not read 16,384 bytes of typed lines. | A writer end has no readiness for a wait request. |
 
 Press the left button on the window title and move the mouse to move the window.
 The move uses the `copy` request of the [Display session ABI](../native-api/abi/display-abi.md#fast-drawing-requests).
@@ -97,12 +105,14 @@ The shell window does not stay open across a mode change.
 
 ## Later stages
 
-1. Add a kernel byte stream object and a wait with a time limit. Then connect a child `sh` that stays open.
-   Give it full line editing, history, and completion in its first interactive release.
+1. Give the shell window line editing, history, and completion. Add a request that stops a child process.
 2. Add a window size change.
 3. Add a copy path through the GPU copy engine of the GTX 950.
 4. Add the laptop display adapter to the display driver modules.
 5. Increase the reserved window of the BIOS kernel image when a kernel feature needs the space.
+6. Use a thinner font in graphics mode. The text console keeps its font.
+
+The [roadmap](../native-api/roadmap.md#graphics-shell-and-byte-stream-limits) records each open limit with its next step.
 
 The [fifth desktop test](nvidia-mode-setting-plan.md#fifth-desktop-test) and the [sixth desktop test](nvidia-mode-setting-plan.md#sixth-desktop-test) and the [seventh desktop test](nvidia-mode-setting-plan.md#seventh-desktop-test) are the sources of this list.
 

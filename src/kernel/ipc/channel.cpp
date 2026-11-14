@@ -12,6 +12,7 @@
 #include "debug/log_export.hpp"
 #include "drivers/input/service.hpp"
 #include "ipc/kernel_provider.hpp"
+#include "ipc/stream_ring.hpp"
 #include "mm/kmem.hpp"
 #include "mm/user_copy.hpp"
 #include "platform/platform.hpp"
@@ -124,8 +125,22 @@ void release(Connection* c)
     kfree(c);
     object_release(account);
 }
+// A byte stream has one reader end and one writer end over a ring of bytes. The wait lock
+// protects the stream.
+using Stream = StreamRing;
+struct StreamEnd : NativeObject
+{
+    Stream* stream;
+    bool writer;
+};
+bool stream_ready_locked(const StreamEnd& end)
+{
+    return end.writer ? end.stream->writer_ready() : end.stream->reader_ready();
+}
 bool ready_locked(NativeObject* object)
 {
+    if(object->kind == OS1_OBJECT_STREAM)
+        return stream_ready_locked(*static_cast<StreamEnd*>(object));
     if(object->kind == OS1_OBJECT_CONSOLE_INPUT_SESSION)
         return console_input_ready(object);
     if(object->kind == OS1_OBJECT_INPUT_SUBSCRIPTION)
@@ -787,6 +802,7 @@ long wait_many(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
         pins.value.instances[pins.value.count++] = raw;
         if(raw->object->kind != OS1_OBJECT_CONSOLE_INPUT_SESSION &&
            raw->object->kind != OS1_OBJECT_INPUT_SUBSCRIPTION &&
+           raw->object->kind != OS1_OBJECT_STREAM &&
            (raw->object->kind < OS1_OBJECT_IPC_CLIENT ||
             raw->object->kind > OS1_OBJECT_SUBSCRIPTION))
             return OS1_ERR_UNSUPPORTED;
@@ -807,6 +823,99 @@ long wait_many(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
     thread->wait.reason = ThreadWaitReason::Ipc;
     thread->wait.ipc = pins.value;
     pins.value = {};
+    thread->state = ThreadState::Blocked;
+    thread->process->state = ProcessState::Ready;
+    wait_queue_enqueue_locked(waiters, thread);
+    return kIpcBlocked;
+}
+void destroy_stream_end(NativeObject* object)
+{
+    auto* end = static_cast<StreamEnd*>(object);
+    Stream* released = nullptr;
+    {
+        IrqSpinGuard guard(waiters.lock);
+        auto& stream = *end->stream;
+        (end->writer ? stream.writer_closed : stream.reader_closed) = true;
+        if(stream.reader_closed && stream.writer_closed)
+            released = end->stream;
+        // The other end is now ready: a reader gets the end of the stream, a writer an error.
+        signal_locked();
+    }
+    if(released)
+    {
+        kfree(released->bytes);
+        kfree(released);
+    }
+    kfree(end);
+    ipc_drain_wakeups();
+}
+long create_stream(PageFrameContainer& frames, Thread* thread, uint64_t pointer)
+{
+    auto* stream = static_cast<Stream*>(kmalloc(sizeof(Stream), KmallocFlags::Zero));
+    auto* bytes = static_cast<uint8_t*>(kmalloc(OS1_STREAM_BYTES));
+    auto* reader = static_cast<StreamEnd*>(kmalloc(sizeof(StreamEnd), KmallocFlags::Zero));
+    auto* writer = static_cast<StreamEnd*>(kmalloc(sizeof(StreamEnd), KmallocFlags::Zero));
+    if(!stream || !bytes || !reader || !writer)
+    {
+        kfree(stream);
+        kfree(bytes);
+        kfree(reader);
+        kfree(writer);
+        return OS1_ERR_NO_MEMORY;
+    }
+    stream->bytes = bytes;
+    StreamEnd* ends[] = {reader, writer};
+    for(auto* end : ends)
+    {
+        end->references = 1;
+        end->kind = OS1_OBJECT_STREAM;
+        end->stream = stream;
+        end->writer = end == writer;
+        end->allowed_rights = (end->writer ? OS1_RIGHT_WRITE : OS1_RIGHT_READ) | OS1_RIGHT_INSPECT |
+                              OS1_RIGHT_DELEGATE;
+        end->destroy = destroy_stream_end;
+    }
+    // From here, each end releases its part of the stream when its last reference closes.
+    InstanceRef a(open_instance(reader)), b(open_instance(writer));
+    object_release(reader);
+    object_release(writer);
+    if(!a.get() || !b.get())
+        return OS1_ERR_NO_MEMORY;
+    auto& table = thread->process->descriptors;
+    long left = descriptor_install(table, a.get(), reader->allowed_rights, OS1_DESCRIPTOR_CLOEXEC);
+    if(left < 0)
+        return left;
+    long right = descriptor_install(table, b.get(), writer->allowed_rights, OS1_DESCRIPTOR_CLOEXEC);
+    if(right < 0)
+    {
+        descriptor_close(table, left);
+        return right;
+    }
+    os1_stream_pair pair{static_cast<int32_t>(left), static_cast<int32_t>(right)};
+    if(!copy_to_user(frames, thread, pointer, &pair, sizeof(pair)))
+    {
+        descriptor_close(table, left);
+        descriptor_close(table, right);
+        return OS1_ERR_FAULT;
+    }
+    return 0;
+}
+// Queue the thread until the stream end is ready. The thread then runs its system call again.
+// Return 0 if the end is ready now.
+long wait_for_stream(Thread* thread, OpenInstance* instance)
+{
+    IrqSpinGuard process_guard(g_process_table_lock);
+    IrqSpinGuard guard(waiters.lock);
+    if(ipc_stop_requested(thread))
+        return OS1_ERR_CANCELLED;
+    if(ready_locked(instance->object))
+        return 0;
+    instance_retain(instance);
+    thread->wait = {};
+    thread->wait.reason = ThreadWaitReason::Ipc;
+    thread->wait.ipc.instances[0] = instance;
+    thread->wait.ipc.count = 1;
+    thread->wait.ipc.restart = true;
     thread->state = ThreadState::Blocked;
     thread->process->state = ProcessState::Ready;
     wait_queue_enqueue_locked(waiters, thread);
@@ -1265,6 +1374,8 @@ long sys_ipc(
         return fd ? OS1_ERR_INVALID : stop_child(thread, argument);
     if(operation == OS1_IPC_CREATE)
         return fd ? OS1_ERR_INVALID : create_pair(frames, thread, argument);
+    if(operation == OS1_IPC_STREAM_CREATE)
+        return fd ? OS1_ERR_INVALID : create_stream(frames, thread, argument);
     if(operation == OS1_IPC_WAIT_MANY)
         return fd ? OS1_ERR_INVALID : wait_many(frames, thread, argument);
     if(operation < OS1_IPC_READY || operation > OS1_IPC_RESULT_BUFFERS)
@@ -1513,7 +1624,7 @@ void ipc_drain_wakeups()
             released = t->wait.ipc;
             // Only a user syscall consumes this return register. A kernel worker
             // can be preempted with any live RAX value while parking.
-            if(t->user_mode)
+            if(t->user_mode && !t->wait.ipc.restart)
                 t->frame.rax = static_cast<uint64_t>(t->wait.ipc.result);
             t->wait = {};
         }
@@ -1734,4 +1845,101 @@ bool ipc_start_kernel_worker(Process* process, PageFrameContainer& frames)
     return create_kernel_thread(process, kernel_provider_worker, frames) != nullptr &&
            create_kernel_thread(process, kernel_export_worker, frames) != nullptr;
 #endif
+}
+
+long stream_read(PageFrameContainer& frames,
+                 Thread* thread,
+                 OpenInstance* instance,
+                 uint64_t user_buffer,
+                 uint64_t length)
+{
+    auto& end = *static_cast<StreamEnd*>(instance->object);
+    if(end.writer)
+        return OS1_ERR_UNSUPPORTED;
+    if(length > OS1_IO_MAX_BYTES)
+        return OS1_ERR_INVALID;
+    uint64_t total = 0;
+    while(total < length)
+    {
+        // Take bytes under the lock and copy them to the user without it.
+        uint8_t chunk[256];
+        uint32_t taken = 0;
+        bool closed = false;
+        {
+            IrqSpinGuard guard(waiters.lock);
+            auto& stream = *end.stream;
+            const uint64_t wanted = length - total < sizeof(chunk) ? length - total : sizeof(chunk);
+            taken = stream.take(chunk, uint32_t(wanted));
+            closed = stream.writer_closed;
+            // A waiting writer now has space.
+            if(taken)
+                signal_locked();
+        }
+        if(!taken)
+        {
+            if(total || closed)
+                break;
+            const long status = wait_for_stream(thread, instance);
+            if(status)
+                return status;
+            continue;
+        }
+        const bool copied = user_buffer <= ~uint64_t{0} - total &&
+                            copy_to_user(frames, thread, user_buffer + total, chunk, taken);
+        ipc_drain_wakeups();
+        // The bytes of a failed copy are lost. Report the bytes that the user has.
+        if(!copied)
+            return total ? static_cast<long>(total) : OS1_ERR_FAULT;
+        total += taken;
+    }
+    return static_cast<long>(total);
+}
+
+long stream_write(PageFrameContainer& frames,
+                  Thread* thread,
+                  OpenInstance* instance,
+                  uint64_t user_buffer,
+                  uint64_t length)
+{
+    auto& end = *static_cast<StreamEnd*>(instance->object);
+    if(!end.writer)
+        return OS1_ERR_UNSUPPORTED;
+    if(length > OS1_IO_MAX_BYTES)
+        return OS1_ERR_INVALID;
+    uint64_t total = 0;
+    while(total < length)
+    {
+        // Copy from the user without the lock. Then add the bytes that the ring has space for.
+        uint8_t chunk[256];
+        const uint32_t wanted =
+            uint32_t(length - total < sizeof(chunk) ? length - total : sizeof(chunk));
+        if(user_buffer > ~uint64_t{0} - total ||
+           !copy_from_user(frames, thread, user_buffer + total, chunk, wanted))
+            return total ? static_cast<long>(total) : OS1_ERR_FAULT;
+        uint32_t added = 0;
+        bool closed = false;
+        {
+            IrqSpinGuard guard(waiters.lock);
+            auto& stream = *end.stream;
+            closed = stream.reader_closed;
+            if(!closed)
+                added = stream.put(chunk, wanted);
+            // A waiting reader now has bytes.
+            if(added)
+                signal_locked();
+        }
+        ipc_drain_wakeups();
+        total += added;
+        if(closed)
+            return total ? static_cast<long>(total) : OS1_ERR_CLOSED;
+        if(added == wanted)
+            continue;
+        // The ring is full. Return the bytes that it took, or wait for space.
+        if(total)
+            break;
+        const long status = wait_for_stream(thread, instance);
+        if(status)
+            return status;
+    }
+    return static_cast<long>(total);
 }

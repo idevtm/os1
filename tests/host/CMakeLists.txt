@@ -216,6 +216,7 @@ add_executable(os1_host_tests
   kernel/ehci_tests.cpp
   kernel/gm206_tests.cpp
   kernel/display_draw_tests.cpp
+  kernel/stream_ring_tests.cpp
   ${PROJECT_SOURCE_DIR}/../../src/kernel/drivers/display/reflection.cpp
   ${PROJECT_SOURCE_DIR}/../../src/drivers/gm206/reflection.cpp
   ${PROJECT_SOURCE_DIR}/../../src/drivers/gm206/display.cpp

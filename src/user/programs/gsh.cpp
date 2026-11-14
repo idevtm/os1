@@ -241,8 +241,6 @@ struct PointerStats
     }
 };
 
-constexpr unsigned desktop_header = 32;
-constexpr unsigned header_color = 0x223d57;
 constexpr unsigned text_color = 0xd9e4f0;
 constexpr unsigned frame_color = 0x4a6d8c, panel_color = 0x0b1420;
 constexpr uint64_t second_ns = 1'000'000'000;
@@ -271,7 +269,7 @@ struct Canvas
 
 unsigned font_scale(const os1_display_mode& mode)
 {
-    return mode.height >= 2000 ? 3 : mode.height >= 1300 ? 2 : 1;
+    return mode.height >= 1300 ? 2 : 1;
 }
 
 long paint(Canvas& c, unsigned x, unsigned y, unsigned width, unsigned height, unsigned rgb)
@@ -385,6 +383,35 @@ long text(Canvas& c,
             return status;
     }
     return 0;
+}
+
+// Draw one rectangle of a character. The character cell starts at (cell_x, cell_y). The rectangle
+// is inside the cell. A session without the bitmap request gets the background color.
+long glyph_part(Canvas& c,
+                unsigned cell_x,
+                unsigned cell_y,
+                char character,
+                unsigned x,
+                unsigned y,
+                unsigned width,
+                unsigned height,
+                unsigned back)
+{
+    if(!width || !height)
+        return 0;
+    if(!c.fast)
+        return paint(c, x, y, width, height, back);
+    const unsigned row_bytes = (width + 7) / 8;
+    os1_display_bitmap bitmap{x, y, width, height, text_color, back, {}};
+    const auto& glyph = font8x8_basic[character & 127];
+    for(unsigned row = 0; row < height; ++row)
+        for(unsigned column = 0; column < width; ++column)
+            if(glyph[(y - cell_y + row) / c.scale] & (1u << (x - cell_x + column) / c.scale))
+                bitmap.bits[row * row_bytes + column / 8] |= uint8_t(1u << column % 8);
+    return session_call(c.client,
+                        OS1_DISPLAY_BITMAP,
+                        &bitmap,
+                        sizeof(bitmap) - sizeof(bitmap.bits) + row_bytes * height);
 }
 
 long text(Canvas& c, unsigned x, unsigned y, const char* characters, unsigned back)
@@ -504,8 +531,8 @@ struct PointerInput
     }
 };
 
-// A window that shows the output of shell commands. Each command runs in a new shell process.
-// The window waits for the end of the command. A command cannot read from the keyboard.
+// A window with one child shell. The child reads the typed lines from a byte stream and writes
+// its output to a second byte stream. The child stays in operation while the window is closed.
 struct Terminal
 {
     static constexpr unsigned max_columns = 80, max_rows = 24;
@@ -517,6 +544,9 @@ struct Terminal
     char cells[max_rows][max_columns]{};
     char line[max_columns * 2]{};
     unsigned length{};
+    // The child shell: its process, the stream to its input, and the stream from its output.
+    long pid = -1;
+    f::Handle input, output;
 
     unsigned width() const
     {
@@ -536,8 +566,9 @@ struct Terminal
     }
     long draw_rows(Canvas& c, unsigned first, unsigned last)
     {
+        // A closed window keeps the text of the child in its cells and draws nothing.
         long status = 0;
-        for(unsigned r = first; status >= 0 && r <= last && r < rows; ++r)
+        for(unsigned r = first; open && status >= 0 && r <= last && r < rows; ++r)
             status = text(c, x + border, y + title + r * size, cells[r], columns, text_color, back);
         return status;
     }
@@ -563,18 +594,30 @@ struct Terminal
         if(c.mode.width < (32 + 20 * 8) * c.scale || c.mode.height < top + (64 + 4 * 8) * c.scale)
             return OS1_ERR_UNSUPPORTED;
         const unsigned across = (c.mode.width - 32 * c.scale) / size;
-        columns = across < max_columns ? across : max_columns;
+        const unsigned new_columns = across < max_columns ? across : max_columns;
         const unsigned space = (c.mode.height - top - 64 * c.scale) / size;
-        rows = space < max_rows ? space : max_rows;
+        const unsigned new_rows = space < max_rows ? space : max_rows;
+        // A window with a new text size starts with empty text. The child continues.
+        if(new_columns != columns || new_rows != rows)
+        {
+            columns = new_columns;
+            rows = new_rows;
+            for(auto& cell_row : cells)
+                for(char& cell : cell_row)
+                    cell = ' ';
+            row = column = length = 0;
+        }
         x = (c.mode.width - width()) / 2;
         y = top + (c.mode.height - top - height()) / 2;
-        for(auto& cell_row : cells)
-            for(char& cell : cell_row)
-                cell = ' ';
-        row = column = length = 0;
         open = true;
-        const long status = draw(c);
-        return status < 0 ? status : write(c, "$ ", 2);
+        long status = draw(c);
+        if(status >= 0 && output.fd < 0)
+        {
+            stop();
+            if(pid > 0 || start() < 0)
+                status = write(c, "gsh: cannot start the shell\n", 28);
+        }
+        return status;
     }
     long new_line(Canvas& c)
     {
@@ -586,6 +629,8 @@ struct Terminal
             __builtin_memcpy(cells[r], cells[r + 1], max_columns);
         for(char& cell : cells[rows - 1])
             cell = ' ';
+        if(!open)
+            return 0;
         // Move the text up by one row. Without the copy request, draw each row again.
         const long status = copy(c,
                                  x + border,
@@ -630,64 +675,106 @@ struct Terminal
         }
         return status >= 0 && dirty ? draw_rows(c, row, row) : status;
     }
-    // Run the typed line in a shell. The shell reads the line from a file and writes to a file.
-    long run(Canvas& c)
+    // Start the child shell. It reads its commands from one byte stream and writes to a second.
+    long start()
     {
-        static char output[4096];
-        f::Handle script(f::temporary()), capture(f::temporary());
-        os1_resource_info input{}, errors{};
-        if(script.fd < 0 || capture.fd < 0 || u::query(0, &input) < 0 || u::query(2, &errors) < 0 ||
-           !f::put(script.fd, line, length) || !f::put(script.fd, "\n", 1) ||
-           u::seek(script.fd, 0) < 0)
-            return write(c, "gsh: cannot prepare the command\n", 32);
-        f::Handle saved_input(u::duplicate(0, input.rights)),
-            saved_errors(u::duplicate(2, errors.rights));
-        long pid = OS1_ERR_ACCESS;
-        if(saved_input.fd >= 0 && saved_errors.fd >= 0)
-        {
-            // The child gets the script as standard input and the capture file as both outputs.
-            const bool swapped = u::duplicate(script.fd, u::fs::file_rights, 0, 0) == 0 &&
-                                 u::duplicate(capture.fd, u::fs::file_rights, 0, 2) == 2;
-            const char* arguments[] = {"sh"};
-            // A shell that init starts gets the init script through its constructor. A desktop
-            // that init starts has no shell before it, so give the child the same constructor.
-            constexpr auto boot = os1::shell_startup::boot_arguments();
-            const bool inherited =
-                os1::context::child(u::environment_data, 0, "shell_init_script") >= 0;
-            if(swapped)
-                pid = u::run_program("/bin/sh",
-                                     1,
-                                     arguments,
-                                     false,
-                                     0,
-                                     nullptr,
-                                     nullptr,
-                                     nullptr,
-                                     -1,
-                                     inherited ? nullptr : &boot,
-                                     capture.fd);
-            u::duplicate(saved_input.fd, input.rights, input.descriptor_flags, 0);
-            u::duplicate(saved_errors.fd, errors.rights, errors.descriptor_flags, 2);
-        }
-        int exit_status = 0;
-        if(pid < 0 || u::waitpid(pid, &exit_status) != pid)
-            return write(c, "gsh: cannot run the shell\n", 26);
-        long status = u::seek(capture.fd, 0) < 0 ? OS1_ERR_IO : 0;
-        for(long n = 0; status >= 0 && (n = u::read(capture.fd, output, sizeof(output))) > 0;)
-            status = write(c, output, unsigned(n));
-        if(status >= 0 && column)
-            status = write(c, "\n", 1);
-        return status;
+        os1_stream_pair to_child{-1, -1}, from_child{-1, -1};
+        if(u::stream_create(to_child) < 0)
+            return OS1_ERR_NO_MEMORY;
+        f::Handle child_input(to_child.reader), own_input(to_child.writer);
+        if(u::stream_create(from_child) < 0)
+            return OS1_ERR_NO_MEMORY;
+        f::Handle own_output(from_child.reader), child_output(from_child.writer);
+        os1_resource_info old_input{}, old_errors{};
+        if(u::query(0, &old_input) < 0 || u::query(2, &old_errors) < 0)
+            return OS1_ERR_ACCESS;
+        f::Handle saved_input(u::duplicate(0, old_input.rights)),
+            saved_errors(u::duplicate(2, old_errors.rights));
+        if(saved_input.fd < 0 || saved_errors.fd < 0)
+            return OS1_ERR_ACCESS;
+        // The child gets the streams as standard input and as both outputs.
+        constexpr uint32_t read_rights = OS1_RIGHT_READ | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE;
+        constexpr uint32_t write_rights = OS1_RIGHT_WRITE | OS1_RIGHT_INSPECT | OS1_RIGHT_DELEGATE;
+        const bool swapped = u::duplicate(child_input.fd, read_rights, 0, 0) == 0 &&
+                             u::duplicate(child_output.fd, write_rights, 0, 2) == 2;
+        const char* arguments[] = {"sh"};
+        // A shell that init starts gets the init script through its constructor. A desktop
+        // that init starts has no shell before it, so give the child the same constructor.
+        constexpr auto boot = os1::shell_startup::boot_arguments();
+        const bool inherited =
+            os1::context::child(u::environment_data, 0, "shell_init_script") >= 0;
+        long child = OS1_ERR_ACCESS;
+        if(swapped)
+            child = u::run_program("/bin/sh",
+                                   1,
+                                   arguments,
+                                   false,
+                                   0,
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   -1,
+                                   inherited ? nullptr : &boot,
+                                   child_output.fd);
+        u::duplicate(saved_input.fd, old_input.rights, old_input.descriptor_flags, 0);
+        u::duplicate(saved_errors.fd, old_errors.rights, old_errors.descriptor_flags, 2);
+        if(child < 0)
+            return child;
+        // Only the child holds its stream ends now. Its end is then the end of the stream.
+        pid = child;
+        input.reset(own_input.take());
+        output.reset(own_output.take());
+        return 0;
+    }
+    // Close the streams of a child and collect it if it has ended.
+    void stop()
+    {
+        input.reset();
+        output.reset();
+        // Typed characters for the child that ended are not for the next child.
+        length = 0;
+        int status = 0;
+        // A child that still runs a command ends when it reads the closed stream.
+        if(pid > 0 && u::waitpid_now(uint64_t(pid), &status) != OS1_ERR_WOULD_BLOCK)
+            pid = -1;
+    }
+    // Show the output that the child wrote. Return 1 after the end of the child.
+    long pump(Canvas& c)
+    {
+        char bytes[512];
+        const long count = u::read(output.fd, bytes, sizeof(bytes));
+        if(count > 0)
+            return write(c, bytes, unsigned(count));
+        stop();
+        const long status = write(c, "[shell ended]\n", 14);
+        return status < 0 ? status : 1;
     }
     long key(Canvas& c, unsigned byte)
     {
+        if(output.fd < 0)
+        {
+            // The first key after the end of the child starts a new one.
+            stop();
+            if(pid > 0 || start() < 0)
+                return write(c, "gsh: cannot start the shell\n", 28);
+            if(byte == '\n' || byte == '\r')
+                return 0;
+        }
         if(byte == '\n' || byte == '\r')
         {
+            // The child reads the line and writes its output and the next prompt.
             long status = write(c, "\n", 1);
-            if(status >= 0 && length)
-                status = run(c);
+            line[length++] = '\n';
+            if((input.fd < 0 || !f::put(input.fd, line, length)) && status >= 0)
+                status = write(c, "gsh: the shell does not read\n", 29);
             length = 0;
-            return status < 0 ? status : write(c, "$ ", 2);
+            return status;
+        }
+        if(byte == 4)
+        {
+            // Ctrl-D closes the input of the child. The child then ends.
+            input.reset();
+            return 0;
         }
         if(byte == '\b' || byte == 127)
         {
@@ -696,7 +783,7 @@ struct Terminal
             --length;
             return write(c, "\b", 1);
         }
-        if(byte < ' ' || byte > 126 || length == sizeof(line) || column + 1 >= columns)
+        if(byte < ' ' || byte > 126 || length + 1 >= sizeof(line) || column + 1 >= columns)
             return 0;
         line[length++] = char(byte);
         const char typed = char(byte);
@@ -835,7 +922,8 @@ struct Desktop
     Canvas& c;
     bool desktop;
     unsigned top;
-    Terminal terminal{};
+    // The shell window and its child stay in operation across display sessions.
+    Terminal& terminal;
     Panel panel{};
     char label[24]{};
     unsigned label_length{};
@@ -852,9 +940,8 @@ struct Desktop
     {
         return c.mode.width - label_length * c.cell() - 16 * c.scale;
     }
-    // Draw text that stays under the windows. A character that a window covers is not drawn.
-    // The visible part of a partly covered character gets the background color, so that no old
-    // character part stays on the screen. Only one window is open at a time.
+    // Draw text that stays under the windows. A character that a window covers fully is not
+    // drawn. A partly covered character shows its visible part. Only one window is open at a time.
     long text_under(unsigned x, unsigned y, const char* characters, unsigned count, unsigned back)
     {
         const unsigned size = c.cell();
@@ -883,18 +970,21 @@ struct Desktop
         {
             if(covered(first))
             {
-                // Paint the parts of the cell above, below, left, and right of the window.
+                // Draw the parts of the character above, below, left, and right of the window.
                 const unsigned cx = x + first * size, right = cx + size, bottom = y + size;
                 const unsigned from = wy > y ? wy : y;
                 const unsigned to = wy + wh < bottom ? wy + wh : bottom;
+                const char character = characters[first];
                 if(wy > y)
-                    status = paint(c, cx, y, size, wy - y, back);
+                    status = glyph_part(c, cx, y, character, cx, y, size, wy - y, back);
                 if(status >= 0 && wy + wh < bottom)
-                    status = paint(c, cx, wy + wh, size, bottom - (wy + wh), back);
+                    status = glyph_part(
+                        c, cx, y, character, cx, wy + wh, size, bottom - (wy + wh), back);
                 if(status >= 0 && wx > cx)
-                    status = paint(c, cx, from, wx - cx, to - from, back);
+                    status = glyph_part(c, cx, y, character, cx, from, wx - cx, to - from, back);
                 if(status >= 0 && wx + ww < right)
-                    status = paint(c, wx + ww, from, right - (wx + ww), to - from, back);
+                    status = glyph_part(
+                        c, cx, y, character, wx + ww, from, right - (wx + ww), to - from, back);
                 ++first;
                 continue;
             }
@@ -911,8 +1001,7 @@ struct Desktop
     long draw_label()
     {
         label_length = put_size(label, c.mode);
-        return text_under(
-            label_x(), 12 * c.scale, label, label_length, top ? header_color : background);
+        return text_under(label_x(), 12 * c.scale, label, label_length, background);
     }
     long draw_clock()
     {
@@ -924,32 +1013,30 @@ struct Desktop
             __builtin_memcpy(time, "Clock unavailable      ", 24);
         return text_under(clock_x(), clock_y(), time, 23, background);
     }
-    long draw_header()
+    // Show the keys of the desktop session as text on the background. The text is not a bar, and a
+    // window can cover it.
+    long draw_help()
     {
-        long status = paint(c, 0, 0, c.mode.width, top, header_color);
         const char* keys = "os1  |  R Reboot  S Shut down  T Shell  M Mode  C Pointer";
-        if(status >= 0 && c.mode.width >= (f::length(keys) + 16) * c.cell() + 28 * c.scale)
-            status = text(c, 12 * c.scale, 12 * c.scale, keys, header_color);
-        else if(status >= 0)
-            status =
-                text(c, 12 * c.scale, 12 * c.scale, "os1  |  R Reboot  S Shut down", header_color);
-        return status < 0 ? status : draw_label();
+        const char* few = "os1  |  R Reboot  S Shut down";
+        const bool fits = c.mode.width >= (f::length(keys) + 16) * c.cell() + 28 * c.scale;
+        const char* shown = fits ? keys : few;
+        return text_under(
+            12 * c.scale, 12 * c.scale, shown, unsigned(f::length(shown)), background);
     }
     // Draw one area of the desktop again. The software pointer uses this to remove itself.
     // A window move draws the window itself and passes false.
     long repaint(unsigned x, unsigned y, unsigned width, unsigned height, bool window = true)
     {
-        long status = 0;
-        if(y < top)
-            status = draw_header();
-        if(status >= 0 && y + height > top)
+        long status = paint(c, x, y, width, height, background);
+        // The key text and the mode size are in the first text row.
+        if(status >= 0 && y < 12 * c.scale + c.cell())
         {
-            const unsigned first = y < top ? top : y;
-            status = paint(c, x, first, width, y + height - first, background);
+            if(desktop)
+                status = draw_help();
+            if(status >= 0)
+                status = draw_label();
         }
-        // Without a header, the mode label is on the background.
-        if(status >= 0 && !top && x + width > label_x() && y < 20 * c.scale + c.cell())
-            status = draw_label();
         if(status >= 0 && window && terminal.overlaps(x, y, width, height))
             status = terminal.draw(c);
         if(status >= 0 && panel.overlaps(x, y, width, height))
@@ -961,9 +1048,11 @@ struct Desktop
     }
     long draw_all()
     {
-        long status = paint(c, 0, top, c.mode.width, c.mode.height - top, background);
+        long status = paint(c, 0, 0, c.mode.width, c.mode.height, background);
+        if(status >= 0 && desktop)
+            status = draw_help();
         if(status >= 0)
-            status = top ? draw_header() : draw_label();
+            status = draw_label();
         if(status >= 0)
             status = draw_clock();
         return status;
@@ -1050,7 +1139,8 @@ long interactive(Canvas& c,
                  PointerStats& stats,
                  bool trace,
                  bool desktop,
-                 ModeChoice& choice)
+                 ModeChoice& choice,
+                 Terminal& terminal)
 {
     const auto& mode = c.mode;
     const int client = c.client;
@@ -1059,7 +1149,9 @@ long interactive(Canvas& c,
     // A session without the fast requests refuses this fill. The old fill request then draws.
     os1_display_fill probe{0, 0, 1, 1, background};
     c.fast = session_call(client, OS1_DISPLAY_FILL_AREA, &probe, sizeof(probe)) >= 0;
-    Desktop d{c, desktop, desktop ? desktop_header * c.scale : 0};
+    terminal.open = false;
+    // The desktop has no bar. A window can use the full screen.
+    Desktop d{c, desktop, 0, terminal};
     d.panel.modes = choice.modes;
     d.panel.first = choice.first;
     d.panel.count = choice.count;
@@ -1112,8 +1204,7 @@ long interactive(Canvas& c,
     os1_measurement start{};
     if(!u::ipc_measure(start) && start.source == OS1_MEASUREMENT_HPET)
         stats.start_ns = start.nanoseconds;
-    const int waits[] = {keys, input.subscription.fd};
-    unsigned wait_count = 2;
+    bool pointer_live = true;
     uint64_t next_clock = 0;
     bool dragging = false;
     unsigned grab_x = 0, grab_y = 0;
@@ -1139,11 +1230,32 @@ long interactive(Canvas& c,
                              ? UINT64_MAX
                              : uint64_t(now) + second_ns;
         }
+        // Wait for a key, a pointer event, or output of the child shell.
+        int waits[3] = {keys};
+        unsigned wait_count = 1;
+        long child_index = -1;
+        if(pointer_live)
+            waits[wait_count++] = input.subscription.fd;
+        if(d.terminal.output.fd >= 0)
+        {
+            child_index = wait_count;
+            waits[wait_count++] = d.terminal.output.fd;
+        }
         long ready = u::ipc_wait_many(waits, wait_count, next_clock);
         if(ready == OS1_ERR_TIMED_OUT)
             continue;
         if(ready < 0)
             return ready;
+        if(ready == child_index)
+        {
+            status = d.terminal.pump(c);
+            // New text in the window can cover the drawn pointer.
+            if(status >= 0 && !c.hardware && d.terminal.open)
+                status = show_pointer(d, x, top + y, pointer_color());
+            if(status < 0)
+                return status;
+            continue;
+        }
         if(!ready)
         {
             unsigned key = 0;
@@ -1263,7 +1375,7 @@ long interactive(Canvas& c,
                     if(status < 0)
                     {
                         status = text(
-                            c, 12 * c.scale, 22 * c.scale, "System command failed", header_color);
+                            c, 12 * c.scale, 22 * c.scale, "System command failed", background);
                         if(status < 0)
                             return status;
                     }
@@ -1290,7 +1402,7 @@ long interactive(Canvas& c,
                 break;
             if(desktop && status == OS1_ERR_CLOSED)
             {
-                wait_count = 1;
+                pointer_live = false;
                 break;
             }
             if(status < 0 || r.payload_bytes != sizeof(os1_input_event))
@@ -1301,7 +1413,7 @@ long interactive(Canvas& c,
             {
                 if(!desktop)
                     return OS1_ERR_CLOSED;
-                wait_count = 1;
+                pointer_live = false;
                 break;
             }
             if(event.flags & OS1_INPUT_LOST)
@@ -1312,7 +1424,7 @@ long interactive(Canvas& c,
                 {
                     if(!desktop)
                         return OS1_ERR_CLOSED;
-                    wait_count = 1;
+                    pointer_live = false;
                     break;
                 }
                 nx = move(nx, int64_t(snapshot.x - next.x), mode.width - 1);
@@ -1543,6 +1655,8 @@ long run(bool check, int menu)
     f::Handle key_client(u::console_input_bind(keys.fd));
     if(key_client.fd < 0)
         return key_client.fd;
+    // One shell window for all display sessions of this run.
+    Terminal terminal;
     if(!menu)
     {
         PointerInput input;
@@ -1582,7 +1696,8 @@ long run(bool check, int menu)
                                  stats,
                                  false,
                                  true,
-                                 choice);
+                                 choice,
+                                 terminal);
             if(status != 1 && status != 2)
                 return status;
             // 1 opens the selected mode, which the user must confirm. 2 returns to the mode before.
@@ -1717,7 +1832,8 @@ long run(bool check, int menu)
                              stats,
                              menu == 2,
                              false,
-                             choice);
+                             choice,
+                             terminal);
         if(status != 1 && status != 2)
             break;
         const unsigned next = status == 1 ? choice.next : before;

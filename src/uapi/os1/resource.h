@@ -35,6 +35,9 @@
 #define OS1_ERR_LIMIT (-7L)
 #define OS1_ERR_FAULT (-8L)
 #define OS1_ERR_WOULD_BLOCK (-9L)
+// Add this bit to the process identifier of a wait request. The request then does not wait.
+// It returns OS1_ERR_WOULD_BLOCK if no matching child has ended.
+#define OS1_WAIT_NO_WAIT (UINT64_C(1) << 63)
 #define OS1_ERR_CLOSED (-10L)
 #define OS1_ERR_CANCELLED (-11L)
 

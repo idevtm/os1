@@ -331,7 +331,7 @@ def main():
                         deadline = time.monotonic() + 15
                         while time.monotonic() < deadline:
                             size, pixels = screen()
-                            if (size == resolution and pixels[:3] == bytes.fromhex('223d57')
+                            if (size == resolution and pixels[:3] == bytes.fromhex('14283e')
                                     and b'\xff\xff\xff' in pixels
                                     and b'\xd9\xe4\xf0' in pixels):
                                 break

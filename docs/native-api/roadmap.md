@@ -288,7 +288,7 @@ Qualify the workflow on physical devices before treating QEMU evidence as hardwa
 | GOALS area | Native API dependency | Independent work still required |
 | --- | --- | --- |
 | Writable VFS and persistence | Console/File/Directory adapter and copied mutations implemented; kernel Buffer I/O and public BlockDevice remain | Bounded ext2 and USB storage implemented; larger layouts, public mounts, and physical update/failure qualification remain |
-| Shell and pipelines | File redirection, append, console EOF, and a line editor are [implemented](../shell/interactive-files.md). Pipes still need endpoint semantics and readiness. | Pipeline syntax and process orchestration; generated bindings are unnecessary |
+| Shell and pipelines | File redirection, append, console EOF, and a line editor are [implemented](../shell/interactive-files.md). A [byte stream](abi/byte-stream-abi.md) with one reader and one writer gives the pipe endpoint and its read readiness. Pipeline syntax and write readiness are not implemented. | Pipeline syntax and process orchestration; generated bindings are unnecessary |
 | Networking and sockets | Endpoint interfaces, packet ownership, backpressure, deadlines and cancellation semantics | IP/UDP/TCP, addressing, DNS, driver buffering |
 | PTYs and SSH | Terminal/session objects, streams, process control, credential-aware grants | Authentication, cryptography, entropy, permissions, network stack |
 | Input and compositor | Input events, recovery snapshots, display authority | Mouse decoding, hardware qualification, rendering and focus policy |
@@ -338,6 +338,33 @@ Keep drivers in the kernel for these milestones.
 Use `snake_case` for methods, properties, and events; types and interfaces may use `UpperCamelCase`.
 Class code retains creation policy; clients receive no fresh/shared-instance override.
 Input events remain volatile broadcast with explicit unsubscribe and state recovery after loss.
+
+## Graphics shell and byte stream limits
+
+This section records the open limits of the [graphics shell](../hardware/gsh-plan.md) and the [byte stream](abi/byte-stream-abi.md).
+The eighth desktop test on the GTX 950 accepted the shell window with these limits.
+
+| Limit | Next step |
+| --- | --- |
+| The shell window has no history, completion, or cursor keys. | Move the line edit to the child shell, with a terminal mode for a stream. |
+| No request stops an ordinary child process. | Add a process stop request and a key for it in the shell window. |
+| Ctrl-D ends the shell also while a command reads its input. | Give the foreground command its own end of the input. |
+| A stream writer has no readiness in a wait request. `gsh` can wait in a write. | Accept a writer end in `WAIT_MANY`. |
+| The shell has no pipeline syntax. | Add the syntax to `sh` on top of the byte stream. |
+| An arrow key from the serial console closes the mode list. | Decode the escape sequence in `gsh`. |
+| `gsh` needs a mouse at its start. | Start with the keyboard only, and add the pointer when a mouse connects. |
+| An error after the display takeover leaves the last image on the screen. | Restore the text console on each error path of `gsh`. |
+| A window has a fixed size. | Add a size change with the pointer. |
+| Window moves and scrolls use processor copies in video memory. | Add the GPU copy engine of the GTX 950 to its driver module. |
+| The graphics font is the console font, with a scale. | Select a thinner font with a free license for graphics mode. |
+| The laptop has no native display driver. | Add its display adapter to the display driver modules. |
+
+These checks are also open:
+
+- A reader end that closes while a writer waits.
+- A stream under load on many processors.
+- The mode list and the saved mode in the desktop session of the QEMU check.
+- A font scale of 2 in a QEMU check.
 
 ## Context discovery and diagnostics additions
 

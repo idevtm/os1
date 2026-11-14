@@ -504,7 +504,7 @@ The [Native API service roadmap](docs/native-api/roadmap.md#remaining-priorities
 3. Establish shared driver lifetime and disk loading; then expose native keyboard and mouse services with volatile events, unsubscribe, state recovery, and removal handling.
 4. Add scoped service discovery and lifecycle rules. Add kernel Buffer borrowing and BlockDevice methods when required by a concrete client.
 5. Expand storage capacity and filesystem operations beyond the bounded ext2 profile; qualify device failure and update recovery separately.
-6. Add pipe endpoints, readiness, and shell pipelines.
+6. Add shell pipelines and write readiness on the [byte stream](docs/native-api/abi/byte-stream-abi.md) endpoints.
 7. Add credentials, ownership, and permissions before multiuser or remote service exposure.
 8. Build IPv4, UDP/TCP, sockets, addressing, and DNS; then add PTYs, authenticated sessions, and SSH.
 

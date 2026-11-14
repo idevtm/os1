@@ -78,6 +78,14 @@ Thread* handle_syscall(TrapFrame* frame)
                 true);
             if(result == kVfsRetry)
                 return retry_vfs_syscall(frame);
+            if(result == kIpcBlocked)
+            {
+                // A full byte stream. The thread runs this system call again after the wait,
+                // with its registers as they are now. The log gets the call when it runs again.
+                thread->log_pending = false;
+                frame->rip -= 2;
+                return schedule_next(false);
+            }
             frame->rax = static_cast<uint64_t>(result);
             if(result == kVfsBlocked)
                 return schedule_next(false);
@@ -92,6 +100,12 @@ Thread* handle_syscall(TrapFrame* frame)
                     return retry_vfs_syscall(frame);
                 frame->rax = static_cast<uint64_t>(read_result);
                 return thread;
+            }
+            // An empty byte stream. The thread runs this system call again after the wait.
+            if(read_result == kIpcBlocked)
+            {
+                thread->log_pending = false;
+                frame->rip -= 2;
             }
             return schedule_next(false);
         }
@@ -146,6 +160,18 @@ Thread* handle_syscall(TrapFrame* frame)
             return thread;
         case os1_sys_waitpid: {
             long wait_result = -1;
+            // A request with the no-wait bit returns at once if no child has ended.
+            if(frame->rdi & OS1_WAIT_NO_WAIT)
+            {
+                if(!try_complete_wait_pid(page_frames,
+                                          thread,
+                                          frame->rdi & ~OS1_WAIT_NO_WAIT,
+                                          frame->rsi,
+                                          wait_result))
+                    wait_result = OS1_ERR_WOULD_BLOCK;
+                frame->rax = static_cast<uint64_t>(wait_result);
+                return thread;
+            }
             if(try_complete_or_block_wait_pid(
                    page_frames, thread, frame->rdi, frame->rsi, wait_result))
             {

@@ -1679,9 +1679,13 @@ static int shell_main(int argc_main, char** argv_main)
     os1::user::files::Line input;
 
     os1_resource_info input_info{};
-    const bool console_input = argc_main != 2 && os1::user::query(0, &input_info) >= 0 &&
-                               input_info.kind == OS1_OBJECT_CONSOLE;
-    if(console_input)
+    // A byte stream as standard input is a terminal of a different program. The shell then
+    // writes its prompt, reads one line for each command, and continues after a failed command.
+    const bool have_input = argc_main != 2 && os1::user::query(0, &input_info) >= 0;
+    const bool stream_input = have_input && input_info.kind == OS1_OBJECT_STREAM;
+    const bool console_input =
+        stream_input || (have_input && input_info.kind == OS1_OBJECT_CONSOLE);
+    if(console_input && !stream_input)
         os1::user::files::message("shell prompt ready\n");
     for(;;)
     {
@@ -1699,7 +1703,8 @@ static int shell_main(int argc_main, char** argv_main)
 
         if(!input.size)
         {
-            if(input.eof && !console_input)
+            // The other program closed the stream.
+            if(input.eof && (!console_input || stream_input))
                 return 0;
             os1::user::files::message("\n");
             continue;

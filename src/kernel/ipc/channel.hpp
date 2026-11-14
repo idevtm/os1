@@ -3,6 +3,13 @@
 
 #include "proc/thread.hpp"
 constexpr long kIpcBlocked = -4098;
+struct OpenInstance;
+class PageFrameContainer;
+struct Thread;
+// Move bytes through a byte stream end. Return the byte count or an error. kIpcBlocked means that
+// the thread waits and must run its system call again.
+long stream_read(PageFrameContainer&, Thread*, OpenInstance*, uint64_t buffer, uint64_t length);
+long stream_write(PageFrameContainer&, Thread*, OpenInstance*, uint64_t buffer, uint64_t length);
 long sys_ipc(PageFrameContainer&, Thread*, uint64_t operation, uint64_t fd, uint64_t argument);
 void cancel_ipc_wait(Thread*);
 // Drains already-signalled waiters only; does not poll endpoint/Operation readiness.
