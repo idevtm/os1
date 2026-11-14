@@ -58,20 +58,30 @@ Storage removal marks mounts unavailable without promising durability for interr
 
 ## Hardware priorities
 
-| Priority | Scope | First useful acceptance |
-| --- | --- | --- |
-| 1 | Input and USB transport | Keyboard, mouse, touchpad, subscriptions, state recovery, and reconnect. |
-| 2 | Display | Fixed firmware-framebuffer output through explicit display sessions. |
-| 3 | Internal storage | AHCI reads, then controlled writes and synchronization on a dedicated test volume. |
-| 4 | Power | Power-button and lid events, battery/AC status, and available thermal information. |
-| 5 | Wired networking | Packet transfer on QEMU and actual NICs, then a usable protocol stack. |
-| 6 | Audio and card reader | Basic PCM playback and card block access. |
-| 7 | Wi-Fi and Bluetooth | Required firmware, association or pairing, and selected useful profiles. |
-| 8 | Camera | One supported capture format and resolution, including its USB transport. |
-| 9 | Advanced display | Hardware mode setting, additional outputs, and later acceleration. |
+Advanced display moved from position 9 to position 3 on 2026-11-14, at the request of the user.
+The State column records a comparison with the source tree at revision `01baad2` on that date.
 
-The laptop needs EHCI low/full-speed split transactions and periodic transfers before its USB mouse can operate.
-xHCI hubs remain a transport extension.
+| Priority | Scope | First useful acceptance | State |
+| --- | --- | --- | --- |
+| 1 | Input and USB transport | Keyboard, mouse, touchpad, subscriptions, state recovery, and reconnect. | Implemented. xHCI hubs and reconnect qualification are open. |
+| 2 | Display | Fixed firmware-framebuffer output through explicit display sessions. | Implemented as the `firmware-framebuffer` module. |
+| 3 | Advanced display | Hardware mode setting, additional outputs, and later acceleration. | Partly implemented for the desktop GTX 950: firmware-timing scanout, scaled sizes, hardware pointer, and GPU copy. No own timing and no additional outputs. The [laptop plan](laptop-display-plan.md) is open. |
+| 4 | Internal storage | AHCI reads, then controlled writes and synchronization on a dedicated test volume. | Not started. The tree has no AHCI code. |
+| 5 | Power | Power-button and lid events, battery/AC status, and available thermal information. | Not started. Only shutdown and restart are implemented. |
+| 6 | Wired networking | Packet transfer on QEMU and actual NICs, then a usable protocol stack. | `virtio-net` with an ARP probe only. No Realtek driver or protocol stack is present. |
+| 7 | Audio and card reader | Basic PCM playback and card block access. | Not started. |
+| 8 | Wi-Fi and Bluetooth | Required firmware, association or pairing, and selected useful profiles. | Not started. |
+| 9 | Camera | One supported capture format and resolution, including its USB transport. | Not started. |
+
+The [physical input acceptance](2026-11-10-input-acceptance.md) records events from the laptop USB mouse and touchpad.
+EHCI periodic transfers and split transactions are implemented for that mouse.
+The touchpad operates as a basic PS/2 pointer; the tree has no Synaptics-specific protocol.
+The xHCI driver does not support hubs or streams.
+That acceptance test was short; it does not qualify reconnect or recovery paths.
+
+Advanced display on the desktop keeps the firmware timing and drives one output.
+Own timings, additional outputs, and a GPU fill are open.
+
 Power events require ACPICA synchronization, deferred execution, SCI/GPE delivery, and relevant Embedded Controller notifications.
 Working shutdown does not establish these capabilities.
 Existing OS partitions remain read-only during initial internal-storage qualification.
