@@ -356,7 +356,7 @@ The eighth desktop test on the GTX 950 accepted the shell window with these limi
 | An error after the display takeover leaves the last image on the screen. | Restore the text console on each error path of `gsh`. |
 | A window has a fixed size. | Add a size change with the pointer. |
 | The GPU copy of the GTX 950 has no time measurement, and the card has no GPU fill. | The [GPU copy engine path](../hardware/gm206-copy-engine.md) passed its first desktop test. Measure it against the processor copy. Add a fill only if a measurement shows a need. |
-| The [Spleen fonts](../shell/fonts.md) have no desktop test. | Examine the three font sizes on the GTX 950. |
+| The [Spleen fonts](../shell/fonts.md) and the console cell change have no desktop test. | Examine the six font sizes in `gsh` and the console fonts of `sh` on the GTX 950. |
 | The laptop has no native display driver. | Add its display adapter to the display driver modules. |
 
 These checks are also open:
@@ -364,7 +364,8 @@ These checks are also open:
 - A reader end that closes while a writer waits.
 - A stream under load on many processors.
 - The mode list and the saved mode in the desktop session of the QEMU check.
-- The 12 × 24 font and the 16 × 32 font in a QEMU check.
+- The fonts other than 6 × 12 in a QEMU check, and a font step from `/etc/gsh.conf`.
+- A `set_glyphs` request that the kernel must refuse, in a QEMU check.
 
 ## Context discovery and diagnostics additions
 

@@ -8,7 +8,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / 'cmake/scripts'))
 from make_font import convert  # noqa: E402
 
-for width, height in ((8, 16), (12, 24), (16, 32)):
+for width, height in ((5, 8), (6, 12), (8, 16), (12, 24), (16, 32), (32, 64)):
     source = (ROOT / f'third_party/spleen/spleen-{width}x{height}.bdf').read_text()
     font = convert(source)
     row_bytes = (width + 7) // 8
@@ -39,4 +39,4 @@ except ValueError:
     pass
 else:
     raise AssertionError('a glyph with a different box passed')
-print('Three font files: header, size, and bit sequence are correct')
+print('Six font files: header, size, and bit sequence are correct')

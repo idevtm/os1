@@ -8,8 +8,9 @@
 os1_console_geometry console_geometry();
 void clear_console();
 long set_console_column(unsigned column);
-// Replace glyphs of the framebuffer text font. See `set_text_display_glyphs`.
-void console_set_glyphs(uint8_t first, uint8_t count, const uint8_t* rows);
+// Handle a SET_GLYPHS payload for the framebuffer text console. A new cell size changes the grid
+// of each terminal. Return 0, OS1_ERR_INVALID, or OS1_ERR_UNSUPPORTED without a framebuffer.
+long console_set_glyphs(const uint8_t* payload, size_t bytes);
 long redraw_console_line(int delta, const char* text, size_t bytes);
 
 // write exactly `length` bytes to the kernel console stream.

@@ -162,16 +162,11 @@ void invoke_console(OpenInstance& source,
     }
     if(request.member == OS1_CONSOLE_SET_GLYPHS)
     {
-        // The payload has a header of four bytes and 16 bytes for each glyph.
-        const uint8_t first = request.payload[0], count = request.payload[1];
+        // The console checks the header and the size. See `os1::terminal::valid_glyphs`.
         if(!object->write_bytes)
             result.application_status = OS1_ERR_UNSUPPORTED;
-        else if(request.payload_bytes < 4 || !count || count > OS1_CONSOLE_GLYPH_LIMIT ||
-                first + count > OS1_CONSOLE_GLYPH_COUNT || request.payload[2] ||
-                request.payload[3] || request.payload_bytes != 4 + count * OS1_CONSOLE_GLYPH_ROWS)
-            result.application_status = OS1_ERR_INVALID;
         else
-            console_set_glyphs(first, count, request.payload + 4);
+            result.application_status = console_set_glyphs(request.payload, request.payload_bytes);
         return;
     }
     if(request.member == OS1_CONSOLE_SET_CURSOR)

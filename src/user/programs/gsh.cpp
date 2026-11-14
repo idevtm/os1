@@ -9,6 +9,7 @@
 #include <os1/system.hpp>
 
 #include "interface/shell_startup.hpp"
+#include "text/settings.hpp"
 
 namespace u = os1::user;
 namespace f = u::files;
@@ -268,17 +269,62 @@ struct Canvas
 const u::Font built_in_font{8, 8, 1, reinterpret_cast<const uint8_t*>(font8x8_basic)};
 uint8_t font_file[u::font_file_limit];
 
-// Select the font file for the size of the mode. No font has a scale.
+// The text and the settings of /etc/gsh.conf. A file that is not valid gives the default
+// settings, and gsh then does not replace the file.
+struct Settings
+{
+    bool loaded{}, valid{};
+    char text[os1::settings::file_limit]{};
+    size_t size{};
+    os1::settings::GraphicsSettings values;
+};
+Settings settings;
+
+const os1::settings::GraphicsSettings& load_settings()
+{
+    if(settings.loaded)
+        return settings.values;
+    settings.loaded = true;
+    f::Handle config(u::open("/etc/gsh.conf", OS1_RIGHT_READ));
+    if(config.fd < 0)
+    {
+        // No file: the default settings. A save writes a new file.
+        settings.valid = true;
+        return settings.values;
+    }
+    char extra;
+    long n = 1;
+    while(n > 0 && settings.size < sizeof(settings.text))
+    {
+        n = u::read(
+            config.fd, settings.text + settings.size, sizeof(settings.text) - settings.size);
+        if(n > 0)
+            settings.size += size_t(n);
+    }
+    if(n < 0 || (n > 0 && u::read(config.fd, &extra, 1) != 0))
+    {
+        settings.size = 0;
+        f::message(
+            "gsh: /etc/gsh.conf is too large or cannot be read; the default settings are in use\n");
+        return settings.values;
+    }
+    settings.valid = os1::settings::parse_graphics(
+        settings.text, settings.size, OS1_DISPLAY_FILL_LIMIT, settings.values);
+    if(!settings.valid)
+    {
+        settings.size = 0;
+        f::message("gsh: /etc/gsh.conf is not valid; the default settings are in use\n");
+    }
+    return settings.values;
+}
+
+// Select the font of the step for the height of the mode. No font has a scale.
 void select_font(Canvas& c)
 {
-    const char* path = c.mode.height >= 1800   ? "/share/fonts/spleen-16x32.font"
-                       : c.mode.height >= 1000 ? "/share/fonts/spleen-12x24.font"
-                                               : "/share/fonts/spleen-8x16.font";
-    // One character must go into one bitmap request.
-    if(!u::load_font(path, font_file, sizeof(font_file), c.font) ||
-       c.font.row_bytes * c.font.height > OS1_DISPLAY_BITMAP_BYTES)
+    const char* path = load_settings().font_for(c.mode.height);
+    if(!path || !u::load_font(path, font_file, sizeof(font_file), c.font))
         c.font = built_in_font;
-    c.unit = c.font.width >= 16 ? 2 : 1;
+    c.unit = c.font.width >= 32 ? 4 : c.font.width >= 16 ? 2 : 1;
 }
 
 long paint(Canvas& c, unsigned x, unsigned y, unsigned width, unsigned height, unsigned rgb)
@@ -359,33 +405,43 @@ long text(Canvas& c,
             }
         return status;
     }
-    // The characters of one bitmap request. Each bitmap row starts at a new byte.
-    const unsigned group = OS1_DISPLAY_BITMAP_BYTES / height * 8 / width;
-    for(unsigned first = 0; first < count; first += group)
+    // A tall glyph goes into bands of rows. One band of one character fits into one request.
+    const unsigned band = c.font.row_bytes * height <= OS1_DISPLAY_BITMAP_BYTES
+                              ? height
+                              : OS1_DISPLAY_BITMAP_BYTES / c.font.row_bytes;
+    for(unsigned top = 0; top < height; top += band)
     {
-        const unsigned part = count - first < group ? count - first : group;
-        const unsigned row_bytes = (part * width + 7) / 8;
-        os1_display_bitmap bitmap{x + first * width, y, part * width, height, rgb, back, {}};
-        for(unsigned row = 0; row < height; ++row)
+        const unsigned lines = height - top < band ? height - top : band;
+        // The characters of one bitmap request. Each bitmap row starts at a new byte.
+        const unsigned group = OS1_DISPLAY_BITMAP_BYTES / lines * 8 / width;
+        for(unsigned first = 0; first < count; first += group)
         {
-            uint8_t* line = bitmap.bits + row * row_bytes;
-            for(unsigned i = 0; i < part; ++i)
+            const unsigned part = count - first < group ? count - first : group;
+            const unsigned row_bytes = (part * width + 7) / 8;
+            os1_display_bitmap bitmap{
+                x + first * width, y + top, part * width, lines, rgb, back, {}};
+            for(unsigned row = 0; row < lines; ++row)
             {
-                const unsigned glyph = c.font.row(characters[first + i], row);
-                for(unsigned column = 0; column < width; ++column)
-                    if(glyph & (1u << column))
-                    {
-                        const unsigned bit = i * width + column;
-                        line[bit / 8] |= uint8_t(1u << bit % 8);
-                    }
+                uint8_t* line = bitmap.bits + row * row_bytes;
+                for(unsigned i = 0; i < part; ++i)
+                {
+                    const unsigned glyph = c.font.row(characters[first + i], top + row);
+                    for(unsigned column = 0; column < width; ++column)
+                        if(glyph & (1u << column))
+                        {
+                            const unsigned bit = i * width + column;
+                            line[bit / 8] |= uint8_t(1u << bit % 8);
+                        }
+                }
             }
+            const long status =
+                session_call(c.client,
+                             OS1_DISPLAY_BITMAP,
+                             &bitmap,
+                             sizeof(bitmap) - sizeof(bitmap.bits) + row_bytes * lines);
+            if(status < 0)
+                return status;
         }
-        const long status = session_call(c.client,
-                                         OS1_DISPLAY_BITMAP,
-                                         &bitmap,
-                                         sizeof(bitmap) - sizeof(bitmap.bits) + row_bytes * height);
-        if(status < 0)
-            return status;
     }
     return 0;
 }
@@ -406,16 +462,25 @@ long glyph_part(Canvas& c,
         return 0;
     if(!c.fast)
         return paint(c, x, y, width, height, back);
+    // A tall rectangle goes into bands of rows. One band fits into one request.
     const unsigned row_bytes = (width + 7) / 8;
-    os1_display_bitmap bitmap{x, y, width, height, text_color, back, {}};
-    for(unsigned row = 0; row < height; ++row)
-        for(unsigned column = 0; column < width; ++column)
-            if(c.font.row(character, y - cell_y + row) & (1u << (x - cell_x + column)))
-                bitmap.bits[row * row_bytes + column / 8] |= uint8_t(1u << column % 8);
-    return session_call(c.client,
-                        OS1_DISPLAY_BITMAP,
-                        &bitmap,
-                        sizeof(bitmap) - sizeof(bitmap.bits) + row_bytes * height);
+    const unsigned band = OS1_DISPLAY_BITMAP_BYTES / row_bytes;
+    for(unsigned top = 0; top < height; top += band)
+    {
+        const unsigned lines = height - top < band ? height - top : band;
+        os1_display_bitmap bitmap{x, y + top, width, lines, text_color, back, {}};
+        for(unsigned row = 0; row < lines; ++row)
+            for(unsigned column = 0; column < width; ++column)
+                if(c.font.row(character, y + top - cell_y + row) & (1u << (x - cell_x + column)))
+                    bitmap.bits[row * row_bytes + column / 8] |= uint8_t(1u << column % 8);
+        const long status = session_call(c.client,
+                                         OS1_DISPLAY_BITMAP,
+                                         &bitmap,
+                                         sizeof(bitmap) - sizeof(bitmap.bits) + row_bytes * lines);
+        if(status < 0)
+            return status;
+    }
+    return 0;
 }
 
 long text(Canvas& c, unsigned x, unsigned y, const char* characters, unsigned back)
@@ -448,72 +513,45 @@ unsigned put_size(char* out, const os1_display_mode& mode)
     return at;
 }
 
-// Save the mode as the preference of the next start. If the file does not open, the old
-// preference stays. After a failed write, the next start uses the first mode of the driver.
+// Save the mode as the preference of the next start. The other lines of a valid file stay. A file
+// that is not valid gets only the version and the mode. If the file does not open, the old file
+// stays. After a failed write, the next start uses the first mode of the driver.
 void save_preference(const os1_display_mode& mode)
 {
+    load_settings();
+    // The kept lines and the new lines must go into the size limit of the file.
+    size_t kept = 0;
+    os1::settings::other_graphics_lines(
+        settings.text, settings.size, [&](const char*, size_t bytes) { kept += bytes; });
+    const bool keep = settings.valid && kept + 40 <= os1::settings::file_limit;
+    if(settings.valid && !keep)
+        f::message("gsh: /etc/gsh.conf is too large; the save keeps only the mode\n");
     f::Handle file(f::open_file("/etc/gsh.conf", f::Mode::Replace));
     if(file.fd < 0)
         return;
     char value[12];
-    f::put(file.fd, "version=1\nwidth=", 16);
+    f::put(file.fd, "version=1\n", 10);
+    if(keep)
+        os1::settings::other_graphics_lines(
+            settings.text, settings.size, [&](const char* line, size_t bytes) {
+                f::put(file.fd, line, bytes);
+            });
+    f::put(file.fd, "width=", 6);
     f::put(file.fd, value, put_number(value, mode.width));
     f::put(file.fd, "\nheight=", 8);
     f::put(file.fd, value, put_number(value, mode.height));
     f::put(file.fd, "\n", 1);
-}
-
-bool read_literal(const char*& cursor, const char* literal)
-{
-    for(; *literal; ++literal, ++cursor)
-        if(*cursor != *literal)
-            return false;
-    return true;
-}
-
-bool read_dimension(const char*& cursor, unsigned& dimension)
-{
-    if(*cursor < '1' || *cursor > '9')
-        return false;
-    unsigned value = 0;
-    while(*cursor >= '0' && *cursor <= '9')
-    {
-        value = value * 10 + unsigned(*cursor++ - '0');
-        if(value > OS1_DISPLAY_FILL_LIMIT)
-            return false;
-    }
-    dimension = value;
-    return true;
+    settings.values.width = mode.width;
+    settings.values.height = mode.height;
 }
 
 os1_display_mode preferred_mode(const os1_display_mode* modes, unsigned count)
 {
-    const auto fallback = modes[0];
-    f::Handle config(u::open("/etc/gsh.conf", OS1_RIGHT_READ));
-    if(config.fd < 0)
-        return fallback;
-    char text[64]{};
-    size_t used = 0;
-    while(used < sizeof(text) - 1)
-    {
-        const long n = u::read(config.fd, text + used, sizeof(text) - 1 - used);
-        if(n < 0)
-            return fallback;
-        if(!n)
-            break;
-        used += n;
-    }
-    if(used == sizeof(text) - 1 || f::length(text) != used)
-        return fallback;
-    const char* cursor = text;
-    unsigned width, height;
-    if(read_literal(cursor, "version=1\nwidth=") && read_dimension(cursor, width) &&
-       read_literal(cursor, "\nheight=") && read_dimension(cursor, height) &&
-       read_literal(cursor, "\n") && !*cursor)
-        for(unsigned i = 0; i < count; ++i)
-            if(modes[i].width == width && modes[i].height == height)
-                return modes[i];
-    return fallback;
+    const auto& values = load_settings();
+    for(unsigned i = 0; values.width && i < count; ++i)
+        if(modes[i].width == values.width && modes[i].height == values.height)
+            return modes[i];
+    return modes[0];
 }
 
 struct PointerInput

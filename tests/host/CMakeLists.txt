@@ -179,6 +179,7 @@ add_executable(os1_host_tests
   common/hardware_tests.cpp
   common/driver_tests.cpp
   common/presentation_tests.cpp
+  common/console_font_tests.cpp
   common/guided_tests.cpp
   common/shell_tests.cpp
   common/pager_tests.cpp

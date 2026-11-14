@@ -20,8 +20,15 @@ public:
     }
     // clear the backing cell buffer and reset the cursor to the origin.
     void clear();
-    // attach a page-backed text buffer owned by the caller.
-    void set_buffer(uint16_t* buffer, uint16_t columns = 80, uint16_t rows = 25);
+    // attach a page-backed text buffer owned by the caller. The buffer has space for `capacity`
+    // cells. A capacity of 0 means columns x rows.
+    void set_buffer(uint16_t* buffer,
+                    uint16_t columns = 80,
+                    uint16_t rows = 25,
+                    uint32_t capacity = 0);
+    // Change the grid size in the same buffer. See `os1::terminal::resize_cells`. This does not
+    // present the terminal.
+    bool resize(uint16_t columns, uint16_t rows);
     // copy an existing VGA-compatible text buffer into this terminal.
     void copy(const uint16_t* buffer);
     // attach this terminal to the active display backend and present immediately.
@@ -58,6 +65,7 @@ private:
     TextDisplayBackend* display_ = nullptr;
     uint16_t width_ = 80;
     uint16_t height_ = 25;
+    uint32_t capacity_ = 80 * 25;
     int row_ = 0;
     int col_ = 0;
 

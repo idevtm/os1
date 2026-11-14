@@ -10,6 +10,7 @@
 #include "driver/display.h"
 #include "drivers/display/text_display.hpp"
 #include "sync/smp.hpp"
+#include "terminal/cells.hpp"
 #include "terminal/line.hpp"
 
 namespace
@@ -34,10 +35,28 @@ void clear_console()
         active_terminal->clear();
 }
 
-void console_set_glyphs(uint8_t first, uint8_t count, const uint8_t* rows)
+long console_set_glyphs(const uint8_t* payload, size_t bytes)
 {
     IrqSpinGuard guard(g_console_output_lock);
-    set_text_display_glyphs(first, count, rows);
+    if(!g_text_display || g_text_display->kind != TextDisplayBackendKind::FramebufferText ||
+       !text_display_glyph_storage())
+        return OS1_ERR_UNSUPPORTED;
+    uint32_t width, height;
+    text_display_cell(width, height);
+    if(!os1::terminal::valid_glyphs(payload, bytes, width, height))
+        return OS1_ERR_INVALID;
+    if(set_text_display_glyphs(payload[0], payload[1], payload[2], payload[3], payload + 4))
+    {
+        // The grid has a new size. Each terminal buffer has space for the grid of each font.
+        const auto& display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
+        for(auto& each : terminal)
+            each.resize(display.columns, display.rows);
+    }
+    // Draw once, after the request with the last glyph. An earlier request only marks the cells
+    // for the next drawing, so a font of many requests does not draw the screen many times.
+    if(payload[0] + payload[1] == OS1_CONSOLE_GLYPH_COUNT && active_terminal)
+        active_terminal->link(g_text_display);
+    return 0;
 }
 
 long set_console_column(unsigned column)

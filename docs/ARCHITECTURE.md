@@ -1034,7 +1034,8 @@ It writes each pixel to a shadow in normal memory and to video memory. A copy re
 The GM206 module shows a hardware pointer through the position channel of the head.
 See the [GM206 module contract](hardware/driver-module-abi.md#gm206-display-module).
 The module can also move an area of its surface with the copy engine of the card. The kernel asks the module first and updates only the shadow after a success.
-The text console and `gsh` read their fonts from files in `/share/fonts` on the disk. `sh` gives the 8 × 16 font to the kernel console through Console member 9.
+The text console and `gsh` read their fonts from files in `/share/fonts` on the disk. `sh` gives the font of `/etc/sh.conf`, by default 6 × 12, to the kernel console through Console member 9.
+`gsh` selects a font with the font steps of `/etc/gsh.conf` for the mode height.
 The kernel and `gsh` keep built-in fonts for a machine without the files. See [Fonts](shell/fonts.md).
 See the [GM206 copy engine](hardware/gm206-copy-engine.md). The first desktop test of this path passed.
 
@@ -1042,8 +1043,9 @@ See the [GM206 copy engine](hardware/gm206-copy-engine.md). The first desktop te
 
 The framebuffer backend is intentionally minimal:
 
-- text grid derived from framebuffer geometry using 8x16 cells
-- bundled `font8x16` bitmap glyphs as the fallback; `sh` replaces them with the [font file](shell/fonts.md) of the disk
+- text grid derived from framebuffer geometry and the cell size of the console font, 8x16 at boot
+- bundled `font8x16` bitmap glyphs as the fallback; `sh` replaces them and can change the cell size with the [font file](shell/fonts.md) of the disk
+- terminal and shadow buffers sized at boot for the grid of the smallest cell, 5x8, so a cell change does not allocate
 - white text on black background
 - software cursor by inverse cell rendering
 - cell-by-cell redraw only where content or cursor state changed
@@ -1505,7 +1507,7 @@ Current user programs:
 - `/bin/fdcheck` and `/bin/fdexec` — descriptor/rights, close/reuse, nonblocking input, and exec cleanup regression programs.
 - `/bin/copycheck` — negative syscall-copy regression probe built from [`src/user/programs/copycheck.cpp`](../src/user/programs/copycheck.cpp)
 - `/bin/acpiprobe` — ACPICA observe probe built from [`src/user/programs/acpiprobe.cpp`](../src/user/programs/acpiprobe.cpp)
-- `/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify 8x16 font rendering on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
+- `/bin/ascii` — ASCII table probe built from [`src/user/programs/ascii.cpp`](../src/user/programs/ascii.cpp) to visually verify the console font on the framebuffer text backend. Intended for human operator inspection only; deliberately not asserted by any automated smoke because its purpose is glyph-shape verification on a real display, which the headless serial-driven smoke matrix cannot validate.
 
 The kernel retains its fixed `/sbin/init` boot contract.
 Init starts `/bin/sh` through the existing filesystem-backed loader.

@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include <os1/command_engine.hpp>
+#include <os1/console.hpp>
 #include <os1/font.hpp>
 #include <os1/image_inspection.hpp>
 #include <os1/line_editor.hpp>
@@ -17,6 +18,8 @@
 #include "interface/parameter_fixture.hpp"
 #include "interface/shell_startup.hpp"
 #include "shell/program_path.hpp"
+#include "terminal/cells.hpp"
+#include "text/settings.hpp"
 
 namespace
 {
@@ -1586,6 +1589,53 @@ bool load_shell_profile()
 }
 }  // namespace
 
+namespace
+{
+// Give the text console the font of /etc/sh.conf. Without the file, the font is the 6 x 12 font
+// file. If the font file is absent or not valid, or on a console without a framebuffer, the
+// console keeps its font.
+void set_console_font()
+{
+    os1::settings::ShellSettings settings;
+    os1::user::files::Handle config(os1::user::open("/etc/sh.conf", OS1_RIGHT_READ));
+    if(config.fd >= 0)
+    {
+        static char text[os1::settings::file_limit];
+        size_t used = 0;
+        long n = 1;
+        while(n > 0 && used < sizeof(text))
+        {
+            n = os1::user::read(config.fd, text + used, sizeof(text) - used);
+            if(n > 0)
+                used += size_t(n);
+        }
+        char extra;
+        if(n < 0 || (n > 0 && os1::user::read(config.fd, &extra, 1) != 0) ||
+           !os1::settings::parse_shell(text, used, settings))
+        {
+            os1::user::files::message(
+                "shell: /etc/sh.conf is not valid; the default font is in use\n");
+            settings = {};
+        }
+    }
+    if(!settings.font[0])
+        return;
+    static uint8_t
+        font_file[os1::user::font_header_bytes +
+                  128 * OS1_CONSOLE_CELL_MAX_HEIGHT * ((OS1_CONSOLE_CELL_MAX_WIDTH + 7) / 8)];
+    os1::user::Font font{};
+    if(!os1::user::load_font(settings.font, font_file, sizeof(font_file), font) ||
+       !os1::terminal::valid_cell(font.width, font.height))
+    {
+        os1::user::files::message("shell: the console font file is absent or not valid\n");
+        return;
+    }
+    os1::user::files::Handle console(os1::user::console_bind(2, OS1_RIGHT_WRITE));
+    if(console.fd >= 0)
+        (void)os1::user::console_set_font(console.fd, font.width, font.height, font.glyphs);
+}
+}  // namespace
+
 static int shell_main(int argc_main, char** argv_main)
 {
     ShellLifetime lifetime;
@@ -1688,18 +1738,7 @@ static int shell_main(int argc_main, char** argv_main)
         stream_input || (have_input && input_info.kind == OS1_OBJECT_CONSOLE);
     if(console_input && !stream_input)
     {
-        // Give the text console the font file of the disk. Without the file, or on a console
-        // without a framebuffer, the console keeps the font in the kernel.
-        static uint8_t font_file[os1::user::font_header_bytes + 128 * 16];
-        os1::user::Font font{};
-        if(os1::user::load_font(
-               "/share/fonts/spleen-8x16.font", font_file, sizeof(font_file), font) &&
-           font.width == 8 && font.height == 16)
-        {
-            os1::user::files::Handle console(os1::user::console_bind(2, OS1_RIGHT_WRITE));
-            if(console.fd >= 0)
-                (void)os1::user::console_set_font(console.fd, font.glyphs);
-        }
+        set_console_font();
         os1::user::files::message("shell prompt ready\n");
     }
     for(;;)

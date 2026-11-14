@@ -633,6 +633,9 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
 
     uint16_t terminal_columns = 80;
     uint16_t terminal_rows = 25;
+    // The buffers have space for the grid of the smallest font cell. A program can change the
+    // font of the framebuffer console later.
+    uint32_t terminal_capacity = 80 * 25;
     if((nullptr != g_text_display) &&
        (TextDisplayBackendKind::FramebufferText == g_text_display->kind) &&
        (nullptr != g_text_display->instance))
@@ -640,9 +643,11 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         auto& framebuffer_display = *static_cast<FramebufferTextDisplay*>(g_text_display->instance);
         terminal_columns = framebuffer_display.columns;
         terminal_rows = framebuffer_display.rows;
+        uint16_t capacity_columns = 0, capacity_rows = 0;
+        framebuffer_text_capacity(framebuffer_display, capacity_columns, capacity_rows);
+        terminal_capacity = (uint32_t)capacity_columns * (uint32_t)capacity_rows;
 
-        const uint64_t shadow_buffer_bytes =
-            (uint64_t)terminal_columns * (uint64_t)terminal_rows * sizeof(uint16_t);
+        const uint64_t shadow_buffer_bytes = (uint64_t)terminal_capacity * sizeof(uint16_t);
         const unsigned shadow_buffer_pages =
             (unsigned)(align_up(shadow_buffer_bytes, kPageSize) / kPageSize);
         uint64_t shadow_buffer = 0;
@@ -653,14 +658,20 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
         }
 
         framebuffer_display.shadow_buffer = kernel_physical_pointer<uint16_t>(shadow_buffer);
-        framebuffer_display.shadow_cell_count =
-            (uint32_t)terminal_columns * (uint32_t)terminal_rows;
+        framebuffer_display.shadow_cell_count = terminal_capacity;
+        // Storage for the glyphs of a font that a program loads. Without it the console keeps
+        // the built-in font.
+        uint64_t glyph_storage = 0;
+        if(page_frames.allocate(glyph_storage,
+                                (unsigned)(kTextDisplayGlyphStorageBytes / kPageSize)))
+            set_text_display_glyph_storage(kernel_physical_pointer<uint8_t>(glyph_storage));
+        else
+            debug("console glyph storage allocation failed")();
         framebuffer_display.cursor_valid = false;
         memset(framebuffer_display.shadow_buffer, 0, shadow_buffer_pages * kPageSize);
     }
 
-    const uint64_t terminal_buffer_bytes =
-        (uint64_t)terminal_columns * (uint64_t)terminal_rows * sizeof(uint16_t);
+    const uint64_t terminal_buffer_bytes = (uint64_t)terminal_capacity * sizeof(uint16_t);
     const unsigned terminal_buffer_pages =
         (unsigned)(align_up(terminal_buffer_bytes, kPageSize) / kPageSize);
     if(0 == terminal_buffer_pages)
@@ -678,8 +689,10 @@ extern "C" void kernel_main(BootInfo* info, cpu* cpu_boot)
             return;
         }
 
-        terminal[i].set_buffer(
-            kernel_physical_pointer<uint16_t>(page), terminal_columns, terminal_rows);
+        terminal[i].set_buffer(kernel_physical_pointer<uint16_t>(page),
+                               terminal_columns,
+                               terminal_rows,
+                               terminal_capacity);
         terminal[i].clear();
         terminal[i].write("Terminal ");
         terminal[i].write_int_line(i + 1);

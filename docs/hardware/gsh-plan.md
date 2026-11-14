@@ -36,7 +36,12 @@ The file `/etc/gsh.conf` has this format. End each line with a newline.
 version=1
 width=1280
 height=720
+font=0 /share/fonts/spleen-6x12.font
+font=1000 /share/fonts/spleen-8x16.font
 ```
+
+The `width` and `height` lines are the saved mode. The `font` lines are optional [font steps](../shell/fonts.md#graphics-shell-font-steps).
+A save of a mode keeps the other lines of the file.
 
 A fresh image installs `gsh` in place of `gfxdemo`.
 An update that preserves data keeps existing files outside the deployment manifest.
@@ -48,8 +53,8 @@ The upper right corner shows the size of the current mode.
 The clock and the mode size stay under each window. `gsh` does not draw a character that a window covers.
 A partly covered character shows its visible part.
 The pointer body has the color `0xffcb54` while a button is down. The hardware pointer shows the same color.
-`gsh` reads a [font file](../shell/fonts.md#font-selection) for the height of the mode. No font has a scale.
-The fonts are 8 × 16, 12 × 24, and 16 × 32 pixels.
+`gsh` reads the font file of a [font step](../shell/fonts.md#graphics-shell-font-steps) for the height of the mode. No font has a scale.
+The default fonts are 6 × 12, 8 × 16, and 12 × 24 pixels. The disk also has 5 × 8, 16 × 32, and 32 × 64 pixels.
 The desktop has no top bar. The key help is text on the background, in the upper left corner.
 A window can move across the full screen. The key help stays under each window, as the clock does.
 If a pointer disconnects, the clock and keyboard controls remain active.

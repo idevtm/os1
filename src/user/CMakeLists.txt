@@ -148,7 +148,7 @@ endforeach()
 # Font files for the text console and the graphics shell, from the Spleen BDF files.
 set(OS1_FONT_FILES "")
 set(font_resources "")
-foreach(size 8x16 12x24 16x32)
+foreach(size 5x8 6x12 8x16 12x24 16x32 32x64)
   set(font "${OS1_GENERATED_DIR}/fonts/spleen-${size}.font")
   add_custom_command(OUTPUT "${font}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${OS1_GENERATED_DIR}/fonts"
@@ -161,7 +161,7 @@ foreach(size 8x16 12x24 16x32)
   string(APPEND font_resources ",{\"source\":\"${font}\",\"destination\":\"/share/fonts/spleen-${size}.font\"}")
 endforeach()
 add_custom_target(os1_fonts ALL DEPENDS ${OS1_FONT_FILES})
-string(APPEND program_manifest "],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/etc/motd\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/readme\",\"destination\":\"/etc/readme\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/shell-init.script\",\"destination\":\"/etc/shell/init.script\"}${font_resources}]}\n")
+string(APPEND program_manifest "],\"resources\":[{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/motd\",\"destination\":\"/etc/motd\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/readme\",\"destination\":\"/etc/readme\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/shell-init.script\",\"destination\":\"/etc/shell/init.script\"},{\"source\":\"${CMAKE_CURRENT_SOURCE_DIR}/data/sh.conf\",\"destination\":\"/etc/sh.conf\"}${font_resources}]}\n")
 file(GENERATE OUTPUT "${OS1_GENERATED_DIR}/storage-programs-base.json" CONTENT "${program_manifest}")
 add_custom_command(OUTPUT "${OS1_GENERATED_DIR}/storage-programs.json"
   COMMAND "${OS1_PYTHON_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/cmake/scripts/driver_manifest.py"

@@ -63,7 +63,22 @@ void present_text_display(const TextDisplayBackend* backend,
 void detach_text_display(const TextDisplayBackend* backend);
 
 void reset_framebuffer_text_display(FramebufferTextDisplay& display);
-// Replace glyphs of the framebuffer text font. One glyph has 16 rows of one byte, and bit 0 is the
-// left pixel. The built-in font stays in use for each glyph without a replacement. The next
-// presentation draws each cell again.
-void set_text_display_glyphs(uint8_t first, uint8_t count, const uint8_t* rows);
+// Get the size of the cell grid for the smallest font cell. A terminal buffer of this size can
+// hold the grid of each font.
+void framebuffer_text_capacity(const FramebufferTextDisplay& display,
+                               uint16_t& columns,
+                               uint16_t& rows);
+// The glyph storage has this size. The kernel allocates it only for a framebuffer console.
+inline constexpr uint32_t kTextDisplayGlyphStorageBytes = 128 * 32 * 2;
+// Give the text display the storage for loaded glyphs. Without it, no glyph can load.
+void set_text_display_glyph_storage(uint8_t* storage);
+bool text_display_glyph_storage();
+// Get the cell size of the framebuffer text font.
+void text_display_cell(uint32_t& width, uint32_t& height);
+// Set glyphs of the framebuffer text font. One glyph has `height` rows of (width + 7) / 8 bytes,
+// and bit 0 of the first byte is the left pixel. A new cell size removes all loaded glyphs and
+// changes the grid of the framebuffer display. The built-in font stays in use for each glyph
+// without a replacement if the cell is 8 x 16. Return true if the grid size changed. The caller
+// checks the arguments with `os1::terminal::valid_glyphs`.
+bool set_text_display_glyphs(
+    uint8_t first, uint8_t count, uint8_t width, uint8_t height, const uint8_t* rows);

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 #include "drivers/display/text_display.hpp"
+#include "terminal/cells.hpp"
 #include "terminal/line.hpp"
 #include "util/memory.h"
 
@@ -24,12 +25,13 @@ void Terminal::clear()
     move_cursor(0, 0);
 }
 
-void Terminal::set_buffer(uint16_t* buffer, uint16_t columns, uint16_t rows)
+void Terminal::set_buffer(uint16_t* buffer, uint16_t columns, uint16_t rows, uint32_t capacity)
 {
     buffer_ = buffer;
     display_ = nullptr;
     width_ = (columns > 0) ? columns : 80;
     height_ = (rows > 0) ? rows : 25;
+    capacity_ = capacity ? capacity : uint32_t(width_) * height_;
     row_ = 0;
     col_ = 0;
     ascii_char_ = 0;
@@ -51,6 +53,16 @@ void Terminal::copy(const uint16_t* buffer)
         memcpy(
             buffer_ + row * width_, buffer + row * source_columns, copy_columns * sizeof(uint16_t));
     }
+}
+
+bool Terminal::resize(uint16_t columns, uint16_t rows)
+{
+    if(!buffer_ ||
+       !os1::terminal::resize_cells(buffer_, capacity_, width_, height_, columns, rows, row_, col_))
+        return false;
+    width_ = columns;
+    height_ = rows;
+    return true;
 }
 
 void Terminal::link(TextDisplayBackend* display)

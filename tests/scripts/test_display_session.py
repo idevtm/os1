@@ -75,10 +75,11 @@ def exercise_graphics(args, run, expect):
             raise AssertionError(message)
 
         def text_pixels():
-            # Count the text pixels in the first window position. The clock is outside this area.
+            # Count the text pixels in the text area of the first window position: below the title
+            # of 16 rows and inside the border. The clock is outside this area.
             width, _, pixels = screenshot()
             return sum(pixels[(y * width + x) * 3:(y * width + x) * 3 + 3] == b'\xd9\xe4\xf0'
-                       for y in range(116, 500) for x in range(76, 724))
+                       for y in range(162, 450) for x in range(160, 640))
 
         def settled_text_pixels():
             deadline = time.monotonic() + 15
@@ -92,16 +93,17 @@ def exercise_graphics(args, run, expect):
             raise AssertionError('shell window text did not settle')
 
         def shell_window(pointer):
-            # The 8 x 16 font gives a window of 648 x 408 pixels. In an 800 x 600 mode, its corner
-            # is at (76, 96). The title has 20 rows.
-            frame, back, left, top = '4a6d8c', '14283e', 76, 96
+            # The default 6 x 12 font of a mode height under 1000 gives a window of 488 x 308
+            # pixels. In an 800 x 600 mode, its corner is at (156, 146). The title has 16 rows.
+            frame, back, left, top = '4a6d8c', '14283e', 156, 146
             key('t')
             await_true(lambda: pixel(left + 1, top + 1) == frame, 'shell window did not open')
             empty = settled_text_pixels()
             for code in ('e', 'c', 'h', 'o', 'spc', 'o', 'k', 'ret'):
                 key(code)
-            # The typed line, the output "ok", and the new prompt add more than 190 text pixels.
-            await_true(lambda: text_pixels() >= empty + 190, 'shell command output did not appear')
+            # The typed line, the output "ok", and the new prompt add 163 text pixels in the 6 x 12
+            # font. The check accepts 90 or more.
+            await_true(lambda: text_pixels() >= empty + 90, 'shell command output did not appear')
             # Move the pointer to the title. Then move the window with the left button.
             qmp.execute('input-send-event', {'events': [
                 {'type': 'rel', 'data': {'axis': 'y', 'value': top + 5 - pointer[1]}}]})
@@ -118,29 +120,29 @@ def exercise_graphics(args, run, expect):
                 {'type': 'btn', 'data': {'down': False, 'button': 'left'}}]})
             key('esc')
             await_true(lambda: pixel(left + 51, top + 31) == back, 'shell window did not close')
-            # The M key shows the mode list. The list is a window of 232 x 108 pixels in the
+            # The M key shows the mode list. The list is a window of 176 x 88 pixels in the
             # center. Down selects 1280 x 720, the mode after the current one.
             key('m')
-            await_true(lambda: pixel(286, 268) == frame, 'mode list did not open')
+            await_true(lambda: pixel(314, 268) == frame, 'mode list did not open')
             key('down')
             key('ret')
             await_true(lambda: screenshot()[:2] == (1280, 720) and pixel(0, 0) == back,
                        'the selected mode did not open')
-            # The new mode asks for a confirmation in a window of 232 x 68 pixels. Enter keeps it.
-            await_true(lambda: pixel(526, 340) == frame, 'mode confirmation did not open')
+            # The new mode asks for a confirmation in a window of 176 x 56 pixels. Enter keeps it.
+            await_true(lambda: pixel(554, 340) == frame, 'mode confirmation did not open')
             key('ret')
-            await_true(lambda: pixel(526, 340) == back, 'mode confirmation did not close')
+            await_true(lambda: pixel(554, 340) == back, 'mode confirmation did not close')
             # A mode without a confirmation returns to the mode before it after 10 seconds.
             key('m')
-            await_true(lambda: pixel(526, 328) == frame, 'mode list did not open again')
+            await_true(lambda: pixel(554, 328) == frame, 'mode list did not open again')
             key('up')
             key('ret')
-            await_true(lambda: screenshot()[:2] == (800, 600) and pixel(286, 280) == frame,
+            await_true(lambda: screenshot()[:2] == (800, 600) and pixel(314, 280) == frame,
                        'the second mode did not ask for a confirmation')
             await_true(lambda: screenshot()[:2] == (1280, 720) and pixel(0, 0) == back,
                        'the session did not return to the confirmed mode', seconds=25)
             time.sleep(1)
-            assert pixel(526, 340) == back, 'a returned mode asked for a confirmation'
+            assert pixel(554, 340) == back, 'a returned mode asked for a confirmation'
 
         boot_width, boot_height, _ = screenshot()
         for arrow, resolution in [('down', (800, 600)), ('up', (1280, 720))]:
@@ -168,23 +170,26 @@ def exercise_graphics(args, run, expect):
             assert (width, height) == (boot_width, boot_height)
             assert pixels[:3] != bytes.fromhex('14283e'), 'graphics background remains after release'
             assert b'\xaa\xaa\xaa' in pixels, 'console text did not redraw after release'
-            # The shell gave the console the font file of the disk. Find the prompt in that font.
+            # The shell gave the console the font of /etc/sh.conf, the 6 x 12 font file of the
+            # disk. Find the prompt in that font. One glyph row has one byte.
             root = Path(__file__).resolve().parents[2]
             sys.path.insert(0, str(root / 'cmake/scripts'))
             from make_font import convert
-            font = convert((root / 'third_party/spleen/spleen-8x16.bdf').read_text())[16:]
-            prompt = [font[ord(c) * 16:ord(c) * 16 + 16] for c in 'os1>']
+            cell_width, cell_height = 6, 12
+            font = convert((root / 'third_party/spleen/spleen-6x12.bdf').read_text())[16:]
+            prompt = [font[ord(c) * cell_height:(ord(c) + 1) * cell_height] for c in 'os1>']
 
             def shows_prompt(column, row):
                 for index, glyph in enumerate(prompt):
-                    for line in range(16):
-                        start = ((row * 16 + line) * width + (column + index) * 8) * 3
-                        for bit in range(8):
+                    for line in range(cell_height):
+                        start = ((row * cell_height + line) * width +
+                                 (column + index) * cell_width) * 3
+                        for bit in range(cell_width):
                             lit = pixels[start + bit * 3:start + bit * 3 + 3] == b'\xaa\xaa\xaa'
                             if lit != bool(glyph[line] >> bit & 1):
                                 return False
                 return True
-            assert any(shows_prompt(0, row) for row in range(height // 16)), \
+            assert any(shows_prompt(0, row) for row in range(height // cell_height)), \
                 'the console does not show the prompt in the font of the disk'
         run('gsh "--check"', b'gsh: session checks passed')
 
